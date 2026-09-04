@@ -49,6 +49,18 @@ describe("issue date-only helpers", () => {
     );
   });
 
+  it("floors a minute-granularity ISO timestamp to its UTC calendar day", () => {
+    // Requirement-calendar start_at / due_date carry a time component (the
+    // API now serializes full ISO). Day-granularity renderers (gantt /
+    // calendar cells) must floor to the UTC day — never shift it.
+    expect(dateOnlyToUTCDate("2026-09-15T09:30:00Z")).toEqual(
+      new Date(Date.UTC(2026, 8, 15)),
+    );
+    expect(dateOnlyToUTCDate("2026-09-15T23:59:00Z")?.toISOString()).toBe(
+      "2026-09-15T00:00:00.000Z",
+    );
+  });
+
   it("builds a local-midnight Date for the picker's selected day", () => {
     const d = dateOnlyToLocalDate("2026-03-01");
     expect(d?.getFullYear()).toBe(2026);

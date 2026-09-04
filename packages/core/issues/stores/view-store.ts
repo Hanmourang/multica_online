@@ -8,8 +8,12 @@ import type { IssueStatus, IssueStatusCategory, IssuePriority, PropertyFilterVal
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane";
+export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane" | "calendar";
 export type GanttZoom = "day" | "week" | "month";
+/** Requirement-calendar zoom: the calendar view renders at week or month
+ *  granularity. Kept independent from ganttZoom so toggling views never
+ *  clobbers the other view's preference. */
+export type CalendarZoom = "week" | "month";
 /**
  * Board grouping. Besides the three built-ins, a select-type custom property
  * groups columns by its options via the `property:<definitionId>` form.
@@ -236,6 +240,8 @@ export interface IssueViewState {
   hiddenStatusCategories: IssueStatusCategory[];
   ganttZoom: GanttZoom;
   ganttShowCompleted: boolean;
+  /** Requirement-calendar granularity preference. */
+  calendarZoom: CalendarZoom;
   /** Active swimlane grouping dimension. */
   swimlaneGrouping: SwimlaneGrouping;
   /** Persisted lane order, keyed by grouping. Entries are raw lane ids
@@ -254,6 +260,7 @@ export interface IssueViewState {
   tableCalculation: TableCalculation;
   setViewMode: (mode: ViewMode) => void;
   setGanttZoom: (zoom: GanttZoom) => void;
+  setCalendarZoom: (zoom: CalendarZoom) => void;
   toggleGanttShowCompleted: () => void;
   setGrouping: (grouping: IssueGrouping) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
@@ -338,6 +345,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   hiddenStatusCategories: [],
   ganttZoom: "week",
   ganttShowCompleted: false,
+  calendarZoom: "month",
   swimlaneGrouping: "assignee",
   swimlaneOrders: { parent: [], project: [], assignee: [] },
   collapsedSwimlanes: { parent: [], project: [], assignee: [] },
@@ -350,6 +358,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
+  setCalendarZoom: (zoom) => set({ calendarZoom: zoom }),
   toggleGanttShowCompleted: () =>
     set((state) => ({ ganttShowCompleted: !state.ganttShowCompleted })),
   setGrouping: (grouping) => set({ grouping }),
@@ -610,6 +619,7 @@ export const viewStorePersistOptions = (name: string) => ({
     hiddenStatusCategories: state.hiddenStatusCategories,
     ganttZoom: state.ganttZoom,
     ganttShowCompleted: state.ganttShowCompleted,
+    calendarZoom: state.calendarZoom,
     swimlaneGrouping: state.swimlaneGrouping,
     swimlaneOrders: state.swimlaneOrders,
     collapsedSwimlanes: state.collapsedSwimlanes,
