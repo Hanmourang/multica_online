@@ -285,6 +285,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// WorkspaceID — there is no path from this service to a row in a
 	// foreign workspace.
 	projectID := p.ProjectID
+	var parentRoot pgtype.UUID
 	if p.ParentIssueID.Valid {
 		parent, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
 			ID:          p.ParentIssueID,
@@ -299,6 +300,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if !projectID.Valid {
 			projectID = parent.ProjectID
 		}
+		parentRoot = parent.RootRequirementID
 	}
 	if projectID.Valid {
 		if _, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
@@ -354,57 +356,83 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{}, fmt.Errorf("next top position: %w", err)
 	}
 
+	// root_requirement_id：任务组标识（spec: 2026-09-04-requirement-calendar-design.md
+	// §11，创建时由 server 写入，不接受客户端传值）。顶层需求自成一组（root=自身；
+	// id 在 Go 侧预生成，INSERT 前即可确定）；子任务沿 parent 链继承，parent 无 root
+	// （452 回填前的遗留行）时回落 parent.id。
+	newIssueID := dbid.NewV7()
+	rootID := newIssueID
+	if p.ParentIssueID.Valid {
+		rootID = parentRoot
+		if !rootID.Valid {
+			rootID = p.ParentIssueID
+		}
+	}
+
 	var issue db.Issue
 	var assignedTask db.AgentTaskQueue
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			OriginType:    p.OriginType,
-			OriginID:      p.OriginID,
-			Stage:         p.Stage,
-			ModuleID:      p.ModuleID,
-			AvoidConflict: pgtype.Bool{Bool: p.AvoidConflict, Valid: true},
+			ID:                newIssueID,
+			WorkspaceID:       p.WorkspaceID,
+			Title:             p.Title,
+			Description:       p.Description,
+			Status:            p.Status,
+			Priority:          p.Priority,
+			AssigneeType:      p.AssigneeType,
+			AssigneeID:        p.AssigneeID,
+			CreatorType:       p.CreatorType,
+			CreatorID:         p.CreatorID,
+			ParentIssueID:     p.ParentIssueID,
+			Position:          newPosition,
+			StartDate:         p.StartDate,
+			DueDate:           p.DueDate,
+			Number:            issueNumber,
+			ProjectID:         projectID,
+			OriginType:        p.OriginType,
+			OriginID:          p.OriginID,
+			Stage:             p.Stage,
+			ModuleID:          p.ModuleID,
+			AvoidConflict:     pgtype.Bool{Bool: p.AvoidConflict, Valid: true},
+			RootRequirementID: rootID,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			Stage:         p.Stage,
-			ModuleID:      p.ModuleID,
-			AvoidConflict: pgtype.Bool{Bool: p.AvoidConflict, Valid: true},
+			ID:                newIssueID,
+			WorkspaceID:       p.WorkspaceID,
+			Title:             p.Title,
+			Description:       p.Description,
+			Status:            p.Status,
+			Priority:          p.Priority,
+			AssigneeType:      p.AssigneeType,
+			AssigneeID:        p.AssigneeID,
+			CreatorType:       p.CreatorType,
+			CreatorID:         p.CreatorID,
+			ParentIssueID:     p.ParentIssueID,
+			Position:          newPosition,
+			StartDate:         p.StartDate,
+			DueDate:           p.DueDate,
+			Number:            issueNumber,
+			ProjectID:         projectID,
+			Stage:             p.Stage,
+			ModuleID:          p.ModuleID,
+			AvoidConflict:     pgtype.Bool{Bool: p.AvoidConflict, Valid: true},
+			RootRequirementID: rootID,
 		})
 	}
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
+	}
+
+	// 班底快照（spec §5.2）：顶层需求带项目时把项目默认班底拷贝为需求快照，之后改
+	// 项目默认不影响本需求。子任务不拷——执行人由拆解确认在需求班底内微调（§8）。
+	if !p.ParentIssueID.Valid && projectID.Valid {
+		if err := qtx.CopyProjectRoleDefaultsToIssue(ctx, db.CopyProjectRoleDefaultsToIssueParams{
+			IssueID:   issue.ID,
+			ProjectID: projectID,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("copy role roster snapshot: %w", err)
+		}
 	}
 
 	if p.SourceContext != nil {

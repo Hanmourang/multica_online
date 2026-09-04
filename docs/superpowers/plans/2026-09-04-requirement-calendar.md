@@ -227,9 +227,14 @@ func TestIssueRoleRosterSnapshot(t *testing.T) {
     // 项目默认 pm=Atlas+developer=Orion → 创建需求 → GET /issues/{id}/roles 含快照 2 行
     // 改项目默认（pm 换成 Kai）→ 需求快照不变
     // PUT 需求班底把 developer 全停用 → 409
-    // PUT 指派一个不在班底的 assignee 到 prototyper → 201（班底内新增），但 enabled=false 的角色不可含指派 → 409
+    // PUT 指派一个不在班底的 assignee 到 prototyper → 200（班底内新增）
+    // 创建路径 root 回填：顶层需求 root=自身 id；子任务 root=需求 id
 }
 ```
+
+> 勘误（执行时修订）：原注释「enabled=false 的角色不可含指派 → 409」归属 Task 11 拆解确认校验
+> （设计文档 §5.2 原文：「enabled=false 的角色…不可被指派（拆解确认校验）」），非班底 PUT 校验——
+> PUT 允许 enabled=false 占位行（Task 4 停用 tester 场景）。
 
 - [ ] **Step 2: 跑测试确认失败** → **Step 3: 实现**（CreateIssue 事务尾部调 `CopyProjectRoleDefaultsToIssue`；`GET/PUT /issues/{id}/roles`；校验逻辑收敛在 handler 私有函数 `validateRoster`）
 
@@ -551,6 +556,7 @@ func TestClaimGateGroupMutex(t *testing.T) {
 
 - `ModuleLocker`：锁 key 从 `moduleID` 改为 `moduleID + "|" + rootRequirementID`；`Acquire` 签名加 `rootID`；同 key 并发计数，异 key 同 module 互斥；新增 `ReleaseGroup(rootID)`（root 终态时由任务终态回传路径调用）
 - claim 闸门：派发查询加 `NOT EXISTS（同 module、异 root、进行中）` 子查询（root 由 issue.root_requirement_id 投影）
+- UpdateIssue 改 parent 时级联重算 `root_requirement_id`（自身 + 全部子孙，递归 UPDATE；创建路径的回填已在 Task 5 落地，改 parent 是本任务的缺口）
 - server 侧在 root 需求转终态的 handler 路径上发释放事件 → daemon 收到后 `ReleaseGroup` + 唤醒 waiting 队列（按需求 start_at 升序）
 
 - [ ] **Step 4: 跑测试确认通过 + 451 既有测试全绿**（`go test ./internal/daemon/ -v`）

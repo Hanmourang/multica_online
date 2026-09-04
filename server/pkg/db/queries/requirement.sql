@@ -6,12 +6,14 @@ SELECT * FROM project_role_default
 WHERE project_id = $1
 ORDER BY role ASC, ordinal ASC, created_at ASC;
 
--- name: ReplaceProjectRoleDefaults :exec
--- Whole-document replace：单语句内先清空再按提交内容批量插入（原子，无需显式事务）。
+-- name: DeleteProjectRoleDefaults :exec
+-- whole-document replace 的前半；必须与 InsertProjectRoleDefaults 同事务先后执行。
+-- （不能合并为单语句 CTE：WITH 内数据修改语句与主查询共享快照，INSERT 看不到
+--  同语句 DELETE 的效果，重写已有行会触唯一约束冲突。）
+DELETE FROM project_role_default WHERE project_id = $1;
+
+-- name: InsertProjectRoleDefaults :exec
 -- entries 为 JSONB 数组：[{role, assignee_type, assignee_id, enabled, ordinal}, ...]
-WITH del AS (
-    DELETE FROM project_role_default WHERE project_id = @project_id
-)
 INSERT INTO project_role_default (project_id, workspace_id, role, assignee_type, assignee_id, enabled, ordinal)
 SELECT @project_id, @workspace_id, r.role, r.assignee_type, r.assignee_id, r.enabled, r.ordinal
 FROM jsonb_to_recordset(@entries::jsonb)
@@ -22,11 +24,13 @@ SELECT * FROM issue_role_assignment
 WHERE issue_id = $1
 ORDER BY role ASC, ordinal ASC, created_at ASC;
 
--- name: ReplaceIssueRoleAssignments :exec
--- 需求级班底同样是 whole-document replace；entries 结构同 ReplaceProjectRoleDefaults。
-WITH del AS (
-    DELETE FROM issue_role_assignment WHERE issue_id = @issue_id
-)
+-- name: DeleteIssueRoleAssignments :exec
+-- 需求级班底同样是 whole-document replace；同 DeleteProjectRoleDefaults 的快照原因，
+-- 必须与 InsertIssueRoleAssignments 同事务先后执行。
+DELETE FROM issue_role_assignment WHERE issue_id = $1;
+
+-- name: InsertIssueRoleAssignments :exec
+-- entries 结构同 InsertProjectRoleDefaults。
 INSERT INTO issue_role_assignment (issue_id, workspace_id, role, assignee_type, assignee_id, enabled, ordinal)
 SELECT @issue_id, @workspace_id, r.role, r.assignee_type, r.assignee_id, r.enabled, r.ordinal
 FROM jsonb_to_recordset(@entries::jsonb)

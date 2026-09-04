@@ -353,11 +353,13 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage, last_activity_at, id, module_id, avoid_conflict
+    origin_type, origin_id, stage, last_activity_at, id, module_id, avoid_conflict,
+    root_requirement_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
-    sqlc.narg('module_id'), COALESCE(sqlc.narg('avoid_conflict')::boolean, false)
+    sqlc.narg('module_id'), COALESCE(sqlc.narg('avoid_conflict')::boolean, false),
+    sqlc.narg('root_requirement_id')
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec

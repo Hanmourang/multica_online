@@ -1886,6 +1886,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateIssue)
 					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
+					r.Get("/roles", h.ListIssueRoleAssignments)
+					r.Put("/roles", h.ReplaceIssueRoleAssignments)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
@@ -1985,6 +1987,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/modules", h.CreateProjectModule)
 					r.Patch("/modules/{moduleId}", h.UpdateProjectModule)
 					r.Delete("/modules/{moduleId}", h.DeleteProjectModule)
+					r.Get("/role-defaults", h.ListProjectRoleDefaults)
+					r.Put("/role-defaults", h.ReplaceProjectRoleDefaults)
 				})
 			})
 

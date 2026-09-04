@@ -90,6 +90,30 @@ func (q *Queries) CreatePrototypeVersion(ctx context.Context, arg CreatePrototyp
 	return i, err
 }
 
+const deleteIssueRoleAssignments = `-- name: DeleteIssueRoleAssignments :exec
+DELETE FROM issue_role_assignment WHERE issue_id = $1
+`
+
+// 需求级班底同样是 whole-document replace；同 DeleteProjectRoleDefaults 的快照原因，
+// 必须与 InsertIssueRoleAssignments 同事务先后执行。
+func (q *Queries) DeleteIssueRoleAssignments(ctx context.Context, issueID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteIssueRoleAssignments, issueID)
+	return err
+}
+
+const deleteProjectRoleDefaults = `-- name: DeleteProjectRoleDefaults :exec
+DELETE FROM project_role_default WHERE project_id = $1
+`
+
+// whole-document replace 的前半；必须与 InsertProjectRoleDefaults 同事务先后执行。
+// （不能合并为单语句 CTE：WITH 内数据修改语句与主查询共享快照，INSERT 看不到
+//
+//	同语句 DELETE 的效果，重写已有行会触唯一约束冲突。）
+func (q *Queries) DeleteProjectRoleDefaults(ctx context.Context, projectID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteProjectRoleDefaults, projectID)
+	return err
+}
+
 const getLatestPrototypeVersion = `-- name: GetLatestPrototypeVersion :one
 SELECT id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at FROM issue_prototype_version
 WHERE issue_id = $1
@@ -132,6 +156,44 @@ func (q *Queries) HasWaitingModuleLockDescendant(ctx context.Context, issueID pg
 	var waiting bool
 	err := row.Scan(&waiting)
 	return waiting, err
+}
+
+const insertIssueRoleAssignments = `-- name: InsertIssueRoleAssignments :exec
+INSERT INTO issue_role_assignment (issue_id, workspace_id, role, assignee_type, assignee_id, enabled, ordinal)
+SELECT $1, $2, r.role, r.assignee_type, r.assignee_id, r.enabled, r.ordinal
+FROM jsonb_to_recordset($3::jsonb)
+    AS r(role text, assignee_type text, assignee_id uuid, enabled boolean, ordinal int)
+`
+
+type InsertIssueRoleAssignmentsParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Entries     []byte      `json:"entries"`
+}
+
+// entries 结构同 InsertProjectRoleDefaults。
+func (q *Queries) InsertIssueRoleAssignments(ctx context.Context, arg InsertIssueRoleAssignmentsParams) error {
+	_, err := q.db.Exec(ctx, insertIssueRoleAssignments, arg.IssueID, arg.WorkspaceID, arg.Entries)
+	return err
+}
+
+const insertProjectRoleDefaults = `-- name: InsertProjectRoleDefaults :exec
+INSERT INTO project_role_default (project_id, workspace_id, role, assignee_type, assignee_id, enabled, ordinal)
+SELECT $1, $2, r.role, r.assignee_type, r.assignee_id, r.enabled, r.ordinal
+FROM jsonb_to_recordset($3::jsonb)
+    AS r(role text, assignee_type text, assignee_id uuid, enabled boolean, ordinal int)
+`
+
+type InsertProjectRoleDefaultsParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Entries     []byte      `json:"entries"`
+}
+
+// entries 为 JSONB 数组：[{role, assignee_type, assignee_id, enabled, ordinal}, ...]
+func (q *Queries) InsertProjectRoleDefaults(ctx context.Context, arg InsertProjectRoleDefaultsParams) error {
+	_, err := q.db.Exec(ctx, insertProjectRoleDefaults, arg.ProjectID, arg.WorkspaceID, arg.Entries)
+	return err
 }
 
 const listIssueRoleAssignments = `-- name: ListIssueRoleAssignments :many
@@ -408,51 +470,6 @@ func (q *Queries) MarkRequirementTriggered(ctx context.Context, id pgtype.UUID) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const replaceIssueRoleAssignments = `-- name: ReplaceIssueRoleAssignments :exec
-WITH del AS (
-    DELETE FROM issue_role_assignment WHERE issue_id = $1
-)
-INSERT INTO issue_role_assignment (issue_id, workspace_id, role, assignee_type, assignee_id, enabled, ordinal)
-SELECT $1, $2, r.role, r.assignee_type, r.assignee_id, r.enabled, r.ordinal
-FROM jsonb_to_recordset($3::jsonb)
-    AS r(role text, assignee_type text, assignee_id uuid, enabled boolean, ordinal int)
-`
-
-type ReplaceIssueRoleAssignmentsParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Entries     []byte      `json:"entries"`
-}
-
-// 需求级班底同样是 whole-document replace；entries 结构同 ReplaceProjectRoleDefaults。
-func (q *Queries) ReplaceIssueRoleAssignments(ctx context.Context, arg ReplaceIssueRoleAssignmentsParams) error {
-	_, err := q.db.Exec(ctx, replaceIssueRoleAssignments, arg.IssueID, arg.WorkspaceID, arg.Entries)
-	return err
-}
-
-const replaceProjectRoleDefaults = `-- name: ReplaceProjectRoleDefaults :exec
-WITH del AS (
-    DELETE FROM project_role_default WHERE project_id = $1
-)
-INSERT INTO project_role_default (project_id, workspace_id, role, assignee_type, assignee_id, enabled, ordinal)
-SELECT $1, $2, r.role, r.assignee_type, r.assignee_id, r.enabled, r.ordinal
-FROM jsonb_to_recordset($3::jsonb)
-    AS r(role text, assignee_type text, assignee_id uuid, enabled boolean, ordinal int)
-`
-
-type ReplaceProjectRoleDefaultsParams struct {
-	ProjectID   pgtype.UUID `json:"project_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Entries     []byte      `json:"entries"`
-}
-
-// Whole-document replace：单语句内先清空再按提交内容批量插入（原子，无需显式事务）。
-// entries 为 JSONB 数组：[{role, assignee_type, assignee_id, enabled, ordinal}, ...]
-func (q *Queries) ReplaceProjectRoleDefaults(ctx context.Context, arg ReplaceProjectRoleDefaultsParams) error {
-	_, err := q.db.Exec(ctx, replaceProjectRoleDefaults, arg.ProjectID, arg.WorkspaceID, arg.Entries)
-	return err
 }
 
 const setPrototypeStatus = `-- name: SetPrototypeStatus :exec

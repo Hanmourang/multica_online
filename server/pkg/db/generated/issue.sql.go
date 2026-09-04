@@ -328,36 +328,39 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage, last_activity_at, id, module_id, avoid_conflict
+    origin_type, origin_id, stage, last_activity_at, id, module_id, avoid_conflict,
+    root_requirement_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18, now(), COALESCE($19::uuid, gen_random_uuid()),
-    $20, COALESCE($21::boolean, false)
+    $20, COALESCE($21::boolean, false),
+    $22
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec
 `
 
 type CreateIssueWithOriginParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	Title         string      `json:"title"`
-	Description   pgtype.Text `json:"description"`
-	Status        string      `json:"status"`
-	Priority      string      `json:"priority"`
-	AssigneeType  pgtype.Text `json:"assignee_type"`
-	AssigneeID    pgtype.UUID `json:"assignee_id"`
-	CreatorType   string      `json:"creator_type"`
-	CreatorID     pgtype.UUID `json:"creator_id"`
-	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
-	Position      float64     `json:"position"`
-	StartDate     pgtype.Date `json:"start_date"`
-	DueDate       pgtype.Date `json:"due_date"`
-	Number        int32       `json:"number"`
-	ProjectID     pgtype.UUID `json:"project_id"`
-	OriginType    pgtype.Text `json:"origin_type"`
-	OriginID      pgtype.UUID `json:"origin_id"`
-	Stage         pgtype.Int4 `json:"stage"`
-	ID            pgtype.UUID `json:"id"`
-	ModuleID      pgtype.UUID `json:"module_id"`
-	AvoidConflict pgtype.Bool `json:"avoid_conflict"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	Title             string      `json:"title"`
+	Description       pgtype.Text `json:"description"`
+	Status            string      `json:"status"`
+	Priority          string      `json:"priority"`
+	AssigneeType      pgtype.Text `json:"assignee_type"`
+	AssigneeID        pgtype.UUID `json:"assignee_id"`
+	CreatorType       string      `json:"creator_type"`
+	CreatorID         pgtype.UUID `json:"creator_id"`
+	ParentIssueID     pgtype.UUID `json:"parent_issue_id"`
+	Position          float64     `json:"position"`
+	StartDate         pgtype.Date `json:"start_date"`
+	DueDate           pgtype.Date `json:"due_date"`
+	Number            int32       `json:"number"`
+	ProjectID         pgtype.UUID `json:"project_id"`
+	OriginType        pgtype.Text `json:"origin_type"`
+	OriginID          pgtype.UUID `json:"origin_id"`
+	Stage             pgtype.Int4 `json:"stage"`
+	ID                pgtype.UUID `json:"id"`
+	ModuleID          pgtype.UUID `json:"module_id"`
+	AvoidConflict     pgtype.Bool `json:"avoid_conflict"`
+	RootRequirementID pgtype.UUID `json:"root_requirement_id"`
 }
 
 func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWithOriginParams) (Issue, error) {
@@ -383,6 +386,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		arg.ID,
 		arg.ModuleID,
 		arg.AvoidConflict,
+		arg.RootRequirementID,
 	)
 	var i Issue
 	err := row.Scan(
