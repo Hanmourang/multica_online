@@ -249,6 +249,24 @@
     "avoid_conflict": "Avoid conflicts with other modules",
     "avoid_conflict_hint": "When checked, this task runs exclusively with tasks from other modules.",
     "set_dependencies": "Blocked by",
-    "toast_set_dependencies_failed": "Issue created, but setting dependencies failed"
+    "toast_set_dependencies_failed": "Issue created, but setting dependencies failed",
+    "goal_label": "Goal",
+    "goal_placeholder": "What should this requirement achieve?",
+    "start_at_label": "Planned start",
+    "start_at_hint": "Minute precision. Auto-trigger fires at this time.",
+    "role_strip_label": "Role Roster",
+    "decompose_mode_label": "Decompose Mode",
+    "decompose_mode": {
+      "auto": "Auto",
+      "confirm": "Confirm",
+      "manual": "Manual"
+    },
+    "decompose_mode_desc": {
+      "auto": "PM agent decomposes, takes effect immediately",
+      "confirm": "PM agent drafts, manual confirmation required",
+      "manual": "No auto-decompose, create subtasks manually"
+    },
+    "auto_trigger_label": "Auto-trigger at start time",
+    "auto_trigger_hint": "Subtasks enter scheduling automatically at start time"
   }
 }

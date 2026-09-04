@@ -220,4 +220,26 @@ export interface Issue {
   last_activity_at?: string | null;
   /** Present only on issue detail responses for issues created from a comment. */
   source_context?: IssueSourceContext;
+
+  // --- Requirement calendar fields (design §5; present on current server) ---
+  /** 需求目标。 */
+  goal?: string | null;
+  /** 绑定的 git 库资源 id。 */
+  repo_resource_id?: string | null;
+  /** 计划开始时间（RFC3339 含分钟精度）。 */
+  start_at?: string | null;
+  /** 拆解模式。 */
+  decompose_mode?: "auto" | "confirm" | "manual" | null;
+  /** 到达 start_at 后自动触发。 */
+  auto_trigger?: boolean;
+  /** 已触发时间。 */
+  triggered_at?: string | null;
+  /** 拆解确认时间。 */
+  decomposition_confirmed_at?: string | null;
+  /** 任务组标识（顶层需求 = 自身 id）。 */
+  root_requirement_id?: string | null;
+  /** 派生状态标签（中文）。 */
+  requirement_status?: string | null;
+  /** 阶段进度 "N/M"。 */
+  stage_progress?: string | null;
 }

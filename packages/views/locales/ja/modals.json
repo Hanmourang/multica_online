@@ -247,6 +247,24 @@
     "avoid_conflict": "他のモジュールとの競合を回避",
     "avoid_conflict_hint": "オンにすると、このタスクは他のモジュールのタスクと排他実行されます。",
     "set_dependencies": "ブロック元",
-    "toast_set_dependencies_failed": "課題は作成されましたが、依存関係の設定に失敗しました"
+    "toast_set_dependencies_failed": "課題は作成されましたが、依存関係の設定に失敗しました",
+    "goal_label": "目標",
+    "goal_placeholder": "この要件で達成したいことは？",
+    "start_at_label": "開始予定",
+    "start_at_hint": "分単位。自動トリガーはこの時刻で起動",
+    "role_strip_label": "ロール担当者",
+    "decompose_mode_label": "分解モード",
+    "decompose_mode": {
+      "auto": "全自動",
+      "confirm": "分解 + 確認",
+      "manual": "手動"
+    },
+    "decompose_mode_desc": {
+      "auto": "PM agent が分解し即時有効",
+      "confirm": "PM agent が下書き、確認後に有効",
+      "manual": "自動分解なし、手動でサブタスク作成"
+    },
+    "auto_trigger_label": "開始時刻で自動トリガー",
+    "auto_trigger_hint": "開始時刻にサブタスクが自動でスケジュールに入る"
   }
 }

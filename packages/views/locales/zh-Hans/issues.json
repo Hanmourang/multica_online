@@ -895,5 +895,20 @@
     "next": "下一个交付物",
     "close": "关闭预览",
     "open_hint": "点击预览"
+  },
+  "role_strip": {
+    "pm": "PM",
+    "prototyper": "原型师",
+    "developer": "研发",
+    "data": "数据",
+    "tester": "测试",
+    "required": "必选",
+    "not_enabled": "未启用",
+    "toggle_aria": "{{role}}角色开关",
+    "pm_note": "必选 · plan + 拆解责任人",
+    "prototyper_note": "启用 → 前置原型 stage\n停用则跳过该 stage",
+    "developer_note": "必选 · 可多选 agent 并行",
+    "data_note": "已停用 → 不产生数据类子任务",
+    "tester_note": "验收 stage 责任人\n停用则回落给 PM"
   }
 }

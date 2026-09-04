@@ -895,5 +895,20 @@
     "next": "다음 산출물",
     "close": "미리보기 닫기",
     "open_hint": "클릭하여 미리보기"
+  },
+  "role_strip": {
+    "pm": "PM",
+    "prototyper": "프로토타이퍼",
+    "developer": "개발",
+    "data": "데이터",
+    "tester": "테스터",
+    "required": "필수",
+    "not_enabled": "비활성화",
+    "toggle_aria": "{{role}} 역할 토글",
+    "pm_note": "필수 · plan + 분해 담당",
+    "prototyper_note": "활성 → 프로토타입 stage\n비활성 → 건너뜀",
+    "developer_note": "필수 · 다중 선택 가능",
+    "data_note": "비활성 → 데이터 하위 작업 없음",
+    "tester_note": "수락 stage 담당\n비활성 → PM에 폴백"
   }
 }

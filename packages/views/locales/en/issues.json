@@ -928,5 +928,20 @@
     "next": "Next deliverable",
     "close": "Close preview",
     "open_hint": "Click to preview"
+  },
+  "role_strip": {
+    "pm": "PM",
+    "prototyper": "Prototyper",
+    "developer": "Developer",
+    "data": "Data",
+    "tester": "Tester",
+    "required": "Required",
+    "not_enabled": "Not enabled",
+    "toggle_aria": "{{role}} role toggle",
+    "pm_note": "Required · Plan + Decompose",
+    "prototyper_note": "Enabled → Prototype stage\nDisabled → Skip",
+    "developer_note": "Required · Multi-select",
+    "data_note": "Disabled → No data subtasks",
+    "tester_note": "Acceptance stage owner\nDisabled → falls back to PM"
   }
 }

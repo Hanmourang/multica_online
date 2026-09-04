@@ -247,6 +247,24 @@
     "avoid_conflict": "避免与其他模块冲突",
     "avoid_conflict_hint": "勾选后本任务将与其他模块的任务互斥执行。",
     "set_dependencies": "前置依赖",
-    "toast_set_dependencies_failed": "任务已创建，但前置依赖设置失败"
+    "toast_set_dependencies_failed": "任务已创建，但前置依赖设置失败",
+    "goal_label": "需求目标",
+    "goal_placeholder": "这个需求要达成什么目标？",
+    "start_at_label": "计划开始时间",
+    "start_at_hint": "精确到分钟；自动触发以开始时间为基准",
+    "role_strip_label": "项目角色班底",
+    "decompose_mode_label": "拆解模式",
+    "decompose_mode": {
+      "auto": "全自动",
+      "confirm": "拆解 + 确认",
+      "manual": "纯人工"
+    },
+    "decompose_mode_desc": {
+      "auto": "PM agent 拆解后直接生效，无需确认",
+      "confirm": "PM agent 出草稿，人工确认后生效",
+      "manual": "系统不拆解，人工按模板建子任务"
+    },
+    "auto_trigger_label": "到达开始时间自动触发",
+    "auto_trigger_hint": "开始时间起子任务自动进入调度；关闭则需手动触发"
   }
 }

@@ -247,6 +247,24 @@
     "avoid_conflict": "다른 모듈과의 충돌 방지",
     "avoid_conflict_hint": "선택하면 이 작업은 다른 모듈의 작업과 상호 배타적으로 실행됩니다.",
     "set_dependencies": "선행 작업",
-    "toast_set_dependencies_failed": "이슈는 생성되었지만 종속성 설정에 실패했습니다"
+    "toast_set_dependencies_failed": "이슈는 생성되었지만 종속성 설정에 실패했습니다",
+    "goal_label": "목표",
+    "goal_placeholder": "이 요구사항으로 달성할 것은?",
+    "start_at_label": "시작 예정",
+    "start_at_hint": "분 단위. 자동 트리거는 이 시간에 실행",
+    "role_strip_label": "역할 편성",
+    "decompose_mode_label": "분해 모드",
+    "decompose_mode": {
+      "auto": "전자동",
+      "confirm": "분해 + 확인",
+      "manual": "수동"
+    },
+    "decompose_mode_desc": {
+      "auto": "PM agent가 분해 후 즉시 적용",
+      "confirm": "PM agent가 초안 작성, 확인 후 적용",
+      "manual": "자동 분해 없음, 수동으로 하위 작업 생성"
+    },
+    "auto_trigger_label": "시작 시간에 자동 트리거",
+    "auto_trigger_hint": "시작 시간에 하위 작업이 자동으로 스케줄링에 진입"
   }
 }

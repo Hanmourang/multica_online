@@ -6,6 +6,8 @@ import type {
   IssueDependencyItem,
   MoveIssueRequest,
   ProjectModule,
+  RoleAssignment,
+  RoleRosterResponse,
   UpdateIssueRequest,
   GroupedIssuesResponse,
   ListIssuesResponse,
@@ -1262,6 +1264,36 @@ export class ApiClient {
     return this.fetch(`/api/issues/${id}/move`, {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  // --- Role roster (requirement-calendar §5.2) ---
+
+  async listProjectRoleDefaults(projectId: string): Promise<RoleRosterResponse> {
+    return this.fetch(`/api/projects/${projectId}/role-defaults`);
+  }
+
+  async replaceProjectRoleDefaults(
+    projectId: string,
+    entries: Array<Pick<RoleAssignment, "role" | "assignee_type" | "assignee_id" | "enabled">>,
+  ): Promise<RoleRosterResponse> {
+    return this.fetch(`/api/projects/${projectId}/role-defaults`, {
+      method: "PUT",
+      body: JSON.stringify({ entries }),
+    });
+  }
+
+  async listIssueRoleAssignments(issueId: string): Promise<RoleRosterResponse> {
+    return this.fetch(`/api/issues/${issueId}/roles`);
+  }
+
+  async replaceIssueRoleAssignments(
+    issueId: string,
+    entries: Array<Pick<RoleAssignment, "role" | "assignee_type" | "assignee_id" | "enabled">>,
+  ): Promise<RoleRosterResponse> {
+    return this.fetch(`/api/issues/${issueId}/roles`, {
+      method: "PUT",
+      body: JSON.stringify({ entries }),
     });
   }
 

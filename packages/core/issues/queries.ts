@@ -179,7 +179,31 @@ export const issueKeys = {
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
   sourceContextPreview: (wsId: string, anchorCommentId: string) =>
     ["source-context", "preview", wsId, anchorCommentId] as const,
+  /** 项目默认班底（requirement-calendar §5.2）。 */
+  projectRoleDefaults: (projectId: string) =>
+    ["project-role-defaults", projectId] as const,
+  /** 需求班底快照。 */
+  issueRoles: (issueId: string) =>
+    ["issue-roles", issueId] as const,
 };
+
+/** 项目默认班底查询。 */
+export function projectRoleDefaultsOptions(projectId: string | undefined) {
+  return queryOptions({
+    queryKey: issueKeys.projectRoleDefaults(projectId ?? ""),
+    queryFn: () => api.listProjectRoleDefaults(projectId!),
+    enabled: !!projectId,
+  });
+}
+
+/** 需求班底快照查询。 */
+export function issueRolesOptions(issueId: string | undefined) {
+  return queryOptions({
+    queryKey: issueKeys.issueRoles(issueId ?? ""),
+    queryFn: () => api.listIssueRoleAssignments(issueId!),
+    enabled: !!issueId,
+  });
+}
 
 export function sourceContextPreviewOptions(
   wsId: string,

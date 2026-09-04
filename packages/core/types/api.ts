@@ -25,6 +25,18 @@ export interface CreateIssueRequest {
   /** Issue-scoped label IDs to attach in the same transaction as the create.
    *  Unknown or non-issue ids are rejected by the server with 400. */
   label_ids?: string[];
+
+  // --- Requirement calendar fields (design §5) ---
+  /** 需求目标：pipeline 的提示词上下文。 */
+  goal?: string;
+  /** 绑定的 git 库资源 id。 */
+  repo_resource_id?: string;
+  /** 计划开始时间（RFC3339 含分钟精度）；null = 无计划，不自动触发。 */
+  start_at?: string;
+  /** 拆解模式：auto=全自动 / confirm=拆解+确认（默认）/ manual=纯人工。 */
+  decompose_mode?: "auto" | "confirm" | "manual";
+  /** 到达 start_at 后自动触发调度。 */
+  auto_trigger?: boolean;
 }
 
 export interface CreateCommentSubIssueManualRequest {
@@ -69,6 +81,22 @@ export interface IssueDependencyItem {
   issue_id: string;
   title: string;
   status: string;
+}
+
+/** 角色班底条目（项目默认 / 需求快照共用形状）。 */
+export interface RoleAssignment {
+  id: string;
+  role: "pm" | "prototyper" | "developer" | "data" | "tester";
+  assignee_type: "member" | "agent";
+  assignee_id: string;
+  enabled: boolean;
+  ordinal: number;
+}
+
+/** GET role-defaults / roles 端点的响应包。 */
+export interface RoleRosterResponse {
+  roles: RoleAssignment[];
+  total: number;
 }
 
 export interface UpdateIssueRequest {

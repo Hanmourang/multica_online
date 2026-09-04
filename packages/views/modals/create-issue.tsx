@@ -83,11 +83,14 @@ import {
   propertyListOptions,
   useSetIssueProperty,
 } from "@multica/core/properties";
+import { projectRoleDefaultsOptions } from "@multica/core/issues/queries";
+import type { RoleAssignment } from "@multica/core/types";
 import {
   ApiError,
   DuplicateIssueErrorBodySchema,
   type DuplicateIssueErrorBody,
   parseWithFallback,
+  api,
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { ClearablePillButton, PillButton } from "../common/pill-button";
@@ -100,6 +103,7 @@ import {
 import { IssuePickerModal } from "./issue-picker-modal";
 import { ModulePicker } from "../issues/components/pickers/module-picker";
 import { DependencyPicker } from "../issues/components/pickers/dependency-picker";
+import { RoleStrip } from "../issues/components/role-strip";
 import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
@@ -328,6 +332,16 @@ export function ManualCreatePanel({
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
   const [childPickerOpen, setChildPickerOpen] = useState(false);
+
+  // --- Requirement calendar fields (design §5) ---
+  // Only shown when creating a top-level issue with a project — the fields
+  // configure the pipeline (prototype → decompose → execute → acceptance).
+  const [goal, setGoal] = useState("");
+  const [startAt, setStartAt] = useState("");
+  const [decomposeMode, setDecomposeMode] = useState<"auto" | "confirm" | "manual">("confirm");
+  const [autoTrigger, setAutoTrigger] = useState(true);
+  const [roleEntries, setRoleEntries] = useState<RoleAssignment[]>([]);
+  const showRequirementFields = !parentIssueId && !!projectId;
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
@@ -343,6 +357,21 @@ export function ManualCreatePanel({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+
+  // Project role defaults — loaded when a project is picked for a top-level
+  // create. The server snapshots these onto the issue at creation time; the
+  // strip here is a preview / pre-creation editor.
+  const { data: projectRoleData } = useQuery({
+    ...projectRoleDefaultsOptions(projectId),
+    enabled: showRequirementFields,
+  });
+  // Sync server-fetched role defaults into local state (only when the user
+  // hasn't customized yet — entries are empty until the first project load).
+  useEffect(() => {
+    if (projectRoleData?.roles && roleEntries.length === 0) {
+      setRoleEntries(projectRoleData.roles);
+    }
+  }, [projectRoleData, roleEntries.length]);
 
   // Set the persisted draft's active mode so a later reopen (and any reader of
   // the unified draft) knows which form the user is editing in.
@@ -451,6 +480,11 @@ export function ManualCreatePanel({
     setAvoidConflict(false);
     setDependencyIds([]);
     setChildIssues([]);
+    setGoal("");
+    setStartAt("");
+    setDecomposeMode("confirm");
+    setAutoTrigger(true);
+    setRoleEntries([]);
     // Keep the just-used assignee for the next issue in the batch; reset
     // everything else across the manual + shared slots.
     setManual({
@@ -556,6 +590,15 @@ export function ManualCreatePanel({
           project_id: projectId,
           module_id: moduleId ?? undefined,
           avoid_conflict: moduleId ? avoidConflict : undefined,
+          // Requirement calendar fields (design §5) — only for top-level
+          // requirements (no parent). The server snapshots the project role
+          // defaults at creation time; roleEntries are the local preview.
+          ...(showRequirementFields ? {
+            goal: goal.trim() || undefined,
+            start_at: startAt ? new Date(startAt).toISOString() : undefined,
+            decompose_mode: decomposeMode,
+            auto_trigger: autoTrigger,
+          } : {}),
         });
       }
 
@@ -572,6 +615,25 @@ export function ManualCreatePanel({
         } catch (err) {
           console.error("[create-issue] dependency set failed", err);
           toast.error(t(($) => $.create_issue.toast_set_dependencies_failed));
+        }
+      }
+
+      // Customized role roster — PUT only when the user changed the project
+      // defaults (roleEntries diverges from the server snapshot). The server
+      // already copied the defaults at creation time; this overrides them.
+      if (showRequirementFields && roleEntries.length > 0) {
+        try {
+          await api.replaceIssueRoleAssignments(
+            issue.id,
+            roleEntries.map((e) => ({
+              role: e.role,
+              assignee_type: e.assignee_type,
+              assignee_id: e.assignee_id,
+              enabled: e.enabled,
+            })),
+          );
+        } catch (err) {
+          console.error("[create-issue] role roster save failed", err);
         }
       }
 
@@ -1457,6 +1519,98 @@ export function ManualCreatePanel({
                 );
               }}
             />
+
+            {/* Requirement calendar fields — only for top-level issues with a project. */}
+            {showRequirementFields && (
+              <div className="border-t px-4 py-3 space-y-3 shrink-0 overflow-y-auto max-h-64">
+                {/* Goal */}
+                <div>
+                  <label className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.create_issue.goal_label)}
+                  </label>
+                  <textarea
+                    className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-body placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    rows={2}
+                    value={goal}
+                    onChange={(e) => setGoal(e.target.value)}
+                    placeholder={t(($) => $.create_issue.goal_placeholder)}
+                  />
+                </div>
+
+                {/* Start time — minute-precision */}
+                <div>
+                  <label className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.create_issue.start_at_label)}
+                  </label>
+                  <input
+                    type="datetime-local"
+                    step={60}
+                    className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-body focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={startAt}
+                    onChange={(e) => setStartAt(e.target.value)}
+                  />
+                  <p className="mt-0.5 text-micro text-muted-foreground">
+                    {t(($) => $.create_issue.start_at_hint)}
+                  </p>
+                </div>
+
+                {/* Role strip */}
+                <div>
+                  <label className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.create_issue.role_strip_label)}
+                  </label>
+                  <RoleStrip
+                    entries={roleEntries}
+                    onChange={setRoleEntries}
+                    className="mt-1"
+                  />
+                </div>
+
+                {/* Decompose mode */}
+                <div>
+                  <label className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.create_issue.decompose_mode_label)}
+                  </label>
+                  <div className="mt-1 flex gap-2">
+                    {(["auto", "confirm", "manual"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setDecomposeMode(mode)}
+                        className={cn(
+                          "flex-1 rounded-md border px-2 py-1.5 text-left transition-colors",
+                          decomposeMode === mode
+                            ? "border-primary bg-primary/5"
+                            : "hover:bg-accent/50",
+                        )}
+                      >
+                        <div className="text-caption font-medium">
+                          {t(($) => $.create_issue.decompose_mode[mode])}
+                        </div>
+                        <div className="text-micro text-muted-foreground">
+                          {t(($) => $.create_issue.decompose_mode_desc[mode])}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Auto trigger */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <Switch
+                    size="sm"
+                    checked={autoTrigger}
+                    onCheckedChange={setAutoTrigger}
+                  />
+                  <span className="text-caption">
+                    <b>{t(($) => $.create_issue.auto_trigger_label)}</b>
+                    <span className="block text-micro text-muted-foreground">
+                      {t(($) => $.create_issue.auto_trigger_hint)}
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
 
             {/* Footer — same 2x2-grid-on-phones / single-row-from-`sm` shape
                 as the agent panel; see the note on AgentCreatePanel's footer

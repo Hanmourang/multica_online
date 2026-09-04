@@ -895,5 +895,20 @@
     "next": "次の成果物",
     "close": "プレビューを閉じる",
     "open_hint": "クリックしてプレビュー"
+  },
+  "role_strip": {
+    "pm": "PM",
+    "prototyper": "プロトタイパー",
+    "developer": "開発",
+    "data": "データ",
+    "tester": "テスター",
+    "required": "必須",
+    "not_enabled": "無効",
+    "toggle_aria": "{{role}}ロール切替",
+    "pm_note": "必須 · plan + 分解担当",
+    "prototyper_note": "有効 → プロトタイプ stage\n無効 → スキップ",
+    "developer_note": "必須 · 複数選択可",
+    "data_note": "無効 → データ系サブタスクなし",
+    "tester_note": "受入 stage 担当\n無効 → PM にフォールバック"
   }
 }

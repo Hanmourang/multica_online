@@ -217,6 +217,14 @@ vi.mock("@multica/core/issues/queries", () => ({
     queryKey: ["issues", wsId, "children", id],
     queryFn: () => Promise.resolve([]),
   }),
+  // Requirement-calendar role strip: the create panel preloads the project's
+  // role defaults to seed its local roster preview. This suite never picks a
+  // roster, so an empty roster keeps the strip inert (no roster PUT on
+  // create).
+  projectRoleDefaultsOptions: (projectId: string | undefined) => ({
+    queryKey: ["project-role-defaults", projectId],
+    queryFn: () => Promise.resolve({ roles: [], total: 0 }),
+  }),
 }));
 
 // CreateRunHint's pre-trigger preview + actor-name lookup are exercised in
@@ -328,6 +336,11 @@ vi.mock("@multica/core/api", async () => {
       listProperties: mockListProperties,
       setIssueProperty: mockSetIssueProperty,
       uploadFile: mockApiUploadFile,
+      // Roster snapshot PUT after a requirement create. Inert here because the
+      // project-role-defaults stub above resolves to an empty roster, so the
+      // create flow skips the call — the stub exists only to fail loudly (not
+      // with a TypeError) if that ever changes.
+      replaceIssueRoleAssignments: vi.fn().mockResolvedValue({ roles: [], total: 0 }),
     },
     ApiError,
     parseWithFallback,
