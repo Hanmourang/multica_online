@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 架构图 · 需求日历与角色化流水线（2026-09-04）</title>
+<style>
+/* ===== Multica 设计 token（packages/ui/styles/tokens.css 浅色主题抄录） ===== */
+:root {
+  --app-shell: oklch(0.964435 0.001327 286.375);
+  --page-canvas: oklch(0.988087 0 0);
+  --surface: oklch(1 0 0);
+  --surface-hover: oklch(0.967 0.001 286.375);
+  --surface-selected: oklch(0.95 0.002 286.375);
+  --surface-border: oklch(0.92 0.004 286.32);
+  --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+  --foreground: oklch(0.141 0.005 285.823);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --faint-foreground: oklch(0.606 0.016 285.938);
+  --primary: oklch(0.21 0.006 285.885);
+  --border: oklch(0.945 0.003 286.32);
+  --destructive: oklch(0.577 0.245 27.325);
+  --brand: oklch(0.55 0.16 255);
+  --success: oklch(0.55 0.16 145);
+  --warning: oklch(0.72 0.15 75);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: oklch(0.93 0.004 286.32);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+/* ===== 画板框架 ===== */
+.proto-nav {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 24px; background: oklch(0.16 0.005 285.823);
+  color: oklch(0.92 0.004 286.32);
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 12px; }
+.proto-nav .logo span { color: var(--brand); }
+.proto-nav a {
+  color: oklch(0.705 0.015 286.067); text-decoration: none;
+  padding: 5px 12px; border-radius: 6px; font-size: 12.5px;
+}
+.proto-nav a:hover { background: oklch(1 0 0 / 8%); color: #fff; }
+.frame-wrap { max-width: 1460px; margin: 0 auto; padding: 32px 24px 80px; }
+.frame-head { margin-bottom: 14px; }
+.frame-head h2 { font-size: 17px; font-weight: 700; }
+.frame-head p { color: var(--muted-foreground); font-size: 13px; margin-top: 4px; line-height: 1.7; max-width: 1180px; }
+.frame {
+  background: var(--page-canvas); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 0.16), 0 4px 16px rgb(15 23 42 / 0.08);
+  border: 1px solid oklch(0.85 0.005 286.32);
+  margin-bottom: 56px; position: relative;
+}
+.frame-bar {
+  height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+}
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: oklch(0.7 0.19 27); }
+.frame-bar i:nth-child(2) { background: oklch(0.8 0.16 85); }
+.frame-bar i:nth-child(3) { background: oklch(0.7 0.16 145); }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--faint-foreground); }
+
+/* ===== 图例 ===== */
+.legend { display: flex; gap: 16px; align-items: center; font-size: 11.5px; color: var(--muted-foreground); padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--app-shell); flex-wrap: wrap; }
+.legend b { font-weight: 650; color: var(--foreground); }
+.lg { display: inline-flex; align-items: center; gap: 6px; }
+.lg i { width: 22px; height: 14px; border-radius: 4px; display: block; }
+.lg .lg-new { border: 1.5px dashed var(--brand); background: oklch(0.55 0.16 255/6%); }
+.lg .lg-ext { border: 1.5px solid oklch(0.72 0.15 75/60%); background: oklch(0.72 0.15 75/10%); }
+.lg .lg-reuse { border: 1.5px solid var(--border); background: var(--surface); }
+
+/* ===== 分层架构（f1） ===== */
+.layer { display: flex; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--border); align-items: stretch; }
+.layer:last-child { border-bottom: none; }
+.layer-tag {
+  flex: none; width: 108px; display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  font-size: 12px; font-weight: 700; color: var(--foreground);
+  border-right: 2px solid var(--border); padding-right: 12px;
+}
+.layer-tag small { font-weight: 400; color: var(--faint-foreground); font-size: 10px; line-height: 1.4; }
+.layer-body { flex: 1; display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; }
+.comp {
+  border: 1.5px solid var(--border); border-radius: 9px; background: var(--surface);
+  padding: 7px 10px; min-width: 150px; flex: 1 1 0; max-width: 260px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.comp .c-t { font-size: 12px; font-weight: 650; display: flex; align-items: center; gap: 5px; }
+.comp .c-d { font-size: 10.5px; color: var(--muted-foreground); line-height: 1.5; }
+.comp .c-f { font-size: 9.5px; color: var(--faint-foreground); line-height: 1.45; }
+.comp.new { border: 1.5px dashed var(--brand); background: oklch(0.55 0.16 255/5%); }
+.comp.new .c-t::after { content: "新增"; font-size: 9px; font-weight: 700; color: var(--brand); background: oklch(0.55 0.16 255/10%); border-radius: 4px; padding: 0.5px 5px; margin-left: auto; }
+.comp.ext { border: 1.5px solid oklch(0.72 0.15 75/55%); background: oklch(0.72 0.15 75/7%); }
+.comp.ext .c-t::after { content: "扩展"; font-size: 9px; font-weight: 700; color: oklch(0.45 0.12 75); background: oklch(0.72 0.15 75/14%); border-radius: 4px; padding: 0.5px 5px; margin-left: auto; }
+.flow-down { text-align: center; color: var(--faint-foreground); font-size: 13px; line-height: 1; padding: 1px 0; background: var(--app-shell); }
+
+/* ===== 流水线（f2） ===== */
+.pipe { display: flex; align-items: stretch; gap: 0; padding: 26px 22px 18px; overflow-x: auto; }
+.pstage { flex: 1 1 0; min-width: 200px; border: 1.5px solid var(--border); border-radius: 11px; background: var(--surface); padding: 10px 12px; position: relative; }
+.pstage .p-no { position: absolute; top: -11px; left: 12px; width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: var(--page-canvas); font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.pstage.opt .p-no { background: var(--faint-foreground); }
+.pstage .p-t { font-size: 12.5px; font-weight: 700; margin: 4px 0 3px; }
+.pstage .p-role { font-size: 10px; color: var(--brand); font-weight: 650; margin-bottom: 5px; }
+.pstage ul { list-style: none; }
+.pstage li { font-size: 10.5px; color: var(--muted-foreground); line-height: 1.6; padding-left: 12px; position: relative; }
+.pstage li::before { content: "·"; position: absolute; left: 3px; }
+.pstage .p-out { margin-top: 6px; padding-top: 5px; border-top: 1px dashed var(--border); font-size: 9.5px; color: var(--faint-foreground); line-height: 1.5; }
+.pstage.opt { border-style: dashed; }
+.pgate { flex: none; width: 74px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+.pgate .arrow { font-size: 16px; color: var(--faint-foreground); }
+.pgate .g-t { font-size: 9px; color: var(--warning); font-weight: 700; text-align: center; line-height: 1.4; background: oklch(0.72 0.15 75/10%); border: 1px solid oklch(0.72 0.15 75/35%); border-radius: 5px; padding: 2px 5px; }
+.pipe-loop { display: flex; justify-content: flex-end; padding: 0 22px 16px; }
+.loop-box { font-size: 10.5px; color: var(--destructive); border: 1px dashed oklch(0.577 0.245 27.325/50%); background: oklch(0.577 0.245 27.325/6%); border-radius: 8px; padding: 6px 12px; line-height: 1.55; }
+.trigger-note { margin: 0 22px 20px; font-size: 11px; color: var(--muted-foreground); background: var(--app-shell); border: 1px solid var(--border); border-radius: 9px; padding: 9px 13px; line-height: 1.65; }
+
+/* ===== ER 图（f3） ===== */
+.er-wrap { position: relative; width: 1400px; height: 880px; margin: 0 auto; }
+.er-svg { position: absolute; inset: 0; width: 1400px; height: 880px; }
+.tbl { position: absolute; background: var(--surface); border: 1.5px solid var(--border); border-radius: 9px; overflow: hidden; box-shadow: 0 2px 8px rgb(15 23 42/6%); }
+.tbl .t-hd { padding: 5px 10px; font-size: 11.5px; font-weight: 700; background: var(--app-shell); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+.tbl .t-hd .tag { font-size: 9px; font-weight: 700; border-radius: 4px; padding: 0.5px 5px; margin-left: auto; }
+.tbl.new { border: 1.5px dashed var(--brand); }
+.tbl.new .t-hd { background: oklch(0.55 0.16 255/7%); }
+.tbl.new .tag { color: var(--brand); background: oklch(0.55 0.16 255/12%); }
+.tbl.ext .tag { color: oklch(0.45 0.12 75); background: oklch(0.72 0.15 75/16%); }
+.tbl.reuse .tag { color: var(--faint-foreground); background: var(--surface-selected); }
+.tbl .t-row { display: flex; gap: 6px; padding: 2.5px 10px; font-size: 10px; line-height: 1.5; border-bottom: 1px dashed oklch(0.945 0.003 286.32/60%); }
+.tbl .t-row:last-child { border-bottom: none; }
+.tbl .t-row .c-name { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--foreground); }
+.tbl .t-row .c-type { margin-left: auto; color: var(--faint-foreground); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 9px; }
+.tbl .t-row.hl { background: oklch(0.55 0.16 255/6%); }
+.tbl .t-row.hl .c-name { color: var(--brand); font-weight: 650; }
+.tbl .t-row.pk .c-name { font-weight: 700; }
+.tbl .t-row.fk .c-name::after { content: " →"; color: var(--warning); }
+
+/* ===== 状态机（f4） ===== */
+.sm-wrap { padding: 22px; }
+.sm-grid { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.sm { border: 1.5px solid var(--border); border-radius: 999px; padding: 7px 14px; font-size: 12px; font-weight: 650; background: var(--surface); display: inline-flex; align-items: center; gap: 7px; }
+.sm small { font-weight: 400; font-size: 9.5px; color: var(--faint-foreground); }
+.sm.terminal { border-color: oklch(0.55 0.16 145/45%); background: oklch(0.55 0.16 145/8%); }
+.sm-arrow { color: var(--faint-foreground); font-size: 14px; }
+.sm-cond { font-size: 9.5px; color: var(--muted-foreground); background: var(--app-shell); border: 1px solid var(--border); border-radius: 5px; padding: 1.5px 7px; }
+.sm-table { margin-top: 16px; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.sm-r { display: grid; grid-template-columns: 34px minmax(0,1.6fr) 150px; border-bottom: 1px solid var(--border); font-size: 11px; }
+.sm-r:last-child { border-bottom: none; }
+.sm-r > div { padding: 6px 12px; line-height: 1.55; }
+.sm-r.hd > div { background: var(--app-shell); font-weight: 700; font-size: 10.5px; color: var(--muted-foreground); }
+.sm-r .prio { font-weight: 700; color: var(--brand); text-align: center; }
+
+/* ===== 部署视图（f5） ===== */
+.deploy { display: flex; gap: 14px; padding: 20px 22px; align-items: stretch; }
+.dcol { flex: 1; border: 1.5px solid var(--border); border-radius: 11px; background: var(--app-shell); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.dcol > .d-t { font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.dcol > .d-t small { font-weight: 400; color: var(--faint-foreground); font-size: 10px; }
+.dcol .comp { max-width: none; flex: none; }
+.dlink { align-self: center; font-size: 10px; color: var(--faint-foreground); writing-mode: horizontal-tb; padding: 2px 8px; border: 1px dashed var(--border); border-radius: 999px; background: var(--surface); }
+
+.anno { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 9.5px; font-weight: 700; font-style: normal; vertical-align: 2px; }
+</style>
+</head>
+<body>
+
+<nav class="proto-nav">
+  <span class="logo">Multica <span>架构图</span></span>
+  <a href="#f1">① 分层架构</a>
+  <a href="#f2">② 端到端流水线</a>
+  <a href="#f3">③ 数据模型 ER</a>
+  <a href="#f4">④ 需求状态机</a>
+  <a href="#f5">⑤ 部署视图</a>
+  <span style="margin-left:auto;font-size:11px;color:oklch(0.6 0.01 286)">2026-09-04 · 配套 design 文档同目录</span>
+</nav>
+
+<div class="frame-wrap">
+
+<!-- ============ 图 1：分层架构 ============ -->
+<div class="frame-head" id="f1">
+  <h2>① 分层架构 — 需求日历在 multica 中的位置</h2>
+  <p>自上而下六层。<b>新增</b>组件 9 个（虚线蓝框）、<b>扩展</b>既有组件 6 个（橙框）、<b>原样复用</b>（灰框）。核心原则：stage barrier（migration 123）、依赖闸门（451）、ModuleLocker、autopilot 调度器全部复用，需求日历只做「编排」不发明新机制。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>architecture — layered view</span></div>
+  <div class="legend">
+    <b>图例</b>
+    <span class="lg"><i class="lg-new"></i> 新增组件</span>
+    <span class="lg"><i class="lg-ext"></i> 扩展既有组件</span>
+    <span class="lg"><i class="lg-reuse"></i> 原样复用</span>
+  </div>
+
+  <div class="layer">
+    <div class="layer-tag">客户端层<small>apps/web · desktop · mobile</small></div>
+    <div class="layer-body">
+      <div class="comp new"><div class="c-t">calendar-view</div><div class="c-d">月/周双粒度需求日历，色块显状态+进度，拖拽调期</div><div class="c-f mono">packages/views/issues/components/calendar-view.tsx</div></div>
+      <div class="comp ext"><div class="c-t">创建需求弹窗</div><div class="c-d">+目标 / git 库 / 分钟粒度时间 / role-strip 班底 / 拆解模式 / 自动触发</div><div class="c-f mono">packages/views/issues/components/create-issue-*</div></div>
+      <div class="comp new"><div class="c-t">需求详情四面板</div><div class="c-d">原型确认 / 拆解确认 / 执行调度 / 验收报告</div><div class="c-f mono">packages/views/issues/components/requirement-*</div></div>
+      <div class="comp ext"><div class="c-t">view-store + 偏好</div><div class="c-d">新增 view type 'calendar'，偏好存 issue_view_preference</div><div class="c-f mono">packages/core/issues/stores/view-store.ts</div></div>
+      <div class="comp"><div class="c-t">交付物管道</div><div class="c-d">原型 HTML 作为 stage 1 任务交付物展示（复用已交付能力）</div><div class="c-f mono">packages/views/common/deliverables/</div></div>
+    </div>
+  </div>
+  <div class="flow-down">▼</div>
+
+  <div class="layer">
+    <div class="layer-tag">接入层<small>server REST API</small></div>
+    <div class="layer-body">
+      <div class="comp new"><div class="c-t">requirement handler</div><div class="c-d">roles / decompose / decomposition confirm / prototype generate·marks·confirm / trigger</div><div class="c-f mono">server/internal/handler/requirement*.go</div></div>
+      <div class="comp ext"><div class="c-t">issue handler</div><div class="c-d">PATCH 扩展 start_at·goal·repo·mode·auto_trigger；list 投影 requirement_status</div><div class="c-f mono">server/internal/handler/issue.go</div></div>
+      <div class="comp"><div class="c-t">module / dependency API</div><div class="c-d">451 已交付：模块 CRUD + 依赖读写（同模块校验）</div><div class="c-f mono">server/internal/handler/module*.go</div></div>
+    </div>
+  </div>
+  <div class="flow-down">▼</div>
+
+  <div class="layer">
+    <div class="layer-tag">领域服务层<small>service + scheduler</small></div>
+    <div class="layer-body">
+      <div class="comp new"><div class="c-t">需求触发 loop</div><div class="c-d">30s 扫描 start_at 到期且已确认拆解的需求 → 推进 stage 3 子任务入队</div><div class="c-f mono">server/internal/scheduler/jobs_requirement_trigger.go</div></div>
+      <div class="comp new"><div class="c-t">拆解编排 service</div><div class="c-d">确认校验（功能点/班底/依赖）→ 批量建子任务写 parent/stage/依赖/指派</div><div class="c-f mono">server/internal/service/requirement_decompose.go</div></div>
+      <div class="comp new"><div class="c-t">提示词组装器</div><div class="c-d">五段模板 + ✗ 标记回流〔本轮修正〕→ 版本 +1</div><div class="c-f mono">server/internal/service/prototype_prompt.go</div></div>
+      <div class="comp ext"><div class="c-t">stage barrier 唤醒</div><div class="c-d">stage 全部终态 → 唤醒 parent 责任人（123 已验证，直接复用）</div><div class="c-f mono">server/internal/handler/issue_child_done.go</div></div>
+      <div class="comp ext"><div class="c-t">依赖闸门 + 组间互斥</div><div class="c-d">claim 时校验 DAG + 同模块跨组互斥（root 维度）</div><div class="c-f mono">server/internal/issuestatus/ + claim 查询</div></div>
+    </div>
+  </div>
+  <div class="flow-down">▼</div>
+
+  <div class="layer">
+    <div class="layer-tag">执行层<small>daemon（agent 运行时）</small></div>
+    <div class="layer-body">
+      <div class="comp ext"><div class="c-t">ModuleLocker v2</div><div class="c-d">锁 key (module_id, root_requirement_id)：同组并发 / 跨组互斥 / 终态即释放</div><div class="c-f mono">server/internal/daemon/module_locker.go</div></div>
+      <div class="comp"><div class="c-t">任务执行器</div><div class="c-d">研发 agent 执行 stage 3 子任务；测试 agent 跑 acceptance/*.spec.ts</div><div class="c-f mono">server/internal/daemon/task_*.go</div></div>
+      <div class="comp"><div class="c-t">等待态上报</div><div class="c-d">waiting_module_lock + wait_reason（451 已交付）</div><div class="c-f mono">agent_task_queue</div></div>
+    </div>
+  </div>
+  <div class="flow-down">▼</div>
+
+  <div class="layer">
+    <div class="layer-tag">数据层<small>Postgres · migration 452/453/454</small></div>
+    <div class="layer-body">
+      <div class="comp ext"><div class="c-t">issue 扩展</div><div class="c-d">+start_at·goal·repo·mode·auto_trigger·confirmed_at·triggered_at·root_id·feature_points·graph_context·acceptance_spec</div><div class="c-f mono">452_requirement_calendar</div></div>
+      <div class="comp new"><div class="c-t">project_role_default</div><div class="c-d">项目默认班底（pm/prototyper/developer/data/tester）</div><div class="c-f mono">453_requirement_roles</div></div>
+      <div class="comp new"><div class="c-t">issue_role_assignment</div><div class="c-d">需求班底快照（创建时拷贝项目默认）</div><div class="c-f mono">453_requirement_roles</div></div>
+      <div class="comp new"><div class="c-t">issue_prototype_version</div><div class="c-d">原型版本：html_path + prompt + marks + status</div><div class="c-f mono">454_requirement_prototype</div></div>
+      <div class="comp"><div class="c-t">project_module · issue_dependency · autopilot</div><div class="c-d">451 / 042 既有，原样复用</div><div class="c-f mono">migration 451 / 042</div></div>
+    </div>
+  </div>
+  <div class="flow-down">▼</div>
+
+  <div class="layer">
+    <div class="layer-tag">外部系统<small>agent 端直连</small></div>
+    <div class="layer-body">
+      <div class="comp"><div class="c-t">GitNexus（MCP）</div><div class="c-d">PM agent 自主查询 /graph · /by-file · /impact-analysis → 图谱四要素落库 graph_context</div><div class="c-f mono">agent 端 MCP client，非 server 集成</div></div>
+      <div class="comp"><div class="c-t">业务 git 仓</div><div class="c-d">docs/prototypes/*.html（原型）+ acceptance/*.spec.ts（验收代码，同仓同 commit 版本绑定）</div><div class="c-f mono">project_resource.resource_ref 指向</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 图 2：端到端流水线 ============ -->
+<div class="frame-head" id="f2">
+  <h2>② 端到端流水线 — 四 stage + barrier 门 + 打回环</h2>
+  <p>stage 编号 1-based（复用 migration 123）。<b>启用原型师才有 stage 1</b>，停用则跳过；stage 之间由 barrier 门隔离——上一 stage 全部子任务终态才唤醒下一 stage 责任人。验收不通过打回 stage 3（上限 3 轮，超限转人工）。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>pipeline — stage flow with barriers</span></div>
+  <div class="pipe">
+    <div class="pstage opt">
+      <span class="p-no">1</span>
+      <div class="p-t">原型 <span style="font-size:9.5px;color:var(--faint-foreground);font-weight:400">（可选）</span></div>
+      <div class="p-role">原型师 · Nova</div>
+      <ul>
+        <li>一键生成：提示词五段模板自动组装</li>
+        <li>产出 HTML → 业务仓 docs/prototypes/</li>
+        <li>实现细节逐项标记 ✓/✗/○</li>
+        <li>✗ 回流〔本轮修正〕→ 重生成版本+1</li>
+      </ul>
+      <div class="p-out">产出：issue_prototype_version（pending→confirmed）<br>落库：html_path · prompt · marks</div>
+    </div>
+    <div class="pgate"><span class="g-t">确认门<br>存在未处理 ✗ 禁止通过</span><span class="arrow">→</span></div>
+    <div class="pstage">
+      <span class="p-no">2</span>
+      <div class="p-t">plan + 拆解</div>
+      <div class="p-role">PM · Atlas（agent/人皆可）</div>
+      <ul>
+        <li>先出 plan（目标分解/阶段/风险）→ 评论</li>
+        <li>MCP 查 GitNexus 出四要素影响面</li>
+        <li>子任务草稿：功能点（新增/改造）+ 验收代码 + 依赖 + 执行人</li>
+        <li>confirm 模式人工确认；auto 直接生效</li>
+      </ul>
+      <div class="p-out">产出：stage 3/4 子任务批量生效<br>落库：parent · stage · dependency · feature_points · acceptance_spec · decomposition_confirmed_at</div>
+    </div>
+    <div class="pgate"><span class="g-t">barrier<br>+ 定时触发</span><span class="arrow">→</span></div>
+    <div class="pstage">
+      <span class="p-no">3</span>
+      <div class="p-t">执行</div>
+      <div class="p-role">研发 · Orion/Rex/Kai（多 agent 并行）</div>
+      <ul>
+        <li>到达 start_at → scheduler 自动触发</li>
+        <li>依赖 DAG 闸门陆续放行</li>
+        <li>同模块跨需求组互斥（waiting_module_lock）</li>
+        <li>组终态即释放模块占用</li>
+      </ul>
+      <div class="p-out">产出：代码 + 交付物卡片墙<br>落库：triggered_at · agent_task_queue</div>
+    </div>
+    <div class="pgate"><span class="g-t">barrier<br>stage3 全终态唤醒</span><span class="arrow">→</span></div>
+    <div class="pstage">
+      <span class="p-no">4</span>
+      <div class="p-t">验收</div>
+      <div class="p-role">测试 · Vera（停用则回落 PM）</div>
+      <ul>
+        <li>依据：已确认原型 + plan + 验收代码 + 图谱</li>
+        <li>执行 acceptance/*.spec.ts（版本绑定）</li>
+        <li>四板块报告：溯源/执行/回归/目标覆盖</li>
+        <li>通过 → 需求 done；不通过 → 打回</li>
+      </ul>
+      <div class="p-out">产出：验收报告评论 + verdict<br>不通过：建 stage 3 修复子任务（附失败日志+断言位置）</div>
+    </div>
+  </div>
+  <div class="pipe-loop">
+    <div class="loop-box">↩ 打回环：验收不通过 → 定位失败断言 + 图谱反查 → 新建 stage 3 修复子任务（依赖挂到相关任务）→ 修复终态后 barrier 再唤醒验收。轮次上限 3，超限需求转「验收失败」并通知负责人 + PM，<b>终态即释放</b>模块占用。</div>
+  </div>
+  <div class="trigger-note">
+    <b>定时触发语义</b>：<span class="mono">jobs_requirement_trigger.go</span> 每 30s 扫描 <span class="mono">auto_trigger=true ∧ triggered_at IS NULL ∧ decomposition_confirmed_at IS NOT NULL ∧ start_at ≤ now()</span> 的需求，同事务写 <span class="mono">triggered_at</span> 防重 → 无未完成依赖的 stage 3 子任务入队。改期（拖拽/PATCH）在触发前自由，触发后拒绝（409）。手动触发按钮走同一函数，忽略 start_at。
+  </div>
+</div>
+
+<!-- ============ 图 3：数据模型 ER ============ -->
+<div class="frame-head" id="f3">
+  <h2>③ 数据模型 ER — migration 452 / 453 / 454</h2>
+  <p>中央 <b class="mono">issue</b> 为扩展表（蓝底行 = 452 新增列）；中列三张<b>新增表</b>（虚线蓝框）：项目默认班底 / 需求班底快照 / 原型版本；右列为<b>原样复用</b>的既有表。两个自引用：<span class="mono">parent_issue_id</span>（需求→子任务层级）与 <span class="mono">root_requirement_id</span>（任务组标识，452 递归回填）。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>data model — entity relationship</span></div>
+  <div class="legend">
+    <b>图例</b>
+    <span class="lg"><i class="lg-new"></i> 新增表（453/454）</span>
+    <span class="lg"><i class="lg-ext"></i> 扩展表（issue 加列 · 452）</span>
+    <span class="lg"><i class="lg-reuse"></i> 复用既有表</span>
+    <span class="lg"><span class="mono" style="color:var(--brand)">蓝底行</span> = 新增列</span>
+    <span class="lg"><span class="mono" style="color:var(--warning)">→</span> = 外键</span>
+  </div>
+  <div style="overflow-x:auto">
+  <div class="er-wrap">
+    <svg class="er-svg" viewBox="0 0 1400 880">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="oklch(0.6 0.02 286)"/>
+        </marker>
+        <marker id="arrD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="oklch(0.72 0.02 286)"/>
+        </marker>
+      </defs>
+      <!-- issue.module_id → project_module -->
+      <polyline points="225,170 225,150" fill="none" stroke="oklch(0.6 0.02 286)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="233" y="163" font-size="9.5" fill="oklch(0.505 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">module_id</text>
+      <!-- role_default → project -->
+      <polyline points="770,75 850,75" fill="none" stroke="oklch(0.6 0.02 286)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="786" y="68" font-size="9.5" fill="oklch(0.505 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">project_id</text>
+      <!-- role_assignment → issue -->
+      <polyline points="470,300 455,300 455,260 390,260" fill="none" stroke="oklch(0.6 0.02 286)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="458" y="293" font-size="9.5" fill="oklch(0.505 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">issue_id</text>
+      <!-- prototype_version → issue -->
+      <polyline points="470,500 425,500 425,320 390,320" fill="none" stroke="oklch(0.6 0.02 286)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="431" y="492" font-size="9.5" fill="oklch(0.505 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">issue_id</text>
+      <!-- issue.repo_resource_id → project_resource -->
+      <polyline points="390,390 445,390 445,235 850,235" fill="none" stroke="oklch(0.6 0.02 286)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="600" y="228" font-size="9.5" fill="oklch(0.505 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">repo_resource_id</text>
+      <!-- issue_dependency → issue（底部进入） -->
+      <polyline points="850,340 815,340 815,700 330,700 330,617" fill="none" stroke="oklch(0.6 0.02 286)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="560" y="693" font-size="9.5" fill="oklch(0.505 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">issue_id / depends_on_issue_id</text>
+      <!-- comment → issue -->
+      <polyline points="850,490 795,490 795,685 360,685 360,617" fill="none" stroke="oklch(0.6 0.02 286)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="480" y="678" font-size="9.5" fill="oklch(0.505 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">issue_id（plan / 验收报告 / 打回链）</text>
+      <!-- agent_task_queue → issue -->
+      <polyline points="850,640 775,640 775,715 300,715 300,617" fill="none" stroke="oklch(0.6 0.02 286)" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="680" y="710" font-size="9.5" fill="oklch(0.505 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">issue_id（执行队列 · waiting_module_lock）</text>
+      <!-- 班底 → agent/member（虚线引用） -->
+      <polyline points="770,120 1170,120 1170,310 1190,310" fill="none" stroke="oklch(0.72 0.02 286)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrD)"/>
+      <text x="920" y="113" font-size="9.5" fill="oklch(0.606 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">assignee ← 班底引用</text>
+      <!-- prototype.html_path → 业务 git 仓（虚线） -->
+      <polyline points="770,540 790,540 790,730 1165,730 1165,610 1190,610" fill="none" stroke="oklch(0.72 0.02 286)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrD)"/>
+      <text x="830" y="723" font-size="9.5" fill="oklch(0.606 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">html_path → docs/prototypes/ · acceptance_spec → acceptance/</text>
+      <!-- issue.graph_context ← GitNexus（虚线） -->
+      <polyline points="150,617 150,835 1210,835 1210,827" fill="none" stroke="oklch(0.72 0.02 286)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrD)"/>
+      <text x="420" y="828" font-size="9.5" fill="oklch(0.606 0.016 285.938)" font-family="ui-monospace,Menlo,monospace">graph_context ← agent 端 MCP 查询（/graph · /by-file · /impact-analysis）</text>
+    </svg>
+
+    <!-- 左列：project_module + issue -->
+    <div class="tbl reuse" style="left:60px;top:20px;width:330px">
+      <div class="t-hd">project_module <span class="tag">复用 · 451</span></div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row fk"><span class="c-name">project_id</span><span class="c-type">uuid</span></div>
+      <div class="t-row"><span class="c-name">name · color</span><span class="c-type">text</span></div>
+      <div class="t-row"><span class="c-name">UNIQUE(project_id, name)</span><span class="c-type">模块色→日历色块</span></div>
+    </div>
+    <div class="tbl ext" style="left:60px;top:170px;width:330px">
+      <div class="t-hd">issue <span class="tag">扩展 · 452 加列</span></div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row fk"><span class="c-name">workspace_id</span><span class="c-type">uuid</span></div>
+      <div class="t-row"><span class="c-name">title · status · priority</span><span class="c-type">既有</span></div>
+      <div class="t-row"><span class="c-name">assignee_type · assignee_id</span><span class="c-type">member|agent</span></div>
+      <div class="t-row fk"><span class="c-name">parent_issue_id</span><span class="c-type">需求→子任务</span></div>
+      <div class="t-row"><span class="c-name">stage</span><span class="c-type">123 · 1原型 2拆解 3执行 4验收</span></div>
+      <div class="t-row fk"><span class="c-name">module_id · avoid_conflict</span><span class="c-type">451</span></div>
+      <div class="t-row"><span class="c-name">due_date</span><span class="c-type">改分钟粒度 §11</span></div>
+      <div class="t-row hl"><span class="c-name">start_at</span><span class="c-type">timestamptz · 分钟</span></div>
+      <div class="t-row hl"><span class="c-name">goal</span><span class="c-type">text · 三阶段基准</span></div>
+      <div class="t-row hl fk"><span class="c-name">repo_resource_id</span><span class="c-type">→ project_resource</span></div>
+      <div class="t-row hl"><span class="c-name">decompose_mode</span><span class="c-type">auto|confirm|manual</span></div>
+      <div class="t-row hl"><span class="c-name">auto_trigger</span><span class="c-type">bool · df true</span></div>
+      <div class="t-row hl"><span class="c-name">decomposition_confirmed_at</span><span class="c-type">timestamptz</span></div>
+      <div class="t-row hl"><span class="c-name">triggered_at</span><span class="c-type">触发防重</span></div>
+      <div class="t-row hl fk"><span class="c-name">root_requirement_id</span><span class="c-type">任务组标识</span></div>
+      <div class="t-row hl"><span class="c-name">feature_points</span><span class="c-type">jsonb · 新增|改造</span></div>
+      <div class="t-row hl"><span class="c-name">graph_context</span><span class="c-type">jsonb · 图谱四要素</span></div>
+      <div class="t-row hl"><span class="c-name">acceptance_spec</span><span class="c-type">jsonb · 验收代码+版本</span></div>
+    </div>
+
+    <!-- 中列：三张新表 -->
+    <div class="tbl new" style="left:470px;top:30px;width:300px">
+      <div class="t-hd">project_role_default <span class="tag">新增 · 453</span></div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row fk"><span class="c-name">project_id</span><span class="c-type">uuid</span></div>
+      <div class="t-row"><span class="c-name">role</span><span class="c-type">pm|prototyper|developer|data|tester</span></div>
+      <div class="t-row"><span class="c-name">assignee_type · assignee_id</span><span class="c-type">member|agent</span></div>
+      <div class="t-row"><span class="c-name">enabled · ordinal</span><span class="c-type">启停开关</span></div>
+      <div class="t-row"><span class="c-name">UNIQUE(project_id, role, assignee)</span><span class="c-type">developer 可多行</span></div>
+    </div>
+    <div class="tbl new" style="left:470px;top:250px;width:300px">
+      <div class="t-hd">issue_role_assignment <span class="tag">新增 · 453</span></div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row fk"><span class="c-name">issue_id</span><span class="c-type">uuid · CASCADE</span></div>
+      <div class="t-row"><span class="c-name">role · assignee_type · assignee_id</span><span class="c-type">同左</span></div>
+      <div class="t-row"><span class="c-name">enabled · ordinal</span><span class="c-type">pm/developer 必选锁定</span></div>
+      <div class="t-row"><span class="c-name">创建需求时从项目默认拷贝快照</span><span class="c-type">需求级覆盖</span></div>
+    </div>
+    <div class="tbl new" style="left:470px;top:445px;width:300px">
+      <div class="t-hd">issue_prototype_version <span class="tag">新增 · 454</span></div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row fk"><span class="c-name">issue_id</span><span class="c-type">uuid · CASCADE</span></div>
+      <div class="t-row"><span class="c-name">version · status</span><span class="c-type">pending|confirmed|superseded</span></div>
+      <div class="t-row"><span class="c-name">html_path</span><span class="c-type">docs/prototypes/*.html</span></div>
+      <div class="t-row"><span class="c-name">prompt</span><span class="c-type">五段模板+〔本轮修正〕</span></div>
+      <div class="t-row"><span class="c-name">marks</span><span class="c-type">jsonb · ✓/✗/○+修正诉求</span></div>
+      <div class="t-row"><span class="c-name">UNIQUE(issue_id, version)</span><span class="c-type">重生成版本+1</span></div>
+    </div>
+
+    <!-- 右列：复用表 -->
+    <div class="tbl reuse" style="left:850px;top:30px;width:240px">
+      <div class="t-hd">project <span class="tag">复用</span></div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row"><span class="c-name">workspace_id · name</span><span class="c-type">既有</span></div>
+    </div>
+    <div class="tbl reuse" style="left:850px;top:140px;width:280px">
+      <div class="t-hd">project_resource <span class="tag">复用</span></div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row fk"><span class="c-name">project_id</span><span class="c-type">uuid</span></div>
+      <div class="t-row"><span class="c-name">resource_type · resource_ref</span><span class="c-type">git 库载体</span></div>
+      <div class="t-row"><span class="c-name">UNIQUE(project_id, type, ref)</span><span class="c-type">既有</span></div>
+    </div>
+    <div class="tbl reuse" style="left:850px;top:290px;width:280px">
+      <div class="t-hd">issue_dependency <span class="tag">复用 · 451 激活</span></div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row fk"><span class="c-name">issue_id</span><span class="c-type">uuid</span></div>
+      <div class="t-row fk"><span class="c-name">depends_on_issue_id</span><span class="c-type">uuid</span></div>
+      <div class="t-row"><span class="c-name">type = 'blocked_by'</span><span class="c-type">同模块校验 · 409</span></div>
+    </div>
+    <div class="tbl reuse" style="left:850px;top:440px;width:280px">
+      <div class="t-hd">comment <span class="tag">复用</span></div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row fk"><span class="c-name">issue_id</span><span class="c-type">uuid</span></div>
+      <div class="t-row"><span class="c-name">type</span><span class="c-type">plan|验收报告|打回|system</span></div>
+      <div class="t-row"><span class="c-name">content · author_type/id</span><span class="c-type">既有</span></div>
+    </div>
+    <div class="tbl reuse" style="left:850px;top:590px;width:280px">
+      <div class="t-hd">agent_task_queue <span class="tag">复用 · 451</span></div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row fk"><span class="c-name">issue_id</span><span class="c-type">uuid</span></div>
+      <div class="t-row"><span class="c-name">status</span><span class="c-type">+waiting_module_lock</span></div>
+      <div class="t-row"><span class="c-name">wait_reason</span><span class="c-type">held by 模块「X」</span></div>
+    </div>
+
+    <!-- 最右列：执行人 + 外部系统 -->
+    <div class="tbl reuse" style="left:1190px;top:290px;width:170px">
+      <div class="t-hd">agent / member</div>
+      <div class="t-row pk"><span class="c-name">id</span><span class="c-type">uuid</span></div>
+      <div class="t-row"><span class="c-name">name · runtime_mode</span><span class="c-type">既有</span></div>
+      <div class="t-row"><span class="c-name">被班底两张表以 (assignee_type, assignee_id) 引用</span><span class="c-type">无角色列</span></div>
+    </div>
+    <div class="tbl" style="left:1190px;top:560px;width:170px;border-style:dashed">
+      <div class="t-hd">业务 git 仓<span class="tag" style="color:var(--faint-foreground)">外部</span></div>
+      <div class="t-row"><span class="c-name">docs/prototypes/*.html</span></div>
+      <div class="t-row"><span class="c-name">acceptance/*.spec.ts</span></div>
+      <div class="t-row"><span class="c-name">同仓同 commit → 版本绑定</span></div>
+    </div>
+    <div class="tbl" style="left:1190px;top:720px;width:170px;border-style:dashed">
+      <div class="t-hd">GitNexus<span class="tag" style="color:var(--faint-foreground)">外部 · MCP</span></div>
+      <div class="t-row"><span class="c-name">/graph · /by-file</span></div>
+      <div class="t-row"><span class="c-name">/impact-analysis</span></div>
+      <div class="t-row"><span class="c-name">agent 端自主查询</span></div>
+    </div>
+  </div>
+  </div>
+</div>
+
+<!-- ============ 图 4：需求状态机 ============ -->
+<div class="frame-head" id="f4">
+  <h2>④ 需求状态机 — 8 态派生投影（不落列，SQL 计算）</h2>
+  <p>与 <span class="mono">issue_effective_status</span> 同一思路：日历色块与详情状态由子任务 stage/status + 队列状态实时派生，永远与事实一致。主流程一条直线；「等待模块释放」是执行期的可逆分支；「验收不通过」打回执行（≤3 轮）。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>state machine — derived projection</span></div>
+  <div class="sm-wrap">
+    <div class="sm-grid">
+      <span class="sm">○ 未拆解 <small>无 stage2 子任务</small></span>
+      <span class="sm-arrow">→</span><span class="sm-cond">发起拆解</span>
+      <span class="sm">⚠ 拆解待确认 <small>confirm 模式</small></span>
+      <span class="sm-arrow">→</span><span class="sm-cond">确认拆解<br>写 confirmed_at</span>
+      <span class="sm">⏱ 待触发 <small>start_at 倒计时</small></span>
+      <span class="sm-arrow">→</span><span class="sm-cond">到点/手动触发<br>写 triggered_at</span>
+      <span class="sm">▶ 执行中 <small>N/M 进度</small></span>
+      <span class="sm-arrow">→</span><span class="sm-cond">stage 3 全终态<br>barrier 唤醒</span>
+      <span class="sm">🧪 验收中 <small>stage 4</small></span>
+      <span class="sm-arrow">→</span><span class="sm-cond">验收通过</span>
+      <span class="sm terminal">✅ 已完成</span>
+    </div>
+    <div class="sm-grid" style="margin-top:12px">
+      <span class="sm" style="border-color:oklch(0.6 0.15 300/40%);background:oklch(0.6 0.15 300/7%)">🎨 原型待确认 <small>启用原型师时前置</small></span>
+      <span class="sm-arrow">→</span><span class="sm-cond">确认门通过<br>（无未处理 ✗）</span>
+      <span style="font-size:11px;color:var(--muted-foreground)">进入「⚠ 拆解待确认 / ○ 未拆解」</span>
+      <span style="flex-basis:100%"></span>
+      <span class="sm" style="border-color:oklch(0.72 0.15 75/45%);background:oklch(0.72 0.15 75/8%)">🔒 等待模块释放 <small>组间互斥</small></span>
+      <span class="sm-arrow">⇄</span>
+      <span style="font-size:11px;color:var(--muted-foreground)">与「▶ 执行中」互转：他组持有同模块 → 等待；对方组<b>终态即释放</b> → 按 start_at 升序唤醒</span>
+      <span style="flex-basis:100%"></span>
+      <span style="font-size:11px;color:var(--destructive)">↩ 验收不通过：建 stage 3 修复子任务 → 回到「▶ 执行中」；轮次上限 3，超限 → 需求转「验收失败」（终态，释放模块，通知负责人+PM）</span>
+    </div>
+
+    <div class="sm-table">
+      <div class="sm-r hd"><div>优先级</div><div>派生条件（自上而下命中即返回）</div><div>需求状态</div></div>
+      <div class="sm-r"><div class="prio">1</div><div>issue 自身到达终态</div><div>✅ 已完成 / 已取消</div></div>
+      <div class="sm-r"><div class="prio">2</div><div>存在 stage 1 子任务未终态</div><div>🎨 原型待确认</div></div>
+      <div class="sm-r"><div class="prio">3</div><div><span class="mono">decomposition_confirmed_at IS NULL</span> 且存在 stage 2 子任务</div><div>⚠ 拆解待确认</div></div>
+      <div class="sm-r"><div class="prio">4</div><div><span class="mono">decomposition_confirmed_at IS NULL</span></div><div>○ 未拆解</div></div>
+      <div class="sm-r"><div class="prio">5</div><div><span class="mono">triggered_at IS NULL</span></div><div>⏱ 待触发</div></div>
+      <div class="sm-r"><div class="prio">6</div><div>存在子孙任务 <span class="mono">queue.status='waiting_module_lock'</span></div><div>🔒 等待模块释放</div></div>
+      <div class="sm-r"><div class="prio">7</div><div>stage 3 子任务未全部终态</div><div>▶ 执行中（N/M）</div></div>
+      <div class="sm-r"><div class="prio">8</div><div>stage 4 子任务未终态</div><div>🧪 验收中</div></div>
+      <div class="sm-r"><div class="prio">9</div><div>其余（stage 4 已终态但需求自身未关）</div><div>✅ 已完成</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 图 5：部署视图 ============ -->
+<div class="frame-head" id="f5">
+  <h2>⑤ 部署视图 — server 集中编排 · daemon 分布执行 · agent 端 MCP 直连 GitNexus</h2>
+  <p>调度与状态全部收敛在 server 单点（Postgres 为事实源）；daemon 只负责任务执行与模块锁持有；GitNexus 由 <b>agent 端</b>经 MCP 自主查询（已确认决策，server 不落图谱快照，仅把查询结果以 <span class="mono">graph_context</span> JSONB 存到子任务上）。</p>
+</div>
+<div class="frame" style="margin-bottom:0">
+  <div class="frame-bar"><i></i><i></i><i></i><span>deployment — server / daemon / external</span></div>
+  <div class="deploy">
+    <div class="dcol">
+      <div class="d-t">🖥 客户端 <small>web · desktop · mobile</small></div>
+      <div class="comp new"><div class="c-t">calendar-view</div><div class="c-d">月/周需求日历 · 拖拽调期 · 状态色块</div></div>
+      <div class="comp new"><div class="c-t">需求详情四面板</div><div class="c-d">原型确认 / 拆解确认 / 执行调度 / 验收报告</div></div>
+      <div class="comp ext"><div class="c-t">创建需求弹窗</div><div class="c-d">班底 role-strip · 分钟粒度 · 目标 · git 库</div></div>
+      <span class="dlink">REST + WS 实时推送</span>
+    </div>
+    <div class="dcol" style="border-color:oklch(0.55 0.16 255/35%)">
+      <div class="d-t">🗄 server（单点编排） <small>Postgres = 事实源</small></div>
+      <div class="comp new"><div class="c-t">requirement handler</div><div class="c-d">roles / decompose / prototype / trigger API</div></div>
+      <div class="comp new"><div class="c-t">scheduler · 需求触发 loop</div><div class="c-d">30s sweep start_at 到期 → 入队（triggered_at 防重）</div></div>
+      <div class="comp new"><div class="c-t">拆解编排 service</div><div class="c-d">确认校验 → 批量建子任务（parent/stage/依赖/指派）</div></div>
+      <div class="comp ext"><div class="c-t">stage barrier 唤醒</div><div class="c-d">issue_child_done.go（123 复用）</div></div>
+      <div class="comp ext"><div class="c-t">依赖闸门 + 组间互斥判定</div><div class="c-d">issuestatus + claim 查询（root 维度）</div></div>
+      <div class="comp"><div class="c-t">Postgres</div><div class="c-d mono">issue(452) · role_default(453) · role_assignment(453) · prototype_version(454) · module/dependency(451)</div></div>
+      <span class="dlink">任务派发 / 状态回传</span>
+    </div>
+    <div class="dcol">
+      <div class="d-t">⚙ daemon（每 agent） <small>分布式执行</small></div>
+      <div class="comp ext"><div class="c-t">ModuleLocker v2</div><div class="c-d">锁 key (module, root)：同组并发 / 跨组互斥 / 终态即释放</div></div>
+      <div class="comp"><div class="c-t">任务执行器</div><div class="c-d">研发写码 · 原型师出 HTML · 测试跑 acceptance/*.spec.ts</div></div>
+      <div class="comp"><div class="c-t">业务仓工作区</div><div class="c-d">git clone：docs/prototypes/ + acceptance/ 同仓提交</div></div>
+      <span class="dlink">agent 端 MCP 直连</span>
+    </div>
+    <div class="dcol" style="flex:0.8">
+      <div class="d-t">🌐 外部系统</div>
+      <div class="comp"><div class="c-t">GitNexus 平台</div><div class="c-d">/graph · /by-file · /impact-analysis<br>PM agent 拆解时查询 → graph_context 落库</div></div>
+      <div class="comp"><div class="c-t">业务 git 仓（远端）</div><div class="c-d">project_resource.resource_ref 指向<br>原型 HTML + 验收代码的存储与版本控制</div></div>
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

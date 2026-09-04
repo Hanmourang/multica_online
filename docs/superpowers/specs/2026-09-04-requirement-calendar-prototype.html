@@ -267,7 +267,7 @@ body {
   display: flex; align-items: center; justify-content: center; z-index: 30;
 }
 .modal {
-  width: 620px; max-height: 700px; background: var(--surface); border-radius: 12px;
+  width: 720px; max-height: 730px; background: var(--surface); border-radius: 12px;
   box-shadow: var(--floating-shadow); overflow: hidden; display: flex; flex-direction: column;
 }
 .modal-head { padding: 14px 18px 10px; font-size: 14.5px; font-weight: 700; display: flex; align-items: center; }
@@ -313,33 +313,13 @@ body {
 .toggle.off { background: var(--border); }
 .toggle.off i { right: auto; left: 2px; }
 
-/* ===== 角色班底配置 ===== */
-.role-box { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--surface); }
-.role-row {
-  display: flex; align-items: center; gap: 9px; padding: 7px 11px;
-  border-bottom: 1px solid var(--border); font-size: 12px;
-}
-.role-row:last-child { border-bottom: none; }
-.role-row .rname { width: 66px; flex: none; font-weight: 600; display: flex; align-items: center; gap: 4px; }
-.role-row .rname .req-star { color: var(--destructive); }
-.role-row .rpick {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
-  border: 1px solid var(--border); border-radius: 7px; padding: 4px 8px; background: var(--page-canvas);
-}
-.role-row .rpick.empty { color: var(--faint-foreground); justify-content: space-between; }
+/* ===== 角色标签 ===== */
 .rtag {
   display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px 2px 3px;
   border-radius: 999px; background: var(--surface); border: 1px solid var(--border);
   font-size: 11px; font-weight: 550;
 }
 .rtag .x { color: var(--faint-foreground); font-size: 10px; }
-.role-row .rnote { font-size: 10.5px; color: var(--faint-foreground); flex: none; }
-.role-row.off { background: oklch(0.977 0.002 286.32); }
-.role-row.off .rname, .role-row.off .rnote { color: var(--faint-foreground); }
-.inherit-tag {
-  font-size: 10px; padding: 1px 6px; border-radius: 999px; flex: none;
-  background: oklch(0.55 0.16 255 / 9%); color: var(--brand); font-weight: 600;
-}
 
 /* ===== 流水线 stage 条 ===== */
 .stage-flow { display: flex; align-items: center; gap: 0; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--surface); }
@@ -428,7 +408,7 @@ body {
   height: 210px; background: oklch(0.98 0.002 286); padding: 12px;
   display: flex; flex-direction: column; gap: 8px; position: relative;
 }
-.pv-wire { border: 1.5px dashed oklch(0.72 0.02 286); border-radius: 7px; background: var(--surface); }
+.pv-wire { border: 1.5px dashed oklch(0.72 0.02 286); border-radius: 7px; background: var(--surface); position: relative; }
 .pv-wire .wt { font-size: 9.5px; color: var(--faint-foreground); padding: 4px 7px; }
 .pv-fade {
   position: absolute; inset: auto 0 0 0; height: 56px;
@@ -439,6 +419,88 @@ body {
   font-size: 11px; padding: 3.5px 11px; border-radius: 999px; background: var(--primary);
   color: var(--primary-foreground); font-weight: 600; box-shadow: var(--surface-shadow);
 }
+
+/* ===== 角色班底（横向卡片 + 启用开关） ===== */
+.role-strip { display: flex; gap: 7px; }
+.role-card {
+  flex: 1; min-width: 0; border: 1.5px solid var(--border); border-radius: 9px;
+  background: var(--surface); padding: 7px 8px; display: flex; flex-direction: column; gap: 5px;
+}
+.role-card.on { border-color: oklch(0.55 0.16 255 / 45%); background: oklch(0.55 0.16 255 / 4%); }
+.role-card.off { background: oklch(0.977 0.002 286.32); border-style: dashed; }
+.rc-top { display: flex; align-items: center; gap: 4px; }
+.rc-name { font-size: 11px; font-weight: 650; white-space: nowrap; }
+.rc-top .req-star { color: var(--destructive); font-size: 10px; }
+.rc-sw { margin-left: auto; flex: none; }
+.toggle.mini { width: 23px; height: 13px; }
+.toggle.mini i { width: 9px; height: 9px; }
+.toggle.lock { background: var(--muted-foreground); }
+.rc-pick { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; min-height: 19px; }
+.rc-pick .rtag { font-size: 10px; padding: 1px 5px 1px 2px; }
+.rc-pick .rtag .avatar { width: 13px; height: 13px; font-size: 7px; }
+.rc-add { font-size: 10px; color: var(--faint-foreground); white-space: nowrap; }
+.rc-note { font-size: 9px; color: var(--faint-foreground); line-height: 1.4; }
+.role-card.off .rc-name, .role-card.off .rc-note { color: var(--faint-foreground); }
+
+/* ===== 功能点明细（新增 / 改造） ===== */
+.fp { margin-top: 7px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.fp-hd, .fp-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 50px minmax(0, 1.5fr);
+  gap: 7px; padding: 4.5px 9px; align-items: start;
+}
+.fp-hd {
+  background: var(--app-shell); border-bottom: 1px solid var(--border); padding: 3.5px 9px;
+  font-size: 9.5px; color: var(--muted-foreground); font-weight: 650;
+}
+.fp-row { border-bottom: 1px solid var(--border); font-size: 10.5px; line-height: 1.5; }
+.fp-row.last { border-bottom: none; }
+.fp-add { padding: 4px 9px; font-size: 10px; color: var(--brand); background: var(--page-canvas); border-top: 1px solid var(--border); }
+.tag-new, .tag-mod {
+  display: inline-block; padding: 0.5px 5px; border-radius: 4px;
+  font-size: 9px; font-weight: 700; white-space: nowrap;
+}
+.tag-new { background: oklch(0.55 0.16 145 / 14%); color: oklch(0.4 0.11 145); }
+.tag-mod { background: oklch(0.72 0.15 75 / 20%); color: oklch(0.45 0.12 75); }
+
+/* ===== 执行人微调 ===== */
+.asg {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1.5px 7px 1.5px 3px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--page-canvas);
+  font-size: 10.5px; font-weight: 550; white-space: nowrap;
+}
+.asg .caret { color: var(--faint-foreground); font-size: 9px; }
+.asg.edit { border-color: oklch(0.55 0.16 255 / 45%); background: oklch(0.55 0.16 255 / 7%); }
+
+/* ===== 原型实现细节标记 ===== */
+.mark {
+  display: inline-flex; align-items: center; gap: 3px; padding: 1.5px 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 650; border: 1px solid var(--border);
+  background: var(--surface); color: var(--faint-foreground); white-space: nowrap; flex: none;
+}
+.mark.ok { border-color: oklch(0.55 0.16 145 / 45%); background: oklch(0.55 0.16 145 / 11%); color: oklch(0.4 0.11 145); }
+.mark.no { border-color: oklch(0.577 0.245 27.325 / 45%); background: oklch(0.577 0.245 27.325 / 9%); color: var(--destructive); }
+.pv-pin { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); }
+
+/* ===== 一键生成 / 提示词 ===== */
+.prompt { border: 1px solid oklch(0.55 0.16 255 / 30%); border-radius: 9px; background: var(--surface); overflow: hidden; }
+.pr-head {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 11.5px; font-weight: 650;
+  color: var(--brand); background: oklch(0.55 0.16 255 / 7%); border-bottom: 1px solid oklch(0.55 0.16 255 / 16%);
+}
+.pr-src { margin-left: auto; font-weight: 400; font-size: 9.5px; color: var(--faint-foreground); }
+.pr-body { padding: 8px 10px; font-size: 10.5px; line-height: 1.75; color: var(--muted-foreground); }
+.pr-body .ins { color: var(--destructive); background: oklch(0.577 0.245 27.325 / 8%); border-radius: 3px; padding: 0 3px; }
+.pr-body .auto { color: var(--faint-foreground); }
+.pr-foot { display: flex; gap: 6px; padding: 7px 10px; border-top: 1px solid var(--border); background: var(--page-canvas); align-items: center; }
+
+/* ===== 键值信息列表（画面 5 左栏） ===== */
+.kv { display: flex; gap: 8px; padding: 4px 0; font-size: 11px; line-height: 1.6; border-bottom: 1px dashed var(--border); }
+.kv.last { border-bottom: none; }
+.kv .k { width: 58px; flex: none; color: var(--faint-foreground); }
+.kv .v { flex: 1; min-width: 0; }
+
+/* ===== 版本历史 ===== */
+.ver-row { display: flex; align-items: center; gap: 7px; padding: 3.5px 0; font-size: 10.5px; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -448,9 +510,10 @@ body {
   <a href="#f1">1 · 月视图全景</a>
   <a href="#f2">2 · 周视图 + 拖拽调期</a>
   <a href="#f3">3 · 创建需求（角色班底）</a>
-  <a href="#f4">4 · 原型师阶段（确认门）</a>
-  <a href="#f5">5 · PM plan + 拆解确认（图谱/验收）</a>
-  <a href="#f6">6 · 交付验收（测试 agent）</a>
+  <a href="#f4">4 · 原型师（一键生成 + 细节标记）</a>
+  <a href="#f5">5 · PM plan + 拆解确认</a>
+  <a href="#f6">6 · 定时触发与执行调度</a>
+  <a href="#f7">7 · 交付验收（测试 agent）</a>
 </nav>
 
 <div class="frame-wrap">
@@ -701,7 +764,7 @@ body {
               <span class="badge">⏱ 已拆解 4 子任务</span>
               <span class="grip"></span>
             </div>
-            <div class="drag-tip" style="left:8px;bottom:14px">改期：9/10 – 9/11 → <b>9/12 – 9/13</b>（触发时间联动改 9/12）</div>
+            <div class="drag-tip" style="left:8px;bottom:14px">改期：9/10 – 9/11 → <b>9/12 – 9/13</b>（开始时间联动改 <b class="mono">9/12 09:00</b> → 自动触发同步，并重跑组间互斥窗口预检）</div>
           </div>
           <div class="week-cell"><span class="dnum">13</span></div>
         </div>
@@ -715,8 +778,8 @@ body {
 
 <!-- ============ 画面 3：创建需求弹窗 ============ -->
 <div class="frame-head" id="f3" style="margin-top:24px">
-  <h2>画面 3 · 创建需求（目标 / git 库 / 角色班底 / 拆解模式 / 自动触发）</h2>
-  <p>需求创建表单在现有 issue 表单上扩展四组新字段：<b>目标</b>（结构化 textarea，供原型师出图、PM 拆解、测试验收共同使用的基准）、<b>git 库</b>（从项目 project_resource 选择或就地添加；拆解、执行、<b class="mono">acceptance/</b> 验收代码都以此为工作库）、<b>项目角色班底</b>（PM / 原型师 / 研发 / 数据 / 测试；项目默认自动带入、可逐需求覆盖；研发可多选 agent 并行）、<b>拆解模式</b>（全自动 / 拆解+人工确认 / 纯人工 三选一）+ <b>执行触发</b>（到达 start_date 自动触发）。班底直接决定流水线形态：<b>选了原型师 → 前置原型 stage + 用户确认门</b>（画面 4）；<b>未选 → 该 stage 跳过</b>；测试角色缺失时验收 stage 回落到 PM。</p>
+  <h2>画面 3 · 创建需求（目标 / git 库 / 角色班底横向启停 / 分钟粒度时间 / 拆解模式）</h2>
+  <p>需求创建表单在现有 issue 表单上扩展五组新字段：<b>目标</b>（结构化 textarea，原型师一键生成、PM 拆解、测试验收共同使用的基准）、<b>git 库</b>（从 project_resource 选择或就地添加；拆解、执行、<b class="mono">acceptance/</b> 验收代码都以此为工作库）、<b>项目角色班底</b>（PM / 原型师 / 研发 / 数据 / 测试 <b>横向并列</b>，<b>每个角色带独立启用开关</b>；项目默认自动带入、可逐需求覆盖；研发可多选 agent 并行）、<b>开始 / 截止时间</b>（<b>精确到分钟</b>）、<b>拆解模式</b>（全自动 / 拆解+人工确认 / 纯人工）+ <b>执行触发</b>。班底启停直接决定流水线形态：<b>启用原型师 → 前置原型 stage + 用户确认门</b>（画面 4），<b>停用 → 该 stage 跳过</b>；停用测试则验收 stage 回落到 PM。</p>
 </div>
 <div class="frame">
   <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 新建需求（弹窗覆盖在日历上）</span></div>
@@ -757,53 +820,56 @@ body {
             <span class="f-label">Git 库 <span class="anno">2</span> <span style="color:var(--faint-foreground);font-weight:400">（来自项目资源，可就地添加）</span></span>
             <div class="f-input f-select"><span class="mono" style="font-size:11.5px">⎇ git@code.alipay.com:trade/payments-service.git</span> <span class="caret">▾ ＋添加</span></div>
           </div>
-          <div class="f-row">
+          <div class="f-row new-el">
             <div class="f-col">
-              <span class="f-label">开始日期 <span class="req-star">*</span></span>
-              <div class="f-input f-select"><span class="mono">2026-09-15</span> <span class="caret">📅</span></div>
+              <span class="f-label">开始时间 <span class="req-star">*</span> <span class="anno">5</span></span>
+              <div class="f-input f-select"><span class="mono">2026-09-15 09:30</span> <span class="caret">📅 ▾</span></div>
             </div>
             <div class="f-col">
-              <span class="f-label">截止日期</span>
-              <div class="f-input f-select"><span class="mono">2026-09-19</span> <span class="caret">📅</span></div>
+              <span class="f-label">截止时间</span>
+              <div class="f-input f-select"><span class="mono">2026-09-19 18:00</span> <span class="caret">📅 ▾</span></div>
+            </div>
+          </div>
+          <div style="margin-top:-7px;font-size:10.5px;color:var(--faint-foreground);line-height:1.55">
+            精确到分钟（<b class="mono">datetime-local · step=60</b>）；日历月/周视图仍按<b>日</b>聚合渲染色块，hover 与详情展示到分钟；<b>自动触发以开始时间为基准</b>（不再是当日 00:00）。
+          </div>
+          <div class="f-col new-el">
+            <span class="f-label">项目角色班底 <span class="anno">3</span> <span style="color:var(--faint-foreground);font-weight:400">（横向并列 · 每个角色可独立启停 · 项目默认已带入）</span></span>
+            <div class="role-strip">
+              <div class="role-card on">
+                <div class="rc-top"><span class="rc-name">项目 PM <span class="req-star">*</span></span><span class="rc-sw"><span class="toggle mini lock"><i></i></span></span></div>
+                <div class="rc-pick"><span class="rtag"><span class="avatar agent">A</span>Atlas<span class="x">✕</span></span><span class="rc-add">▾</span></div>
+                <div class="rc-note">必选·不可停用<br>plan + 拆解责任人</div>
+              </div>
+              <div class="role-card on">
+                <div class="rc-top"><span class="rc-name">原型师</span><span class="rc-sw"><span class="toggle mini"><i></i></span></span></div>
+                <div class="rc-pick"><span class="rtag"><span class="avatar agent">N</span>Nova<span class="x">✕</span></span><span class="rc-add">▾</span></div>
+                <div class="rc-note">已启用 → 前置原型 stage <span class="anno">4</span><br>停用则跳过该 stage</div>
+              </div>
+              <div class="role-card on">
+                <div class="rc-top"><span class="rc-name">研发 <span class="req-star">*</span></span><span class="rc-sw"><span class="toggle mini lock"><i></i></span></span></div>
+                <div class="rc-pick">
+                  <span class="rtag"><span class="avatar agent">O</span>Orion<span class="x">✕</span></span>
+                  <span class="rtag"><span class="avatar agent">R</span>Rex<span class="x">✕</span></span>
+                  <span class="rtag"><span class="avatar agent">K</span>Kai<span class="x">✕</span></span>
+                  <span class="rc-add">＋多选</span>
+                </div>
+                <div class="rc-note">必选·<b>可多选 agent 并行</b></div>
+              </div>
+              <div class="role-card off">
+                <div class="rc-top"><span class="rc-name">数据</span><span class="rc-sw"><span class="toggle mini off"><i></i></span></span></div>
+                <div class="rc-pick"><span class="rc-add">未启用</span></div>
+                <div class="rc-note">已停用 → 不产生数据类子任务<br>启用后需指定执行人</div>
+              </div>
+              <div class="role-card on">
+                <div class="rc-top"><span class="rc-name">测试</span><span class="rc-sw"><span class="toggle mini"><i></i></span></span></div>
+                <div class="rc-pick"><span class="rtag"><span class="avatar agent">V</span>Vera<span class="x">✕</span></span><span class="rc-add">▾</span></div>
+                <div class="rc-note">验收 stage 责任人<br>停用则回落给 PM</div>
+              </div>
             </div>
           </div>
           <div class="f-col new-el">
-            <span class="f-label">项目角色班底 <span class="anno">3</span> <span style="color:var(--faint-foreground);font-weight:400">（项目默认已带入，可逐需求覆盖）</span></span>
-            <div class="role-box">
-              <div class="role-row">
-                <span class="rname">项目 PM <span class="req-star">*</span></span>
-                <span class="rpick"><span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">A</span> Atlas <span class="x">✕</span></span><span style="color:var(--faint-foreground);font-size:10.5px">▾ 换人</span></span>
-                <span class="inherit-tag">项目默认</span>
-              </div>
-              <div class="role-row">
-                <span class="rname">原型师</span>
-                <span class="rpick"><span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">N</span> Nova <span class="x">✕</span></span><span style="color:var(--faint-foreground);font-size:10.5px">▾ 换人</span></span>
-                <span class="rnote">已选 → 前置原型 stage <span class="anno">4</span></span>
-              </div>
-              <div class="role-row">
-                <span class="rname">研发 <span class="req-star">*</span></span>
-                <span class="rpick">
-                  <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">O</span> Orion <span class="x">✕</span></span>
-                  <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">R</span> Rex <span class="x">✕</span></span>
-                  <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">K</span> Kai <span class="x">✕</span></span>
-                  <span style="color:var(--faint-foreground);font-size:10.5px">＋ 多选</span>
-                </span>
-                <span class="rnote">多 agent 并行</span>
-              </div>
-              <div class="role-row off">
-                <span class="rname">数据</span>
-                <span class="rpick empty">未指定（本需求不涉及数据改造）<span style="font-size:10px">▾</span></span>
-                <span class="rnote">可留空</span>
-              </div>
-              <div class="role-row">
-                <span class="rname">测试 <span class="req-star">*</span></span>
-                <span class="rpick"><span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">V</span> Vera <span class="x">✕</span></span><span style="color:var(--faint-foreground);font-size:10.5px">▾ 换人</span></span>
-                <span class="inherit-tag">项目默认</span>
-              </div>
-            </div>
-          </div>
-          <div class="f-col new-el">
-            <span class="f-label">拆解模式 <span class="anno">4</span></span>
+            <span class="f-label">拆解模式 <span class="anno">6</span></span>
             <div class="mode-cards">
               <div class="mode-card">
                 <div class="mc-t"><span class="radio"></span> 全自动</div>
@@ -821,7 +887,7 @@ body {
           </div>
           <div class="trigger-row new-el">
             <span class="toggle"><i></i></span>
-            <span><b>到达开始日期自动触发</b> <span class="anno">5</span><br><span style="color:var(--muted-foreground);font-size:11px">9/15 00:00 起子任务自动进入调度（按依赖 DAG + 组间互斥）；关闭则需手动触发</span></span>
+            <span><b>到达开始时间自动触发</b> <span class="anno">7</span><br><span style="color:var(--muted-foreground);font-size:11px">9/15 09:30（= 开始时间）起子任务自动进入调度（按依赖 DAG + 组间互斥）；关闭则需手动触发</span></span>
           </div>
         </div>
         <div class="modal-foot">
@@ -833,142 +899,216 @@ body {
   </div>
 </div>
 <div class="frame-head" style="margin-top:-40px">
-  <p style="font-size:12px">标注：<span class="anno">1</span> 「目标」为新增结构化字段（区别于自由描述），<b>原型师出原型、PM 拆解、测试验收都以它为基准</b>&nbsp; <span class="anno">2</span> git 库复用 project_resource（repository/local path），需求必选其一；验收代码就写在该仓 <b class="mono">acceptance/</b> 目录&nbsp; <span class="anno">3</span> <b>角色班底</b>：项目默认一套（PM/原型师/研发/数据/测试），创建需求时带入可覆盖；研发支持<b>多选 agent</b>，其余单选，数据可留空；agent 与成员均可承担任一角色&nbsp; <span class="anno">4</span> 选了原型师 → 流水线前置「原型 stage」（画面 4）：原型师基于描述+目标出产品功能原型，<b>用户确认后才进 PM 拆解</b>；不选则跳过该 stage&nbsp; <span class="anno">5</span> 三种拆解模式单选；自动触发默认开（拆解完成后到 start_date 自动进调度），按钮文案随模式联动。</p>
+  <p style="font-size:12px">标注：<span class="anno">1</span> 「目标」为新增结构化字段（区别于自由描述），<b>原型师一键生成、PM 拆解、测试验收都以它为基准</b>&nbsp; <span class="anno">2</span> git 库复用 project_resource（repository/local path），需求必选其一；验收代码就写在该仓 <b class="mono">acceptance/</b> 目录&nbsp; <span class="anno">3</span> <b>角色班底横向并列</b>，每个角色一张卡片 + <b>独立启用开关</b>：PM / 研发 为必选（开关锁定不可停用），原型师 / 数据 / 测试 可自由启停；<b>停用 = 该角色不参与本需求</b>（不产生对应子任务、不可被指派），卡片置灰虚框；研发卡内<b>多选 agent</b>，其余单选；agent 与成员均可承担任一角色；卡片默认值来自<b>项目默认班底</b>，修改仅影响当前需求&nbsp; <span class="anno">4</span> 启用原型师 → 流水线前置「原型 stage」（画面 4）：一键生成产品功能原型 + 细节标记，<b>用户确认后才进 PM 拆解</b>&nbsp; <span class="anno">5</span> <b>开始 / 截止时间精确到分钟</b>（<span class="mono">datetime-local · step=60</span>）：日历色块仍按日聚合，自动触发以开始时间为基准（不再是 00:00）&nbsp; <span class="anno">6</span> 三种拆解模式单选，按钮文案随模式联动&nbsp; <span class="anno">7</span> 自动触发默认开：拆解确认后到达<b>开始时间</b>自动进调度；关闭则需手动触发。</p>
 </div>
 
 <!-- ============ 画面 4：原型师阶段（确认门） ============ -->
 <div class="frame-head" id="f4" style="margin-top:24px">
-  <h2>画面 4 · 原型师阶段 — 产品功能原型 + 用户确认门</h2>
-  <p>配了原型师的需求，流水线第一阶段（<b class="mono">stage 1</b>）由原型师 agent 基于<b>需求描述 + 目标</b>产出产品功能原型（HTML，写入业务仓 <b class="mono">docs/prototypes/</b>，同时作为任务交付物展示）。<b>确认门未过前，stage barrier 阻止 PM 拆解任务派发</b>：确认 → 进拆解；提意见 → 原型师回炉重出（版本 +1）；跳过 → 直接拆解。</p>
+  <h2>画面 4 · 原型师阶段 — 一键构建可视化原型 + 实现细节标记 + 确认门</h2>
+  <p>配了原型师的需求，流水线第一阶段（<b class="mono">stage 1</b>）由原型师 agent 承接。右侧提供<b>「⚡ 一键构建可视化原型」</b>按钮：系统<b>自动组装提示词</b>（需求描述 + 目标 + git 库 + 产出约定），点一下即产出 HTML 原型（写入业务仓 <b class="mono">docs/prototypes/</b>，同时作为任务交付物展示）。用户<b>在左栏逐条实现细节上标记「✓ 符合 / ✗ 不符 / ○ 待定」</b>；标为 ✗ 的项连同<b>修正诉求</b>自动回流成提示词的 <b class="mono">〔本轮修正〕</b> 段，点「按提示词重新生成」→ 原型师重出、<b>版本 +1</b>、旧版可回溯。<b>确认门未过前，stage barrier 阻止 PM 拆解任务派发</b>。</p>
 </div>
 <div class="frame">
   <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 需求详情抽屉（SIRI-29 · 原型待确认）</span></div>
-  <div style="display:flex;height:790px;background:var(--app-shell)">
-    <div style="flex:1;max-width:640px;margin:0 auto;background:var(--page-canvas);display:flex;flex-direction:column;overflow:hidden;border-left:1px solid var(--surface-border);border-right:1px solid var(--surface-border)">
-      <!-- 头部 -->
-      <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span class="mono" style="font-size:11px;color:var(--faint-foreground)">SIRI-29</span>
-          <b style="font-size:14.5px">退款流程异步化改造</b>
-          <span style="margin-left:auto;font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.6 0.15 300/12%);color:oklch(0.45 0.15 300);font-weight:650">🎨 原型待确认</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:var(--muted-foreground)">
-          <span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-pay)"></span>支付</span> ·
-          <span class="mono">9/15 – 9/19</span> ·
-          <span class="mono" style="font-size:10.5px">⎇ payments-service.git</span>
-        </div>
+  <div style="display:flex;flex-direction:column;height:830px;background:var(--page-canvas)">
+    <!-- 头部 -->
+    <div style="padding:13px 18px 9px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="mono" style="font-size:11px;color:var(--faint-foreground)">SIRI-29</span>
+        <b style="font-size:14.5px">退款流程异步化改造</b>
+        <span style="margin-left:auto;font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.6 0.15 300/12%);color:oklch(0.45 0.15 300);font-weight:650">🎨 原型待确认</span>
       </div>
-      <!-- stage 流水线条 -->
-      <div class="stage-flow">
-        <span class="st-node cur"><span class="dot">1</span>原型</span>
-        <span class="st-line"></span>
-        <span class="st-node"><span class="dot">2</span>plan + 拆解</span>
-        <span class="st-line"></span>
-        <span class="st-node"><span class="dot">3</span>执行</span>
-        <span class="st-line"></span>
-        <span class="st-node"><span class="dot">4</span>验收</span>
-        <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">stage barrier：本阶段未确认 → 后续任务不派发 <span class="anno">1</span></span>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:11.5px;color:var(--muted-foreground);flex-wrap:wrap">
+        <span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-pay)"></span>支付</span> ·
+        <span class="mono">9/15 09:30 – 9/19 18:00</span> ·
+        <span class="mono" style="font-size:10.5px">⎇ payments-service.git</span> ·
+        <span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar agent" style="width:16px;height:16px;font-size:8px">N</span>Nova（原型师）· <b style="color:var(--foreground)">第 2 版</b> · 12 分钟前</span>
       </div>
-      <div style="flex:1;overflow:auto;padding:13px 18px;display:flex;flex-direction:column;gap:11px">
-        <!-- 原型师与产物 -->
-        <div style="display:flex;align-items:center;gap:8px;font-size:12px">
-          <span class="avatar agent">N</span>
-          <b>Nova</b><span style="color:var(--muted-foreground);font-size:11.5px">（原型师）产出产品功能原型</span>
-          <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">8 分钟前 · 第 1 版</span>
-        </div>
-        <div class="proto-preview new-el">
-          <div class="pv-bar"><i></i><i></i><i></i><span class="mono">docs/prototypes/SIRI-29-refund-async.html</span><span style="margin-left:auto;font-size:10px;color:var(--faint-foreground)">v1 · 交付物</span></div>
-          <div class="pv-body">
-            <div class="pv-wire" style="height:30px;display:flex;align-items:center"><span class="wt">退款申请页 · 新增「异步处理中」状态条 + 预计到账时间</span></div>
-            <div class="pv-wire" style="height:62px;display:flex;flex-direction:column;justify-content:center;gap:3px">
-              <span class="wt">退款进度时间线：申请 → 审核 → 打款 → 到账</span>
-              <div style="display:flex;gap:4px;padding:0 7px">
-                <span style="flex:1;height:5px;border-radius:3px;background:oklch(0.55 0.16 145/55%)"></span>
-                <span style="flex:1;height:5px;border-radius:3px;background:oklch(0.55 0.16 145/55%)"></span>
-                <span style="flex:1;height:5px;border-radius:3px;background:var(--brand)"></span>
-                <span style="flex:1;height:5px;border-radius:3px;background:var(--border)"></span>
+    </div>
+    <!-- stage 流水线条 -->
+    <div class="stage-flow">
+      <span class="st-node cur"><span class="dot">1</span>原型</span>
+      <span class="st-line"></span>
+      <span class="st-node"><span class="dot">2</span>plan + 拆解</span>
+      <span class="st-line"></span>
+      <span class="st-node"><span class="dot">3</span>执行</span>
+      <span class="st-line"></span>
+      <span class="st-node"><span class="dot">4</span>验收</span>
+      <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">stage barrier：本阶段未确认 → 后续任务不派发 <span class="anno">1</span></span>
+    </div>
+    <!-- 两栏主体：左＝原型 + 细节标记 / 右＝一键生成 + 提示词 -->
+    <div style="flex:1;display:flex;min-height:0">
+      <!-- 左栏 -->
+      <div style="flex:1.25;border-right:1px solid var(--surface-border);display:flex;flex-direction:column;overflow:hidden">
+        <div style="flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px">
+          <div class="proto-preview new-el">
+            <div class="pv-bar"><i></i><i></i><i></i><span class="mono">docs/prototypes/SIRI-29-refund-async.html</span><span style="margin-left:auto;font-size:10px;color:var(--faint-foreground)">v2 · 交付物 <span class="anno">6</span></span></div>
+            <div class="pv-body">
+              <div class="pv-wire" style="height:30px;display:flex;align-items:center">
+                <span class="wt" style="padding-right:74px">① 退款申请页 · 新增「异步处理中」状态条 + 预计到账时间</span>
+                <span class="pv-pin"><span class="mark ok">✓ 符合</span></span>
               </div>
+              <div class="pv-wire" style="height:62px;display:flex;flex-direction:column;justify-content:center;gap:3px">
+                <span class="wt" style="padding-right:74px">② 退款进度时间线：申请 → 审核 → 打款 → 到账</span>
+                <div style="display:flex;gap:4px;padding:0 7px 0 7px">
+                  <span style="flex:1;height:5px;border-radius:3px;background:oklch(0.55 0.16 145/55%)"></span>
+                  <span style="flex:1;height:5px;border-radius:3px;background:oklch(0.55 0.16 145/55%)"></span>
+                  <span style="flex:1;height:5px;border-radius:3px;background:var(--brand)"></span>
+                  <span style="flex:1;height:5px;border-radius:3px;background:var(--border)"></span>
+                </div>
+                <span class="pv-pin" style="top:9px;transform:none"><span class="mark ok">✓ 符合</span></span>
+              </div>
+              <div class="pv-wire" style="height:30px;display:flex;align-items:center;border-color:oklch(0.577 0.245 27.325/45%);background:oklch(0.577 0.245 27.325/4%)">
+                <span class="wt" style="padding-right:74px;color:var(--destructive)">③ 失败重试入口 + 超时自动升级人工客服</span>
+                <span class="pv-pin"><span class="mark no">✗ 不符</span></span>
+              </div>
+              <div class="pv-fade"><span class="pv-open">⤢ 打开全屏预览</span></div>
             </div>
-            <div class="pv-wire" style="height:30px;display:flex;align-items:center"><span class="wt">失败重试入口 + 人工客服通道（超时自动升级）</span></div>
-            <div class="pv-fade"><span class="pv-open">⤢ 打开全屏预览</span></div>
+          </div>
+          <!-- 实现细节逐项标记 -->
+          <div class="new-el" style="border:1px solid var(--border);border-radius:9px;background:var(--surface);overflow:hidden">
+            <div style="display:flex;align-items:center;gap:6px;padding:7px 11px;border-bottom:1px solid var(--border);background:var(--app-shell);font-size:11.5px;font-weight:650">
+              实现细节逐项标记 <span class="anno">5</span>
+              <span style="margin-left:auto;font-weight:400;font-size:10px;color:var(--faint-foreground)">点击切换三态 · ✓ 2 · ✗ 1 · ○ 1</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 11px;border-bottom:1px solid var(--border);font-size:11px;line-height:1.55">
+              <span style="flex:none;color:var(--faint-foreground);font-weight:700">①</span>
+              <span style="flex:1;min-width:0">退款提交后立即返回「异步处理中」，展示预计到账时间（P99 5min）</span>
+              <span class="mark ok">✓ 符合</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 11px;border-bottom:1px solid var(--border);font-size:11px;line-height:1.55">
+              <span style="flex:none;color:var(--faint-foreground);font-weight:700">②</span>
+              <span style="flex:1;min-width:0">进度时间线四节点，节点变更推送通知（复用现有消息通道）</span>
+              <span class="mark ok">✓ 符合</span>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 11px;border-bottom:1px solid var(--border);font-size:11px;line-height:1.55;background:oklch(0.577 0.245 27.325/4%)">
+              <span style="flex:none;color:var(--faint-foreground);font-weight:700">③</span>
+              <span style="flex:1;min-width:0">失败可一键重试；超 15min 未推进<b>自动升级人工</b>
+                <span style="display:block;margin-top:3px;font-size:10px;color:var(--destructive);line-height:1.5">修正诉求：重试上限 3 次，超限置灰并露出客服入口；<b>去掉自动升级人工</b>，文案复用现有客服组件</span>
+              </span>
+              <span class="mark no">✗ 不符</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 11px;border-bottom:1px solid var(--border);font-size:11px;line-height:1.55">
+              <span style="flex:none;color:var(--faint-foreground);font-weight:700">④</span>
+              <span style="flex:1;min-width:0">部分退款 / 全额退款分流，对外 API 入口与字段不变</span>
+              <span class="mark">○ 待定</span>
+            </div>
+            <div style="padding:5px 11px;font-size:10px;color:var(--brand);background:var(--page-canvas)">＋ 追加一条实现细节（用户可补充原型未覆盖的点）</div>
           </div>
         </div>
-        <!-- 原型要点 -->
-        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:9px 12px">
-          <b style="font-size:11.5px;display:block;margin-bottom:5px">原型要点 <span class="anno">2</span></b>
-          <div style="font-size:11.5px;color:var(--muted-foreground);line-height:1.75">
-            ① 退款提交后立即返回「异步处理中」，展示预计到账时间（P99 5min）<br>
-            ② 进度时间线四节点，节点变更推送通知<br>
-            ③ 失败可一键重试；超 15min 未推进自动升级人工<br>
-            ④ 部分退款/全额退款分流，对外 API 入口不变
+      </div>
+      <!-- 右栏 -->
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+        <div style="flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px">
+          <div class="prompt new-el">
+            <div class="pr-head">⚡ 一键构建可视化原型 <span class="anno">2</span>
+              <span class="pr-src">输入源：需求描述 + 目标 + git 库</span>
+            </div>
+            <div class="pr-body">
+              <span class="auto">〔需求〕</span>退款流程异步化改造<br>
+              <span class="auto">〔目标〕</span>退款处理时长 P99 30min → 5min；对账差异率保持 0；对外 API 契约不变<br>
+              <span class="auto">〔仓库〕</span><b class="mono">payments-service.git</b> —— 先读现有退款页结构与 API 契约，原型不得改动对外字段<br>
+              <span class="auto">〔产出〕</span>单文件 HTML 原型 → <b class="mono">docs/prototypes/SIRI-29-refund-async.html</b>，并<b>逐屏列出实现细节</b>供用户标记<br>
+              <span class="auto">〔风格〕</span>沿用业务仓现有设计 token，不引入新组件库<br>
+              <span class="ins">〔本轮修正 · 来自 ✗ 标记〕</span>③ 失败重试：上限 3 次，超限置灰并露出客服入口；<b>移除「超时自动升级人工」</b>，文案复用现有客服组件
+            </div>
+            <div class="pr-foot">
+              <span class="btn primary">⚡ 一键生成</span>
+              <span class="btn">↻ 按提示词重新生成（版本 +1）<span class="anno">3</span></span>
+              <span style="margin-left:auto;font-size:9.5px;color:var(--faint-foreground)">提示词可编辑 · <span class="auto">灰底段</span>为自动组装</span>
+            </div>
+          </div>
+          <div style="border-radius:8px;padding:8px 11px;background:oklch(0.577 0.245 27.325/6%);border:1px solid oklch(0.577 0.245 27.325/22%);font-size:11px;line-height:1.65;color:var(--muted-foreground)">
+            <b style="color:var(--destructive)">✗ 标记自动回流</b> <span class="anno">4</span>：左栏标为「✗ 不符」的实现细节 + 用户填写的<b>修正诉求</b>，自动追加为提示词的 <b class="mono">〔本轮修正〕</b> 段；点「按提示词重新生成」→ 原型师 agent 重出，<b>版本 +1</b>，历史版本可回溯对比。「○ 待定」项不回流，仅在确认前提示。
+          </div>
+          <div style="border:1px solid oklch(0.55 0.16 145/28%);border-radius:9px;background:oklch(0.55 0.16 145/4%);padding:9px 12px">
+            <b style="font-size:11.5px;display:block;margin-bottom:5px;color:oklch(0.42 0.12 145)">目标覆盖对照 <span class="anno">7</span></b>
+            <div class="rep-item pass" style="font-size:11.5px"><span class="ic">✓</span><span>P99 30min → 5min：异步化 + 进度时间线支撑</span></div>
+            <div class="rep-item" style="font-size:11.5px"><span class="ic" style="color:var(--faint-foreground)">○</span><span>对账差异率保持 0：<span style="color:var(--muted-foreground)">后端约束，原型不体现 → 转 PM 拆解关注</span></span></div>
+            <div class="rep-item pass" style="font-size:11.5px"><span class="ic">✓</span><span>对外 API 契约不变：入口与字段无改动</span></div>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:8px 11px">
+            <b style="font-size:11.5px;display:block;margin-bottom:4px">版本历史 <span class="anno">8</span></b>
+            <div class="ver-row"><span class="mono" style="font-size:10.5px;font-weight:700;color:var(--brand)">v2</span><span style="flex:1;min-width:0">↻ 按提示词重新生成 · 修正 ③ 重试与客服入口</span><span class="mono" style="font-size:10px;color:var(--faint-foreground);flex:none">12 分钟前 · 当前</span></div>
+            <div class="ver-row"><span class="mono" style="font-size:10.5px;font-weight:700;color:var(--faint-foreground)">v1</span><span style="flex:1;min-width:0">⚡ 一键生成初版 · ③ 被标记 ✗ 不符</span><span class="mono" style="font-size:10px;color:var(--faint-foreground);flex:none">8 分钟前</span></div>
+            <div style="margin-top:5px;padding-top:5px;border-top:1px dashed var(--border);font-size:10px;color:var(--faint-foreground);line-height:1.55">原型 HTML 随业务仓提交，<b>版本号与 commit 一一对应</b>；任一历史版本可直接预览 / 回滚为当前版。</div>
           </div>
         </div>
-        <!-- 目标覆盖对照 -->
-        <div style="border:1px solid oklch(0.55 0.16 145/28%);border-radius:9px;background:oklch(0.55 0.16 145/4%);padding:9px 12px">
-          <b style="font-size:11.5px;display:block;margin-bottom:5px;color:oklch(0.42 0.12 145)">目标覆盖对照 <span class="anno">3</span></b>
-          <div class="rep-item pass" style="font-size:11.5px"><span class="ic">✓</span><span>P99 30min → 5min：异步化 + 进度时间线支撑</span></div>
-          <div class="rep-item" style="font-size:11.5px"><span class="ic" style="color:var(--faint-foreground)">○</span><span>对账差异率保持 0：<span style="color:var(--muted-foreground)">后端约束，原型不体现 → 转 PM 拆解关注</span></span></div>
-          <div class="rep-item pass" style="font-size:11.5px"><span class="ic">✓</span><span>对外 API 契约不变：入口与字段无改动</span></div>
-        </div>
-        <div style="border-radius:8px;padding:8px 11px;background:oklch(0.55 0.16 255/6%);font-size:11.5px;line-height:1.6;color:var(--muted-foreground)">
-          确认后：PM <b style="color:var(--foreground)">Atlas</b> 自动收到拆解任务（stage 2），基于<b style="color:var(--foreground)">已确认的原型 + 目标</b>出 plan 与子任务。
-        </div>
       </div>
-      <!-- 确认门操作 -->
-      <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;background:var(--surface)">
-        <span class="btn primary" style="flex:1;justify-content:center">✓ 确认原型，进入拆解 <span class="anno" style="margin-left:5px">4</span></span>
-        <span class="btn">💬 提修改意见（回炉）</span>
-        <span class="btn" style="color:var(--muted-foreground)">⏭ 跳过</span>
-      </div>
+    </div>
+    <!-- 确认门操作 -->
+    <div style="padding:11px 18px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;background:var(--surface)">
+      <span class="btn primary">✓ 确认原型，进入拆解 <span class="anno">9</span></span>
+      <span class="btn">↻ 按提示词重新生成</span>
+      <span class="btn" style="color:var(--muted-foreground)">⏭ 跳过原型</span>
+      <span style="margin-left:auto;font-size:10.5px;color:var(--destructive);font-weight:650;text-align:right;line-height:1.45">⚠ 存在 1 项「✗ 不符预期」→ 需先重新生成，或显式勾选「忽略此项」后方可确认</span>
     </div>
   </div>
 </div>
 <div class="frame-head" style="margin-top:-40px">
-  <p style="font-size:12px">标注：<span class="anno">1</span> 流水线四阶段条（复用 <b class="mono">issue.stage</b> barrier：阶段内全部子任务终态才放行下一阶段）；未配原型师的需求该节点置灰跳过&nbsp; <span class="anno">2</span> 原型要点由原型师 agent 自述，供确认时快速审阅&nbsp; <span class="anno">3</span> <b>目标覆盖对照</b>：逐条比对需求「目标」与原型体现情况，未覆盖项自动标注去向（转 PM 拆解关注）&nbsp; <span class="anno">4</span> 确认门三选：确认（进 stage 2 · plan + 拆解）/ 提意见（原型师重出，版本 +1，已确认版可回溯）/ 跳过（无原型直接拆解）。原型 HTML 本体作为任务交付物可直接弹窗预览（复用交付物预览能力）。</p>
+  <p style="font-size:12px">标注：<span class="anno">1</span> 流水线四阶段条（复用 <b class="mono">issue.stage</b> barrier：阶段内全部子任务终态才放行下一阶段）；未配原型师的需求该节点置灰跳过&nbsp; <span class="anno">2</span> <b>「⚡ 一键构建可视化原型」</b>：无需手写提示词，系统按固定模板自动组装 <b class="mono">〔需求〕〔目标〕〔仓库〕〔产出〕〔风格〕</b> 五段（灰底只读），点一次即产出可预览的 HTML 原型并登记为任务交付物&nbsp; <span class="anno">3</span> <b>「↻ 按提示词重新生成」</b>：提示词可编辑，重生成后<b>版本号 +1</b>，不覆盖历史版本&nbsp; <span class="anno">4</span> <b>✗ 标记自动回流</b>：不符预期的细节 + 修正诉求自动拼成 <b class="mono">〔本轮修正〕</b> 段（红底），形成「标记 → 改提示词 → 重生成」闭环&nbsp; <span class="anno">5</span> <b>实现细节逐项标记</b>：三态 ✓ 符合 / ✗ 不符 / ○ 待定，✗ 需填修正诉求；用户可追加原型未覆盖的细节项&nbsp; <span class="anno">6</span> 原型预览逐屏<b>就地打点</b>（右缘徽章），与下方细节列表一一对应；不符项的线框转红&nbsp; <span class="anno">7</span> <b>目标覆盖对照</b>：逐条比对需求「目标」与原型体现情况，未覆盖项自动标注去向（转 PM 拆解关注）&nbsp; <span class="anno">8</span> <b>版本历史</b>：每版记录来源（一键生成 / 按提示词重生成）与修正内容，原型随业务仓提交，版本 ↔ commit 一一对应，可预览 / 回滚&nbsp; <span class="anno">9</span> 确认门：<b>存在 ✗ 未处理项时禁止确认</b>（须重生成或显式忽略）；确认 → 进 stage 2 由 PM 出 plan + 拆解；跳过 → 无原型直接拆解。</p>
 </div>
 
 <!-- ============ 画面 5：PM plan + 拆解确认 ============ -->
 <div class="frame-head" id="f5" style="margin-top:24px">
-  <h2>画面 5 · PM plan + 拆解草稿确认（GitNexus 图谱 + 验收代码）</h2>
-  <p>拆解阶段（<b class="mono">stage 2</b>）由项目 PM 先出 <b>plan</b>（目标分解 / 阶段划分 / 风险），再拆为子任务。每个子任务由 PM agent <b>经 MCP 查 GitNexus 本体+图谱</b>，带回四要素：<b>功能点 / 代码对象 / 依赖 / 影响面</b>；并必须出具<b>代码化验收标准</b>（写入业务仓 <b class="mono">acceptance/</b>，与功能代码同仓同 commit 天然版本绑定：功能不调则验收不动）。确认后创建子 issue 并按开始日期自动触发。</p>
+  <h2>画面 5 · PM plan + 任务拆解确认（左：任务基础信息 / 右：子任务明细）</h2>
+  <p>拆解阶段（<b class="mono">stage 2</b>）<b>只做任务拆解这一件事</b>——不承载执行、不承载调度（定时触发与执行进度见画面 6，验收报告见画面 7）。<b>左栏＝任务基础信息</b>：需求标识 / 模块 / git 库 / <b>分钟粒度时间窗口</b> / 角色班底 / 拆解模式 / 目标，加上 PM 先出的 <b>plan</b>（目标分解 / 阶段划分 / 风险）与依赖链总览。<b>右栏＝每个任务拆解后的子任务明细</b>：逐个把<b>功能点细节确认到位</b>并明确标注 <b class="tag-new">新增</b> / <b class="tag-mod">改造</b>，配套<b>代码对象 / 依赖情况 / 图谱影响面 / 代码化验收标准</b>；<b>执行人可就地微调</b>，任务明细可逐项编辑。点「确认拆解」→ 系统<b>自动生成自动化任务</b>（写入 <b class="mono">parent_issue_id / stage / issue_dependency / assignee</b>），到开始时间即无人值守护开跑。</p>
 </div>
 <div class="frame">
-  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 需求详情抽屉（左：待确认草稿 / 右：定时执行中）</span></div>
-  <div style="display:flex;gap:0;height:800px;background:var(--app-shell)">
-    <!-- 左：review 待确认 -->
-    <div style="flex:1;border-right:1px solid var(--surface-border);background:var(--page-canvas);display:flex;flex-direction:column;overflow:hidden">
-      <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span class="mono" style="font-size:11px;color:var(--faint-foreground)">SIRI-21</span>
-          <b style="font-size:14.5px">会员积分重构</b>
-          <span style="margin-left:auto;font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.72 0.15 75/15%);color:oklch(0.45 0.12 75);font-weight:650">⚠ 拆解待确认</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:var(--muted-foreground)">
-          <span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span> ·
-          <span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar agent" style="width:16px;height:16px;font-size:8px">A</span>Atlas 拆解于 10 分钟前</span> ·
-          <span class="mono">9/15 – 9/19</span>
-        </div>
-        <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:11.5px;line-height:1.6">
-          <b style="font-size:11px;color:var(--muted-foreground)">目标</b><br>积分获取/消耗链路统一到账实时化；对账 T+1 → T+0；不改对外 API 契约。
-          <div style="margin-top:4px;color:var(--faint-foreground)" class="mono">⎇ git@code.alipay.com:member/points-service.git</div>
-        </div>
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 需求详情抽屉（左：任务基础信息 + PM plan / 右：子任务拆解明细）</span></div>
+  <div style="display:flex;flex-direction:column;height:880px;background:var(--page-canvas)">
+    <!-- 头部 -->
+    <div style="padding:13px 18px 9px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="mono" style="font-size:11px;color:var(--faint-foreground)">SIRI-21</span>
+        <b style="font-size:14.5px">会员积分重构</b>
+        <span style="margin-left:auto;font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.72 0.15 75/15%);color:oklch(0.45 0.12 75);font-weight:650">⚠ 拆解待确认</span>
       </div>
-      <!-- stage 流水线条 -->
-      <div class="stage-flow">
-        <span class="st-node done"><span class="dot">✓</span>原型</span>
-        <span class="st-line done"></span>
-        <span class="st-node cur"><span class="dot">2</span>plan + 拆解</span>
-        <span class="st-line"></span>
-        <span class="st-node"><span class="dot">3</span>执行</span>
-        <span class="st-line"></span>
-        <span class="st-node"><span class="dot">4</span>验收</span>
-        <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">原型已确认 v2 · 9/4 09:12</span>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:11.5px;color:var(--muted-foreground);flex-wrap:wrap">
+        <span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span> ·
+        <span class="mono">9/15 09:00 – 9/19 18:00</span> ·
+        <span class="mono" style="font-size:10.5px">⎇ points-service.git</span> ·
+        <span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar agent" style="width:16px;height:16px;font-size:8px">A</span>Atlas（PM）拆解于 10 分钟前</span>
       </div>
-      <div style="flex:1;overflow:auto;padding:12px 18px;display:flex;flex-direction:column;gap:9px">
+    </div>
+    <!-- stage 流水线条 -->
+    <div class="stage-flow">
+      <span class="st-node done"><span class="dot">✓</span>原型</span>
+      <span class="st-line done"></span>
+      <span class="st-node cur"><span class="dot">2</span>plan + 拆解</span>
+      <span class="st-line"></span>
+      <span class="st-node"><span class="dot">3</span>执行</span>
+      <span class="st-line"></span>
+      <span class="st-node"><span class="dot">4</span>验收</span>
+      <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">本画面只做拆解 · 原型已确认 v2 · 9/4 09:12</span>
+    </div>
+    <!-- 两栏主体 -->
+    <div style="flex:1;display:flex;min-height:0">
+      <!-- 左栏：任务基础信息 + PM plan -->
+      <div style="flex:0.82;border-right:1px solid var(--surface-border);display:flex;flex-direction:column;overflow:hidden">
+        <div style="flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px">
+          <div class="new-el" style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:9px 12px">
+            <b style="font-size:11.5px;display:block;margin-bottom:5px">任务基础信息 <span class="anno">1</span></b>
+            <div class="kv"><span class="k">标识</span><span class="v mono">SIRI-21 · 电商中台</span></div>
+            <div class="kv"><span class="k">模块</span><span class="v" style="display:flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-member)"></span>会员 <span style="color:var(--faint-foreground);font-size:10px">（组间互斥的锁粒度）</span></span></div>
+            <div class="kv"><span class="k">git 库</span><span class="v mono" style="font-size:10px">⎇ git@code.alipay.com:member/points-service.git</span></div>
+            <div class="kv"><span class="k">时间窗口</span><span class="v"><b class="mono">9/15 09:00 → 9/19 18:00</b><br><span style="color:var(--faint-foreground);font-size:10px">分钟粒度 · 自动触发以开始时间为基准</span></span></div>
+            <div class="kv"><span class="k">拆解模式</span><span class="v">拆解 + 人工确认（本画面即确认门）</span></div>
+            <div class="kv"><span class="k">角色班底</span><span class="v" style="display:flex;flex-wrap:wrap;gap:3px;align-items:center">
+              <span class="rtag" style="font-size:10px;padding:1px 5px 1px 2px"><span class="avatar agent" style="width:13px;height:13px;font-size:7px">A</span>PM·Atlas</span>
+              <span class="rtag" style="font-size:10px;padding:1px 5px 1px 2px"><span class="avatar agent" style="width:13px;height:13px;font-size:7px">N</span>原型·Nova</span>
+              <span class="rtag" style="font-size:10px;padding:1px 5px 1px 2px"><span class="avatar agent" style="width:13px;height:13px;font-size:7px">O</span>研发·Orion</span>
+              <span class="rtag" style="font-size:10px;padding:1px 5px 1px 2px"><span class="avatar agent" style="width:13px;height:13px;font-size:7px">R</span>Rex</span>
+              <span class="rtag" style="font-size:10px;padding:1px 5px 1px 2px"><span class="avatar agent" style="width:13px;height:13px;font-size:7px">K</span>Kai</span>
+              <span class="rtag" style="font-size:10px;padding:1px 5px 1px 2px"><span class="avatar human" style="width:13px;height:13px;font-size:7px">周</span>数据·周晴</span>
+              <span class="rtag" style="font-size:10px;padding:1px 5px 1px 2px"><span class="avatar agent" style="width:13px;height:13px;font-size:7px">V</span>测试·Vera</span>
+              <span style="font-size:10px;color:var(--faint-foreground);line-height:1.4">项目默认 + 需求级覆盖（画面 3 anno 3）；<b>未入班底的角色不可被指派</b></span>
+            </span></div>
+            <div class="kv last"><span class="k">目标</span><span class="v">积分获取/消耗链路统一到账实时化；对账 T+1 → T+0；不改对外 API 契约。</span></div>
+          </div>
         <!-- PM plan 区块 -->
         <div style="border:1px solid oklch(0.55 0.16 255/30%);border-radius:9px;background:oklch(0.55 0.16 255/4%);padding:9px 12px" class="new-el">
           <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:650;color:var(--brand)">
-            📋 PM plan <span class="anno">1</span>
+            📋 PM plan <span class="anno">2</span>
             <span style="margin-left:auto;font-weight:400;font-size:10.5px;color:var(--faint-foreground)">Atlas · 基于已确认原型 v2 + 目标产出</span>
           </div>
           <div style="font-size:11.5px;color:var(--muted-foreground);line-height:1.7;margin-top:5px">
@@ -978,204 +1118,339 @@ body {
           </div>
           <div style="margin-top:5px;font-size:10.5px;color:var(--faint-foreground)">plan 全文存入需求评论（可追溯）· 拆解与 plan 不一致时确认页高亮提醒</div>
         </div>
-        <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:650">
-          拆解草稿 <span class="anno">2</span>
-          <span style="font-weight:400;color:var(--faint-foreground);font-size:11px">（内置模板：标题/描述/模块/依赖/规模/<b>指派角色</b><span class="anno">5</span>/<b>图谱影响面</b>/<b>验收代码</b>）</span>
-          <span style="margin-left:auto;font-size:11px;color:var(--muted-foreground)">4 项 · 链式依赖</span>
-        </div>
-        <!-- 草稿卡 1 -->
-        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:10px 12px">
-          <div style="display:flex;align-items:center;gap:7px">
-            <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T1</span>
-            <b style="font-size:12.5px">积分账户模型重构</b>
-            <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">O</span>Orion<span class="x">✕</span></span>
-            <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">研发 · 规模 M</span>
-            <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
-          </div>
-          <div style="font-size:11.5px;color:var(--muted-foreground);margin-top:5px;line-height:1.55">账户表拆分流水/余额双表，引入幂等账变接口。</div>
-          <div style="margin-top:5px;display:flex;gap:6px;font-size:10.5px;color:var(--faint-foreground)"><span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span><span>依赖：无（入度 0，可立即执行）</span></div>
-          <div class="gn-box new-el">
-            <div class="gn-head">🕸 图谱影响面 <span class="anno">3</span><span class="src">PM agent 经 MCP 查 GitNexus 本体+图谱 · 2 分钟前 · commit a3f19c2</span></div>
-            <div class="gn-grid">
-              <div class="gn-cell"><b>功能点（本体）</b><span class="mono">points/account · points/ledger</span><br>能力：账户余额维护、账变流水记录</div>
-              <div class="gn-cell"><b>代码对象</b><span class="mono">points/account.go<br>points/ledger.go<br>AccountRepo · t_account（表）</span></div>
-              <div class="gn-cell"><b>依赖</b>上游 <span class="mono">order/payment_callback</span><br>下游 <span class="mono">points/query_api<br>points/reconcile</span></div>
-              <div class="gn-cell"><b>影响情况</b><span class="risk hi">高风险</span> 调用方 3 处 · 表结构变更 · 跨模块引用 0<br><span style="color:var(--faint-foreground)">/impact-analysis：建议灰度双写</span></div>
+          <!-- 依赖链总览（左栏） -->
+          <div style="border:1px dashed var(--border);border-radius:9px;padding:9px 12px;background:var(--surface)">
+            <div style="font-size:11px;color:var(--muted-foreground);margin-bottom:6px">依赖链总览 <span class="anno">8</span>（确认后写入 <b class="mono">issue_dependency</b>，同模块校验通过）</div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:10.5px;flex-wrap:wrap" class="mono">
+              <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T1</span>→
+              <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T2</span>→
+              <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T3</span>→
+              <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T4</span>→
+              <span style="background:oklch(0.5 0.13 145);color:#fff;border-radius:4px;padding:1.5px 6px">A1</span>
             </div>
+            <div style="margin-top:5px;font-size:10px;color:var(--faint-foreground);line-height:1.55">T1–T4 串行（stage 3）；A1 验收（stage 4）由 barrier 自动唤醒。人工把 T2/T3 改成并行时依赖边自动重算并做防环校验。</div>
           </div>
-          <div class="acc-box new-el">
-            <div class="acc-head">✓ 验收标准（代码化）<span class="anno">4</span><span class="ver">v1 · 新建</span></div>
-            <div class="acc-path mono">acceptance/member/account-model.spec.ts</div>
-            <div style="margin-top:3px">☐ 迁移后 <span class="mono">count(t_account_old) == count(t_account)</span> 且余额求和一致<br>☐ 同一 <span class="mono">idempotency_key</span> 重放 3 次，流水仅 1 条<br>☐ 账变接口 <span class="mono">P99 &lt; 50ms</span>（1k QPS 压测）</div>
-            <div class="acc-note">验收代码写入<b>业务仓</b>，与功能代码<b>同仓同 commit</b> 演进 → 天然版本控制：功能未调整则验收不动；功能变更须在同一 PR 内更新验收并递增版本号（v1→v2），diff 可追溯。</div>
+          <div style="border-radius:8px;padding:8px 11px;background:oklch(0.55 0.16 255/6%);font-size:11px;line-height:1.6;color:var(--muted-foreground)">
+            <b style="color:var(--foreground)">本模块只做任务拆解</b>：此处不展示定时触发与执行进度（见<b>画面 6</b>），也不展示验收报告（见<b>画面 7</b>）。确认即落库，后续全自动。
           </div>
-        </div>
-        <!-- 草稿卡 2 -->
-        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:10px 12px">
-          <div style="display:flex;align-items:center;gap:7px">
-            <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T2</span>
-            <b style="font-size:12.5px">积分获取规则引擎</b>
-            <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">R</span>Rex<span class="x">✕</span></span>
-            <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">研发 · 规模 M</span>
-            <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
-          </div>
-          <div style="font-size:11.5px;color:var(--muted-foreground);margin-top:5px;line-height:1.55">下单/签到/活动三类获取源接入统一规则引擎。</div>
-          <div style="margin-top:5px;display:flex;gap:6px;font-size:10.5px;color:var(--faint-foreground)"><span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span><span>依赖：<b class="mono" style="color:var(--foreground)">T1</b></span></div>
-          <div class="gn-box">
-            <div class="gn-head">🕸 图谱影响面<span class="src">MCP · 2 分钟前</span></div>
-            <div class="gn-grid">
-              <div class="gn-cell"><b>功能点</b><span class="mono">points/earning</span><br>能力：三类获取源规则计算</div>
-              <div class="gn-cell"><b>代码对象</b><span class="mono">earning/rules.go<br>earning/source_{order,checkin,campaign}.go</span></div>
-              <div class="gn-cell"><b>依赖</b>上游 <span class="mono">points/account</span>（T1 产出）<br>下游 <span class="mono">points/query_api</span></div>
-              <div class="gn-cell"><b>影响情况</b><span class="risk mid">中风险</span> 调用方 2 处 · 新增表 1 · 存量规则需迁移</div>
-            </div>
-          </div>
-          <div class="acc-box">
-            <div class="acc-head">✓ 验收标准（代码化）<span class="ver">v1 · 新建</span></div>
-            <div class="acc-path mono">acceptance/member/earning-rules.spec.ts</div>
-            <div style="margin-top:3px">☐ 27 条规则用例集命中率 100% ☐ 规则变更不产生重复发放 ☐ 单账户日获取上限生效</div>
-          </div>
-        </div>
-        <!-- 草稿卡 3 -->
-        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:10px 12px">
-          <div style="display:flex;align-items:center;gap:7px">
-            <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T3</span>
-            <b style="font-size:12.5px">积分消耗/抵扣接口</b>
-            <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">K</span>Kai<span class="x">✕</span></span>
-            <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">研发 · 规模 S</span>
-            <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
-          </div>
-          <div style="margin-top:5px;display:flex;gap:6px;font-size:10.5px;color:var(--faint-foreground);flex-wrap:wrap;align-items:center">
-            <span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span>
-            <span>依赖：<b class="mono" style="color:var(--foreground)">T2</b></span>
-            <span>🕸 <span class="mono">points/deduct</span> · <span class="mono">deduct/api.go · DeductService</span> · <span class="risk lo">低风险</span> 调用方 1 处</span>
-          </div>
-          <div class="acc-box">
-            <div class="acc-head">✓ 验收标准（代码化）<span class="ver">v2 · 复用既有</span></div>
-            <div class="acc-path mono">acceptance/member/deduct-api.spec.ts</div>
-            <div class="acc-note">图谱判定本任务<b>不改动抵扣语义</b>（仅接入新账户模型）→ 沿用仓库既有 v2 验收，<b>不新增不修改</b>；仅当功能调整时才升 v3。</div>
-          </div>
-        </div>
-        <!-- 草稿卡 4 -->
-        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:10px 12px">
-          <div style="display:flex;align-items:center;gap:7px">
-            <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T4</span>
-            <b style="font-size:12.5px">积分对账与回归验证</b>
-            <span class="rtag"><span class="avatar human" style="width:14px;height:14px;font-size:7.5px">周</span>周晴<span class="x">✕</span></span>
-            <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">数据 · 规模 S</span>
-            <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
-          </div>
-          <div style="margin-top:5px;display:flex;gap:6px;font-size:10.5px;color:var(--faint-foreground);flex-wrap:wrap;align-items:center">
-            <span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span>
-            <span>依赖：<b class="mono" style="color:var(--foreground)">T3</b></span>
-            <span>🕸 <span class="mono">points/reconcile</span> · <span class="mono">reconcile/job.go · t_reconcile_diff</span> · <span class="risk mid">中风险</span> 下游 T+1 报表</span>
-          </div>
-          <div class="acc-box">
-            <div class="acc-head">✓ 验收标准（代码化）<span class="ver">v1 · 新建</span></div>
-            <div class="acc-path mono">acceptance/member/reconcile.spec.ts</div>
-            <div style="margin-top:3px">☐ 对账差异率 = 0（T+0 全量比对） ☐ 对账时延 T+1 → T+0 达标 ☐ 差异明细可下钻到账变流水</div>
-          </div>
-        </div>
-        <!-- 依赖链示意 -->
-        <div style="border:1px dashed var(--border);border-radius:9px;padding:9px 12px;background:var(--surface)">
-          <div style="font-size:11px;color:var(--muted-foreground);margin-bottom:6px">依赖链 <span class="anno">6</span>（确认后写入 issue_dependency，同模块校验通过）</div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:10.5px" class="mono">
-            <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T1</span>→
-            <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T2</span>→
-            <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T3</span>→
-            <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T4</span>
-            <span style="color:var(--faint-foreground);font-family:inherit">串行；若人工调整为 T2/T3 并行则自动改边</span>
-          </div>
-        </div>
-        <div style="border-radius:8px;padding:8px 11px;background:oklch(0.55 0.16 255/6%);font-size:11.5px;line-height:1.6;color:var(--muted-foreground)">
-          确认后：创建 4 个执行子任务（stage 3）+ <b style="color:var(--foreground)">1 个验收子任务</b>（stage 4，指派测试角色 Vera）→ <b style="color:var(--foreground)">9/15 00:00 自动触发</b>；同模块「会员」当前无其他执行中需求组，触发即可开跑。验收代码随首个子任务的 PR 一并落入 <b class="mono">acceptance/member/</b>。
         </div>
       </div>
-      <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;background:var(--surface)">
-        <span class="btn primary" style="flex:1;justify-content:center">✓ 确认拆解（4+1 项生效）<span class="anno" style="margin-left:5px">7</span></span>
-        <span class="btn">逐项调整</span>
-        <span class="btn" style="color:var(--destructive)">✗ 驳回重拆</span>
+      <!-- 右栏：子任务拆解明细 -->
+      <div style="flex:1.45;display:flex;flex-direction:column;overflow:hidden">
+        <div style="flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:9px">
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:650;flex-wrap:wrap">
+            子任务明细 <span class="anno">3</span>
+            <span style="font-weight:400;color:var(--faint-foreground);font-size:10.5px">（内置模板：标题 / 描述 / 模块 / 规模 / <b>功能点·新增或改造</b> / <b>执行人</b> / 依赖 / 图谱影响面 / 验收代码）</span>
+            <span style="margin-left:auto;font-size:11px;color:var(--muted-foreground);font-weight:400">4 执行 + 1 验收 · 逐项可编辑 ✎</span>
+          </div>
+          <!-- 草稿卡 1（全展开） -->
+          <div style="border:1.5px solid oklch(0.55 0.16 255/40%);border-radius:9px;background:var(--surface);padding:10px 12px">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T1</span>
+              <b style="font-size:12.5px">积分账户模型重构</b>
+              <span class="asg edit">执行人 <span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">O</span>Orion <span class="caret">▾</span></span>
+              <span class="anno">5</span>
+              <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">研发 · 规模 M · stage 3</span>
+              <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--muted-foreground);margin-top:5px;line-height:1.55">账户表拆分流水/余额双表，引入幂等账变接口。<span style="color:var(--faint-foreground)">（描述可就地编辑）</span></div>
+            <div style="margin-top:5px;display:flex;gap:8px;font-size:10.5px;color:var(--faint-foreground);flex-wrap:wrap;align-items:center">
+              <span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span>
+              <span>依赖：<b style="color:var(--foreground)">无</b>（入度 0，可立即执行）</span>
+            </div>
+            <!-- 功能点明细：逐项确认新增 / 改造 -->
+            <div class="fp new-el">
+              <div class="fp-hd"><span>功能点（本体）<span class="anno" style="margin-left:4px">4</span></span><span>新增/改造</span><span>代码对象 · 细节确认</span></div>
+              <div class="fp-row">
+                <span><b>points/account</b><br><span style="color:var(--faint-foreground);font-size:10px">账户余额维护</span></span>
+                <span><span class="tag-mod">改造</span></span>
+                <span><span class="mono" style="font-size:10px">points/account.go · AccountRepo</span><br><span style="color:var(--muted-foreground);font-size:10px">t_account 拆为 t_account + t_account_balance；存量灰度双写迁移，旧表保留 30 天</span></span>
+              </div>
+              <div class="fp-row">
+                <span><b>points/ledger</b><br><span style="color:var(--faint-foreground);font-size:10px">账变流水记录</span></span>
+                <span><span class="tag-new">新增</span></span>
+                <span><span class="mono" style="font-size:10px">points/ledger.go（新建）· t_ledger（新表）</span><br><span style="color:var(--muted-foreground);font-size:10px">幂等账变接口，idempotency_key 唯一约束</span></span>
+              </div>
+              <div class="fp-row last">
+                <span><b>points/query_api</b><br><span style="color:var(--faint-foreground);font-size:10px">余额查询</span></span>
+                <span><span class="tag-mod">改造</span></span>
+                <span><span class="mono" style="font-size:10px">query/api.go</span><br><span style="color:var(--muted-foreground);font-size:10px">改读新余额表；对外契约与字段不变</span></span>
+              </div>
+              <div class="fp-add">＋ 添加功能点（PM / 用户均可补；<b>未标注「新增」或「改造」的项禁止确认</b>）</div>
+            </div>
+            <div class="gn-box new-el">
+              <div class="gn-head">🕸 图谱影响面 <span class="anno">6</span><span class="src">PM agent 经 MCP 查 GitNexus 本体+图谱 · 2 分钟前 · commit a3f19c2</span></div>
+              <div class="gn-grid">
+                <div class="gn-cell"><b>功能点（本体）</b><span class="mono">points/account · points/ledger</span><br>能力：账户余额维护、账变流水记录</div>
+                <div class="gn-cell"><b>代码对象</b><span class="mono">points/account.go<br>points/ledger.go<br>AccountRepo · t_account（表）</span></div>
+                <div class="gn-cell"><b>依赖</b>上游 <span class="mono">order/payment_callback</span><br>下游 <span class="mono">points/query_api<br>points/reconcile</span></div>
+                <div class="gn-cell"><b>影响情况</b><span class="risk hi">高风险</span> 调用方 3 处 · 表结构变更 · 跳模块引用 0<br><span style="color:var(--faint-foreground)">/impact-analysis：建议灰度双写</span></div>
+              </div>
+            </div>
+            <div class="acc-box new-el">
+              <div class="acc-head">✓ 验收标准（代码化）<span class="anno">7</span><span class="ver">v1 · 新建</span></div>
+              <div class="acc-path mono">acceptance/member/account-model.spec.ts</div>
+              <div style="margin-top:3px">☐ 迁移后 <span class="mono">count(t_account_old) == count(t_account)</span> 且余额求和一致<br>☐ 同一 <span class="mono">idempotency_key</span> 重放 3 次，流水仅 1 条<br>☐ 账变接口 <span class="mono">P99 &lt; 50ms</span>（1k QPS 压测）</div>
+              <div class="acc-note">验收代码写入<b>业务仓</b>，与功能代码<b>同仓同 commit</b> 演进 → 天然版本控制：功能未调整则验收不动；功能变更须在同一 PR 内更新验收并递增版本号（v1→v2），diff 可追溯。</div>
+            </div>
+          </div>
+          <!-- 草稿卡 2（有 1 个功能点未标注 → 阻止确认） -->
+          <div style="border:1px solid oklch(0.577 0.245 27.325/40%);border-radius:9px;background:var(--surface);padding:10px 12px">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T2</span>
+              <b style="font-size:12.5px">积分获取规则引擎</b>
+              <span class="asg">执行人 <span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">R</span>Rex <span class="caret">▾</span></span>
+              <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">研发 · 规模 M · stage 3</span>
+              <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--muted-foreground);margin-top:5px;line-height:1.55">下单/签到/活动三类获取源接入统一规则引擎。</div>
+            <div style="margin-top:5px;display:flex;gap:8px;font-size:10.5px;color:var(--faint-foreground);flex-wrap:wrap;align-items:center">
+              <span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span>
+              <span>依赖：<b class="mono" style="color:var(--foreground)">T1</b></span>
+            </div>
+            <div class="fp">
+              <div class="fp-hd"><span>功能点（本体）</span><span>新增/改造</span><span>代码对象 · 细节确认</span></div>
+              <div class="fp-row">
+                <span><b>points/earning</b><br><span style="color:var(--faint-foreground);font-size:10px">获取规则计算</span></span>
+                <span><span class="tag-mod">改造</span></span>
+                <span><span class="mono" style="font-size:10px">earning/rules.go · earning/source_order.go</span><br><span style="color:var(--muted-foreground);font-size:10px">下单/签到规则改走统一引擎，旧分支下线</span></span>
+              </div>
+              <div class="fp-row last">
+                <span><b>points/earning_campaign</b><br><span style="color:var(--faint-foreground);font-size:10px">活动获取源</span></span>
+                <span><span class="tag-mod" style="background:oklch(0.577 0.245 27.325/12%);color:var(--destructive)">待定</span></span>
+                <span><span class="mono" style="font-size:10px">earning/source_campaign.go</span><br><span style="color:var(--destructive);font-size:10px">✗ 需明确「新增」还是「改造」后才可确认拆解</span></span>
+              </div>
+              <div class="fp-add">＋ 添加功能点</div>
+            </div>
+            <div class="gn-box">
+              <div class="gn-head">🕸 图谱影响面<span class="src">MCP · 2 分钟前</span></div>
+              <div class="gn-grid">
+                <div class="gn-cell"><b>功能点</b><span class="mono">points/earning</span><br>能力：三类获取源规则计算</div>
+                <div class="gn-cell"><b>代码对象</b><span class="mono">earning/rules.go<br>earning/source_{order,checkin,campaign}.go</span></div>
+                <div class="gn-cell"><b>依赖</b>上游 <span class="mono">points/account</span>（T1 产出）<br>下游 <span class="mono">points/query_api</span></div>
+                <div class="gn-cell"><b>影响情况</b><span class="risk mid">中风险</span> 调用方 2 处 · 新增表 1 · 存量规则需迁移</div>
+              </div>
+            </div>
+            <div class="acc-box">
+              <div class="acc-head">✓ 验收标准（代码化）<span class="ver">v1 · 新建</span></div>
+              <div class="acc-path mono">acceptance/member/earning-rules.spec.ts</div>
+              <div style="margin-top:3px">☐ 27 条规则用例集命中率 100% ☐ 规则变更不产生重复发放 ☐ 单账户日获取上限生效</div>
+            </div>
+          </div>
+          <!-- 草稿卡 3（折叠态） -->
+          <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:10px 12px">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T3</span>
+              <b style="font-size:12.5px">积分消耗/抵扣接口</b>
+              <span class="asg">执行人 <span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">K</span>Kai <span class="caret">▾</span></span>
+              <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">研发 · 规模 S · stage 3</span>
+              <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
+            </div>
+            <div style="margin-top:5px;display:flex;gap:8px;font-size:10.5px;color:var(--faint-foreground);flex-wrap:wrap;align-items:center">
+              <span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span>
+              <span>依赖：<b class="mono" style="color:var(--foreground)">T2</b></span>
+              <span>🕸 <span class="mono">points/deduct</span> · <span class="risk lo">低风险</span> 调用方 1 处</span>
+            </div>
+            <div style="margin-top:6px;display:flex;align-items:center;gap:5px;font-size:10.5px;flex-wrap:wrap">
+              <span style="color:var(--faint-foreground)">功能点</span>
+              <span class="mono">points/deduct</span><span class="tag-mod">改造</span>
+              <span class="mono" style="color:var(--faint-foreground)">deduct/api.go · DeductService</span>
+              <span style="color:var(--muted-foreground);font-size:10px">仅接入新账户模型，不改抵扣语义</span>
+              <span style="margin-left:auto;font-size:10px;color:var(--brand)">展开明细 ▾</span>
+            </div>
+            <div class="acc-box">
+              <div class="acc-head">✓ 验收标准（代码化）<span class="ver">v2 · 复用既有</span></div>
+              <div class="acc-path mono">acceptance/member/deduct-api.spec.ts</div>
+              <div class="acc-note">图谱判定本任务<b>不改动抵扣语义</b>（仅接入新账户模型）→ 沿用仓库既有 v2 验收，<b>不新增不修改</b>；仅当功能调整时才升 v3。</div>
+            </div>
+          </div>
+          <!-- 草稿卡 4（折叠态） -->
+          <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:10px 12px">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T4</span>
+              <b style="font-size:12.5px">积分对账与回归验证</b>
+              <span class="asg">执行人 <span class="avatar human" style="width:14px;height:14px;font-size:7.5px">周</span>周晴 <span class="caret">▾</span></span>
+              <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">数据 · 规模 S · stage 3</span>
+              <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
+            </div>
+            <div style="margin-top:5px;display:flex;gap:8px;font-size:10.5px;color:var(--faint-foreground);flex-wrap:wrap;align-items:center">
+              <span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span>
+              <span>依赖：<b class="mono" style="color:var(--foreground)">T3</b></span>
+              <span>🕸 <span class="mono">points/reconcile</span> · <span class="risk mid">中风险</span> 下游 T+1 报表</span>
+            </div>
+            <div style="margin-top:6px;display:flex;align-items:center;gap:5px;font-size:10.5px;flex-wrap:wrap">
+              <span style="color:var(--faint-foreground)">功能点</span>
+              <span class="mono">points/reconcile</span><span class="tag-mod">改造</span>
+              <span class="tag-new">新增</span>
+              <span class="mono" style="color:var(--faint-foreground)">reconcile/job.go · t_reconcile_diff（新表）</span>
+              <span style="color:var(--muted-foreground);font-size:10px">对账周期 T+1 → T+0，新增差异明细表</span>
+              <span style="margin-left:auto;font-size:10px;color:var(--brand)">展开明细 ▾</span>
+            </div>
+            <div class="acc-box">
+              <div class="acc-head">✓ 验收标准（代码化）<span class="ver">v1 · 新建</span></div>
+              <div class="acc-path mono">acceptance/member/reconcile.spec.ts</div>
+              <div style="margin-top:3px">☐ 对账差异率 = 0（T+0 全量比对） ☐ 对账时延 T+1 → T+0 达标 ☐ 差异明细可下钻到账变流水</div>
+            </div>
+          </div>
+          <!-- 验收子任务（确认时自动追加） -->
+          <div style="border:1px solid oklch(0.55 0.16 145/35%);border-radius:9px;background:oklch(0.55 0.16 145/4%);padding:9px 12px">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+              <span class="mono" style="font-size:10px;color:#fff;background:oklch(0.5 0.13 145);border-radius:4px;padding:1px 5px">A1</span>
+              <b style="font-size:12.5px">交付验收（自动追加，非 PM 手拆）</b>
+              <span class="asg edit">执行人 <span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">V</span>Vera <span class="caret">▾</span></span>
+              <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">测试 · stage 4 · 依赖 T1–T4 全部终态</span>
+            </div>
+            <div style="margin-top:5px;font-size:11px;color:var(--muted-foreground);line-height:1.6">确认拆解时按班底「测试角色」<b>自动生成</b>，无需人工建。验收依据 = 已确认原型 v2 + PM plan 目标分解 + 各子任务 <b class="mono">acceptance/</b> 验收代码 + 图谱影响面（详见<b>画面 7</b>）。测试角色停用时该卡回落指派给 PM。</div>
+          </div>
+          <div style="border-radius:8px;padding:8px 11px;background:oklch(0.55 0.16 255/6%);font-size:11px;line-height:1.65;color:var(--muted-foreground)">
+            <b style="color:var(--foreground)">确认拆解 → 自动生成自动化任务</b> <span class="anno">9</span>：批量创建 5 个子 issue —— <b class="mono">parent_issue_id</b>=SIRI-21、<b class="mono">stage</b>=3（T1–T4）/ 4（A1）、<b class="mono">issue_dependency</b>=依赖链、<b class="mono">assignee_type / assignee_id</b>=微调后的执行人、<b class="mono">module_id</b>=会员；每个子任务自动带上功能点明细（新增/改造）、图谱影响面快照与验收代码路径。落库后无需人工干预：<b class="mono">9/15 09:00</b> 到点自动进调度（依赖 DAG + 组间互斥双闸门，见<b>画面 6</b>）。验收代码随首个子任务的 PR 一并落入 <b class="mono">acceptance/member/</b>。
+          </div>
+        </div>
       </div>
     </div>
-    <!-- 右：定时执行面板 -->
-    <div style="flex:1;background:var(--page-canvas);display:flex;flex-direction:column;overflow:hidden">
-      <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span class="mono" style="font-size:11px;color:var(--faint-foreground)">SIRI-24</span>
-          <b style="font-size:14.5px">订单导出优化</b>
-          <span style="margin-left:auto;font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.55 0.16 255/12%);color:var(--brand);font-weight:650">⏱ 待自动触发</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:var(--muted-foreground)">
-          <span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-order)"></span>订单</span> ·
-          <span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar agent" style="width:16px;height:16px;font-size:8px">A</span>Atlas · 全自动</span> ·
-          <span class="mono">9/10 – 9/11</span>
-        </div>
-        <div style="margin-top:9px;display:flex;align-items:center;gap:9px;border-radius:8px;padding:9px 12px;background:oklch(0.55 0.16 255/6%);border:1px solid oklch(0.55 0.16 255/18%)">
-          <span style="font-size:17px">⏱</span>
-          <div style="font-size:11.5px;line-height:1.5">
-            <b>9/10 00:00 自动触发</b>（还剩 6 天）<span class="anno" style="margin-left:4px">8</span><br>
-            <span style="color:var(--muted-foreground)">已拆解 4+1 子任务 · 依赖链校验通过 · 验收代码 v1 已生成 · 组间互斥检查通过</span>
-          </div>
-          <span class="btn" style="margin-left:auto;flex:none">立即触发</span>
-        </div>
-      </div>
-      <div style="flex:1;overflow:auto;padding:12px 18px;display:flex;flex-direction:column;gap:7px">
-        <div style="font-size:12px;font-weight:650;display:flex;align-items:center;gap:6px">子任务执行 <span style="font-weight:400;color:var(--faint-foreground);font-size:11px">stage 3 · 1/4 完成</span></div>
-        <!-- T1 done -->
-        <div style="border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:9px 11px;display:flex;align-items:center;gap:8px;font-size:12px">
-          <span style="color:var(--success);font-weight:700">✓</span>
-          <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T1</span>
-          <span style="font-weight:550">导出任务队列化</span>
-          <span style="margin-left:auto;font-size:10.5px;color:var(--success);font-weight:600">已完成</span>
-        </div>
-        <!-- T2 running -->
-        <div style="border:1.5px solid oklch(0.55 0.16 255/45%);border-radius:8px;background:oklch(0.55 0.16 255/4%);padding:9px 11px;display:flex;align-items:center;gap:8px;font-size:12px">
-          <span style="color:var(--brand);font-weight:700">▶</span>
-          <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T2</span>
-          <span style="font-weight:550">大数据量分片导出</span>
-          <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--brand);font-weight:600"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">O</span>Orion 执行中 38m</span>
-        </div>
-        <!-- T3 queued waiting dependency -->
-        <div style="border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:9px 11px;display:flex;align-items:center;gap:8px;font-size:12px">
-          <span style="color:var(--faint-foreground)">○</span>
-          <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T3</span>
-          <span style="font-weight:550">导出模板管理</span>
-          <span style="margin-left:auto;font-size:10.5px;color:var(--muted-foreground)">等待依赖：<b class="mono">T2</b></span>
-        </div>
-        <!-- T4 blocked by module lock (cross-group) -->
-        <div style="border:1px solid oklch(0.72 0.15 75/45%);border-radius:8px;background:oklch(0.72 0.15 75/7%);padding:9px 11px;font-size:12px">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="color:oklch(0.5 0.12 75);font-weight:700">🔒</span>
-            <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T4</span>
-            <span style="font-weight:550">导出权限收敛</span>
-            <span style="margin-left:auto;font-size:10.5px;color:oklch(0.5 0.12 75);font-weight:600">等待模块释放 <span class="anno" style="margin-left:3px">9</span></span>
-          </div>
-          <div style="margin-top:5px;font-size:11px;color:var(--muted-foreground);line-height:1.55">同模块「订单」存在执行中的其他需求组 <b class="mono" style="color:var(--foreground)">SIRI-30（订单列表重构）</b>——组间互斥：该组全部子任务到达终态后自动放行。</div>
-        </div>
-        <!-- 验收 stage（barrier 后自动开启） -->
-        <div style="border:1px solid oklch(0.55 0.16 145/35%);border-radius:8px;background:oklch(0.55 0.16 145/5%);padding:9px 11px;font-size:12px">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="color:oklch(0.42 0.12 145);font-weight:700">🧪</span>
-            <span class="mono" style="font-size:10px;color:var(--faint-foreground)">A1</span>
-            <span style="font-weight:550">交付验收（stage 4）</span>
-            <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--muted-foreground)"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">V</span>Vera · 测试</span>
-          </div>
-          <div style="margin-top:5px;font-size:11px;color:var(--muted-foreground);line-height:1.55">等 stage 3 全部子任务到达终态后由 <b class="mono">stage barrier</b> 自动唤醒 → 依据 <b class="mono">acceptance/</b> 验收代码 + 图谱影响面出系统验收报告（详见画面 6）。</div>
-        </div>
-        <div style="border:1px dashed var(--border);border-radius:8px;padding:8px 11px;font-size:11px;color:var(--faint-foreground);line-height:1.6">
-          调度顺序总览：依赖 DAG（T1→T2→T3）决定组内顺序；组间互斥（同模块其他需求组）决定本组何时能占用模块。两道闸门均在 claim 时判定，等待不占并发配额。
-        </div>
-      </div>
+    <!-- 确认门操作（整幅宽） -->
+    <div style="padding:11px 18px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;background:var(--surface)">
+      <span class="btn primary">✓ 确认拆解 → 自动生成自动化任务（4 执行 + 1 验收）</span>
+      <span class="btn">✎ 逐项调整（执行人 / 明细 / 依赖）</span>
+      <span class="btn">↻ 让 PM agent 重拆</span>
+      <span class="btn" style="color:var(--destructive)">✗ 驳回</span>
+      <span style="margin-left:auto;font-size:10.5px;color:var(--destructive);font-weight:650;text-align:right;line-height:1.45">⚠ T2 有 1 个功能点未标注「新增 / 改造」→ 禁止确认</span>
     </div>
   </div>
 </div>
 <div class="frame-head" style="margin-top:-40px">
-  <p style="font-size:12px">标注：<span class="anno">1</span> PM 先出 plan（目标分解 / 阶段划分 / 风险）再拆任务；plan 全文写入需求评论可追溯，拆解与 plan 不一致时确认页高亮提醒&nbsp; <span class="anno">2</span> 拆解草稿按<b>系统内置固定模板</b>逐要素呈现，✎ 可逐项编辑&nbsp; <span class="anno">3</span> <b>图谱影响面四要素</b>（功能点 / 代码对象 / 依赖 / 影响情况）：PM agent <b>经 MCP 自主查 GitNexus 本体+图谱</b>（<span class="mono">/impact-analysis</span> · <span class="mono">/graph</span> · <span class="mono">/by-file</span>），标注来源 commit + 查询时间，可手动「重新查询」刷新&nbsp; <span class="anno">4</span> <b>验收标准代码化 + 版本控制</b>：写入业务仓 <span class="mono">acceptance/</span>，与功能代码同仓同 commit——<b>功能未调整则验收不动</b>，调整则在同一 PR 内更新并递增版本号；图谱判定无功能语义变更时直接<b>复用既有版本</b>（T3）&nbsp; <span class="anno">5</span> <b>指派角色</b>：PM 按需求班底将子任务分派到对应角色（研发多 agent 可并行，数据/测试角色承接专项任务），未入班底的角色不可被指派&nbsp; <span class="anno">6</span> 依赖链可视化，确认时写入 <span class="mono">issue_dependency</span>（同模块 + 防环校验复用现有 API）&nbsp; <span class="anno">7</span> 确认 = 批量创建子 issue（<span class="mono">parent_issue_id</span> = 本需求；stage 3 执行 / stage 4 验收）；驳回可附意见让 PM agent 重拆&nbsp; <span class="anno">8</span> 定时触发倒计时 + 「立即触发」手动通道；触发前完成依赖/互斥预检&nbsp; <span class="anno">9</span> 组间互斥等待原因直接呈现（held by 哪个需求组），与 <span class="mono">waiting_module_lock</span> 状态文案一致。</p>
+  <p style="font-size:12px">标注：<span class="anno">1</span> <b>左栏＝任务基础信息</b>：标识 / 模块（组间互斥的锁粒度）/ git 库 / <b>分钟粒度时间窗口</b> / 拆解模式 / 角色班底 / 目标，均为只读带入（修改需回画面 3）；<b>未入班底或已停用的角色不可被指派</b>&nbsp; <span class="anno">2</span> PM 先出 plan（目标分解 / 阶段划分 / 风险）再拆任务；plan 全文写入需求评论可追溯，拆解与 plan 不一致时确认页高亮提醒&nbsp; <span class="anno">3</span> <b>右栏＝子任务明细</b>，按<b>系统内置固定模板</b>逐要素呈现，✎ 可逐项编辑；默认展开首卡，其余折叠&nbsp; <span class="anno">4</span> <b>功能点细节逐项确认</b>：每个功能点必须明确标注 <b class="tag-new">新增</b> 或 <b class="tag-mod">改造</b>，并给出代码对象 + 实现细节；<b>存在「待定」项时禁止确认拆解</b>（底部红字 + 卡片红框高亮）；PM / 用户均可增删功能点&nbsp; <span class="anno">5</span> <b>执行人就地微调</b>：下拉候选人仅限班底内<b>已启用</b>的角色成员（研发可多 agent 并行）；被改过的卡胶囊高亮（<span class="mono">.asg.edit</span>）以便审阅&nbsp; <span class="anno">6</span> <b>图谱影响面四要素</b>（功能点 / 代码对象 / 依赖 / 影响情况）：PM agent <b>经 MCP 自主查 GitNexus 本体+图谱</b>（<span class="mono">/impact-analysis</span> · <span class="mono">/graph</span> · <span class="mono">/by-file</span>），标注来源 commit + 查询时间，可手动「重新查询」刷新&nbsp; <span class="anno">7</span> <b>验收标准代码化 + 版本控制</b>：写入业务仓 <span class="mono">acceptance/</span>，与功能代码同仓同 commit——<b>功能未调整则验收不动</b>，调整则在同一 PR 内更新并递增版本号；图谱判定无功能语义变更时直接<b>复用既有版本</b>（T3）&nbsp; <span class="anno">8</span> <b>依赖情况</b>：卡内展示直接前置，左栏给出依赖链总览；确认时写入 <span class="mono">issue_dependency</span>（同模块 + 防环校验复用现有 API），人工改为并行时自动重算依赖边&nbsp; <span class="anno">9</span> <b>确认拆解 = 自动生成自动化任务</b>：批量创建子 issue（<span class="mono">parent_issue_id</span> / <span class="mono">stage</span> / <span class="mono">issue_dependency</span> / <span class="mono">assignee</span> / <span class="mono">module_id</span>）并携带功能点明细、图谱快照、验收代码路径；驳回可附意见让 PM agent 重拆。<b>本画面不包含执行与调度（画面 6）、不包含验收报告（画面 7）</b>。</p>
 </div>
 
-<!-- ============ 画面 6：交付验收 ============ -->
-<div class="frame-head" id="f6">
-  <h2>画面 6 · 交付验收 — 测试 agent 系统化验收</h2>
+<!-- ============ 画面 6：定时触发与执行调度 ============ -->
+<div class="frame-head" id="f6" style="margin-top:24px">
+  <h2>画面 6 · 定时触发与执行调度（拆解完成后的自动化流转）</h2>
+  <p>拆解确认后，需求进入<b>无人值守护流转</b>：到达<b>开始时间（分钟粒度）</b>自动触发子任务进调度，也可「立即触发」。每道闸门都在 claim 时判定：<b>① 依赖 DAG</b>（前置未 done 则等待）、<b>② 组间互斥</b>（同模块其他需求组未终态则 <b class="mono">waiting_module_lock</b>，等待不占并发配额）。stage 3 全部终态后由 <b class="mono">stage barrier</b> 自动唤醒 stage 4 验收。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 需求详情抽屉（左：触发配置与预检 / 右：子任务执行调度）</span></div>
+  <div style="display:flex;flex-direction:column;height:800px;background:var(--page-canvas)">
+    <!-- 头部 -->
+    <div style="padding:13px 18px 9px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="mono" style="font-size:11px;color:var(--faint-foreground)">SIRI-24</span>
+        <b style="font-size:14.5px">订单导出优化</b>
+        <span style="margin-left:auto;font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.55 0.16 255/12%);color:var(--brand);font-weight:650">⏱ 待自动触发</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:11.5px;color:var(--muted-foreground);flex-wrap:wrap">
+        <span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-order)"></span>订单</span> ·
+        <span class="mono">9/10 09:00 – 9/11 18:00</span> ·
+        <span class="mono" style="font-size:10.5px">⎇ order-service.git</span> ·
+        <span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar agent" style="width:16px;height:16px;font-size:8px">A</span>Atlas（PM）· 全自动拆解</span>
+      </div>
+    </div>
+    <!-- stage 流水线条 -->
+    <div class="stage-flow">
+      <span class="st-node skip"><span class="dot">–</span>原型</span>
+      <span class="st-line done"></span>
+      <span class="st-node done"><span class="dot">✓</span>plan + 拆解</span>
+      <span class="st-line done"></span>
+      <span class="st-node cur"><span class="dot">3</span>执行</span>
+      <span class="st-line"></span>
+      <span class="st-node"><span class="dot">4</span>验收</span>
+      <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">未启用原型师 → stage 1 跳过 · 拆解已自动生效 9/4 10:02</span>
+    </div>
+    <!-- 两栏主体 -->
+    <div style="flex:1;display:flex;min-height:0">
+      <!-- 左栏：触发配置 + 预检 -->
+      <div style="flex:0.9;border-right:1px solid var(--surface-border);display:flex;flex-direction:column;overflow:hidden">
+        <div style="flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px">
+          <div class="new-el" style="display:flex;align-items:center;gap:9px;border-radius:9px;padding:10px 12px;background:oklch(0.55 0.16 255/6%);border:1px solid oklch(0.55 0.16 255/18%)">
+            <span style="font-size:18px">⏱</span>
+            <div style="font-size:11.5px;line-height:1.55">
+              <b class="mono">9/10 09:00 自动触发</b>（还剩 5 天 22 小时）<span class="anno" style="margin-left:4px">1</span><br>
+              <span style="color:var(--muted-foreground)">触发基准 = <b>开始时间（分钟）</b>，不再是当日 00:00</span>
+            </div>
+            <span class="btn" style="margin-left:auto;flex:none">立即触发</span>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:9px 12px">
+            <b style="font-size:11.5px;display:block;margin-bottom:5px">触发前预检 <span class="anno">2</span></b>
+            <div class="rep-item pass" style="font-size:11px"><span class="ic">✓</span><span>拆解已生效：<b class="mono">4 执行 + 1 验收</b> 子 issue 已落库</span></div>
+            <div class="rep-item pass" style="font-size:11px"><span class="ic">✓</span><span>依赖链无环 · 同模块校验通过（<span class="mono">issue_dependency</span>）</span></div>
+            <div class="rep-item pass" style="font-size:11px"><span class="ic">✓</span><span>验收代码 v1 已生成（<span class="mono">acceptance/order/</span>）</span></div>
+            <div class="rep-item fail" style="font-size:11px"><span class="ic">⚠</span><span><b>组间互斥</b>：模块「订单」当前被 <b class="mono">SIRI-30（订单列表重构）</b>占用 → 触发后相关子任务进 <b class="mono">waiting_module_lock</b>，不占并发配额</span></div>
+            <div class="rep-item pass" style="font-size:11px"><span class="ic">✓</span><span>执行人均在线且属于已启用班底角色</span></div>
+          </div>
+          <div style="border:1px dashed var(--border);border-radius:9px;padding:9px 12px;background:var(--surface);font-size:11px;color:var(--muted-foreground);line-height:1.6">
+            <b style="color:var(--foreground)">日历拖拽改期 → 触发时间联动</b> <span class="anno">3</span><br>在周/月视图拖拽色块（画面 2）会同步重写<b>开始时间</b>与自动触发时刻，并<b>重新跑一次组间互斥窗口预检</b>；已进入执行/验收的需求禁止拖拽。
+          </div>
+          <div style="border-radius:8px;padding:8px 11px;background:oklch(0.55 0.16 255/6%);font-size:11px;line-height:1.6;color:var(--muted-foreground)">
+            关闭「到达开始时间自动触发」（画面 3 anno 7）时，本页只保留<b>立即触发</b>手动通道，倒计时区置灰。
+          </div>
+        </div>
+      </div>
+      <!-- 右栏：子任务执行调度 -->
+      <div style="flex:1.3;display:flex;flex-direction:column;overflow:hidden">
+        <div style="flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:7px">
+          <div style="font-size:12px;font-weight:650;display:flex;align-items:center;gap:6px">子任务执行 <span style="font-weight:400;color:var(--faint-foreground);font-size:11px">stage 3 · 1/4 完成</span></div>
+          <!-- T1 done -->
+          <div style="border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:9px 11px;display:flex;align-items:center;gap:8px;font-size:12px">
+            <span style="color:var(--success);font-weight:700">✓</span>
+            <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T1</span>
+            <span style="font-weight:550">导出任务队列化</span>
+            <span style="margin-left:auto;font-size:10.5px;color:var(--success);font-weight:600">已完成</span>
+          </div>
+          <!-- T2 running -->
+          <div style="border:1.5px solid oklch(0.55 0.16 255/45%);border-radius:8px;background:oklch(0.55 0.16 255/4%);padding:9px 11px;display:flex;align-items:center;gap:8px;font-size:12px">
+            <span style="color:var(--brand);font-weight:700">▶</span>
+            <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T2</span>
+            <span style="font-weight:550">大数据量分片导出</span>
+            <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--brand);font-weight:600"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">O</span>Orion 执行中 38m</span>
+          </div>
+          <!-- T3 queued waiting dependency -->
+          <div style="border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:9px 11px;display:flex;align-items:center;gap:8px;font-size:12px">
+            <span style="color:var(--faint-foreground)">○</span>
+            <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T3</span>
+            <span style="font-weight:550">导出模板管理</span>
+            <span style="margin-left:auto;font-size:10.5px;color:var(--muted-foreground)">等待依赖：<b class="mono">T2</b></span>
+          </div>
+          <!-- T4 blocked by module lock (cross-group) -->
+          <div style="border:1px solid oklch(0.72 0.15 75/45%);border-radius:8px;background:oklch(0.72 0.15 75/7%);padding:9px 11px;font-size:12px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="color:oklch(0.5 0.12 75);font-weight:700">🔒</span>
+              <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T4</span>
+              <span style="font-weight:550">导出权限收敛</span>
+              <span style="margin-left:auto;font-size:10.5px;color:oklch(0.5 0.12 75);font-weight:600">等待模块释放 <span class="anno" style="margin-left:3px">4</span></span>
+            </div>
+            <div style="margin-top:5px;font-size:11px;color:var(--muted-foreground);line-height:1.55">同模块「订单」存在执行中的其他需求组 <b class="mono" style="color:var(--foreground)">SIRI-30（订单列表重构）</b>——组间互斥：该组全部子任务到达<b>终态（done / failed / cancelled）即释放</b>，自动放行。</div>
+          </div>
+          <!-- 验收 stage（barrier 后自动开启） -->
+          <div style="border:1px solid oklch(0.55 0.16 145/35%);border-radius:8px;background:oklch(0.55 0.16 145/5%);padding:9px 11px;font-size:12px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="color:oklch(0.42 0.12 145);font-weight:700">🧪</span>
+              <span class="mono" style="font-size:10px;color:var(--faint-foreground)">A1</span>
+              <span style="font-weight:550">交付验收（stage 4）</span>
+              <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--muted-foreground)"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">V</span>Vera · 测试</span>
+            </div>
+            <div style="margin-top:5px;font-size:11px;color:var(--muted-foreground);line-height:1.55">等 stage 3 全部子任务到达终态后由 <b class="mono">stage barrier</b> 自动唤醒 <span class="anno">5</span> → 依据 <b class="mono">acceptance/</b> 验收代码 + 图谱影响面出系统验收报告（详见<b>画面 7</b>）。</div>
+          </div>
+          <div style="border:1px dashed var(--border);border-radius:8px;padding:8px 11px;font-size:11px;color:var(--faint-foreground);line-height:1.6">
+            调度顺序总览 <span class="anno">6</span>：依赖 DAG（T1→T2→T3）决定组内顺序；组间互斥（同模块其他需求组）决定本组何时能占用模块。两道闸门均在 claim 时判定，等待不占并发配额。
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 底部操作 -->
+    <div style="padding:11px 18px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;background:var(--surface)">
+      <span class="btn primary">▶ 立即触发</span>
+      <span class="btn">⏸ 暂停调度</span>
+      <span class="btn">查看执行日志</span>
+      <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">触发后本页转为实时执行看板（状态点与日历色块同步）</span>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p style="font-size:12px">标注：<span class="anno">1</span> <b>定时自动触发</b>：以需求的<b>开始时间（分钟粒度）</b>为基准倒计时，到点自动把子任务推入调度队列；保留「立即触发」手动通道（关闭自动触发开关后仅保留此通道）&nbsp; <span class="anno">2</span> <b>触发前预检</b>：拆解生效 / 依赖无环 / 验收代码已生成 / <b>组间互斥窗口</b> / 执行人可用；任一硬校验不通过则不触发并通知负责人&nbsp; <span class="anno">3</span> 日历拖拽改期与触发时间<b>双向联动</b>，改期后重跑互斥预检（画面 2 anno 2）&nbsp; <span class="anno">4</span> 组间互斥等待原因直接呈现（held by 哪个需求组），与 <span class="mono">waiting_module_lock</span> 状态文案一致；<b>终态（done/failed/cancelled）即释放</b>&nbsp; <span class="anno">5</span> stage 3 全部终态 → <span class="mono">stage barrier</span> 自动唤醒 stage 4 验收子任务，无需人工推动&nbsp; <span class="anno">6</span> 两道闸门（依赖 DAG + 组间互斥）均在 claim 时判定，等待中的任务不占用并发配额。</p>
+</div>
+
+<!-- ============ 画面 7：交付验收 ============ -->
+<div class="frame-head" id="f7" style="margin-top:24px">
+  <h2>画面 7 · 交付验收 — 测试 agent 系统化验收</h2>
   <p>执行 stage 全部子任务到达终态后，<b class="mono">stage barrier</b> 自动唤醒验收子任务（stage 4），由班底中的<b>测试角色</b>承接。它无需重新理解需求——前置三类产出即验收依据：<b>① 已确认的产品原型</b>（画面 4）<b>② PM plan 的目标分解</b>（画面 5）<b>③ 每个子任务的验收代码 + 图谱影响面</b>。验收 agent 跑 <b class="mono">acceptance/</b> 全量断言、按图谱影响面推导<b>回归范围</b>（受影响调用方必测）、比对目标覆盖，产出结构化报告。<b>不通过 → 自动打回</b>：按失败断言定位到原子任务、创建修复子任务指派原研发 agent，修复后重新验收；循环达上限转人工。</p>
 </div>
 <div class="frame">
@@ -1192,7 +1467,7 @@ body {
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:var(--muted-foreground)">
           <span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-cart)"></span>购物车</span> ·
           <span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar agent" style="width:16px;height:16px;font-size:8px">V</span>Vera · 测试角色</span> ·
-          <span class="mono">9/15 – 9/19</span>
+          <span class="mono">9/15 09:00 – 9/19 18:00</span>
         </div>
       </div>
       <div class="stage-flow">
