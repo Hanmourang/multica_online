@@ -86,7 +86,7 @@ ALTER TABLE issue
 WITH RECURSIVE root AS (
     SELECT id, id AS root_id FROM issue WHERE parent_issue_id IS NULL
     UNION ALL
-    SELECT i.id, r.root_id FROM issue i JOIN root r ON i.parent_issue_id = r.root_id
+    SELECT i.id, r.root_id FROM issue i JOIN root r ON i.parent_issue_id = r.id
 )
 UPDATE issue i SET root_requirement_id = r.root_id FROM root r WHERE i.id = r.id;
 
