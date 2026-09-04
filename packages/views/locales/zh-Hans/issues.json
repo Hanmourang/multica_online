@@ -912,5 +912,12 @@
     "developer_note": "必选 · 可多选 agent 并行",
     "data_note": "已停用 → 不产生数据类子任务",
     "tester_note": "验收 stage 责任人\n停用则回落给 PM"
+  },
+  "calendar": {
+    "today": "今天",
+    "week": "周",
+    "month": "月",
+    "prev_aria": "上一周期",
+    "next_aria": "下一周期"
   }
 }

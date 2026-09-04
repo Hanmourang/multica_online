@@ -912,5 +912,12 @@
     "developer_note": "必須 · 複数選択可",
     "data_note": "無効 → データ系サブタスクなし",
     "tester_note": "受入 stage 担当\n無効 → PM にフォールバック"
+  },
+  "calendar": {
+    "today": "今日",
+    "week": "週",
+    "month": "月",
+    "prev_aria": "前の期間",
+    "next_aria": "次の期間"
   }
 }

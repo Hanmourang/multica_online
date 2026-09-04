@@ -945,5 +945,12 @@
     "developer_note": "Required · Multi-select",
     "data_note": "Disabled → No data subtasks",
     "tester_note": "Acceptance stage owner\nDisabled → falls back to PM"
+  },
+  "calendar": {
+    "today": "Today",
+    "week": "Week",
+    "month": "Month",
+    "prev_aria": "Previous period",
+    "next_aria": "Next period"
   }
 }

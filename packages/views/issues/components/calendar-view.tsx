@@ -1,0 +1,478 @@
+"use client";
+
+/**
+ * CalendarView — requirement calendar (month / week). Lays top-level
+ * requirement blocks across their start_at ~ due_date window (minute
+ * granularity floored to UTC days for cells, verbatim in tooltips), colored
+ * by module, carrying the derived pipeline status badge + stage progress.
+ *
+ * Spec: docs/superpowers/specs/2026-09-04-requirement-calendar-design.md §6/§10
+ * (prototype frames 1–2). Drag rescheduling lands in Task 9 on top of this
+ * renderer.
+ */
+import { useMemo, useState } from "react";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { cn } from "@multica/ui/lib/utils";
+import type { Issue, ProjectModule } from "@multica/core/types";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { projectModulesOptions } from "@multica/core/modules";
+import {
+  useViewStore,
+  useViewStoreApi,
+} from "@multica/core/issues/stores/view-store-context";
+import { dateOnlyToUTCDate } from "@multica/core/issues/date";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
+import { Button } from "@multica/ui/components/ui/button";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { AppLink } from "../../navigation";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useLocale, useT } from "../../i18n";
+
+// ---------------------------------------------------------------------------
+// Date utilities — UTC-day aligned, mirroring gantt-view so a minute-level
+// ISO string maps to exactly one calendar cell.
+// ---------------------------------------------------------------------------
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function startOfDayUTC(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+function addDays(d: Date, days: number): Date {
+  return new Date(d.getTime() + days * MS_PER_DAY);
+}
+
+function isWeekendUTC(d: Date): boolean {
+  const wd = d.getUTCDay();
+  return wd === 0 || wd === 6;
+}
+
+function sameDayUTC(a: Date, b: Date): boolean {
+  return (
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
+  );
+}
+
+function dayKey(d: Date): string {
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${m}-${day}`;
+}
+
+/** Monday-first offset of a UTC day within its week (Mon=0 … Sun=6). */
+function mondayFirstOffset(d: Date): number {
+  return (d.getUTCDay() + 6) % 7;
+}
+
+/** Month grid: Monday of the first week's row through Sunday of the last. */
+function monthGridDays(anchor: Date): Date[] {
+  const first = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1));
+  const gridStart = addDays(first, -mondayFirstOffset(first));
+  const last = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 0));
+  const gridEnd = addDays(last, 6 - mondayFirstOffset(last));
+  const days: Date[] = [];
+  for (let d = gridStart; d.getTime() <= gridEnd.getTime(); d = addDays(d, 1)) {
+    days.push(d);
+  }
+  return days;
+}
+
+/** Week grid: the anchor's Monday through Sunday. */
+function weekGridDays(anchor: Date): Date[] {
+  const monday = addDays(startOfDayUTC(anchor), -mondayFirstOffset(anchor));
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+}
+
+/** HH:mm of a full ISO timestamp, in UTC — the same frame the cells floor to. */
+function formatMinuteUTC(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+// ---------------------------------------------------------------------------
+// Requirement spans
+// ---------------------------------------------------------------------------
+
+interface RequirementSpan {
+  issue: Issue;
+  start: Date;
+  end: Date;
+}
+
+/**
+ * A requirement's calendar window: start_at (minute-granularity) wins over
+ * the legacy day-granularity start_date; a missing side collapses to a
+ * single-day span. Requirements with neither date don't render.
+ */
+function requirementSpan(issue: Issue): RequirementSpan | null {
+  const start = dateOnlyToUTCDate(issue.start_at ?? issue.start_date ?? null);
+  const end = dateOnlyToUTCDate(issue.due_date ?? null);
+  if (!start && !end) return null;
+  const s = start ?? end;
+  const e = end ?? start;
+  if (!s || !e) return null;
+  return { issue, start: s, end: e };
+}
+
+type Segment = "start" | "mid" | "end";
+
+interface DayBlock {
+  span: RequirementSpan;
+  segment: Segment;
+}
+
+// ---------------------------------------------------------------------------
+// Derived pipeline status → block marker (spec §6; labels arrive as Chinese
+// projection strings from the list endpoint).
+// ---------------------------------------------------------------------------
+
+const STATUS_ICON: Record<string, string> = {
+  未拆解: "○",
+  原型待确认: "🎨",
+  拆解待确认: "⚠",
+  待触发: "⏱",
+  执行中: "▶",
+  等待模块释放: "🔒",
+  验收中: "🧪",
+  已完成: "✅",
+  已取消: "—",
+};
+
+const STATUS_TONE: Record<string, string> = {
+  原型待确认: "text-amber-600 dark:text-amber-400",
+  拆解待确认: "text-amber-600 dark:text-amber-400",
+  等待模块释放: "text-muted-foreground",
+  已完成: "text-emerald-600 dark:text-emerald-400",
+  已取消: "text-muted-foreground",
+};
+
+// ---------------------------------------------------------------------------
+// View
+// ---------------------------------------------------------------------------
+
+export function CalendarView({ issues }: { issues: Issue[] }) {
+  const { t } = useT("issues");
+  const locale = useLocale();
+  const zoom = useViewStore((s) => s.calendarZoom);
+  const act = useViewStoreApi().getState();
+  const paths = useWorkspacePaths();
+  const wsId = useWorkspaceId();
+
+  const today = useMemo(() => startOfDayUTC(new Date()), []);
+  const [anchor, setAnchor] = useState(today);
+
+  const days = useMemo(
+    () => (zoom === "month" ? monthGridDays(anchor) : weekGridDays(anchor)),
+    [anchor, zoom],
+  );
+
+  // Module colors, aggregated across every project in scope (workspace
+  // surfaces span projects — same fan-out pattern as ModuleFilterBar).
+  const { data: projects } = useQuery(projectListOptions(wsId));
+  const projectIds = useMemo(
+    () => (projects ?? []).map((p) => p.id),
+    [projects],
+  );
+  const moduleColorById = useQueries({
+    queries: projectIds.map((id) => projectModulesOptions(wsId, id)),
+    combine: (results) => {
+      const map = new Map<string, string>();
+      for (const query of results) {
+        for (const mod of (query.data ?? []) as ProjectModule[]) {
+          if (!map.has(mod.id)) map.set(mod.id, mod.color);
+        }
+      }
+      return map;
+    },
+  });
+
+  // Top-level requirements only — stage children stay out of the calendar.
+  const spans = useMemo(() => {
+    const out: RequirementSpan[] = [];
+    for (const issue of issues) {
+      if (issue.parent_issue_id) continue;
+      const span = requirementSpan(issue);
+      if (span) out.push(span);
+    }
+    // Stable ordering: earlier start first so cells stack deterministically.
+    out.sort((a, b) => a.start.getTime() - b.start.getTime());
+    return out;
+  }, [issues]);
+
+  const blocksByDay = useMemo(() => {
+    const map = new Map<string, DayBlock[]>();
+    if (days.length === 0) return map;
+    const gridStart = days[0];
+    const gridEnd = days[days.length - 1];
+    if (!gridStart || !gridEnd) return map;
+    for (const span of spans) {
+      if (span.end.getTime() < gridStart.getTime() || span.start.getTime() > gridEnd.getTime()) {
+        continue;
+      }
+      const from = span.start.getTime() < gridStart.getTime() ? gridStart : span.start;
+      const to = span.end.getTime() > gridEnd.getTime() ? gridEnd : span.end;
+      for (let d = from; d.getTime() <= to.getTime(); d = addDays(d, 1)) {
+        const segment: Segment = sameDayUTC(d, span.start)
+          ? "start"
+          : sameDayUTC(d, span.end)
+            ? "end"
+            : "mid";
+        const key = dayKey(d);
+        const list = map.get(key);
+        const block: DayBlock = { span, segment };
+        if (list) list.push(block);
+        else map.set(key, [block]);
+      }
+    }
+    return map;
+  }, [spans, days]);
+
+  const dowLabels = useMemo(
+    () =>
+      Array.from({ length: 7 }, (_, i) =>
+        // 2026-09-14 is a Monday — any Monday-anchored week works.
+        new Intl.DateTimeFormat(locale, {
+          weekday: "short",
+          timeZone: "UTC",
+        }).format(new Date(Date.UTC(2026, 8, 14 + i))),
+      ),
+    [locale],
+  );
+
+  const title = useMemo(() => {
+    if (zoom === "month") {
+      return new Intl.DateTimeFormat(locale, {
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      }).format(anchor);
+    }
+    const first = days[0];
+    const last = days[days.length - 1];
+    if (!first || !last) return "";
+    const fmt = new Intl.DateTimeFormat(locale, {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+    const year = new Intl.DateTimeFormat(locale, {
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(last);
+    return `${fmt.format(first)} – ${fmt.format(last)}, ${year}`;
+  }, [anchor, zoom, days, locale]);
+
+  const shiftAnchor = (direction: -1 | 1) => {
+    setAnchor((current) =>
+      zoom === "month"
+        ? new Date(
+            Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + direction, 1),
+          )
+        : addDays(current, direction * 7),
+    );
+  };
+
+  return (
+    <div className="flex h-full flex-col" data-testid="calendar-view">
+      {/* Toolbar: prev / next / today + period title + zoom switch. */}
+      <div className="flex items-center gap-1.5 px-3 py-2">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t(($) => $.calendar.prev_aria)}
+          onClick={() => shiftAnchor(-1)}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t(($) => $.calendar.next_aria)}
+          onClick={() => shiftAnchor(1)}
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => setAnchor(today)}>
+          {t(($) => $.calendar.today)}
+        </Button>
+        <h2 className="ml-1 text-body font-medium">{title}</h2>
+        <div className="ml-auto flex items-center rounded-md border border-border p-0.5">
+          {(["week", "month"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              data-testid={`calendar-zoom-${mode}`}
+              aria-pressed={zoom === mode}
+              onClick={() => act.setCalendarZoom(mode)}
+              className={cn(
+                "rounded px-2 py-0.5 text-caption",
+                zoom === mode
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted/60",
+              )}
+            >
+              {t(($) => $.calendar[mode])}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Weekday header (Monday-first). */}
+      <div className="grid grid-cols-7 border-y border-border px-0 text-center">
+        {dowLabels.map((label, i) => (
+          <div
+            key={label}
+            className={cn(
+              "py-1 text-caption text-muted-foreground",
+              i >= 5 && "text-muted-foreground/60",
+            )}
+          >
+            {label}
+          </div>
+        ))}
+      </div>
+
+      {/* Day grid. */}
+      <div className="grid flex-1 auto-rows-fr grid-cols-7 overflow-y-auto">
+        {days.map((day) => {
+          const key = dayKey(day);
+          const outOfMonth =
+            zoom === "month" && day.getUTCMonth() !== anchor.getUTCMonth();
+          return (
+            <div
+              key={key}
+              data-testid={`cal-cell-${key}`}
+              data-weekend={isWeekendUTC(day) ? "true" : "false"}
+              data-out={outOfMonth ? "true" : "false"}
+              data-today={sameDayUTC(day, today) ? "true" : "false"}
+              className={cn(
+                "relative flex min-h-[72px] flex-col gap-0.5 border-b border-r border-border/60 px-1 pb-1 pt-0.5",
+                isWeekendUTC(day) && "bg-muted/40",
+                outOfMonth && "bg-muted/20",
+                sameDayUTC(day, today) && "bg-primary/5",
+              )}
+            >
+              <span
+                className={cn(
+                  "self-start text-caption",
+                  outOfMonth
+                    ? "text-muted-foreground/50"
+                    : "text-muted-foreground",
+                  sameDayUTC(day, today) &&
+                    "flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground",
+                )}
+              >
+                {day.getUTCDate()}
+              </span>
+              {(blocksByDay.get(key) ?? []).map(({ span, segment }) => (
+                <RequirementBlock
+                  key={span.issue.id}
+                  span={span}
+                  day={day}
+                  segment={segment}
+                  color={
+                    (span.issue.module_id &&
+                      moduleColorById.get(span.issue.module_id)) ||
+                    undefined
+                  }
+                  href={paths.issueDetail(span.issue.id)}
+                />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Requirement block (one day segment of a span)
+// ---------------------------------------------------------------------------
+
+function RequirementBlock({
+  span,
+  day,
+  segment,
+  color,
+  href,
+}: {
+  span: RequirementSpan;
+  day: Date;
+  segment: Segment;
+  color?: string;
+  href: string;
+}) {
+  const { issue } = span;
+  const status = issue.requirement_status ?? "";
+  const icon = STATUS_ICON[status] ?? "";
+  const tone = STATUS_TONE[status] ?? "";
+  const progress = issue.stage_progress || "";
+
+  const startMinute = formatMinuteUTC(issue.start_at ?? issue.start_date);
+  const endMinute = formatMinuteUTC(issue.due_date);
+  const tooltipRange =
+    startMinute || endMinute
+      ? `${dayKey(span.start)}${startMinute ? ` ${startMinute}` : ""} → ${dayKey(span.end)}${endMinute ? ` ${endMinute}` : ""}`
+      : `${dayKey(span.start)} → ${dayKey(span.end)}`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <AppLink href={href} className="block min-w-0">
+            <div
+              data-testid={`req-block-${issue.id}-${dayKey(day)}`}
+              data-segment={segment}
+              className={cn(
+                "flex h-5 min-w-0 items-center gap-1 border-l-2 px-1 text-2xs",
+                segment === "start" && "rounded-l-sm",
+                segment === "end" && "rounded-r-sm",
+                segment === "mid" && "border-l-0",
+                color ? "" : "border-primary/45 bg-primary/10",
+              )}
+              style={
+                color
+                  ? { backgroundColor: `${color}26`, borderLeftColor: color }
+                  : undefined
+              }
+            >
+              {segment === "start" ? (
+                <>
+                  <span className={cn("shrink-0", tone)}>{icon}</span>
+                  <span className="min-w-0 truncate font-medium">
+                    {issue.identifier} {issue.title}
+                  </span>
+                  <span
+                    className={cn(
+                      "ml-auto shrink-0 text-muted-foreground",
+                      tone,
+                    )}
+                  >
+                    {status}
+                    {progress ? ` ${progress}` : ""}
+                  </span>
+                </>
+              ) : (
+                <span className={cn("shrink-0", tone)}>{icon}</span>
+              )}
+            </div>
+          </AppLink>
+        }
+      />
+      <TooltipContent>
+        {issue.identifier} · {tooltipRange}
+      </TooltipContent>
+    </Tooltip>
+  );
+}

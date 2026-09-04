@@ -912,5 +912,12 @@
     "developer_note": "필수 · 다중 선택 가능",
     "data_note": "비활성 → 데이터 하위 작업 없음",
     "tester_note": "수락 stage 담당\n비활성 → PM에 폴백"
+  },
+  "calendar": {
+    "today": "오늘",
+    "week": "주",
+    "month": "월",
+    "prev_aria": "이전 기간",
+    "next_aria": "다음 기간"
   }
 }
