@@ -9,7 +9,8 @@
  */
 import { createStore } from "zustand/vanilla";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { toast } from "sonner";
 import {
   type IssueViewState,
   viewStoreSlice,
@@ -26,6 +27,17 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
+}));
+
+// Drag rescheduling funnels into the shared update mutation; capture the
+// payload here.
+const mockUpdateMutate = vi.fn();
+vi.mock("@multica/core/issues/mutations", () => ({
+  useUpdateIssue: () => ({ mutate: mockUpdateMutate }),
+}));
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
 }));
 
 // Tooltip content renders inline so the minute-granularity times are
@@ -105,6 +117,8 @@ describe("CalendarView", () => {
     // Tuesday of the fixture week: week view spans Mon 9/14 – Sun 9/20.
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-15T12:00:00Z"));
+    mockUpdateMutate.mockClear();
+    vi.mocked(toast.success).mockClear();
   });
   afterEach(() => {
     cleanup();
@@ -185,5 +199,73 @@ describe("CalendarView", () => {
     // so assert at screen level with getAllByText.
     expect(screen.getAllByText(/09:30/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/18:00/).length).toBeGreaterThan(0);
+  });
+
+  it("dragging a block onto a later cell PATCHes start_at/due_date shifted by the day delta and toasts the trigger linkage", () => {
+    renderCalendar([
+      requirement({
+        start_at: "2026-09-15T09:30:00Z",
+        due_date: "2026-09-17",
+        requirement_status: "待触发",
+        auto_trigger: true,
+      }),
+    ]);
+
+    const block = screen.getByTestId("req-block-req-1-2026-09-15");
+    expect(block.getAttribute("draggable")).toBe("true");
+
+    const dataTransfer = {
+      setData: vi.fn(),
+      getData: vi.fn(() => "req-1"),
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    fireEvent.dragStart(block, { dataTransfer });
+    const target = screen.getByTestId("cal-cell-2026-09-22");
+    fireEvent.dragOver(target, { dataTransfer });
+    fireEvent.drop(target, { dataTransfer });
+
+    // 9/15 → 9/22 is +7 days: the minute component survives on start_at,
+    // due_date stays a calendar day.
+    expect(mockUpdateMutate).toHaveBeenCalledTimes(1);
+    const [payload] = mockUpdateMutate.mock.calls[0]!;
+    expect(payload.id).toBe("req-1");
+    expect(payload.start_at).toBe("2026-09-22T09:30:00.000Z");
+    expect(payload.due_date).toBe("2026-09-24");
+
+    // The reschedule toast names the auto-trigger linkage (spec §7.2).
+    expect(toast.success).toHaveBeenCalledWith(
+      "Rescheduled — the auto-trigger time moved with it",
+    );
+  });
+
+  it("running or finished requirements are not draggable and explain why", () => {
+    renderCalendar([
+      requirement({
+        id: "req-run",
+        identifier: "REQ-2",
+        start_at: "2026-09-15T09:00:00Z",
+        due_date: "2026-09-16",
+        requirement_status: "执行中",
+      }),
+      requirement({
+        id: "req-done",
+        identifier: "REQ-3",
+        start_at: "2026-09-16T09:00:00Z",
+        due_date: "2026-09-16",
+        requirement_status: "已完成",
+      }),
+    ]);
+
+    const running = screen.getByTestId("req-block-req-run-2026-09-15");
+    expect(running.getAttribute("draggable")).toBe("false");
+    expect(running.getAttribute("title")).toBe(
+      "Already triggered — cancel the run before rescheduling",
+    );
+    const done = screen.getByTestId("req-block-req-done-2026-09-16");
+    expect(done.getAttribute("draggable")).toBe("false");
+    expect(done.getAttribute("title")).toBe(
+      "Already triggered — cancel the run before rescheduling",
+    );
   });
 });

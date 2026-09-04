@@ -918,6 +918,8 @@
     "week": "週",
     "month": "月",
     "prev_aria": "前の期間",
-    "next_aria": "次の期間"
+    "next_aria": "次の期間",
+    "rescheduled": "予定を変更しました。自動トリガー時刻も連動しました",
+    "reschedule_locked": "トリガー済み — 改期前に実行をキャンセルしてください"
   }
 }

@@ -13,10 +13,12 @@
 import { useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
+import { toast } from "sonner";
 import type { Issue, ProjectModule } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { projectModulesOptions } from "@multica/core/modules";
+import { useUpdateIssue } from "@multica/core/issues/mutations";
 import {
   useViewStore,
   useViewStoreApi,
@@ -156,6 +158,20 @@ const STATUS_TONE: Record<string, string> = {
   已取消: "text-muted-foreground",
 };
 
+/**
+ * Reschedule lock (spec §7.2): once the pipeline has fired, the schedule is
+ * owned by the run — the server rejects start_at changes with 409. These
+ * derived statuses all sit at or after the trigger point, so their blocks
+ * render undraggable with the reason on the title.
+ */
+const RESCHEDULE_LOCKED_STATUSES = new Set([
+  "执行中",
+  "等待模块释放",
+  "验收中",
+  "已完成",
+  "已取消",
+]);
+
 // ---------------------------------------------------------------------------
 // View
 // ---------------------------------------------------------------------------
@@ -167,9 +183,11 @@ export function CalendarView({ issues }: { issues: Issue[] }) {
   const act = useViewStoreApi().getState();
   const paths = useWorkspacePaths();
   const wsId = useWorkspaceId();
+  const updateIssue = useUpdateIssue();
 
   const today = useMemo(() => startOfDayUTC(new Date()), []);
   const [anchor, setAnchor] = useState(today);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
 
   const days = useMemo(
     () => (zoom === "month" ? monthGridDays(anchor) : weekGridDays(anchor)),
@@ -282,6 +300,48 @@ export function CalendarView({ issues }: { issues: Issue[] }) {
     );
   };
 
+  /**
+   * Drop a dragged requirement onto a day cell: shift its whole window by
+   * the day delta — start_at keeps its minute component, due_date stays a
+   * calendar day (the server column is DATE). The trigger linkage toast is
+   * optimistic; the server still guards the race with its 409 (spec §7.2).
+   */
+  const handleDrop = (day: Date, e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverKey(null);
+    const id = e.dataTransfer.getData("text/plain");
+    const span = spans.find((s) => s.issue.id === id);
+    if (!span) return;
+    const offset = Math.round(
+      (startOfDayUTC(day).getTime() - span.start.getTime()) / MS_PER_DAY,
+    );
+    if (offset === 0) return;
+    const issue = span.issue;
+    const payload: {
+      id: string;
+      start_at?: string;
+      start_date?: string;
+      due_date?: string;
+    } = { id };
+    if (issue.start_at) {
+      const instant = new Date(issue.start_at);
+      if (!Number.isNaN(instant.getTime())) {
+        payload.start_at = new Date(
+          instant.getTime() + offset * MS_PER_DAY,
+        ).toISOString();
+      }
+    } else if (issue.start_date) {
+      const d = dateOnlyToUTCDate(issue.start_date);
+      if (d) payload.start_date = dayKey(addDays(d, offset));
+    }
+    if (issue.due_date) {
+      const d = dateOnlyToUTCDate(issue.due_date);
+      if (d) payload.due_date = dayKey(addDays(d, offset));
+    }
+    updateIssue.mutate(payload);
+    toast.success(t(($) => $.calendar.rescheduled));
+  };
+
   return (
     <div className="flex h-full flex-col" data-testid="calendar-view">
       {/* Toolbar: prev / next / today + period title + zoom switch. */}
@@ -355,11 +415,21 @@ export function CalendarView({ issues }: { issues: Issue[] }) {
               data-weekend={isWeekendUTC(day) ? "true" : "false"}
               data-out={outOfMonth ? "true" : "false"}
               data-today={sameDayUTC(day, today) ? "true" : "false"}
+              data-drag-over={dragOverKey === key ? "true" : "false"}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (dragOverKey !== key) setDragOverKey(key);
+              }}
+              onDragLeave={() =>
+                setDragOverKey((current) => (current === key ? null : current))
+              }
+              onDrop={(e) => handleDrop(day, e)}
               className={cn(
                 "relative flex min-h-[72px] flex-col gap-0.5 border-b border-r border-border/60 px-1 pb-1 pt-0.5",
                 isWeekendUTC(day) && "bg-muted/40",
                 outOfMonth && "bg-muted/20",
                 sameDayUTC(day, today) && "bg-primary/5",
+                dragOverKey === key && "ring-2 ring-inset ring-primary/50",
               )}
             >
               <span
@@ -413,11 +483,13 @@ function RequirementBlock({
   color?: string;
   href: string;
 }) {
+  const { t } = useT("issues");
   const { issue } = span;
   const status = issue.requirement_status ?? "";
   const icon = STATUS_ICON[status] ?? "";
   const tone = STATUS_TONE[status] ?? "";
   const progress = issue.stage_progress || "";
+  const rescheduleLocked = RESCHEDULE_LOCKED_STATUSES.has(status);
 
   const startMinute = formatMinuteUTC(issue.start_at ?? issue.start_date);
   const endMinute = formatMinuteUTC(issue.due_date);
@@ -434,6 +506,20 @@ function RequirementBlock({
             <div
               data-testid={`req-block-${issue.id}-${dayKey(day)}`}
               data-segment={segment}
+              draggable={!rescheduleLocked}
+              title={
+                rescheduleLocked
+                  ? t(($) => $.calendar.reschedule_locked)
+                  : undefined
+              }
+              onDragStart={
+                rescheduleLocked
+                  ? undefined
+                  : (e) => {
+                      e.dataTransfer.setData("text/plain", issue.id);
+                      e.dataTransfer.effectAllowed = "move";
+                    }
+              }
               className={cn(
                 "flex h-5 min-w-0 items-center gap-1 border-l-2 px-1 text-2xs",
                 segment === "start" && "rounded-l-sm",

@@ -918,6 +918,8 @@
     "week": "周",
     "month": "月",
     "prev_aria": "上一周期",
-    "next_aria": "下一周期"
+    "next_aria": "下一周期",
+    "rescheduled": "已改期，自动触发时间已同步调整",
+    "reschedule_locked": "已触发：先取消运行才能改期"
   }
 }

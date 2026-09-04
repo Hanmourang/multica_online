@@ -3218,6 +3218,9 @@ type UpdateIssueRequest struct {
 	Position        *float64 `json:"position"`
 	StartDate       *string  `json:"start_date"`
 	DueDate         *string  `json:"due_date"`
+	// StartAt 需求开始时间（分钟粒度 RFC3339；null = 清空）。已触发需求
+	// （triggered_at 非空）改期会被 409 拒绝——排期归运行中流水线所有。
+	StartAt         *string  `json:"start_at"`
 	ParentIssueID   *string  `json:"parent_issue_id"`
 	ProjectID       *string  `json:"project_id"`
 	// ModuleID：显式 null = 清空模块；省略 = 不动。AvoidConflict 同理
@@ -3550,6 +3553,30 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		} else {
 			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
+	}
+	if _, ok := rawFields["start_at"]; ok {
+	        if req.StartAt != nil && *req.StartAt != "" {
+	                ts, err := util.ParseTimestamp(*req.StartAt)
+	                if err != nil {
+	                        writeError(w, http.StatusBadRequest, "invalid start_at format, expected RFC3339")
+	                        return
+	                }
+	                // 触发联动（spec §7.2）：已触发需求的排期归运行中流水线所有，
+	                // 改 start_at 即重写历史 → 409，提示先取消运行。值未变的幂等
+	                // 重放逐行。
+	                if prevIssue.TriggeredAt.Valid && !ts.Time.Equal(prevIssue.StartAt.Time) {
+	                        writeError(w, http.StatusConflict, "requirement already triggered; cancel the run before rescheduling")
+	                        return
+	                }
+	                params.StartAt = ts
+	        } else {
+	                // 显式清空同样是改期：已触发且有排期则拒绝。
+	                if prevIssue.TriggeredAt.Valid && prevIssue.StartAt.Valid {
+	                        writeError(w, http.StatusConflict, "requirement already triggered; cancel the run before rescheduling")
+	                        return
+	                }
+	                params.StartAt = pgtype.Timestamptz{Valid: false} // explicit null = clear start_at
+	        }
 	}
 	if _, ok := rawFields["parent_issue_id"]; ok {
 		if req.ParentIssueID != nil {

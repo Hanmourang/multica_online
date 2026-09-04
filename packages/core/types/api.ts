@@ -117,6 +117,8 @@ export interface UpdateIssueRequest {
   position?: number;
   start_date?: string | null;
   due_date?: string | null;
+  /** 需求开始时间（分钟粒度 RFC3339）；null 显式清空。已触发需求改期服务端 409。 */
+  start_at?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
   /** 所属模块；null 显式清空。异项目模块服务端 409；未显式给出时随

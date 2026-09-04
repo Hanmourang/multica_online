@@ -918,6 +918,8 @@
     "week": "주",
     "month": "월",
     "prev_aria": "이전 기간",
-    "next_aria": "다음 기간"
+    "next_aria": "다음 기간",
+    "rescheduled": "일정이 변경되었습니다. 자동 트리거 시간도 함께 조정되었습니다",
+    "reschedule_locked": "트리거됨 — 일정 변경 전에 실행을 취소하세요"
   }
 }

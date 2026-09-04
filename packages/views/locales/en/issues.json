@@ -951,6 +951,8 @@
     "week": "Week",
     "month": "Month",
     "prev_aria": "Previous period",
-    "next_aria": "Next period"
+    "next_aria": "Next period",
+    "rescheduled": "Rescheduled — the auto-trigger time moved with it",
+    "reschedule_locked": "Already triggered — cancel the run before rescheduling"
   }
 }
