@@ -8,8 +8,43 @@
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision, i.module_id, i.avoid_conflict
+       i.revision, i.module_id, i.avoid_conflict,
+       i.start_at,
+       -- 需求派生状态投影（spec: 2026-09-04-requirement-calendar-design.md §6，9 条规则按序命中）。
+       -- 不落列，永远与事实一致；子任务终态判定用 issue_effective_status 与 stage barrier 同语义。
+       CASE
+           WHEN issue_effective_status(i.workspace_id, i.status) = 'done' THEN '已完成'
+           WHEN issue_effective_status(i.workspace_id, i.status) = 'cancelled' THEN '已取消'
+           WHEN COALESCE(prog.has_open_stage1, FALSE) THEN '原型待确认'
+           WHEN i.decomposition_confirmed_at IS NULL AND COALESCE(prog.has_stage2, FALSE) THEN '拆解待确认'
+           WHEN i.decomposition_confirmed_at IS NULL THEN '未拆解'
+           WHEN i.triggered_at IS NULL THEN '待触发'
+           WHEN EXISTS (
+               SELECT 1 FROM issue wc
+               JOIN agent_task_queue wq ON wq.issue_id = wc.id
+               WHERE wc.parent_issue_id = i.id AND wq.status = 'waiting_module_lock'
+           ) THEN '等待模块释放'
+           WHEN COALESCE(prog.has_open_stage3, FALSE) THEN '执行中'
+           WHEN COALESCE(prog.has_open_stage4, FALSE) THEN '验收中'
+           ELSE '已完成'
+       END AS requirement_status,
+       -- stage 3 执行进度 N/M（无 stage 3 子任务时为空串，响应层映射为 null）。
+       (CASE WHEN COALESCE(prog.stage3_total, 0) > 0
+            THEN concat(prog.stage3_done, '/', prog.stage3_total)
+            ELSE ''
+       END)::text AS stage_progress
 FROM issue i
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*) FILTER (WHERE c.stage = 3)::int AS stage3_total,
+        COUNT(*) FILTER (WHERE c.stage = 3 AND issue_effective_status(c.workspace_id, c.status) IN ('done', 'cancelled'))::int AS stage3_done,
+        BOOL_OR(c.stage = 1 AND issue_effective_status(c.workspace_id, c.status) NOT IN ('done', 'cancelled')) AS has_open_stage1,
+        BOOL_OR(c.stage = 2) AS has_stage2,
+        BOOL_OR(c.stage = 3 AND issue_effective_status(c.workspace_id, c.status) NOT IN ('done', 'cancelled')) AS has_open_stage3,
+        BOOL_OR(c.stage = 4 AND issue_effective_status(c.workspace_id, c.status) NOT IN ('done', 'cancelled')) AS has_open_stage4
+    FROM issue c
+    WHERE c.parent_issue_id = i.id
+) prog ON TRUE
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
@@ -146,11 +181,17 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage, last_activity_at, id, module_id, avoid_conflict
+    stage, last_activity_at, id, module_id, avoid_conflict,
+    start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
-    sqlc.narg('module_id'), COALESCE(sqlc.narg('avoid_conflict')::boolean, false)
+    sqlc.narg('module_id'), COALESCE(sqlc.narg('avoid_conflict')::boolean, false),
+    -- 需求日历扩展列：省略时用列默认值；root_requirement_id 由 server 计算写入，不接受客户端传值。
+    sqlc.narg('start_at')::timestamptz, sqlc.narg('goal')::text, sqlc.narg('repo_resource_id')::uuid,
+    COALESCE(sqlc.narg('decompose_mode')::text, 'confirm'),
+    COALESCE(sqlc.narg('auto_trigger')::boolean, true),
+    sqlc.narg('root_requirement_id')::uuid
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -204,7 +245,16 @@ WITH candidate AS (
         -- 显式 null = 清空模块；avoid_conflict 是布尔，无法区分「未传」与
         -- false，故用 COALESCE：未传保持现值。
         sqlc.narg('module_id')::uuid AS next_module_id,
-        COALESCE(sqlc.narg('avoid_conflict')::boolean, i.avoid_conflict) AS next_avoid_conflict
+        COALESCE(sqlc.narg('avoid_conflict')::boolean, i.avoid_conflict) AS next_avoid_conflict,
+        -- 需求日历扩展列：start_at/goal/repo_resource_id/root_requirement_id 裸 narg
+        -- + handler 预填现值（显式 null = 清空）；decompose_mode/auto_trigger 是
+        -- NOT NULL 标量，COALESCE 未传保持现值。
+        sqlc.narg('start_at')::timestamptz AS next_start_at,
+        sqlc.narg('goal')::text AS next_goal,
+        sqlc.narg('repo_resource_id')::uuid AS next_repo_resource_id,
+        COALESCE(sqlc.narg('decompose_mode')::text, i.decompose_mode) AS next_decompose_mode,
+        COALESCE(sqlc.narg('auto_trigger')::boolean, i.auto_trigger) AS next_auto_trigger,
+        sqlc.narg('root_requirement_id')::uuid AS next_root_requirement_id
     FROM issue AS i
     WHERE i.id = $1
       AND (sqlc.narg('expected_revision')::bigint IS NULL OR i.revision = sqlc.narg('expected_revision')::bigint)
@@ -214,22 +264,28 @@ WITH candidate AS (
         ROW(
             title, description, status, priority, assignee_type, assignee_id,
             position, start_date, due_date, parent_issue_id, project_id, stage,
-            module_id, avoid_conflict
+            module_id, avoid_conflict,
+            start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id
         ) IS DISTINCT FROM ROW(
             next_title, next_description, next_status, next_priority,
             next_assignee_type, next_assignee_id, next_position, next_start_date,
             next_due_date, next_parent_issue_id, next_project_id, next_stage,
-            next_module_id, next_avoid_conflict
+            next_module_id, next_avoid_conflict,
+            next_start_at, next_goal, next_repo_resource_id, next_decompose_mode,
+            next_auto_trigger, next_root_requirement_id
         ) AS did_change,
         ROW(
             title, description, status, priority, assignee_type, assignee_id,
             start_date, due_date, parent_issue_id, project_id, stage,
-            module_id, avoid_conflict
+            module_id, avoid_conflict,
+            start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id
         ) IS DISTINCT FROM ROW(
             next_title, next_description, next_status, next_priority,
             next_assignee_type, next_assignee_id, next_start_date, next_due_date,
             next_parent_issue_id, next_project_id, next_stage,
-            next_module_id, next_avoid_conflict
+            next_module_id, next_avoid_conflict,
+            next_start_at, next_goal, next_repo_resource_id, next_decompose_mode,
+            next_auto_trigger, next_root_requirement_id
         ) AS did_activity
     FROM candidate
 )
@@ -248,6 +304,12 @@ UPDATE issue AS i SET
     stage = changed.next_stage,
     module_id = changed.next_module_id,
     avoid_conflict = changed.next_avoid_conflict,
+    start_at = changed.next_start_at,
+    goal = changed.next_goal,
+    repo_resource_id = changed.next_repo_resource_id,
+    decompose_mode = changed.next_decompose_mode,
+    auto_trigger = changed.next_auto_trigger,
+    root_requirement_id = changed.next_root_requirement_id,
     revision = i.revision + changed.did_change::integer,
     last_activity_at = CASE WHEN changed.did_activity
         THEN GREATEST(COALESCE(i.last_activity_at, i.updated_at), now())
@@ -363,7 +425,8 @@ DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-       i.revision, i.module_id, i.avoid_conflict
+       i.revision, i.module_id, i.avoid_conflict,
+       i.start_at
 FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains visible.

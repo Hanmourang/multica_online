@@ -28,14 +28,18 @@ type IssueContentPatch struct {
 // effects.
 func (s *IssueService) UpdateContent(ctx context.Context, issue db.Issue, patch IssueContentPatch) (db.Issue, error) {
 	params := db.UpdateIssueParams{
-		ID:            issue.ID,
-		AssigneeType:  issue.AssigneeType,
-		AssigneeID:    issue.AssigneeID,
-		StartDate:     issue.StartDate,
-		DueDate:       issue.DueDate,
-		ParentIssueID: issue.ParentIssueID,
-		ProjectID:     issue.ProjectID,
-		Stage:         issue.Stage,
+		ID:                issue.ID,
+		AssigneeType:      issue.AssigneeType,
+		AssigneeID:        issue.AssigneeID,
+		StartDate:         issue.StartDate,
+		DueDate:           issue.DueDate,
+		ParentIssueID:     issue.ParentIssueID,
+		ProjectID:         issue.ProjectID,
+		Stage:             issue.Stage,
+		StartAt:           issue.StartAt,
+		Goal:              issue.Goal,
+		RepoResourceID:    issue.RepoResourceID,
+		RootRequirementID: issue.RootRequirementID,
 	}
 	if patch.ExpectedRevision != nil {
 		params.ExpectedRevision = pgtype.Int8{Int64: *patch.ExpectedRevision, Valid: true}

@@ -80,9 +80,15 @@ type IssueResponse struct {
 	Stage     *int32  `json:"stage"`
 	StartDate *string `json:"start_date"`
 	DueDate   *string `json:"due_date"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
-	Revision  int64   `json:"revision"`
+	// StartAt 需求开始时间（分钟粒度全量 ISO 时间戳；null = 无计划）。
+	StartAt *string `json:"start_at"`
+	// RequirementStatus/StageProgress 是需求派生状态投影（spec §6，不落列），
+	// 仅 list 端点计算；详情/写路径不emit（omitempty 语义同 Labels：缺省 = 不动缓存）。
+	RequirementStatus string  `json:"requirement_status,omitempty"`
+	StageProgress     *string `json:"stage_progress,omitempty"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	Revision          int64   `json:"revision"`
 	// LastActivityAt is the latest semantic issue activity. It stays nullable
 	// while the operator-run historical backfill is incomplete.
 	LastActivityAt *string `json:"last_activity_at"`
@@ -326,6 +332,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		Stage:          int4ToPtr(i.Stage),
 		StartDate:      dateToPtr(i.StartDate),
 		DueDate:        dateToPtr(i.DueDate),
+		StartAt:        timestampToPtr(i.StartAt),
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
 		Revision:       i.Revision,
@@ -344,33 +351,36 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:             uuidToString(i.ID),
-		WorkspaceID:    uuidToString(i.WorkspaceID),
-		Number:         i.Number,
-		Identifier:     identifier,
-		Title:          i.Title,
-		Description:    textToPtr(i.Description),
-		Status:         i.Status,
-		StatusCategory: statusCategory,
-		Priority:       i.Priority,
-		AssigneeType:   textToPtr(i.AssigneeType),
-		AssigneeID:     uuidToPtr(i.AssigneeID),
-		CreatorType:    i.CreatorType,
-		CreatorID:      uuidToString(i.CreatorID),
-		ParentIssueID:  uuidToPtr(i.ParentIssueID),
-		ProjectID:      uuidToPtr(i.ProjectID),
-		ModuleID:       uuidToPtr(i.ModuleID),
-		AvoidConflict:  i.AvoidConflict,
-		Position:       i.Position,
-		Stage:          int4ToPtr(i.Stage),
-		StartDate:      dateToPtr(i.StartDate),
-		DueDate:        dateToPtr(i.DueDate),
-		CreatedAt:      timestampToString(i.CreatedAt),
-		UpdatedAt:      timestampToString(i.UpdatedAt),
-		Revision:       i.Revision,
-		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
-		Metadata:       parseIssueMetadata(i.Metadata),
-		Properties:     parseIssueProperties(i.Properties),
+		ID:                uuidToString(i.ID),
+		WorkspaceID:       uuidToString(i.WorkspaceID),
+		Number:            i.Number,
+		Identifier:        identifier,
+		Title:             i.Title,
+		Description:       textToPtr(i.Description),
+		Status:            i.Status,
+		StatusCategory:    statusCategory,
+		Priority:          i.Priority,
+		AssigneeType:      textToPtr(i.AssigneeType),
+		AssigneeID:        uuidToPtr(i.AssigneeID),
+		CreatorType:       i.CreatorType,
+		CreatorID:         uuidToString(i.CreatorID),
+		ParentIssueID:     uuidToPtr(i.ParentIssueID),
+		ProjectID:         uuidToPtr(i.ProjectID),
+		ModuleID:          uuidToPtr(i.ModuleID),
+		AvoidConflict:     i.AvoidConflict,
+		Position:          i.Position,
+		Stage:             int4ToPtr(i.Stage),
+		StartDate:         dateToPtr(i.StartDate),
+		DueDate:           dateToPtr(i.DueDate),
+		StartAt:           timestampToPtr(i.StartAt),
+		RequirementStatus: i.RequirementStatus,
+		StageProgress:     nonemptyTextPtr(i.StageProgress),
+		CreatedAt:         timestampToString(i.CreatedAt),
+		UpdatedAt:         timestampToString(i.UpdatedAt),
+		Revision:          i.Revision,
+		LastActivityAt:    timestampToNanoPtr(i.LastActivityAt),
+		Metadata:          parseIssueMetadata(i.Metadata),
+		Properties:        parseIssueProperties(i.Properties),
 	}
 }
 
@@ -436,6 +446,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		Stage:          int4ToPtr(i.Stage),
 		StartDate:      dateToPtr(i.StartDate),
 		DueDate:        dateToPtr(i.DueDate),
+		StartAt:        timestampToPtr(i.StartAt),
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
 		Revision:       i.Revision,
@@ -2776,21 +2787,21 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title         string   `json:"title"`
-	Description   *string  `json:"description"`
-	Status        string   `json:"status"`
-	Priority      string   `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
+	Title         string  `json:"title"`
+	Description   *string `json:"description"`
+	Status        string  `json:"status"`
+	Priority      string  `json:"priority"`
+	AssigneeType  *string `json:"assignee_type"`
+	AssigneeID    *string `json:"assignee_id"`
 	ParentIssueID *string `json:"parent_issue_id"`
 	ProjectID     *string `json:"project_id"`
 	// ModuleID 归属的项目模块（必须属于 issue 所在项目）；AvoidConflict
 	// 勾选后与其他模块的任务互斥执行。创建时随字段一并写入。
-	ModuleID      *string `json:"module_id"`
-	AvoidConflict *bool   `json:"avoid_conflict"`
-	Stage         *int32  `json:"stage,omitempty"`
-	StartDate     *string `json:"start_date"`
-	DueDate       *string `json:"due_date"`
+	ModuleID      *string  `json:"module_id"`
+	AvoidConflict *bool    `json:"avoid_conflict"`
+	Stage         *int32   `json:"stage,omitempty"`
+	StartDate     *string  `json:"start_date"`
+	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// LabelIDs are issue-scoped labels to attach to the new issue in the same
 	// transaction as the create. Unknown or non-issue ids are rejected with
@@ -3162,9 +3173,9 @@ type UpdateIssueRequest struct {
 	ProjectID       *string  `json:"project_id"`
 	// ModuleID：显式 null = 清空模块；省略 = 不动。AvoidConflict 同理
 	//（省略保持现值）。模块必须属于 issue 所在项目，违反 409。
-	ModuleID        *string `json:"module_id"`
-	AvoidConflict   *bool   `json:"avoid_conflict"`
-	Stage           *int32   `json:"stage"`
+	ModuleID      *string `json:"module_id"`
+	AvoidConflict *bool   `json:"avoid_conflict"`
+	Stage         *int32  `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -3394,15 +3405,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
-		ID:            prevIssue.ID,
-		AssigneeType:  prevIssue.AssigneeType,
-		AssigneeID:    prevIssue.AssigneeID,
-		StartDate:     prevIssue.StartDate,
-		DueDate:       prevIssue.DueDate,
-		ParentIssueID: prevIssue.ParentIssueID,
-		ProjectID:     prevIssue.ProjectID,
-		ModuleID:      prevIssue.ModuleID,
-		Stage:         prevIssue.Stage,
+		ID:                prevIssue.ID,
+		AssigneeType:      prevIssue.AssigneeType,
+		AssigneeID:        prevIssue.AssigneeID,
+		StartDate:         prevIssue.StartDate,
+		DueDate:           prevIssue.DueDate,
+		ParentIssueID:     prevIssue.ParentIssueID,
+		ProjectID:         prevIssue.ProjectID,
+		ModuleID:          prevIssue.ModuleID,
+		Stage:             prevIssue.Stage,
+		StartAt:           prevIssue.StartAt,
+		Goal:              prevIssue.Goal,
+		RepoResourceID:    prevIssue.RepoResourceID,
+		RootRequirementID: prevIssue.RootRequirementID,
 	}
 	if req.ExpectedRevision != nil {
 		if *req.ExpectedRevision < 1 {
@@ -4214,14 +4229,18 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		params := db.UpdateIssueParams{
-			ID:            prevIssue.ID,
-			AssigneeType:  prevIssue.AssigneeType,
-			AssigneeID:    prevIssue.AssigneeID,
-			StartDate:     prevIssue.StartDate,
-			DueDate:       prevIssue.DueDate,
-			ParentIssueID: prevIssue.ParentIssueID,
-			ProjectID:     prevIssue.ProjectID,
-			Stage:         prevIssue.Stage,
+			ID:                prevIssue.ID,
+			AssigneeType:      prevIssue.AssigneeType,
+			AssigneeID:        prevIssue.AssigneeID,
+			StartDate:         prevIssue.StartDate,
+			DueDate:           prevIssue.DueDate,
+			ParentIssueID:     prevIssue.ParentIssueID,
+			ProjectID:         prevIssue.ProjectID,
+			Stage:             prevIssue.Stage,
+			StartAt:           prevIssue.StartAt,
+			Goal:              prevIssue.Goal,
+			RepoResourceID:    prevIssue.RepoResourceID,
+			RootRequirementID: prevIssue.RootRequirementID,
 		}
 
 		if req.Updates.Title != nil {

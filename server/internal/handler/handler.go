@@ -604,6 +604,15 @@ func timestampToNanoPtr(t pgtype.Timestamptz) *string {
 func dateToPtr(d pgtype.Date) *string { return util.DateToPtr(d) }
 func uuidToPtr(u pgtype.UUID) *string { return util.UUIDToPtr(u) }
 
+// nonemptyTextPtr 把 SQL 投影的空串哨兵（如 stage_progress 无 stage 3 子任务时）
+// 映射回 nil，保持 JSON 语义为 null。
+func nonemptyTextPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // uuidsToStrings maps a UUID array column to string ids, skipping NULL/invalid
 // entries. Returns nil (not an empty slice) when there is nothing to emit so
 // `omitempty` JSON fields drop out cleanly (MUL-4195).

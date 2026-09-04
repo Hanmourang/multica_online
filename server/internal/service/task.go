@@ -7378,6 +7378,7 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"stage":            util.Int4ToPtr(issue.Stage),
 		"start_date":       util.DateToPtr(issue.StartDate),
 		"due_date":         util.DateToPtr(issue.DueDate),
+		"start_at":         util.TimestampToPtr(issue.StartAt),
 		"created_at":       util.TimestampToString(issue.CreatedAt),
 		"updated_at":       util.TimestampToString(issue.UpdatedAt),
 		"last_activity_at": util.TimestampToNanoPtr(issue.LastActivityAt),

@@ -754,36 +754,48 @@ type InboxItem struct {
 }
 
 type Issue struct {
-	ID                 pgtype.UUID        `json:"id"`
-	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
-	Title              string             `json:"title"`
-	Description        pgtype.Text        `json:"description"`
-	Status             string             `json:"status"`
-	Priority           string             `json:"priority"`
-	AssigneeType       pgtype.Text        `json:"assignee_type"`
-	AssigneeID         pgtype.UUID        `json:"assignee_id"`
-	CreatorType        string             `json:"creator_type"`
-	CreatorID          pgtype.UUID        `json:"creator_id"`
-	ParentIssueID      pgtype.UUID        `json:"parent_issue_id"`
-	AcceptanceCriteria []byte             `json:"acceptance_criteria"`
-	ContextRefs        []byte             `json:"context_refs"`
-	Position           float64            `json:"position"`
-	DueDate            pgtype.Date        `json:"due_date"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	Number             int32              `json:"number"`
-	ProjectID          pgtype.UUID        `json:"project_id"`
-	OriginType         pgtype.Text        `json:"origin_type"`
-	OriginID           pgtype.UUID        `json:"origin_id"`
-	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
-	StartDate          pgtype.Date        `json:"start_date"`
-	Metadata           []byte             `json:"metadata"`
-	Stage              pgtype.Int4        `json:"stage"`
-	Properties         []byte             `json:"properties"`
-	Revision           int64              `json:"revision"`
-	LastActivityAt     pgtype.Timestamptz `json:"last_activity_at"`
-	ModuleID           pgtype.UUID        `json:"module_id"`
-	AvoidConflict      bool               `json:"avoid_conflict"`
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	Title                    string             `json:"title"`
+	Description              pgtype.Text        `json:"description"`
+	Status                   string             `json:"status"`
+	Priority                 string             `json:"priority"`
+	AssigneeType             pgtype.Text        `json:"assignee_type"`
+	AssigneeID               pgtype.UUID        `json:"assignee_id"`
+	CreatorType              string             `json:"creator_type"`
+	CreatorID                pgtype.UUID        `json:"creator_id"`
+	ParentIssueID            pgtype.UUID        `json:"parent_issue_id"`
+	AcceptanceCriteria       []byte             `json:"acceptance_criteria"`
+	ContextRefs              []byte             `json:"context_refs"`
+	Position                 float64            `json:"position"`
+	DueDate                  pgtype.Date        `json:"due_date"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	Number                   int32              `json:"number"`
+	ProjectID                pgtype.UUID        `json:"project_id"`
+	OriginType               pgtype.Text        `json:"origin_type"`
+	OriginID                 pgtype.UUID        `json:"origin_id"`
+	FirstExecutedAt          pgtype.Timestamptz `json:"first_executed_at"`
+	StartDate                pgtype.Date        `json:"start_date"`
+	Metadata                 []byte             `json:"metadata"`
+	Stage                    pgtype.Int4        `json:"stage"`
+	Properties               []byte             `json:"properties"`
+	Revision                 int64              `json:"revision"`
+	LastActivityAt           pgtype.Timestamptz `json:"last_activity_at"`
+	ModuleID                 pgtype.UUID        `json:"module_id"`
+	AvoidConflict            bool               `json:"avoid_conflict"`
+	StartAt                  pgtype.Timestamptz `json:"start_at"`
+	Goal                     pgtype.Text        `json:"goal"`
+	RepoResourceID           pgtype.UUID        `json:"repo_resource_id"`
+	DecomposeMode            string             `json:"decompose_mode"`
+	AutoTrigger              bool               `json:"auto_trigger"`
+	DecompositionConfirmedAt pgtype.Timestamptz `json:"decomposition_confirmed_at"`
+	TriggeredAt              pgtype.Timestamptz `json:"triggered_at"`
+	AcceptanceRound          int32              `json:"acceptance_round"`
+	RootRequirementID        pgtype.UUID        `json:"root_requirement_id"`
+	FeaturePoints            []byte             `json:"feature_points"`
+	GraphContext             []byte             `json:"graph_context"`
+	AcceptanceSpec           []byte             `json:"acceptance_spec"`
 }
 
 type IssueDependency struct {
@@ -818,6 +830,20 @@ type IssueProperty struct {
 	Icon        string             `json:"icon"`
 }
 
+type IssuePrototypeVersion struct {
+	ID            pgtype.UUID        `json:"id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Version       int32              `json:"version"`
+	HtmlPath      string             `json:"html_path"`
+	Prompt        string             `json:"prompt"`
+	Marks         []byte             `json:"marks"`
+	Status        string             `json:"status"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssuePullRequest struct {
 	IssueID       pgtype.UUID        `json:"issue_id"`
 	PullRequestID pgtype.UUID        `json:"pull_request_id"`
@@ -836,6 +862,19 @@ type IssueReaction struct {
 	ActorID     pgtype.UUID        `json:"actor_id"`
 	Emoji       string             `json:"emoji"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type IssueRoleAssignment struct {
+	ID           pgtype.UUID        `json:"id"`
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Role         string             `json:"role"`
+	AssigneeType string             `json:"assignee_type"`
+	AssigneeID   pgtype.UUID        `json:"assignee_id"`
+	Enabled      bool               `json:"enabled"`
+	Ordinal      int32              `json:"ordinal"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type IssueSourceContext struct {
@@ -1188,6 +1227,19 @@ type ProjectResource struct {
 	Position     int32              `json:"position"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	CreatedBy    pgtype.UUID        `json:"created_by"`
+}
+
+type ProjectRoleDefault struct {
+	ID           pgtype.UUID        `json:"id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Role         string             `json:"role"`
+	AssigneeType string             `json:"assignee_type"`
+	AssigneeID   pgtype.UUID        `json:"assignee_id"`
+	Enabled      bool               `json:"enabled"`
+	Ordinal      int32              `json:"ordinal"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type QuickAction struct {
