@@ -1,0 +1,1299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 原型 · 需求日历模块（2026-09-04）</title>
+<style>
+/* ===== Multica 设计 token（packages/ui/styles/tokens.css 浅色主题抄录） ===== */
+:root {
+  --app-shell: oklch(0.964435 0.001327 286.375);
+  --page-canvas: oklch(0.988087 0 0);
+  --surface: oklch(1 0 0);
+  --surface-hover: oklch(0.967 0.001 286.375);
+  --surface-selected: oklch(0.95 0.002 286.375);
+  --surface-border: oklch(0.92 0.004 286.32);
+  --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
+  --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+  --foreground: oklch(0.141 0.005 285.823);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --faint-foreground: oklch(0.606 0.016 285.938);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --border: oklch(0.945 0.003 286.32);
+  --destructive: oklch(0.577 0.245 27.325);
+  --brand: oklch(0.55 0.16 255);
+  --success: oklch(0.55 0.16 145);
+  --warning: oklch(0.72 0.15 75);
+  --radius: 0.625rem;
+  --sidebar-accent: oklch(0.935 0.003 286.375);
+  /* 模块色（project_module.color） */
+  --mod-member: oklch(0.62 0.17 15);
+  --mod-pay: oklch(0.58 0.15 250);
+  --mod-home: oklch(0.6 0.15 300);
+  --mod-order: oklch(0.62 0.14 55);
+  --mod-search: oklch(0.58 0.13 190);
+  --mod-cart: oklch(0.58 0.16 145);
+  --mod-perf: oklch(0.55 0.1 265);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: oklch(0.93 0.004 286.32);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+/* ===== 原型画板框架（非产品 UI） ===== */
+.proto-nav {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 24px; background: oklch(0.16 0.005 285.823);
+  color: oklch(0.92 0.004 286.32);
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 12px; }
+.proto-nav .logo span { color: var(--brand); }
+.proto-nav a {
+  color: oklch(0.705 0.015 286.067); text-decoration: none;
+  padding: 5px 12px; border-radius: 6px; font-size: 12.5px;
+}
+.proto-nav a:hover { background: oklch(1 0 0 / 8%); color: #fff; }
+.frame-wrap { max-width: 1460px; margin: 0 auto; padding: 32px 24px 80px; }
+.frame-head { margin-bottom: 14px; }
+.frame-head h2 { font-size: 17px; font-weight: 700; }
+.frame-head p { color: var(--muted-foreground); font-size: 13px; margin-top: 4px; line-height: 1.7; max-width: 1100px; }
+.frame {
+  background: var(--page-canvas); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 0.16), 0 4px 16px rgb(15 23 42 / 0.08);
+  border: 1px solid oklch(0.85 0.005 286.32);
+  margin-bottom: 56px; position: relative;
+}
+.frame-bar {
+  height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+}
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: oklch(0.7 0.19 27); }
+.frame-bar i:nth-child(2) { background: oklch(0.8 0.16 85); }
+.frame-bar i:nth-child(3) { background: oklch(0.7 0.16 145); }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--faint-foreground); }
+
+/* 标注 */
+.anno {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700;
+  box-shadow: 0 0 0 2.5px oklch(0.55 0.16 255 / 20%);
+  position: relative; z-index: 5; flex: none;
+}
+.anno-float { position: absolute; }
+.new-el { outline: 1.5px dashed oklch(0.55 0.16 255 / 55%); outline-offset: 2px; border-radius: 6px; }
+
+/* ===== 应用外壳 ===== */
+.app { display: flex; height: 780px; }
+.sidebar {
+  width: 210px; flex: none; background: var(--app-shell);
+  border-right: 1px solid var(--surface-border);
+  padding: 10px 8px; display: flex; flex-direction: column; gap: 1px;
+  font-size: 12.5px; overflow: hidden;
+}
+.sidebar .ws { display: flex; align-items: center; gap: 7px; padding: 5px 8px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
+.sidebar .ws .ws-avatar {
+  width: 18px; height: 18px; border-radius: 5px; background: var(--primary);
+  color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px;
+}
+.s-item { display: flex; align-items: center; gap: 8px; padding: 4.5px 8px; border-radius: 6px; color: var(--muted-foreground); }
+.s-item.active { background: var(--sidebar-accent); color: var(--foreground); font-weight: 500; }
+.s-item .badge-n {
+  margin-left: auto; font-size: 10.5px; background: var(--surface-selected);
+  color: var(--muted-foreground); border-radius: 8px; padding: 0 6px; line-height: 16px;
+}
+.s-group { margin-top: 14px; padding: 0 8px 3px; font-size: 11px; color: var(--faint-foreground); }
+.s-dot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--page-canvas); }
+
+/* ===== 顶栏 ===== */
+.topbar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); font-size: 12.5px; flex: none;
+}
+.crumb { color: var(--muted-foreground); display: flex; gap: 6px; align-items: center; }
+.crumb b { color: var(--foreground); font-weight: 600; }
+.tab-pill { padding: 4px 10px; border-radius: 6px; color: var(--muted-foreground); }
+.tab-pill.active { background: var(--surface-selected); color: var(--foreground); font-weight: 500; }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4.5px 10px;
+  border: 1px solid var(--border); background: var(--surface); border-radius: 6px;
+  font-size: 12px; color: var(--foreground); box-shadow: var(--surface-shadow);
+}
+.btn.primary { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+
+/* ===== 日历工具栏 ===== */
+.cal-toolbar {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); font-size: 12.5px; flex: none;
+}
+.nav-btn {
+  width: 24px; height: 24px; border: 1px solid var(--border); background: var(--surface);
+  border-radius: 6px; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted-foreground); font-size: 12px;
+}
+.cal-title { font-weight: 650; font-size: 14px; min-width: 96px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--surface); }
+.seg span { padding: 3.5px 12px; font-size: 12px; color: var(--muted-foreground); }
+.seg span.active { background: var(--surface-selected); color: var(--foreground); font-weight: 600; }
+.chip-filter {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3.5px 9px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+  font-size: 11.5px; color: var(--muted-foreground);
+}
+.chip-filter b { color: var(--foreground); font-weight: 550; }
+.toolbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* ===== 月视图网格 ===== */
+.cal-wrap { flex: 1; overflow: auto; padding: 0; }
+.cal-dow {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid var(--border); background: var(--surface);
+  position: sticky; top: 0; z-index: 3;
+}
+.cal-dow span {
+  padding: 6px 10px; font-size: 11.5px; color: var(--muted-foreground);
+  border-right: 1px solid var(--border); font-weight: 550;
+}
+.cal-dow span:last-child { border-right: none; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-cell {
+  min-height: 112px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  padding: 3px 2px; display: flex; flex-direction: column; gap: 2px; position: relative;
+  background: var(--page-canvas);
+}
+.cal-cell:nth-child(7n) { border-right: none; }
+.cal-cell.out { background: oklch(0.977 0.002 286.32); }
+.cal-cell.today { background: oklch(0.965 0.012 255 / 45%); box-shadow: inset 0 0 0 1.5px oklch(0.55 0.16 255 / 40%); }
+.cal-cell .dnum { font-size: 11px; color: var(--muted-foreground); padding: 1px 6px; font-weight: 550; }
+.cal-cell.out .dnum { color: oklch(0.75 0.01 286); }
+.cal-cell.today .dnum {
+  color: #fff; background: var(--brand); border-radius: 999px; width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 700;
+}
+.cal-cell .more { font-size: 10.5px; color: var(--faint-foreground); padding: 0 6px; }
+
+/* 需求色段（跨格连续条） */
+.req {
+  height: 21px; margin: 0 -2px; display: flex; align-items: center; gap: 4px;
+  padding: 0 6px; font-size: 11px; color: #fff; overflow: hidden; white-space: nowrap;
+  position: relative; cursor: default;
+}
+.req.mid { padding-left: 6px; }
+.req-start { margin-left: 2px; border-radius: 5px 0 0 5px; }
+.req-end { margin-right: 2px; border-radius: 0 5px 5px 0; }
+.req-single { margin: 0 2px; border-radius: 5px; }
+.req .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.req .sub { opacity: 0.85; font-size: 10px; flex: none; }
+.st { width: 6px; height: 6px; border-radius: 50%; flex: none; background: #fff; }
+.st.warn { background: oklch(0.85 0.16 85); box-shadow: 0 0 0 2px oklch(0.85 0.16 85 / 35%); }
+.st.lock { background: oklch(0.8 0.14 60); }
+.st.ok { background: oklch(0.85 0.17 145); }
+.req.ghost {
+  opacity: 0.35; border: 1.5px dashed #fff; background: transparent !important;
+}
+/* 模块色背景 */
+.m-member { background: var(--mod-member); }
+.m-pay { background: var(--mod-pay); }
+.m-home { background: var(--mod-home); }
+.m-order { background: var(--mod-order); }
+.m-search { background: var(--mod-search); }
+.m-cart { background: var(--mod-cart); }
+.m-perf { background: var(--mod-perf); }
+/* 淡色变体（等待/完成态） */
+.req.dim { filter: saturate(0.45) opacity(0.55); }
+
+/* PM 头像 */
+.pm {
+  width: 15px; height: 15px; border-radius: 50%; flex: none; font-size: 8.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; color: #fff;
+  border: 1px solid rgb(255 255 255 / 60%);
+}
+.pm.agent { background: oklch(0.45 0.13 280); }
+.pm.human { background: oklch(0.55 0.12 30); }
+
+/* ===== 周视图 ===== */
+.week-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+.week-cell {
+  min-height: 560px; border-right: 1px solid var(--border); padding: 6px 5px;
+  display: flex; flex-direction: column; gap: 6px; position: relative; background: var(--page-canvas);
+}
+.week-cell:nth-child(7n) { border-right: none; }
+.week-cell.today { background: oklch(0.965 0.012 255 / 45%); }
+.week-cell .dnum { font-size: 12px; color: var(--muted-foreground); padding: 0 4px 4px; font-weight: 550; }
+.week-cell.today .dnum { color: var(--brand); font-weight: 700; }
+.week-cell.drop-target {
+  background: oklch(0.94 0.03 255 / 70%);
+  box-shadow: inset 0 0 0 2px var(--brand);
+  border-radius: 8px;
+}
+.wreq {
+  border-radius: 8px; padding: 8px 9px; color: #fff; font-size: 11.5px;
+  display: flex; flex-direction: column; gap: 5px; position: relative;
+  box-shadow: var(--surface-shadow);
+}
+.wreq .row1 { display: flex; align-items: center; gap: 5px; }
+.wreq .t { font-weight: 650; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wreq .meta { display: flex; align-items: center; gap: 6px; font-size: 10.5px; opacity: 0.9; }
+.wreq .pbar { height: 3.5px; border-radius: 2px; background: rgb(255 255 255 / 30%); overflow: hidden; }
+.wreq .pbar i { display: block; height: 100%; background: #fff; border-radius: 2px; }
+.wreq .badge {
+  display: inline-flex; align-items: center; gap: 3px; padding: 1.5px 6px; border-radius: 999px;
+  background: rgb(255 255 255 / 22%); font-size: 10px; font-weight: 600; width: fit-content;
+}
+.wreq.dragging {
+  opacity: 0.85; transform: rotate(1.2deg) scale(1.03);
+  box-shadow: 0 14px 32px rgb(15 23 42 / 0.35); cursor: grabbing; z-index: 10;
+}
+.wreq .grip { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 5px; height: 26px; border-radius: 3px; background: rgb(255 255 255 / 45%); cursor: ew-resize; }
+.drag-tip {
+  position: absolute; z-index: 20; background: var(--primary); color: var(--primary-foreground);
+  font-size: 11px; padding: 4px 9px; border-radius: 6px; box-shadow: var(--floating-shadow);
+  white-space: nowrap; font-weight: 550;
+}
+
+/* ===== 弹窗 ===== */
+.modal-back {
+  position: absolute; inset: 0; background: oklch(0.15 0.01 285 / 45%);
+  display: flex; align-items: center; justify-content: center; z-index: 30;
+}
+.modal {
+  width: 620px; max-height: 700px; background: var(--surface); border-radius: 12px;
+  box-shadow: var(--floating-shadow); overflow: hidden; display: flex; flex-direction: column;
+}
+.modal-head { padding: 14px 18px 10px; font-size: 14.5px; font-weight: 700; display: flex; align-items: center; }
+.modal-head .x { margin-left: auto; color: var(--faint-foreground); font-weight: 400; }
+.modal-body { padding: 4px 18px 14px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.modal-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; background: var(--page-canvas); }
+.f-row { display: flex; gap: 12px; }
+.f-col { flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.f-label { font-size: 11.5px; color: var(--muted-foreground); font-weight: 550; display: flex; align-items: center; gap: 5px; }
+.f-label .req-star { color: var(--destructive); }
+.f-input {
+  border: 1px solid var(--border); border-radius: 7px; padding: 6.5px 10px; font-size: 12.5px;
+  background: var(--surface); color: var(--foreground); display: flex; align-items: center; gap: 6px;
+}
+.f-input.placeholder { color: var(--faint-foreground); }
+.f-input.textarea { min-height: 54px; align-items: flex-start; line-height: 1.55; }
+.f-select { justify-content: space-between; }
+.f-select .caret { color: var(--faint-foreground); font-size: 10px; }
+/* 模式选择卡 */
+.mode-cards { display: flex; gap: 8px; }
+.mode-card {
+  flex: 1; border: 1.5px solid var(--border); border-radius: 9px; padding: 9px 10px;
+  display: flex; flex-direction: column; gap: 4px; background: var(--surface);
+}
+.mode-card.active { border-color: var(--brand); background: oklch(0.55 0.16 255 / 5%); }
+.mode-card .mc-t { font-size: 12px; font-weight: 650; display: flex; align-items: center; gap: 5px; }
+.mode-card .mc-d { font-size: 10.5px; color: var(--muted-foreground); line-height: 1.5; }
+.radio { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--border); flex: none; }
+.mode-card.active .radio { border: 3.5px solid var(--brand); }
+.avatar {
+  width: 20px; height: 20px; border-radius: 50%; flex: none; font-size: 9.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; color: #fff;
+}
+.avatar.agent { background: oklch(0.45 0.13 280); }
+.avatar.human { background: oklch(0.55 0.12 30); }
+/* 触发时间 */
+.trigger-row {
+  display: flex; align-items: center; gap: 8px; border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 11px; background: oklch(0.55 0.16 255 / 4%); font-size: 12px;
+}
+.toggle { width: 30px; height: 17px; border-radius: 999px; background: var(--brand); position: relative; flex: none; }
+.toggle i { position: absolute; right: 2px; top: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; }
+.toggle.off { background: var(--border); }
+.toggle.off i { right: auto; left: 2px; }
+
+/* ===== 角色班底配置 ===== */
+.role-box { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--surface); }
+.role-row {
+  display: flex; align-items: center; gap: 9px; padding: 7px 11px;
+  border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.role-row:last-child { border-bottom: none; }
+.role-row .rname { width: 66px; flex: none; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+.role-row .rname .req-star { color: var(--destructive); }
+.role-row .rpick {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  border: 1px solid var(--border); border-radius: 7px; padding: 4px 8px; background: var(--page-canvas);
+}
+.role-row .rpick.empty { color: var(--faint-foreground); justify-content: space-between; }
+.rtag {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px 2px 3px;
+  border-radius: 999px; background: var(--surface); border: 1px solid var(--border);
+  font-size: 11px; font-weight: 550;
+}
+.rtag .x { color: var(--faint-foreground); font-size: 10px; }
+.role-row .rnote { font-size: 10.5px; color: var(--faint-foreground); flex: none; }
+.role-row.off { background: oklch(0.977 0.002 286.32); }
+.role-row.off .rname, .role-row.off .rnote { color: var(--faint-foreground); }
+.inherit-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 999px; flex: none;
+  background: oklch(0.55 0.16 255 / 9%); color: var(--brand); font-weight: 600;
+}
+
+/* ===== 流水线 stage 条 ===== */
+.stage-flow { display: flex; align-items: center; gap: 0; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.st-node { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--faint-foreground); }
+.st-node .dot {
+  width: 19px; height: 19px; border-radius: 50%; flex: none; display: flex; align-items: center;
+  justify-content: center; font-size: 10px; font-weight: 700;
+  background: var(--surface-selected); color: var(--faint-foreground);
+}
+.st-node.done { color: var(--success); }
+.st-node.done .dot { background: oklch(0.55 0.16 145 / 14%); color: var(--success); }
+.st-node.cur { color: var(--brand); font-weight: 650; }
+.st-node.cur .dot { background: var(--brand); color: #fff; box-shadow: 0 0 0 3px oklch(0.55 0.16 255 / 18%); }
+.st-node.fail { color: var(--destructive); font-weight: 650; }
+.st-node.fail .dot { background: oklch(0.577 0.245 27.325 / 14%); color: var(--destructive); }
+.st-node.skip { text-decoration: line-through; opacity: .55; }
+.st-line { flex: 1; height: 1.5px; background: var(--border); margin: 0 8px; min-width: 14px; }
+.st-line.done { background: oklch(0.55 0.16 145 / 45%); }
+
+/* ===== GitNexus 影响面区块 ===== */
+.gn-box {
+  margin-top: 7px; border: 1px solid oklch(0.55 0.16 255 / 22%); border-radius: 8px;
+  background: oklch(0.55 0.16 255 / 4%); overflow: hidden;
+}
+.gn-head {
+  display: flex; align-items: center; gap: 6px; padding: 5px 9px; font-size: 10.5px;
+  font-weight: 650; color: var(--brand); border-bottom: 1px solid oklch(0.55 0.16 255 / 15%);
+}
+.gn-head .src { margin-left: auto; font-weight: 400; color: var(--faint-foreground); font-size: 10px; }
+.gn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: oklch(0.55 0.16 255 / 12%); }
+.gn-cell { background: var(--surface); padding: 6px 9px; font-size: 10.5px; line-height: 1.6; }
+.gn-cell b { display: block; font-size: 10px; color: var(--muted-foreground); font-weight: 600; margin-bottom: 2px; }
+.gn-cell .mono { font-size: 10px; }
+.risk { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 9.5px; font-weight: 700; }
+.risk.hi { background: oklch(0.577 0.245 27.325 / 13%); color: var(--destructive); }
+.risk.mid { background: oklch(0.72 0.15 75 / 18%); color: oklch(0.45 0.12 75); }
+.risk.lo { background: oklch(0.55 0.16 145 / 13%); color: oklch(0.42 0.12 145); }
+
+/* ===== 验收标准（代码化） ===== */
+.acc-box {
+  margin-top: 7px; border: 1px solid oklch(0.55 0.16 145 / 28%); border-radius: 8px;
+  background: oklch(0.55 0.16 145 / 5%); padding: 7px 9px; font-size: 10.5px; line-height: 1.6;
+}
+.acc-head { display: flex; align-items: center; gap: 6px; font-weight: 650; color: oklch(0.42 0.12 145); }
+.acc-head .ver {
+  margin-left: auto; font-size: 9.5px; padding: 1px 6px; border-radius: 999px; font-weight: 700;
+  background: oklch(0.55 0.16 145 / 15%); color: oklch(0.4 0.11 145);
+}
+.acc-path { font-size: 10px; color: var(--foreground); word-break: break-all; }
+.acc-note { color: var(--muted-foreground); font-size: 10px; margin-top: 3px; }
+
+/* ===== 验收报告 ===== */
+.rep { border: 1px solid var(--border); border-radius: 9px; background: var(--surface); overflow: hidden; }
+.rep-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 650; }
+.rep-head .score { margin-left: auto; font-size: 11px; font-weight: 700; }
+.rep-sec { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
+.rep-sec:last-child { border-bottom: none; }
+.rep-sec > b { display: block; font-size: 10.5px; color: var(--muted-foreground); font-weight: 600; margin-bottom: 5px; }
+.rep-item { display: flex; align-items: flex-start; gap: 7px; padding: 3.5px 0; line-height: 1.55; }
+.rep-item .ic { flex: none; font-weight: 700; width: 13px; }
+.rep-item.pass .ic { color: var(--success); }
+.rep-item.fail .ic { color: var(--destructive); }
+.rep-item .mono { font-size: 10px; color: var(--faint-foreground); }
+.verdict {
+  display: flex; align-items: center; gap: 9px; padding: 10px 12px; font-size: 12px; font-weight: 650;
+}
+.verdict.bad { background: oklch(0.577 0.245 27.325 / 8%); color: var(--destructive); }
+.verdict.good { background: oklch(0.55 0.16 145 / 9%); color: oklch(0.4 0.11 145); }
+.bounce {
+  border: 1px dashed oklch(0.577 0.245 27.325 / 45%); border-radius: 8px;
+  background: oklch(0.577 0.245 27.325 / 4%); padding: 9px 11px; font-size: 11.5px; line-height: 1.65;
+}
+.bounce b { color: var(--destructive); }
+
+/* ===== 原型预览卡 ===== */
+.proto-preview {
+  border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--surface);
+}
+.proto-preview .pv-bar {
+  height: 26px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 5px; padding: 0 10px;
+}
+.proto-preview .pv-bar i { width: 8px; height: 8px; border-radius: 50%; background: oklch(0.78 0.02 286); display: block; }
+.proto-preview .pv-bar span { margin-left: 6px; font-size: 10.5px; color: var(--faint-foreground); }
+.proto-preview .pv-body {
+  height: 210px; background: oklch(0.98 0.002 286); padding: 12px;
+  display: flex; flex-direction: column; gap: 8px; position: relative;
+}
+.pv-wire { border: 1.5px dashed oklch(0.72 0.02 286); border-radius: 7px; background: var(--surface); }
+.pv-wire .wt { font-size: 9.5px; color: var(--faint-foreground); padding: 4px 7px; }
+.pv-fade {
+  position: absolute; inset: auto 0 0 0; height: 56px;
+  background: linear-gradient(transparent, oklch(0.98 0.002 286));
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 7px;
+}
+.pv-open {
+  font-size: 11px; padding: 3.5px 11px; border-radius: 999px; background: var(--primary);
+  color: var(--primary-foreground); font-weight: 600; box-shadow: var(--surface-shadow);
+}
+</style>
+</head>
+<body>
+
+<nav class="proto-nav">
+  <div class="logo">Multica <span>原型</span> · 需求日历 + 角色化流水线</div>
+  <a href="#f1">1 · 月视图全景</a>
+  <a href="#f2">2 · 周视图 + 拖拽调期</a>
+  <a href="#f3">3 · 创建需求（角色班底）</a>
+  <a href="#f4">4 · 原型师阶段（确认门）</a>
+  <a href="#f5">5 · PM plan + 拆解确认（图谱/验收）</a>
+  <a href="#f6">6 · 交付验收（测试 agent）</a>
+</nav>
+
+<div class="frame-wrap">
+
+<!-- ============ 画面 1：月视图全景 ============ -->
+<div class="frame-head" id="f1">
+  <h2>画面 1 · 需求日历 — 月视图（核心全景）</h2>
+  <p>项目视图新增「日历」tab（与看板/列表/甘特图并列）。月粒度格子按需求 <b class="mono">start_date ~ due_date</b> 渲染跨天色块；色块承载：模块色、需求标题、<b>流水线阶段状态点</b>、子任务进度、角色头像。今天（9/4）高亮。状态点体系覆盖全流水线：<b>○未拆解 · 🎨原型待确认 · ⚠拆解待确认 · ⏱待触发 · ▶执行中 · 🧪验收中 · 🔒等待模块释放 · ✅已完成</b>。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 电商中台 / 需求日历</span></div>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">M</span> Multica 工作区</div>
+      <div class="s-item">📥 收件箱 <span class="badge-n">3</span></div>
+      <div class="s-item">✅ 我的任务</div>
+      <div class="s-item">🤖 Agent</div>
+      <div class="s-item">👥 团队</div>
+      <div class="s-group">项目</div>
+      <div class="s-item active"><span class="s-dot" style="background:var(--brand)"></span> 电商中台</div>
+      <div class="s-item"><span class="s-dot" style="background:var(--success)"></span> 移动端 App</div>
+      <div class="s-item"><span class="s-dot" style="background:var(--warning)"></span> 数据平台</div>
+      <div class="s-group">自动化</div>
+      <div class="s-item">⚡ Autopilot</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb"><b>电商中台</b></div>
+        <span class="tab-pill">看板</span>
+        <span class="tab-pill">列表</span>
+        <span class="tab-pill">甘特图</span>
+        <span class="tab-pill active new-el">日历 <span class="anno" style="margin-left:3px">1</span></span>
+        <div class="topbar-right">
+          <span class="btn">筛选</span>
+          <span class="btn primary">＋ 新建需求</span>
+        </div>
+      </div>
+      <div class="cal-toolbar">
+        <span class="nav-btn">‹</span><span class="nav-btn">›</span>
+        <span class="btn" style="padding:3.5px 10px">今天</span>
+        <span class="cal-title">2026 年 9 月</span>
+        <span class="seg new-el"><span>周</span><span class="active">月</span></span>
+        <span class="anno">2</span>
+        <span class="chip-filter">模块 <b>全部 7</b> ▾</span>
+        <span class="chip-filter">PM <b>全部</b> ▾</span>
+        <span class="chip-filter">拆解状态 <b>全部</b> ▾</span>
+        <div class="toolbar-right">
+          <span class="chip-filter" style="border-style:dashed">⚠ 待确认 <b>2</b></span>
+        </div>
+      </div>
+      <div class="cal-wrap">
+        <div class="cal-dow"><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span></div>
+        <div class="cal-grid">
+          <!-- 第 1 行 8/31 - 9/6 -->
+          <div class="cal-cell out"><span class="dnum">31</span></div>
+          <div class="cal-cell"><span class="dnum">1</span>
+            <div class="req m-member req-start"><span class="st warn"></span><span class="t">SIRI-21 会员积分重构</span><span class="sub">⚠待确认</span><span class="pm agent" style="margin-left:auto">A</span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">2</span>
+            <div class="req m-member mid"><span class="st warn"></span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">3</span>
+            <div class="req m-member mid"><span class="st warn"></span></div>
+            <div class="req m-pay req-start"><span class="st"></span><span class="t">SIRI-22 支付网关切换</span><span class="sub">2/5</span><span class="pm human" style="margin-left:auto">张</span></div>
+          </div>
+          <div class="cal-cell today"><span class="dnum">4</span>
+            <div class="req m-member mid"><span class="st warn"></span></div>
+            <div class="req m-pay mid"><span class="st"></span><span class="sub">▶ 执行中 2/5</span></div>
+            <span class="anno" style="position:absolute;right:4px;top:4px">7</span>
+          </div>
+          <div class="cal-cell"><span class="dnum">5</span>
+            <div class="req m-member req-end"><span class="st warn"></span></div>
+            <div class="req m-pay mid"><span class="st"></span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">6</span>
+            <div class="req m-pay mid"><span class="st"></span></div>
+          </div>
+          <!-- 第 2 行 9/7 - 9/13 -->
+          <div class="cal-cell"><span class="dnum">7</span>
+            <div class="req m-pay mid"><span class="st"></span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">8</span>
+            <div class="req m-pay mid"><span class="st"></span></div>
+            <div class="req m-home req-start"><span class="st" style="background:rgb(255 255 255/55)"></span><span class="t">SIRI-23 首页信息流改版</span><span class="sub">○未拆解</span><span class="pm agent" style="margin-left:auto">N</span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">9</span>
+            <div class="req m-pay req-end"><span class="st"></span></div>
+            <div class="req m-home mid"><span class="st" style="background:rgb(255 255 255/55)"></span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">10</span>
+            <div class="req m-home mid"><span class="st" style="background:rgb(255 255 255/55)"></span></div>
+            <div class="req m-order req-start"><span class="st"></span><span class="t">SIRI-24 订单导出优化</span><span class="sub">⏱ 9/10 触发</span><span class="pm agent" style="margin-left:auto">A</span></div>
+            <span class="anno" style="position:absolute;right:4px;bottom:4px">5</span>
+          </div>
+          <div class="cal-cell"><span class="dnum">11</span>
+            <div class="req m-home mid"><span class="st" style="background:rgb(255 255 255/55)"></span></div>
+            <div class="req m-order req-end"><span class="st"></span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">12</span>
+            <div class="req m-home req-end"><span class="st" style="background:rgb(255 255 255/55)"></span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">13</span></div>
+          <!-- 第 3 行 9/14 - 9/20 -->
+          <div class="cal-cell"><span class="dnum">14</span>
+            <div class="req m-search req-start dim"><span class="st ok"></span><span class="t">SIRI-25 搜索联想词</span><span class="sub">✅3/3</span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">15</span>
+            <div class="req m-search mid dim"><span class="st ok"></span></div>
+            <div class="req m-cart req-start"><span class="st"></span><span class="t">SIRI-26 购物车合并结算</span><span class="sub">🧪验收中 3/4</span><span class="pm agent" style="margin-left:auto">V</span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">16</span>
+            <div class="req m-search req-end dim"><span class="st ok"></span></div>
+            <div class="req m-cart mid"><span class="st"></span></div>
+            <div class="req m-cart req-start" style="filter:saturate(0.6)"><span class="st lock"></span><span class="t">SIRI-27 优惠券叠加</span><span class="sub">🔒等待</span></div>
+            <span class="anno" style="position:absolute;right:4px;bottom:4px">6</span>
+          </div>
+          <div class="cal-cell"><span class="dnum">17</span>
+            <div class="req m-cart mid"><span class="st"></span></div>
+            <div class="req m-cart mid" style="filter:saturate(0.6)"><span class="st lock"></span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">18</span>
+            <div class="req m-cart mid"><span class="st"></span></div>
+            <div class="req m-cart req-end" style="filter:saturate(0.6)"><span class="st lock"></span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">19</span>
+            <div class="req m-cart req-end"><span class="st"></span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">20</span></div>
+          <!-- 第 4 行 9/21 - 9/27 -->
+          <div class="cal-cell"><span class="dnum">21</span></div>
+          <div class="cal-cell"><span class="dnum">22</span>
+            <div class="req m-perf req-start"><span class="st warn"></span><span class="t">SIRI-28 App 启动提速</span><span class="sub">🎨原型待确认</span><span class="pm agent" style="margin-left:auto">N</span></div>
+          </div>
+          <div class="cal-cell"><span class="dnum">23</span><div class="req m-perf mid"></div></div>
+          <div class="cal-cell"><span class="dnum">24</span><div class="req m-perf mid"></div></div>
+          <div class="cal-cell"><span class="dnum">25</span><div class="req m-perf req-end"></div></div>
+          <div class="cal-cell"><span class="dnum">26</span></div>
+          <div class="cal-cell"><span class="dnum">27</span></div>
+          <!-- 第 5 行 9/28 - 10/4 -->
+          <div class="cal-cell"><span class="dnum">28</span></div>
+          <div class="cal-cell"><span class="dnum">29</span></div>
+          <div class="cal-cell"><span class="dnum">30</span></div>
+          <div class="cal-cell" style="position:relative"><span class="dnum">1</span>
+            <span class="more" style="position:absolute;right:6px;bottom:6px;color:var(--faint-foreground);font-size:10px">下月 →</span>
+          </div>
+          <div class="cal-cell out"><span class="dnum">2</span></div>
+          <div class="cal-cell out"><span class="dnum">3</span></div>
+          <div class="cal-cell out"><span class="dnum">4</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <span class="anno anno-float" style="left:352px;top:78px">1</span>
+  <span class="anno anno-float" style="left:392px;top:118px">2</span>
+  <span class="anno anno-float" style="left:330px;top:190px">3</span>
+  <span class="anno anno-float" style="left:545px;top:190px">4</span>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p style="font-size:12px">标注：<span class="anno">1</span> 视图 tab 新增「日历」&nbsp; <span class="anno">2</span> 周/月粒度切换（沿用甘特图 zoom 数据管道）&nbsp; <span class="anno">3</span> 需求色块 = 模块色 + 阶段状态点 + 标题 + 进度 + 当前阶段角色头像&nbsp; <span class="anno">4</span> SIRI-21 拆解草稿待确认（⚠黄点，详见画面 5）；工具栏「待确认 2」聚合原型待确认（SIRI-28 🎨）与拆解待确认（SIRI-21 ⚠）&nbsp; <span class="anno">5</span> SIRI-24 已拆解，色块直接标注自动触发日&nbsp; <span class="anno">6</span> SIRI-27 与 SIRI-26 同属「购物车」模块 → <b>组间互斥</b>：SIRI-26 尚在验收阶段（未终态），SIRI-27 继续等待&nbsp; <span class="anno">7</span> 今天高亮。</p>
+</div>
+
+<!-- ============ 画面 2：周视图 + 拖拽调期 ============ -->
+<div class="frame-head" id="f2" style="margin-top:24px">
+  <h2>画面 2 · 周视图 + 拖拽调期</h2>
+  <p>周粒度色块放大，完整展示：标题、拆解状态徽章、模块、PM、子任务进度条、触发时间。色块可<b>拖拽整体改期</b>（目标日格高亮 + 浮动提示新旧日期），右缘手柄<b>拉伸调 due_date</b>。拖拽落点即写回 <b class="mono">start_date / due_date</b>，定时触发时间随之联动。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 电商中台 / 需求日历 · 周视图（拖拽中）</span></div>
+  <div class="app" style="height:700px">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">M</span> Multica 工作区</div>
+      <div class="s-item">📥 收件箱</div>
+      <div class="s-item">✅ 我的任务</div>
+      <div class="s-group">项目</div>
+      <div class="s-item active"><span class="s-dot" style="background:var(--brand)"></span> 电商中台</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb"><b>电商中台</b></div>
+        <span class="tab-pill">看板</span><span class="tab-pill">列表</span><span class="tab-pill">甘特图</span>
+        <span class="tab-pill active">日历</span>
+        <div class="topbar-right"><span class="btn primary">＋ 新建需求</span></div>
+      </div>
+      <div class="cal-toolbar">
+        <span class="nav-btn">‹</span><span class="nav-btn">›</span>
+        <span class="btn" style="padding:3.5px 10px">今天</span>
+        <span class="cal-title">9/7 – 9/13</span>
+        <span class="seg"><span class="active">周</span><span>月</span></span>
+        <span class="anno">1</span>
+        <span class="chip-filter">模块 <b>全部 7</b> ▾</span>
+        <div class="toolbar-right"><span class="chip-filter">📅 本周 5 个需求</span></div>
+      </div>
+      <div class="cal-wrap">
+        <div class="cal-dow"><span>周一 7</span><span>周二 8</span><span>周三 9</span><span>周四 10</span><span>周五 11</span><span>周六 12</span><span>周日 13</span></div>
+        <div class="week-grid">
+          <div class="week-cell"><span class="dnum">7</span>
+            <div class="wreq m-pay" style="opacity:.55;border-radius:0 8px 8px 0">
+              <div class="row1"><span class="st"></span><span class="t">SIRI-22 支付网关切换</span></div>
+              <div class="meta"><span class="pm human">张</span> 支付 · 9/3–9/9</div>
+              <div class="pbar"><i style="width:40%"></i></div>
+              <span class="badge">▶ 执行中 2/5</span>
+            </div>
+          </div>
+          <div class="week-cell"><span class="dnum">8</span>
+            <div class="wreq m-pay" style="opacity:.55;border-radius:0">
+              <div class="row1"><span class="st"></span><span class="t">SIRI-22</span></div>
+              <div class="pbar"><i style="width:40%"></i></div>
+            </div>
+            <div class="wreq m-home">
+              <div class="row1"><span class="st" style="background:rgb(255 255 255/55)"></span><span class="t">SIRI-23 首页信息流改版</span></div>
+              <div class="meta"><span class="pm agent">N</span> 首页 · 9/8–9/12 · 纯人工</div>
+              <span class="badge">○ 未拆解</span>
+            </div>
+          </div>
+          <div class="week-cell"><span class="dnum">9</span>
+            <div class="wreq m-pay" style="opacity:.55;border-radius:0 0 8px 8px">
+              <div class="row1"><span class="st"></span><span class="t">SIRI-22</span></div>
+              <div class="pbar"><i style="width:40%"></i></div>
+              <span class="badge">9/9 结束</span>
+            </div>
+            <div class="wreq m-home" style="opacity:.7">
+              <div class="row1"><span class="t">SIRI-23</span></div>
+            </div>
+          </div>
+          <div class="week-cell"><span class="dnum">10</span>
+            <div class="wreq m-home" style="opacity:.7">
+              <div class="row1"><span class="t">SIRI-23</span></div>
+            </div>
+            <!-- 拖拽源：残影 -->
+            <div class="wreq m-order ghost" style="color:var(--mod-order);border:1.5px dashed var(--mod-order);background:oklch(0.62 0.14 55/8%)">
+              <div class="row1"><span class="t" style="color:var(--mod-order)">SIRI-24（原位置）</span></div>
+              <div class="meta" style="color:var(--muted-foreground)">9/10–9/11</div>
+            </div>
+          </div>
+          <div class="week-cell"><span class="dnum">11</span>
+            <div class="wreq m-home" style="opacity:.7;border-radius:0 0 8px 8px">
+              <div class="row1"><span class="t">SIRI-23</span></div>
+              <div class="meta"><span class="pm agent">N</span> 9/12 结束</div>
+            </div>
+          </div>
+          <div class="week-cell drop-target"><span class="dnum">12</span>
+            <span class="anno" style="position:absolute;right:6px;top:6px">2</span>
+            <!-- 拖拽中的色块 -->
+            <div class="wreq m-order dragging" style="margin-top:16px">
+              <div class="row1"><span class="st"></span><span class="t">SIRI-24 订单导出优化</span></div>
+              <div class="meta"><span class="pm agent">A</span> 订单 · 2 天 · 全自动</div>
+              <div class="pbar"><i style="width:0%"></i></div>
+              <span class="badge">⏱ 已拆解 4 子任务</span>
+              <span class="grip"></span>
+            </div>
+            <div class="drag-tip" style="left:8px;bottom:14px">改期：9/10 – 9/11 → <b>9/12 – 9/13</b>（触发时间联动改 9/12）</div>
+          </div>
+          <div class="week-cell"><span class="dnum">13</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p style="font-size:12px">标注：<span class="anno">1</span> 周/月切换记忆用户偏好（issue_view_preference）&nbsp; <span class="anno">2</span> 拖拽中：源格留虚线残影，目标格高亮，浮动提示新旧日期；已拆解需求改期时<b>自动触发时间联动</b>，并提示将重新校验组间互斥窗口。右缘 <b class="mono">grip</b> 手柄拉伸调 due_date。执行中/已完成需求禁止拖拽（hover 显示禁用原因）。</p>
+</div>
+
+<!-- ============ 画面 3：创建需求弹窗 ============ -->
+<div class="frame-head" id="f3" style="margin-top:24px">
+  <h2>画面 3 · 创建需求（目标 / git 库 / 角色班底 / 拆解模式 / 自动触发）</h2>
+  <p>需求创建表单在现有 issue 表单上扩展四组新字段：<b>目标</b>（结构化 textarea，供原型师出图、PM 拆解、测试验收共同使用的基准）、<b>git 库</b>（从项目 project_resource 选择或就地添加；拆解、执行、<b class="mono">acceptance/</b> 验收代码都以此为工作库）、<b>项目角色班底</b>（PM / 原型师 / 研发 / 数据 / 测试；项目默认自动带入、可逐需求覆盖；研发可多选 agent 并行）、<b>拆解模式</b>（全自动 / 拆解+人工确认 / 纯人工 三选一）+ <b>执行触发</b>（到达 start_date 自动触发）。班底直接决定流水线形态：<b>选了原型师 → 前置原型 stage + 用户确认门</b>（画面 4）；<b>未选 → 该 stage 跳过</b>；测试角色缺失时验收 stage 回落到 PM。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 新建需求（弹窗覆盖在日历上）</span></div>
+  <div style="position:relative;height:790px;background:oklch(0.97 0.002 286.32)">
+    <!-- 背景：虚化的日历轮廓 -->
+    <div style="position:absolute;inset:0;opacity:.5">
+      <div class="cal-toolbar" style="border-bottom:1px solid var(--border)">
+        <span class="cal-title">2026 年 9 月</span><span class="seg"><span>周</span><span class="active">月</span></span>
+      </div>
+      <div class="cal-grid" style="filter:blur(1px)">
+        <div class="cal-cell"><span class="dnum">14</span></div><div class="cal-cell"><span class="dnum">15</span></div><div class="cal-cell"><span class="dnum">16</span></div><div class="cal-cell"><span class="dnum">17</span></div><div class="cal-cell"><span class="dnum">18</span></div><div class="cal-cell"><span class="dnum">19</span></div><div class="cal-cell"><span class="dnum">20</span></div>
+        <div class="cal-cell"><span class="dnum">21</span></div><div class="cal-cell"><span class="dnum">22</span></div><div class="cal-cell"><span class="dnum">23</span></div><div class="cal-cell"><span class="dnum">24</span></div><div class="cal-cell"><span class="dnum">25</span></div><div class="cal-cell"><span class="dnum">26</span></div><div class="cal-cell"><span class="dnum">27</span></div>
+      </div>
+    </div>
+    <div class="modal-back">
+      <div class="modal">
+        <div class="modal-head">新建需求 <span style="font-weight:400;color:var(--faint-foreground);font-size:12px;margin-left:8px">电商中台 · SIRI-29</span><span class="x">✕</span></div>
+        <div class="modal-body">
+          <div class="f-col">
+            <span class="f-label">标题 <span class="req-star">*</span></span>
+            <div class="f-input">退款流程异步化改造</div>
+          </div>
+          <div class="f-row">
+            <div class="f-col">
+              <span class="f-label">所属项目</span>
+              <div class="f-input f-select">电商中台 <span class="caret">▾</span></div>
+            </div>
+            <div class="f-col">
+              <span class="f-label">模块 <span class="req-star">*</span></span>
+              <div class="f-input f-select"><span style="display:inline-flex;align-items:center;gap:6px"><span class="s-dot" style="background:var(--mod-pay)"></span> 支付</span> <span class="caret">▾ ＋新建</span></div>
+            </div>
+          </div>
+          <div class="f-col new-el">
+            <span class="f-label">目标 <span class="anno">1</span> <span style="color:var(--faint-foreground);font-weight:400">（PM 拆解的验收基准）</span></span>
+            <div class="f-input textarea">退款处理时长 P99 从 30min 降到 5min 以内；异步化后对账差异率保持 0；不改变现有退款 API 的对外契约。</div>
+          </div>
+          <div class="f-col new-el">
+            <span class="f-label">Git 库 <span class="anno">2</span> <span style="color:var(--faint-foreground);font-weight:400">（来自项目资源，可就地添加）</span></span>
+            <div class="f-input f-select"><span class="mono" style="font-size:11.5px">⎇ git@code.alipay.com:trade/payments-service.git</span> <span class="caret">▾ ＋添加</span></div>
+          </div>
+          <div class="f-row">
+            <div class="f-col">
+              <span class="f-label">开始日期 <span class="req-star">*</span></span>
+              <div class="f-input f-select"><span class="mono">2026-09-15</span> <span class="caret">📅</span></div>
+            </div>
+            <div class="f-col">
+              <span class="f-label">截止日期</span>
+              <div class="f-input f-select"><span class="mono">2026-09-19</span> <span class="caret">📅</span></div>
+            </div>
+          </div>
+          <div class="f-col new-el">
+            <span class="f-label">项目角色班底 <span class="anno">3</span> <span style="color:var(--faint-foreground);font-weight:400">（项目默认已带入，可逐需求覆盖）</span></span>
+            <div class="role-box">
+              <div class="role-row">
+                <span class="rname">项目 PM <span class="req-star">*</span></span>
+                <span class="rpick"><span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">A</span> Atlas <span class="x">✕</span></span><span style="color:var(--faint-foreground);font-size:10.5px">▾ 换人</span></span>
+                <span class="inherit-tag">项目默认</span>
+              </div>
+              <div class="role-row">
+                <span class="rname">原型师</span>
+                <span class="rpick"><span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">N</span> Nova <span class="x">✕</span></span><span style="color:var(--faint-foreground);font-size:10.5px">▾ 换人</span></span>
+                <span class="rnote">已选 → 前置原型 stage <span class="anno">4</span></span>
+              </div>
+              <div class="role-row">
+                <span class="rname">研发 <span class="req-star">*</span></span>
+                <span class="rpick">
+                  <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">O</span> Orion <span class="x">✕</span></span>
+                  <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">R</span> Rex <span class="x">✕</span></span>
+                  <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">K</span> Kai <span class="x">✕</span></span>
+                  <span style="color:var(--faint-foreground);font-size:10.5px">＋ 多选</span>
+                </span>
+                <span class="rnote">多 agent 并行</span>
+              </div>
+              <div class="role-row off">
+                <span class="rname">数据</span>
+                <span class="rpick empty">未指定（本需求不涉及数据改造）<span style="font-size:10px">▾</span></span>
+                <span class="rnote">可留空</span>
+              </div>
+              <div class="role-row">
+                <span class="rname">测试 <span class="req-star">*</span></span>
+                <span class="rpick"><span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">V</span> Vera <span class="x">✕</span></span><span style="color:var(--faint-foreground);font-size:10.5px">▾ 换人</span></span>
+                <span class="inherit-tag">项目默认</span>
+              </div>
+            </div>
+          </div>
+          <div class="f-col new-el">
+            <span class="f-label">拆解模式 <span class="anno">4</span></span>
+            <div class="mode-cards">
+              <div class="mode-card">
+                <div class="mc-t"><span class="radio"></span> 全自动</div>
+                <div class="mc-d">PM agent 拆解后直接生效，无需确认</div>
+              </div>
+              <div class="mode-card active">
+                <div class="mc-t"><span class="radio"></span> 拆解 + 确认</div>
+                <div class="mc-d">PM agent 出草稿，人工确认后生效</div>
+              </div>
+              <div class="mode-card">
+                <div class="mc-t"><span class="radio"></span> 纯人工</div>
+                <div class="mc-d">系统不拆解，人工按模板建子任务</div>
+              </div>
+            </div>
+          </div>
+          <div class="trigger-row new-el">
+            <span class="toggle"><i></i></span>
+            <span><b>到达开始日期自动触发</b> <span class="anno">5</span><br><span style="color:var(--muted-foreground);font-size:11px">9/15 00:00 起子任务自动进入调度（按依赖 DAG + 组间互斥）；关闭则需手动触发</span></span>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <span class="btn">取消</span>
+          <span class="btn primary">创建并发起拆解</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p style="font-size:12px">标注：<span class="anno">1</span> 「目标」为新增结构化字段（区别于自由描述），<b>原型师出原型、PM 拆解、测试验收都以它为基准</b>&nbsp; <span class="anno">2</span> git 库复用 project_resource（repository/local path），需求必选其一；验收代码就写在该仓 <b class="mono">acceptance/</b> 目录&nbsp; <span class="anno">3</span> <b>角色班底</b>：项目默认一套（PM/原型师/研发/数据/测试），创建需求时带入可覆盖；研发支持<b>多选 agent</b>，其余单选，数据可留空；agent 与成员均可承担任一角色&nbsp; <span class="anno">4</span> 选了原型师 → 流水线前置「原型 stage」（画面 4）：原型师基于描述+目标出产品功能原型，<b>用户确认后才进 PM 拆解</b>；不选则跳过该 stage&nbsp; <span class="anno">5</span> 三种拆解模式单选；自动触发默认开（拆解完成后到 start_date 自动进调度），按钮文案随模式联动。</p>
+</div>
+
+<!-- ============ 画面 4：原型师阶段（确认门） ============ -->
+<div class="frame-head" id="f4" style="margin-top:24px">
+  <h2>画面 4 · 原型师阶段 — 产品功能原型 + 用户确认门</h2>
+  <p>配了原型师的需求，流水线第一阶段（<b class="mono">stage 1</b>）由原型师 agent 基于<b>需求描述 + 目标</b>产出产品功能原型（HTML，写入业务仓 <b class="mono">docs/prototypes/</b>，同时作为任务交付物展示）。<b>确认门未过前，stage barrier 阻止 PM 拆解任务派发</b>：确认 → 进拆解；提意见 → 原型师回炉重出（版本 +1）；跳过 → 直接拆解。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 需求详情抽屉（SIRI-29 · 原型待确认）</span></div>
+  <div style="display:flex;height:790px;background:var(--app-shell)">
+    <div style="flex:1;max-width:640px;margin:0 auto;background:var(--page-canvas);display:flex;flex-direction:column;overflow:hidden;border-left:1px solid var(--surface-border);border-right:1px solid var(--surface-border)">
+      <!-- 头部 -->
+      <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="mono" style="font-size:11px;color:var(--faint-foreground)">SIRI-29</span>
+          <b style="font-size:14.5px">退款流程异步化改造</b>
+          <span style="margin-left:auto;font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.6 0.15 300/12%);color:oklch(0.45 0.15 300);font-weight:650">🎨 原型待确认</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:var(--muted-foreground)">
+          <span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-pay)"></span>支付</span> ·
+          <span class="mono">9/15 – 9/19</span> ·
+          <span class="mono" style="font-size:10.5px">⎇ payments-service.git</span>
+        </div>
+      </div>
+      <!-- stage 流水线条 -->
+      <div class="stage-flow">
+        <span class="st-node cur"><span class="dot">1</span>原型</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">2</span>plan + 拆解</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">3</span>执行</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">4</span>验收</span>
+        <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">stage barrier：本阶段未确认 → 后续任务不派发 <span class="anno">1</span></span>
+      </div>
+      <div style="flex:1;overflow:auto;padding:13px 18px;display:flex;flex-direction:column;gap:11px">
+        <!-- 原型师与产物 -->
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+          <span class="avatar agent">N</span>
+          <b>Nova</b><span style="color:var(--muted-foreground);font-size:11.5px">（原型师）产出产品功能原型</span>
+          <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">8 分钟前 · 第 1 版</span>
+        </div>
+        <div class="proto-preview new-el">
+          <div class="pv-bar"><i></i><i></i><i></i><span class="mono">docs/prototypes/SIRI-29-refund-async.html</span><span style="margin-left:auto;font-size:10px;color:var(--faint-foreground)">v1 · 交付物</span></div>
+          <div class="pv-body">
+            <div class="pv-wire" style="height:30px;display:flex;align-items:center"><span class="wt">退款申请页 · 新增「异步处理中」状态条 + 预计到账时间</span></div>
+            <div class="pv-wire" style="height:62px;display:flex;flex-direction:column;justify-content:center;gap:3px">
+              <span class="wt">退款进度时间线：申请 → 审核 → 打款 → 到账</span>
+              <div style="display:flex;gap:4px;padding:0 7px">
+                <span style="flex:1;height:5px;border-radius:3px;background:oklch(0.55 0.16 145/55%)"></span>
+                <span style="flex:1;height:5px;border-radius:3px;background:oklch(0.55 0.16 145/55%)"></span>
+                <span style="flex:1;height:5px;border-radius:3px;background:var(--brand)"></span>
+                <span style="flex:1;height:5px;border-radius:3px;background:var(--border)"></span>
+              </div>
+            </div>
+            <div class="pv-wire" style="height:30px;display:flex;align-items:center"><span class="wt">失败重试入口 + 人工客服通道（超时自动升级）</span></div>
+            <div class="pv-fade"><span class="pv-open">⤢ 打开全屏预览</span></div>
+          </div>
+        </div>
+        <!-- 原型要点 -->
+        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:9px 12px">
+          <b style="font-size:11.5px;display:block;margin-bottom:5px">原型要点 <span class="anno">2</span></b>
+          <div style="font-size:11.5px;color:var(--muted-foreground);line-height:1.75">
+            ① 退款提交后立即返回「异步处理中」，展示预计到账时间（P99 5min）<br>
+            ② 进度时间线四节点，节点变更推送通知<br>
+            ③ 失败可一键重试；超 15min 未推进自动升级人工<br>
+            ④ 部分退款/全额退款分流，对外 API 入口不变
+          </div>
+        </div>
+        <!-- 目标覆盖对照 -->
+        <div style="border:1px solid oklch(0.55 0.16 145/28%);border-radius:9px;background:oklch(0.55 0.16 145/4%);padding:9px 12px">
+          <b style="font-size:11.5px;display:block;margin-bottom:5px;color:oklch(0.42 0.12 145)">目标覆盖对照 <span class="anno">3</span></b>
+          <div class="rep-item pass" style="font-size:11.5px"><span class="ic">✓</span><span>P99 30min → 5min：异步化 + 进度时间线支撑</span></div>
+          <div class="rep-item" style="font-size:11.5px"><span class="ic" style="color:var(--faint-foreground)">○</span><span>对账差异率保持 0：<span style="color:var(--muted-foreground)">后端约束，原型不体现 → 转 PM 拆解关注</span></span></div>
+          <div class="rep-item pass" style="font-size:11.5px"><span class="ic">✓</span><span>对外 API 契约不变：入口与字段无改动</span></div>
+        </div>
+        <div style="border-radius:8px;padding:8px 11px;background:oklch(0.55 0.16 255/6%);font-size:11.5px;line-height:1.6;color:var(--muted-foreground)">
+          确认后：PM <b style="color:var(--foreground)">Atlas</b> 自动收到拆解任务（stage 2），基于<b style="color:var(--foreground)">已确认的原型 + 目标</b>出 plan 与子任务。
+        </div>
+      </div>
+      <!-- 确认门操作 -->
+      <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;background:var(--surface)">
+        <span class="btn primary" style="flex:1;justify-content:center">✓ 确认原型，进入拆解 <span class="anno" style="margin-left:5px">4</span></span>
+        <span class="btn">💬 提修改意见（回炉）</span>
+        <span class="btn" style="color:var(--muted-foreground)">⏭ 跳过</span>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p style="font-size:12px">标注：<span class="anno">1</span> 流水线四阶段条（复用 <b class="mono">issue.stage</b> barrier：阶段内全部子任务终态才放行下一阶段）；未配原型师的需求该节点置灰跳过&nbsp; <span class="anno">2</span> 原型要点由原型师 agent 自述，供确认时快速审阅&nbsp; <span class="anno">3</span> <b>目标覆盖对照</b>：逐条比对需求「目标」与原型体现情况，未覆盖项自动标注去向（转 PM 拆解关注）&nbsp; <span class="anno">4</span> 确认门三选：确认（进 stage 2 · plan + 拆解）/ 提意见（原型师重出，版本 +1，已确认版可回溯）/ 跳过（无原型直接拆解）。原型 HTML 本体作为任务交付物可直接弹窗预览（复用交付物预览能力）。</p>
+</div>
+
+<!-- ============ 画面 5：PM plan + 拆解确认 ============ -->
+<div class="frame-head" id="f5" style="margin-top:24px">
+  <h2>画面 5 · PM plan + 拆解草稿确认（GitNexus 图谱 + 验收代码）</h2>
+  <p>拆解阶段（<b class="mono">stage 2</b>）由项目 PM 先出 <b>plan</b>（目标分解 / 阶段划分 / 风险），再拆为子任务。每个子任务由 PM agent <b>经 MCP 查 GitNexus 本体+图谱</b>，带回四要素：<b>功能点 / 代码对象 / 依赖 / 影响面</b>；并必须出具<b>代码化验收标准</b>（写入业务仓 <b class="mono">acceptance/</b>，与功能代码同仓同 commit 天然版本绑定：功能不调则验收不动）。确认后创建子 issue 并按开始日期自动触发。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 需求详情抽屉（左：待确认草稿 / 右：定时执行中）</span></div>
+  <div style="display:flex;gap:0;height:800px;background:var(--app-shell)">
+    <!-- 左：review 待确认 -->
+    <div style="flex:1;border-right:1px solid var(--surface-border);background:var(--page-canvas);display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="mono" style="font-size:11px;color:var(--faint-foreground)">SIRI-21</span>
+          <b style="font-size:14.5px">会员积分重构</b>
+          <span style="margin-left:auto;font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.72 0.15 75/15%);color:oklch(0.45 0.12 75);font-weight:650">⚠ 拆解待确认</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:var(--muted-foreground)">
+          <span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span> ·
+          <span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar agent" style="width:16px;height:16px;font-size:8px">A</span>Atlas 拆解于 10 分钟前</span> ·
+          <span class="mono">9/15 – 9/19</span>
+        </div>
+        <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:11.5px;line-height:1.6">
+          <b style="font-size:11px;color:var(--muted-foreground)">目标</b><br>积分获取/消耗链路统一到账实时化；对账 T+1 → T+0；不改对外 API 契约。
+          <div style="margin-top:4px;color:var(--faint-foreground)" class="mono">⎇ git@code.alipay.com:member/points-service.git</div>
+        </div>
+      </div>
+      <!-- stage 流水线条 -->
+      <div class="stage-flow">
+        <span class="st-node done"><span class="dot">✓</span>原型</span>
+        <span class="st-line done"></span>
+        <span class="st-node cur"><span class="dot">2</span>plan + 拆解</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">3</span>执行</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">4</span>验收</span>
+        <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">原型已确认 v2 · 9/4 09:12</span>
+      </div>
+      <div style="flex:1;overflow:auto;padding:12px 18px;display:flex;flex-direction:column;gap:9px">
+        <!-- PM plan 区块 -->
+        <div style="border:1px solid oklch(0.55 0.16 255/30%);border-radius:9px;background:oklch(0.55 0.16 255/4%);padding:9px 12px" class="new-el">
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:650;color:var(--brand)">
+            📋 PM plan <span class="anno">1</span>
+            <span style="margin-left:auto;font-weight:400;font-size:10.5px;color:var(--faint-foreground)">Atlas · 基于已确认原型 v2 + 目标产出</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--muted-foreground);line-height:1.7;margin-top:5px">
+            <b style="color:var(--foreground);font-weight:600">目标分解</b>：账户模型重构（实时账变基座）→ 规则引擎（获取侧）→ 抵扣接口（消耗侧）→ 对账回归（T+0 验证）<br>
+            <b style="color:var(--foreground);font-weight:600">阶段划分</b>：四任务链式依赖，均在 stage 3（执行）；验收 stage 4 由 Vera 承接<br>
+            <b style="color:var(--foreground);font-weight:600">风险</b>：存量账户迁移需灰度双写；幂等账变为强约束，影响面已标高风险
+          </div>
+          <div style="margin-top:5px;font-size:10.5px;color:var(--faint-foreground)">plan 全文存入需求评论（可追溯）· 拆解与 plan 不一致时确认页高亮提醒</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:650">
+          拆解草稿 <span class="anno">2</span>
+          <span style="font-weight:400;color:var(--faint-foreground);font-size:11px">（内置模板：标题/描述/模块/依赖/规模/<b>指派角色</b><span class="anno">5</span>/<b>图谱影响面</b>/<b>验收代码</b>）</span>
+          <span style="margin-left:auto;font-size:11px;color:var(--muted-foreground)">4 项 · 链式依赖</span>
+        </div>
+        <!-- 草稿卡 1 -->
+        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T1</span>
+            <b style="font-size:12.5px">积分账户模型重构</b>
+            <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">O</span>Orion<span class="x">✕</span></span>
+            <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">研发 · 规模 M</span>
+            <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--muted-foreground);margin-top:5px;line-height:1.55">账户表拆分流水/余额双表，引入幂等账变接口。</div>
+          <div style="margin-top:5px;display:flex;gap:6px;font-size:10.5px;color:var(--faint-foreground)"><span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span><span>依赖：无（入度 0，可立即执行）</span></div>
+          <div class="gn-box new-el">
+            <div class="gn-head">🕸 图谱影响面 <span class="anno">3</span><span class="src">PM agent 经 MCP 查 GitNexus 本体+图谱 · 2 分钟前 · commit a3f19c2</span></div>
+            <div class="gn-grid">
+              <div class="gn-cell"><b>功能点（本体）</b><span class="mono">points/account · points/ledger</span><br>能力：账户余额维护、账变流水记录</div>
+              <div class="gn-cell"><b>代码对象</b><span class="mono">points/account.go<br>points/ledger.go<br>AccountRepo · t_account（表）</span></div>
+              <div class="gn-cell"><b>依赖</b>上游 <span class="mono">order/payment_callback</span><br>下游 <span class="mono">points/query_api<br>points/reconcile</span></div>
+              <div class="gn-cell"><b>影响情况</b><span class="risk hi">高风险</span> 调用方 3 处 · 表结构变更 · 跨模块引用 0<br><span style="color:var(--faint-foreground)">/impact-analysis：建议灰度双写</span></div>
+            </div>
+          </div>
+          <div class="acc-box new-el">
+            <div class="acc-head">✓ 验收标准（代码化）<span class="anno">4</span><span class="ver">v1 · 新建</span></div>
+            <div class="acc-path mono">acceptance/member/account-model.spec.ts</div>
+            <div style="margin-top:3px">☐ 迁移后 <span class="mono">count(t_account_old) == count(t_account)</span> 且余额求和一致<br>☐ 同一 <span class="mono">idempotency_key</span> 重放 3 次，流水仅 1 条<br>☐ 账变接口 <span class="mono">P99 &lt; 50ms</span>（1k QPS 压测）</div>
+            <div class="acc-note">验收代码写入<b>业务仓</b>，与功能代码<b>同仓同 commit</b> 演进 → 天然版本控制：功能未调整则验收不动；功能变更须在同一 PR 内更新验收并递增版本号（v1→v2），diff 可追溯。</div>
+          </div>
+        </div>
+        <!-- 草稿卡 2 -->
+        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T2</span>
+            <b style="font-size:12.5px">积分获取规则引擎</b>
+            <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">R</span>Rex<span class="x">✕</span></span>
+            <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">研发 · 规模 M</span>
+            <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--muted-foreground);margin-top:5px;line-height:1.55">下单/签到/活动三类获取源接入统一规则引擎。</div>
+          <div style="margin-top:5px;display:flex;gap:6px;font-size:10.5px;color:var(--faint-foreground)"><span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span><span>依赖：<b class="mono" style="color:var(--foreground)">T1</b></span></div>
+          <div class="gn-box">
+            <div class="gn-head">🕸 图谱影响面<span class="src">MCP · 2 分钟前</span></div>
+            <div class="gn-grid">
+              <div class="gn-cell"><b>功能点</b><span class="mono">points/earning</span><br>能力：三类获取源规则计算</div>
+              <div class="gn-cell"><b>代码对象</b><span class="mono">earning/rules.go<br>earning/source_{order,checkin,campaign}.go</span></div>
+              <div class="gn-cell"><b>依赖</b>上游 <span class="mono">points/account</span>（T1 产出）<br>下游 <span class="mono">points/query_api</span></div>
+              <div class="gn-cell"><b>影响情况</b><span class="risk mid">中风险</span> 调用方 2 处 · 新增表 1 · 存量规则需迁移</div>
+            </div>
+          </div>
+          <div class="acc-box">
+            <div class="acc-head">✓ 验收标准（代码化）<span class="ver">v1 · 新建</span></div>
+            <div class="acc-path mono">acceptance/member/earning-rules.spec.ts</div>
+            <div style="margin-top:3px">☐ 27 条规则用例集命中率 100% ☐ 规则变更不产生重复发放 ☐ 单账户日获取上限生效</div>
+          </div>
+        </div>
+        <!-- 草稿卡 3 -->
+        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T3</span>
+            <b style="font-size:12.5px">积分消耗/抵扣接口</b>
+            <span class="rtag"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">K</span>Kai<span class="x">✕</span></span>
+            <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">研发 · 规模 S</span>
+            <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
+          </div>
+          <div style="margin-top:5px;display:flex;gap:6px;font-size:10.5px;color:var(--faint-foreground);flex-wrap:wrap;align-items:center">
+            <span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span>
+            <span>依赖：<b class="mono" style="color:var(--foreground)">T2</b></span>
+            <span>🕸 <span class="mono">points/deduct</span> · <span class="mono">deduct/api.go · DeductService</span> · <span class="risk lo">低风险</span> 调用方 1 处</span>
+          </div>
+          <div class="acc-box">
+            <div class="acc-head">✓ 验收标准（代码化）<span class="ver">v2 · 复用既有</span></div>
+            <div class="acc-path mono">acceptance/member/deduct-api.spec.ts</div>
+            <div class="acc-note">图谱判定本任务<b>不改动抵扣语义</b>（仅接入新账户模型）→ 沿用仓库既有 v2 验收，<b>不新增不修改</b>；仅当功能调整时才升 v3。</div>
+          </div>
+        </div>
+        <!-- 草稿卡 4 -->
+        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span class="mono" style="font-size:10px;color:#fff;background:var(--mod-member);border-radius:4px;padding:1px 5px">T4</span>
+            <b style="font-size:12.5px">积分对账与回归验证</b>
+            <span class="rtag"><span class="avatar human" style="width:14px;height:14px;font-size:7.5px">周</span>周晴<span class="x">✕</span></span>
+            <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">数据 · 规模 S</span>
+            <span style="font-size:11px;color:var(--muted-foreground)">✎</span>
+          </div>
+          <div style="margin-top:5px;display:flex;gap:6px;font-size:10.5px;color:var(--faint-foreground);flex-wrap:wrap;align-items:center">
+            <span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span>
+            <span>依赖：<b class="mono" style="color:var(--foreground)">T3</b></span>
+            <span>🕸 <span class="mono">points/reconcile</span> · <span class="mono">reconcile/job.go · t_reconcile_diff</span> · <span class="risk mid">中风险</span> 下游 T+1 报表</span>
+          </div>
+          <div class="acc-box">
+            <div class="acc-head">✓ 验收标准（代码化）<span class="ver">v1 · 新建</span></div>
+            <div class="acc-path mono">acceptance/member/reconcile.spec.ts</div>
+            <div style="margin-top:3px">☐ 对账差异率 = 0（T+0 全量比对） ☐ 对账时延 T+1 → T+0 达标 ☐ 差异明细可下钻到账变流水</div>
+          </div>
+        </div>
+        <!-- 依赖链示意 -->
+        <div style="border:1px dashed var(--border);border-radius:9px;padding:9px 12px;background:var(--surface)">
+          <div style="font-size:11px;color:var(--muted-foreground);margin-bottom:6px">依赖链 <span class="anno">6</span>（确认后写入 issue_dependency，同模块校验通过）</div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:10.5px" class="mono">
+            <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T1</span>→
+            <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T2</span>→
+            <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T3</span>→
+            <span style="background:var(--mod-member);color:#fff;border-radius:4px;padding:1.5px 6px">T4</span>
+            <span style="color:var(--faint-foreground);font-family:inherit">串行；若人工调整为 T2/T3 并行则自动改边</span>
+          </div>
+        </div>
+        <div style="border-radius:8px;padding:8px 11px;background:oklch(0.55 0.16 255/6%);font-size:11.5px;line-height:1.6;color:var(--muted-foreground)">
+          确认后：创建 4 个执行子任务（stage 3）+ <b style="color:var(--foreground)">1 个验收子任务</b>（stage 4，指派测试角色 Vera）→ <b style="color:var(--foreground)">9/15 00:00 自动触发</b>；同模块「会员」当前无其他执行中需求组，触发即可开跑。验收代码随首个子任务的 PR 一并落入 <b class="mono">acceptance/member/</b>。
+        </div>
+      </div>
+      <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;background:var(--surface)">
+        <span class="btn primary" style="flex:1;justify-content:center">✓ 确认拆解（4+1 项生效）<span class="anno" style="margin-left:5px">7</span></span>
+        <span class="btn">逐项调整</span>
+        <span class="btn" style="color:var(--destructive)">✗ 驳回重拆</span>
+      </div>
+    </div>
+    <!-- 右：定时执行面板 -->
+    <div style="flex:1;background:var(--page-canvas);display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="mono" style="font-size:11px;color:var(--faint-foreground)">SIRI-24</span>
+          <b style="font-size:14.5px">订单导出优化</b>
+          <span style="margin-left:auto;font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.55 0.16 255/12%);color:var(--brand);font-weight:650">⏱ 待自动触发</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:var(--muted-foreground)">
+          <span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-order)"></span>订单</span> ·
+          <span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar agent" style="width:16px;height:16px;font-size:8px">A</span>Atlas · 全自动</span> ·
+          <span class="mono">9/10 – 9/11</span>
+        </div>
+        <div style="margin-top:9px;display:flex;align-items:center;gap:9px;border-radius:8px;padding:9px 12px;background:oklch(0.55 0.16 255/6%);border:1px solid oklch(0.55 0.16 255/18%)">
+          <span style="font-size:17px">⏱</span>
+          <div style="font-size:11.5px;line-height:1.5">
+            <b>9/10 00:00 自动触发</b>（还剩 6 天）<span class="anno" style="margin-left:4px">8</span><br>
+            <span style="color:var(--muted-foreground)">已拆解 4+1 子任务 · 依赖链校验通过 · 验收代码 v1 已生成 · 组间互斥检查通过</span>
+          </div>
+          <span class="btn" style="margin-left:auto;flex:none">立即触发</span>
+        </div>
+      </div>
+      <div style="flex:1;overflow:auto;padding:12px 18px;display:flex;flex-direction:column;gap:7px">
+        <div style="font-size:12px;font-weight:650;display:flex;align-items:center;gap:6px">子任务执行 <span style="font-weight:400;color:var(--faint-foreground);font-size:11px">stage 3 · 1/4 完成</span></div>
+        <!-- T1 done -->
+        <div style="border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:9px 11px;display:flex;align-items:center;gap:8px;font-size:12px">
+          <span style="color:var(--success);font-weight:700">✓</span>
+          <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T1</span>
+          <span style="font-weight:550">导出任务队列化</span>
+          <span style="margin-left:auto;font-size:10.5px;color:var(--success);font-weight:600">已完成</span>
+        </div>
+        <!-- T2 running -->
+        <div style="border:1.5px solid oklch(0.55 0.16 255/45%);border-radius:8px;background:oklch(0.55 0.16 255/4%);padding:9px 11px;display:flex;align-items:center;gap:8px;font-size:12px">
+          <span style="color:var(--brand);font-weight:700">▶</span>
+          <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T2</span>
+          <span style="font-weight:550">大数据量分片导出</span>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--brand);font-weight:600"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">O</span>Orion 执行中 38m</span>
+        </div>
+        <!-- T3 queued waiting dependency -->
+        <div style="border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:9px 11px;display:flex;align-items:center;gap:8px;font-size:12px">
+          <span style="color:var(--faint-foreground)">○</span>
+          <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T3</span>
+          <span style="font-weight:550">导出模板管理</span>
+          <span style="margin-left:auto;font-size:10.5px;color:var(--muted-foreground)">等待依赖：<b class="mono">T2</b></span>
+        </div>
+        <!-- T4 blocked by module lock (cross-group) -->
+        <div style="border:1px solid oklch(0.72 0.15 75/45%);border-radius:8px;background:oklch(0.72 0.15 75/7%);padding:9px 11px;font-size:12px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:oklch(0.5 0.12 75);font-weight:700">🔒</span>
+            <span class="mono" style="font-size:10px;color:var(--faint-foreground)">T4</span>
+            <span style="font-weight:550">导出权限收敛</span>
+            <span style="margin-left:auto;font-size:10.5px;color:oklch(0.5 0.12 75);font-weight:600">等待模块释放 <span class="anno" style="margin-left:3px">9</span></span>
+          </div>
+          <div style="margin-top:5px;font-size:11px;color:var(--muted-foreground);line-height:1.55">同模块「订单」存在执行中的其他需求组 <b class="mono" style="color:var(--foreground)">SIRI-30（订单列表重构）</b>——组间互斥：该组全部子任务到达终态后自动放行。</div>
+        </div>
+        <!-- 验收 stage（barrier 后自动开启） -->
+        <div style="border:1px solid oklch(0.55 0.16 145/35%);border-radius:8px;background:oklch(0.55 0.16 145/5%);padding:9px 11px;font-size:12px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:oklch(0.42 0.12 145);font-weight:700">🧪</span>
+            <span class="mono" style="font-size:10px;color:var(--faint-foreground)">A1</span>
+            <span style="font-weight:550">交付验收（stage 4）</span>
+            <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--muted-foreground)"><span class="avatar agent" style="width:14px;height:14px;font-size:7.5px">V</span>Vera · 测试</span>
+          </div>
+          <div style="margin-top:5px;font-size:11px;color:var(--muted-foreground);line-height:1.55">等 stage 3 全部子任务到达终态后由 <b class="mono">stage barrier</b> 自动唤醒 → 依据 <b class="mono">acceptance/</b> 验收代码 + 图谱影响面出系统验收报告（详见画面 6）。</div>
+        </div>
+        <div style="border:1px dashed var(--border);border-radius:8px;padding:8px 11px;font-size:11px;color:var(--faint-foreground);line-height:1.6">
+          调度顺序总览：依赖 DAG（T1→T2→T3）决定组内顺序；组间互斥（同模块其他需求组）决定本组何时能占用模块。两道闸门均在 claim 时判定，等待不占并发配额。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p style="font-size:12px">标注：<span class="anno">1</span> PM 先出 plan（目标分解 / 阶段划分 / 风险）再拆任务；plan 全文写入需求评论可追溯，拆解与 plan 不一致时确认页高亮提醒&nbsp; <span class="anno">2</span> 拆解草稿按<b>系统内置固定模板</b>逐要素呈现，✎ 可逐项编辑&nbsp; <span class="anno">3</span> <b>图谱影响面四要素</b>（功能点 / 代码对象 / 依赖 / 影响情况）：PM agent <b>经 MCP 自主查 GitNexus 本体+图谱</b>（<span class="mono">/impact-analysis</span> · <span class="mono">/graph</span> · <span class="mono">/by-file</span>），标注来源 commit + 查询时间，可手动「重新查询」刷新&nbsp; <span class="anno">4</span> <b>验收标准代码化 + 版本控制</b>：写入业务仓 <span class="mono">acceptance/</span>，与功能代码同仓同 commit——<b>功能未调整则验收不动</b>，调整则在同一 PR 内更新并递增版本号；图谱判定无功能语义变更时直接<b>复用既有版本</b>（T3）&nbsp; <span class="anno">5</span> <b>指派角色</b>：PM 按需求班底将子任务分派到对应角色（研发多 agent 可并行，数据/测试角色承接专项任务），未入班底的角色不可被指派&nbsp; <span class="anno">6</span> 依赖链可视化，确认时写入 <span class="mono">issue_dependency</span>（同模块 + 防环校验复用现有 API）&nbsp; <span class="anno">7</span> 确认 = 批量创建子 issue（<span class="mono">parent_issue_id</span> = 本需求；stage 3 执行 / stage 4 验收）；驳回可附意见让 PM agent 重拆&nbsp; <span class="anno">8</span> 定时触发倒计时 + 「立即触发」手动通道；触发前完成依赖/互斥预检&nbsp; <span class="anno">9</span> 组间互斥等待原因直接呈现（held by 哪个需求组），与 <span class="mono">waiting_module_lock</span> 状态文案一致。</p>
+</div>
+
+<!-- ============ 画面 6：交付验收 ============ -->
+<div class="frame-head" id="f6">
+  <h2>画面 6 · 交付验收 — 测试 agent 系统化验收</h2>
+  <p>执行 stage 全部子任务到达终态后，<b class="mono">stage barrier</b> 自动唤醒验收子任务（stage 4），由班底中的<b>测试角色</b>承接。它无需重新理解需求——前置三类产出即验收依据：<b>① 已确认的产品原型</b>（画面 4）<b>② PM plan 的目标分解</b>（画面 5）<b>③ 每个子任务的验收代码 + 图谱影响面</b>。验收 agent 跑 <b class="mono">acceptance/</b> 全量断言、按图谱影响面推导<b>回归范围</b>（受影响调用方必测）、比对目标覆盖，产出结构化报告。<b>不通过 → 自动打回</b>：按失败断言定位到原子任务、创建修复子任务指派原研发 agent，修复后重新验收；循环达上限转人工。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 需求详情抽屉（左：验收报告 / 右：自动打回与轮次）</span></div>
+  <div style="display:flex;gap:0;height:800px;background:var(--app-shell)">
+    <!-- 左：验收报告 -->
+    <div style="flex:1.15;border-right:1px solid var(--surface-border);background:var(--page-canvas);display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="mono" style="font-size:11px;color:var(--faint-foreground)">SIRI-26</span>
+          <b style="font-size:14.5px">购物车合并结算</b>
+          <span style="margin-left:auto;font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.55 0.16 145/13%);color:oklch(0.4 0.11 145);font-weight:650">🧪 验收中 · 第 2 轮</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:var(--muted-foreground)">
+          <span style="display:inline-flex;align-items:center;gap:4px"><span class="s-dot" style="background:var(--mod-cart)"></span>购物车</span> ·
+          <span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar agent" style="width:16px;height:16px;font-size:8px">V</span>Vera · 测试角色</span> ·
+          <span class="mono">9/15 – 9/19</span>
+        </div>
+      </div>
+      <div class="stage-flow">
+        <span class="st-node done"><span class="dot">✓</span>原型</span>
+        <span class="st-line done"></span>
+        <span class="st-node done"><span class="dot">✓</span>plan + 拆解</span>
+        <span class="st-line done"></span>
+        <span class="st-node done"><span class="dot">✓</span>执行 4/4</span>
+        <span class="st-line done"></span>
+        <span class="st-node cur"><span class="dot">4</span>验收</span>
+        <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">barrier 唤醒于 12 分钟前</span>
+      </div>
+      <div style="flex:1;overflow:auto;padding:12px 18px;display:flex;flex-direction:column;gap:9px">
+        <div class="rep new-el">
+          <div class="rep-head">🧪 验收报告 <span class="anno">1</span>
+            <span style="font-weight:400;font-size:10.5px;color:var(--faint-foreground)">Vera · commit 7b2e1f4</span>
+            <span class="score" style="color:var(--destructive)">通过 23/26 · 88%</span>
+          </div>
+          <div class="rep-sec">
+            <b>一、验收依据（可溯源，均来自前置阶段产出）</b>
+            <div class="rep-item pass"><span class="ic">✓</span><span>已确认原型 <b>v2</b>（用户 9/4 09:12 确认）<span class="mono">docs/prototypes/SIRI-26-cart-merge.html</span></span></div>
+            <div class="rep-item pass"><span class="ic">✓</span><span>PM plan 目标分解 3 项 → 已全部落入子任务，无遗漏项</span></div>
+            <div class="rep-item pass"><span class="ic">✓</span><span>验收代码 <b>4 份</b>（<span class="mono">acceptance/cart/</span>）· 最高版本 v3 · 与功能代码同 commit</span></div>
+            <div class="rep-item pass"><span class="ic">✓</span><span>图谱影响面：受影响调用方 <b>5 处</b> → 已推导回归范围</span></div>
+          </div>
+          <div class="rep-sec">
+            <b>二、验收代码执行（<span class="mono">acceptance/</span> 全量断言）<span class="anno">2</span></b>
+            <div class="rep-item pass"><span class="ic">✓</span><span><span class="mono">cart/merge-order.spec.ts</span> <b>v2</b> — 8/8 断言通过</span></div>
+            <div class="rep-item pass"><span class="ic">✓</span><span><span class="mono">cart/coupon-stack.spec.ts</span> <b>v1</b> — 6/6 通过</span></div>
+            <div class="rep-item fail"><span class="ic">✗</span><span><span class="mono">cart/inventory-lock.spec.ts</span> <b>v3</b> — 5/7，失败：并发锁库存超卖（断言 L42）</span></div>
+            <div class="rep-item pass"><span class="ic">✓</span><span><span class="mono">cart/price-calc.spec.ts</span> <b>v2</b> — 4/4 通过</span></div>
+          </div>
+          <div class="rep-sec">
+            <b>三、图谱影响面回归（受影响调用方必测）<span class="anno">3</span></b>
+            <div class="rep-item pass"><span class="ic">✓</span><span><span class="mono">order/create_api</span> ← 调用 <span class="mono">cart/merge</span>：对外契约不变，回归 9 用例全通过</span></div>
+            <div class="rep-item pass"><span class="ic">✓</span><span><span class="mono">promotion/engine</span> ← 优惠券叠加：回归 12 用例全通过</span></div>
+            <div class="rep-item fail"><span class="ic">✗</span><span><span class="mono">inventory/deduct</span> ← 库存锁定：高并发下 P99 超时 + 出现超卖</span></div>
+          </div>
+          <div class="rep-sec">
+            <b>四、需求目标覆盖对照（回到创建时填写的目标）</b>
+            <div class="rep-item pass"><span class="ic">✓</span><span>结算步骤 3 → 1：已达成（原型一致）</span></div>
+            <div class="rep-item pass"><span class="ic">✓</span><span>下单转化率 +5%：灰度数据 +6.2%</span></div>
+            <div class="rep-item fail"><span class="ic">✗</span><span>库存准确率 100%：出现 2 笔超卖</span></div>
+          </div>
+          <div class="verdict bad">✗ 验收不通过 · 3 项失败（同根因：并发库存锁定）→ 已自动打回</div>
+        </div>
+        <div style="border:1px dashed var(--border);border-radius:8px;padding:8px 11px;font-size:11px;color:var(--faint-foreground);line-height:1.6">
+          验收报告写入需求<b>评论</b> + <b>交付物面板</b>（可预览）；每轮报告独立留存，可对比历轮通过率变化。
+        </div>
+      </div>
+    </div>
+    <!-- 右：自动打回 + 轮次 -->
+    <div style="flex:1;background:var(--page-canvas);display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border)">
+        <div style="font-size:13.5px;font-weight:650;display:flex;align-items:center;gap:7px">自动打回 <span class="anno">4</span>
+          <span style="margin-left:auto;font-size:11px;font-weight:400;color:var(--faint-foreground)">无需人工介入</span>
+        </div>
+      </div>
+      <div style="flex:1;overflow:auto;padding:12px 18px;display:flex;flex-direction:column;gap:9px">
+        <div class="bounce new-el">
+          <div style="font-weight:650;font-size:12px;margin-bottom:5px">第 2 轮打回 · 已执行</div>
+          <div style="font-size:11.5px;color:var(--muted-foreground);line-height:1.75">
+            <b style="color:var(--foreground)">① 定位</b>：失败断言 <span class="mono">inventory-lock.spec.ts:L42</span> → 图谱反查 → 原子任务 <b class="mono" style="color:var(--foreground)">T3 库存锁定改造</b>（研发 Rex）<br>
+            <b style="color:var(--foreground)">② 创建修复子任务</b>：<b class="mono" style="color:var(--foreground)">SIRI-26-F1</b>（stage 3，依赖 T3）· 指派 <b>Rex</b>（原研发 agent，保留上下文）<br>
+            <b style="color:var(--foreground)">③ 附件</b>：失败日志 + 断言代码位置 + 该任务图谱影响面 + 原型对应片段<br>
+            <b style="color:var(--foreground)">④ 重跑</b>：F1 到达终态 → barrier 再次唤醒验收（仅重跑受影响断言 + 全量回归）
+          </div>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:9px 12px">
+          <div style="font-size:11.5px;font-weight:650;margin-bottom:5px">验收代码是否需要跟着改？<span class="anno" style="margin-left:4px">5</span></div>
+          <div style="font-size:11px;color:var(--muted-foreground);line-height:1.7">
+            本轮判定：断言<b style="color:var(--foreground)">正确</b>、功能实现有缺陷 → <b style="color:var(--foreground)">验收代码不动</b>（继续 v3），只修功能。<br>
+            若判定为<b>需求变更导致断言过期</b> → 不得由验收 agent 自行改断言，需<b style="color:var(--foreground)">回退到 PM 确认</b>后由研发在同一 PR 内升版（v3→v4），并记录变更原因。
+          </div>
+        </div>
+        <div style="font-size:12px;font-weight:650;display:flex;align-items:center;gap:6px">验收轮次
+          <span style="font-weight:400;color:var(--faint-foreground);font-size:11px">上限 3 轮 · 超限转人工</span>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:9px 11px;font-size:11.5px;line-height:1.6">
+          <div style="display:flex;align-items:center;gap:7px"><span class="mono" style="color:var(--faint-foreground);font-size:10px">R1</span><span style="font-weight:550">9/19 14:02</span><span style="margin-left:auto;color:var(--destructive);font-weight:600">18/26 → 打回 T2、T3</span></div>
+          <div style="display:flex;align-items:center;gap:7px;margin-top:5px"><span class="mono" style="color:var(--faint-foreground);font-size:10px">R2</span><span style="font-weight:550">9/19 18:40</span><span style="margin-left:auto;color:var(--destructive);font-weight:600">23/26 → 打回 T3</span></div>
+          <div style="display:flex;align-items:center;gap:7px;margin-top:5px"><span class="mono" style="color:var(--brand);font-size:10px;font-weight:700">R3</span><span style="font-weight:550">进行中</span><span style="margin-left:auto;color:var(--brand);font-weight:600">Rex 修复中 22m</span></div>
+        </div>
+        <div style="border-radius:8px;padding:9px 11px;background:oklch(0.72 0.15 75/9%);border:1px solid oklch(0.72 0.15 75/25%);font-size:11.5px;line-height:1.65;color:var(--muted-foreground)">
+          <b style="color:oklch(0.45 0.12 75)">超限兵推：</b>若 R3 仍不通过 → 验收子任务置 <b class="mono">failed</b>，需求状态转「验收失败」，通知需求负责人 + PM agent；同时释放模块占用（终态即释放），不阻塞同模块其他需求组。
+        </div>
+        <div style="border:1px dashed var(--border);border-radius:8px;padding:8px 11px;font-size:11px;color:var(--faint-foreground);line-height:1.6">
+          验收子任务终态 = 需求终态：通过 → 需求 <b class="mono">done</b>（日历色块转 ✅）；失败转人工后由人判定是重跑还是取消。
+        </div>
+      </div>
+      <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;background:var(--surface)">
+        <span class="btn primary" style="flex:1;justify-content:center">▶ 查看修复子任务 SIRI-26-F1</span>
+        <span class="btn">人工介入</span>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p style="font-size:12px">标注：<span class="anno">1</span> 验收报告四大板块（依据溯源 / 验收代码执行 / 图谱回归 / 目标覆盖）——全部来自前置阶段的结构化产出，不依赖验收 agent 自行推断&nbsp; <span class="anno">2</span> 直接执行 <span class="mono">acceptance/</span> 下的验收代码，按<b>文件 + 版本号</b>逐项回报，失败项定位到断言行号&nbsp; <span class="anno">3</span> 回归范围由<b>图谱影响面推导</b>：拆解阶段记录的上下游调用方全部纳入必测集，避免遗漏隔层影响&nbsp; <span class="anno">4</span> <b>自动打回</b>：失败断言 → 图谱反查 → 原子任务 → 创建修复子任务（同 stage 3）指派原研发 agent，修复后 barrier 再次唤醒验收&nbsp; <span class="anno">5</span> <b>验收代码版本约束</b>：功能缺陷 → 验收不动；需求变更 → 回 PM 确认后同 PR 升版并记原因，验收 agent 无权自行改断言。</p>
+</div>
+
+</div>
+</body>
+</html>

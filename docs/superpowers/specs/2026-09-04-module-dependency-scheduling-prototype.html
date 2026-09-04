@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 原型 · 模块 + 依赖调度（2026-09-04）</title>
+<style>
+/* ===== Multica 设计 token（packages/ui/styles/tokens.css 浅色主题抄录） ===== */
+:root {
+  --app-shell: oklch(0.964435 0.001327 286.375);
+  --page-canvas: oklch(0.988087 0 0);
+  --surface: oklch(1 0 0);
+  --surface-hover: oklch(0.967 0.001 286.375);
+  --surface-selected: oklch(0.95 0.002 286.375);
+  --surface-border: oklch(0.92 0.004 286.32);
+  --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
+  --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+  --menu-shadow: 0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05);
+  --foreground: oklch(0.141 0.005 285.823);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --faint-foreground: oklch(0.606 0.016 285.938);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.967 0.001 286.375);
+  --border: oklch(0.945 0.003 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --destructive: oklch(0.577 0.245 27.325);
+  --brand: oklch(0.55 0.16 255);
+  --success: oklch(0.55 0.16 145);
+  --warning: oklch(0.75 0.16 85);
+  --info: oklch(0.55 0.18 250);
+  --radius: 0.625rem;
+  --sidebar-accent: oklch(0.935 0.003 286.375);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: oklch(0.93 0.004 286.32);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+/* ===== 原型画板框架（非产品 UI） ===== */
+.proto-nav {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 24px; background: oklch(0.16 0.005 285.823);
+  color: oklch(0.92 0.004 286.32);
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 12px; }
+.proto-nav .logo span { color: var(--brand); }
+.proto-nav a {
+  color: oklch(0.705 0.015 286.067); text-decoration: none;
+  padding: 5px 12px; border-radius: 6px; font-size: 12.5px;
+}
+.proto-nav a:hover { background: oklch(1 0 0 / 8%); color: #fff; }
+.proto-nav a.active { background: var(--brand); color: #fff; }
+.frame-wrap { max-width: 1460px; margin: 0 auto; padding: 32px 24px 80px; }
+.frame-head { margin-bottom: 14px; }
+.frame-head h2 { font-size: 17px; font-weight: 700; }
+.frame-head p { color: var(--muted-foreground); font-size: 13px; margin-top: 4px; line-height: 1.6; }
+.frame {
+  background: var(--page-canvas); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 0.16), 0 4px 16px rgb(15 23 42 / 0.08);
+  border: 1px solid oklch(0.85 0.005 286.32);
+  margin-bottom: 56px; position: relative;
+}
+.frame-bar {
+  height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+}
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: oklch(0.7 0.19 27); }
+.frame-bar i:nth-child(2) { background: oklch(0.8 0.16 85); }
+.frame-bar i:nth-child(3) { background: oklch(0.7 0.16 145); }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--faint-foreground); }
+
+/* 标注序号 */
+.anno {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700;
+  box-shadow: 0 0 0 2.5px oklch(0.55 0.16 255 / 20%);
+  position: relative; z-index: 5; flex: none;
+}
+.anno-float { position: absolute; }
+.new-el { outline: 1.5px dashed oklch(0.55 0.16 255 / 55%); outline-offset: 2px; border-radius: 6px; }
+
+/* ===== 应用外壳 ===== */
+.app { display: flex; height: 760px; }
+.sidebar {
+  width: 218px; flex: none; background: var(--app-shell);
+  border-right: 1px solid var(--surface-border);
+  padding: 10px 8px; display: flex; flex-direction: column; gap: 1px;
+  font-size: 12.5px; overflow: hidden;
+}
+.sidebar .ws {
+  display: flex; align-items: center; gap: 7px; padding: 5px 8px; margin-bottom: 8px;
+  font-weight: 600; font-size: 13px;
+}
+.sidebar .ws .ws-avatar {
+  width: 18px; height: 18px; border-radius: 5px; background: var(--primary);
+  color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px;
+}
+.s-item {
+  display: flex; align-items: center; gap: 8px; padding: 4.5px 8px;
+  border-radius: 6px; color: var(--muted-foreground); cursor: default;
+}
+.s-item svg { width: 14px; height: 14px; flex: none; }
+.s-item.active { background: var(--sidebar-accent); color: var(--foreground); font-weight: 500; }
+.s-item .kbd { margin-left: auto; font-size: 10.5px; color: var(--faint-foreground); }
+.s-item .badge-n {
+  margin-left: auto; font-size: 10.5px; background: var(--surface-selected);
+  color: var(--muted-foreground); border-radius: 8px; padding: 0 6px; line-height: 16px;
+}
+.s-group { margin-top: 14px; padding: 0 8px 3px; font-size: 11px; color: var(--faint-foreground); }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--page-canvas); }
+
+/* ===== 看板 ===== */
+.board-topbar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); font-size: 12.5px;
+}
+.board-topbar .crumb { color: var(--muted-foreground); display: flex; gap: 6px; align-items: center; }
+.board-topbar .crumb b { color: var(--foreground); font-weight: 600; }
+.tab-pill { padding: 4px 10px; border-radius: 6px; color: var(--muted-foreground); }
+.tab-pill.active { background: var(--surface-selected); color: var(--foreground); font-weight: 500; }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4.5px 10px;
+  border: 1px solid var(--border); background: var(--surface); border-radius: 6px;
+  font-size: 12px; color: var(--foreground); box-shadow: var(--surface-shadow);
+}
+.btn svg { width: 13px; height: 13px; }
+.btn.primary { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+.btn.brand { background: var(--brand); color: #fff; border-color: transparent; }
+
+/* 模块过滤条（新元素） */
+.module-filter {
+  display: flex; align-items: center; gap: 6px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); background: var(--page-canvas);
+}
+.module-filter .lbl { font-size: 11.5px; color: var(--faint-foreground); margin-right: 2px; }
+.module-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px; font-size: 12px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted-foreground);
+}
+.module-chip .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.module-chip.active { border-color: var(--brand); color: var(--foreground); background: oklch(0.55 0.16 255 / 7%); }
+.module-chip .cnt { font-size: 10.5px; color: var(--faint-foreground); }
+
+.board { display: flex; gap: 10px; padding: 12px 16px; overflow-x: auto; flex: 1; align-items: flex-start; }
+.col { width: 258px; flex: none; }
+.col-head {
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px 8px;
+  font-size: 12px; font-weight: 600; color: var(--muted-foreground);
+}
+.col-head .st-dot { width: 9px; height: 9px; border-radius: 50%; }
+.col-head .cnt { color: var(--faint-foreground); font-weight: 400; }
+.card {
+  background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: var(--radius); padding: 9px 10px; margin-bottom: 8px;
+  box-shadow: var(--surface-shadow); font-size: 12.5px; position: relative;
+}
+.card .id-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.card .iid { color: var(--faint-foreground); font-size: 11.5px; }
+.card .title { font-weight: 500; line-height: 1.45; }
+.card .desc { color: var(--muted-foreground); font-size: 11.5px; margin-top: 3px; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card .meta { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--faint-foreground); font-size: 11px; }
+.card .meta .proj { display: inline-flex; align-items: center; gap: 4px; }
+.card .meta .proj svg { width: 11px; height: 11px; }
+.card .meta .who { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.avatar {
+  width: 16px; height: 16px; border-radius: 50%; background: oklch(0.21 0.006 285.885);
+  color: #fff; font-size: 9px; display: inline-flex; align-items: center; justify-content: center;
+}
+.prio { display: inline-flex; gap: 1.5px; align-items: flex-end; height: 10px; }
+.prio i { width: 2.5px; background: var(--warning); border-radius: 1px; display: block; }
+.prio i:nth-child(1) { height: 4px; } .prio i:nth-child(2) { height: 7px; } .prio i:nth-child(3) { height: 10px; }
+.prio.urgent { display: inline-flex; align-items: center; height: auto; }
+.prio.urgent i { width: 9px; height: 9px; background: var(--destructive); border-radius: 2.5px; }
+
+/* 模块徽章（新元素） */
+.module-badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1.5px 8px;
+  border-radius: 999px; font-size: 10.5px; font-weight: 500; line-height: 16px;
+}
+.module-badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+.module-badge svg { width: 10px; height: 10px; }
+.badge-row { display: flex; align-items: center; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+
+/* 等待徽标（新元素） */
+.wait-badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1.5px 8px;
+  border-radius: 999px; font-size: 10.5px; line-height: 16px; font-weight: 500;
+}
+.wait-badge svg { width: 10px; height: 10px; }
+.wait-dep { background: oklch(0.75 0.16 85 / 14%); color: oklch(0.5 0.13 85); }
+.wait-lock { background: oklch(0.55 0.18 250 / 12%); color: oklch(0.45 0.15 250); }
+.running-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success);
+  box-shadow: 0 0 0 3px oklch(0.55 0.16 145 / 20%); display: inline-block; }
+</style>
+</head>
+<body>
+
+<nav class="proto-nav">
+  <div class="logo">Multica <span>◆</span> 模块 + 依赖调度 · 原型</div>
+  <a href="#board" class="active">A · 项目看板</a>
+  <a href="#create">B · 新建任务</a>
+  <a href="#detail">C · 任务详情</a>
+  <a href="#modules">D · 模块管理</a>
+  <a href="#legend">E · 图例</a>
+</nav>
+
+<div class="frame-wrap">
+
+<!-- ================= 画面 A：项目看板 ================= -->
+<section id="board">
+  <div class="frame-head">
+    <h2>画面 A · 项目看板 —— 模块过滤与执行状态呈现</h2>
+    <p>① 模块过滤条（看板顶部新增，可多选过滤）　② 卡片模块徽章（色点 + 模块名，盾牌 = 已勾选「避免冲突」）　③ 等待依赖徽标（前置未完成）　④ 等待模块锁徽标（异模块勾选方持锁中）　⑤ 正常进行中的任务不受影响</p>
+  </div>
+  <div class="frame">
+    <div class="frame-bar"><i></i><i></i><i></i><span>Multica · 天狼星工作区 · dsk_desktop 项目</span></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="ws"><div class="ws-avatar">天</div>天狼星</div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>搜索…<span class="kbd">⌘K</span></div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>新建任务<span class="kbd">C</span></div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>收件箱<span class="badge-n">2</span></div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>聊天<span class="badge-n">1</span></div>
+        <div class="s-group">工作区</div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>任务</div>
+        <div class="s-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>项目</div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>自动化</div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>智能体</div>
+        <div class="s-group">配置</div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>运行时</div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</div>
+      </aside>
+
+      <div class="main">
+        <div class="board-topbar">
+          <span class="crumb">项目 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg> <b>dsk_desktop 项目</b></span>
+          <span class="tab-pill active">全部</span><span class="tab-pill">成员</span><span class="tab-pill">智能体</span>
+          <div class="topbar-right">
+            <span class="btn"><span class="running-dot"></span>1 个智能体工作中</span>
+            <span class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54z"/></svg>筛选</span>
+            <span class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M7 12h10m-7 6h4"/></svg>显示</span>
+            <span class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="18" rx="1"/><rect x="17" y="3" width="5" height="18" rx="1"/></svg>看板</span>
+          </div>
+        </div>
+
+        <!-- ① 模块过滤条 -->
+        <div class="module-filter new-el">
+          <span class="anno">1</span><span class="lbl">模块</span>
+          <span class="module-chip active">全部模块</span>
+          <span class="module-chip"><i class="dot" style="background:oklch(0.55 0.16 255)"></i>内核与配置<span class="cnt">7</span></span>
+          <span class="module-chip"><i class="dot" style="background:oklch(0.6 0.17 25)"></i>Flow 与编排<span class="cnt">4</span></span>
+          <span class="module-chip"><i class="dot" style="background:oklch(0.55 0.16 145)"></i>插件生态<span class="cnt">3</span></span>
+          <span class="module-chip" style="border-style:dashed"><i class="dot" style="background:var(--faint-foreground)"></i>无模块<span class="cnt">2</span></span>
+        </div>
+
+        <div class="board">
+          <!-- 待办列 -->
+          <div class="col">
+            <div class="col-head"><i class="st-dot" style="background:transparent;border:2px solid var(--faint-foreground)"></i>待办 <span class="cnt">5</span></div>
+
+            <div class="card">
+              <div class="id-row"><span class="prio"><i></i><i></i><i></i></span><span class="iid">SIRI-14</span></div>
+              <div class="title">[P0-4] 投影编译器 MVP（JSON 图→overlay/journey/entitlement+签名）</div>
+              <div class="badge-row">
+                <span class="module-badge new-el" style="background:oklch(0.55 0.16 255/10%);color:oklch(0.42 0.13 255)"><i class="dot" style="background:oklch(0.55 0.16 255)"></i>内核与配置<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span class="anno">2</span></span>
+                <span class="wait-badge wait-dep new-el"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>等待依赖 2<span class="anno">3</span></span>
+              </div>
+              <div class="meta"><span class="proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/></svg>dsk_desktop</span><span class="who"><span class="avatar">Q</span>3 分钟前</span></div>
+            </div>
+
+            <div class="card">
+              <div class="id-row"><span class="prio"><i></i><i></i><i></i></span><span class="iid">SIRI-13</span></div>
+              <div class="title">[P0-3] projection-sync 端侧插件（拉取/验签/原子落盘/last_good/ACK）</div>
+              <div class="badge-row">
+                <span class="module-badge" style="background:oklch(0.55 0.16 255/10%);color:oklch(0.42 0.13 255)"><i class="dot" style="background:oklch(0.55 0.16 255)"></i>内核与配置<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+                <span class="wait-badge wait-dep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>等待依赖 1</span>
+              </div>
+              <div class="meta"><span class="proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/></svg>dsk_desktop</span><span class="who"><span class="avatar">Q</span>3 分钟前</span></div>
+            </div>
+
+            <div class="card">
+              <div class="id-row"><span class="prio"><i></i><i></i><i></i></span><span class="iid">SIRI-12</span></div>
+              <div class="title">[P0-2] 内核观测面：隔离事件与熔断计数接入诊断页</div>
+              <div class="badge-row">
+                <span class="module-badge" style="background:oklch(0.55 0.16 255/10%);color:oklch(0.42 0.13 255)"><i class="dot" style="background:oklch(0.55 0.16 255)"></i>内核与配置</span>
+              </div>
+              <div class="meta"><span class="proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/></svg>dsk_desktop</span><span class="who"><span class="avatar">Q</span>3 分钟前</span></div>
+            </div>
+
+            <div class="card">
+              <div class="id-row"><span class="prio urgent"><i></i></span><span class="iid">SIRI-10</span></div>
+              <div class="title">[前置-A3] Flow Runtime 与 workflow 包边界划界决策</div>
+              <div class="badge-row">
+                <span class="module-badge" style="background:oklch(0.6 0.17 25/10%);color:oklch(0.47 0.14 25)"><i class="dot" style="background:oklch(0.6 0.17 25)"></i>Flow 与编排</span>
+                <span class="wait-badge wait-lock new-el"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>等待模块锁释放<span class="anno">4</span></span>
+              </div>
+              <div class="meta"><span class="proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/></svg>dsk_desktop</span><span class="who"><span class="avatar">Q</span>3 分钟前</span></div>
+            </div>
+
+            <div class="card">
+              <div class="id-row"><span class="prio urgent"><i></i></span><span class="iid">SIRI-9</span></div>
+              <div class="title">[前置-A2] 拍板 D1–D5 五条架构决策并回写文档</div>
+              <div class="badge-row">
+                <span class="module-badge" style="background:oklch(0.6 0.17 25/10%);color:oklch(0.47 0.14 25)"><i class="dot" style="background:oklch(0.6 0.17 25)"></i>Flow 与编排</span>
+                <span class="wait-badge wait-lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>等待模块锁释放</span>
+              </div>
+              <div class="meta"><span class="proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/></svg>dsk_desktop</span><span class="who"><span class="avatar">Q</span>3 分钟前</span></div>
+            </div>
+          </div>
+
+          <!-- 进行中列 -->
+          <div class="col">
+            <div class="col-head"><i class="st-dot" style="background:var(--warning)"></i>进行中 <span class="cnt">2</span></div>
+
+            <div class="card" style="border-color:oklch(0.55 0.16 145/40%)">
+              <div class="id-row"><span class="prio urgent"><i></i></span><span class="iid">SIRI-8</span><span class="anno anno-float" style="top:-7px;right:-7px">5</span></div>
+              <div class="title">[前置-A1] 清理 git 工作区并提交干净基线</div>
+              <div class="badge-row">
+                <span class="module-badge" style="background:oklch(0.6 0.17 25/10%);color:oklch(0.47 0.14 25)"><i class="dot" style="background:oklch(0.6 0.17 25)"></i>Flow 与编排<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+                <span class="wait-badge" style="background:oklch(0.55 0.16 145/12%);color:oklch(0.42 0.13 145)"><span class="running-dot" style="width:7px;height:7px"></span>正在工作</span>
+              </div>
+              <div class="meta"><span class="proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/></svg>dsk_desktop</span><span class="who"><span class="avatar">Q</span>1 分钟前</span></div>
+            </div>
+
+            <div class="card" style="border-color:oklch(0.55 0.16 145/40%)">
+              <div class="id-row"><span class="prio"><i></i><i></i><i></i></span><span class="iid">SIRI-11</span></div>
+              <div class="title">[P0-1] Cordis Loader 分域隔离默认（faultDomain 机制）</div>
+              <div class="badge-row">
+                <span class="module-badge" style="background:oklch(0.55 0.16 255/10%);color:oklch(0.42 0.13 255)"><i class="dot" style="background:oklch(0.55 0.16 255)"></i>内核与配置</span>
+                <span class="wait-badge" style="background:oklch(0.55 0.16 145/12%);color:oklch(0.42 0.13 145)"><span class="running-dot" style="width:7px;height:7px"></span>正在工作</span>
+              </div>
+              <div class="meta"><span class="proj"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/></svg>dsk_desktop</span><span class="who"><span class="avatar">Q</span>刚刚</span></div>
+            </div>
+          </div>
+
+          <!-- 审核中 -->
+          <div class="col">
+            <div class="col-head"><i class="st-dot" style="background:var(--success)"></i>审核中 <span class="cnt">0</span></div>
+            <div style="border:1.5px dashed var(--input);border-radius:var(--radius);padding:18px;text-align:center;color:var(--faint-foreground);font-size:12px">无任务</div>
+          </div>
+
+          <!-- 已完成 -->
+          <div class="col">
+            <div class="col-head"><i class="st-dot" style="background:var(--brand)"></i>已完成 <span class="cnt">0</span></div>
+            <div style="border:1.5px dashed var(--input);border-radius:var(--radius);padding:18px;text-align:center;color:var(--faint-foreground);font-size:12px">无任务</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 画面 B：新建任务表单 ================= -->
+<section id="create">
+  <div class="frame-head">
+    <h2>画面 B · 新建任务 —— 模块选择、避免冲突、前置依赖</h2>
+    <p>⑥ 模块下拉（单选，可就地新建）　⑦ 勾选「避免冲突」后展示语义说明　⑧ 前置依赖多选器（仅列同模块任务，已选成 chip，可移除）</p>
+  </div>
+  <div class="frame">
+    <div class="frame-bar"><i></i><i></i><i></i><span>新建任务（Modal）</span></div>
+    <div style="padding:40px 32px;display:flex;justify-content:center;background:var(--page-canvas)">
+      <div style="width:640px;background:var(--surface-raised,#fff);border:1px solid var(--surface-border);border-radius:12px;box-shadow:var(--floating-shadow);overflow:hidden">
+        <div style="padding:14px 18px 0;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--faint-foreground)">
+          <span style="color:var(--muted-foreground)">dsk_desktop 项目</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+          <span>新建任务</span>
+        </div>
+        <div style="padding:10px 18px 0">
+          <div style="font-size:17px;font-weight:700;color:var(--faint-foreground)">任务标题…</div>
+          <div style="margin-top:8px;padding:10px 12px;border:1px dashed var(--input);border-radius:8px;color:var(--faint-foreground);font-size:12.5px">添加描述…（背景 / 产出 / 验收）</div>
+        </div>
+
+        <!-- 属性网格 -->
+        <div style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:8px 14px">
+          <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+            <span style="width:64px;color:var(--faint-foreground)">状态</span>
+            <span class="btn" style="border:none;box-shadow:none;background:var(--muted);padding:3px 10px"><i style="width:8px;height:8px;border-radius:50%;border:2px solid var(--faint-foreground);display:inline-block"></i>待办</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+            <span style="width:64px;color:var(--faint-foreground)">优先级</span>
+            <span class="btn" style="border:none;box-shadow:none;background:var(--muted);padding:3px 10px"><span class="prio" style="margin-right:2px"><i></i><i></i><i></i></span>高</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+            <span style="width:64px;color:var(--faint-foreground)">负责人</span>
+            <span class="btn" style="border:none;box-shadow:none;background:var(--muted);padding:3px 10px"><span class="avatar">Q</span>Qoder_3.8Max</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+            <span style="width:64px;color:var(--faint-foreground)">项目</span>
+            <span class="btn" style="border:none;box-shadow:none;background:var(--muted);padding:3px 10px">dsk_desktop 项目</span>
+          </div>
+        </div>
+
+        <!-- ⑥ 模块选择（展开态） -->
+        <div style="margin:0 18px;border-top:1px solid var(--border);padding:12px 0;position:relative">
+          <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+            <span class="anno">6</span>
+            <span style="width:56px;color:var(--faint-foreground)">模块</span>
+            <span class="btn" style="padding:4px 10px">
+              <i class="dot" style="width:7px;height:7px;border-radius:50%;background:oklch(0.55 0.16 255);display:inline-block"></i>
+              内核与配置
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--faint-foreground)"><path d="m6 9 6 6 6-6"/></svg>
+            </span>
+          </div>
+          <!-- 下拉面板 -->
+          <div style="position:absolute;left:66px;top:44px;width:280px;background:var(--surface-raised,#fff);border:1px solid var(--surface-border);border-radius:10px;box-shadow:var(--menu-shadow);z-index:10;overflow:hidden">
+            <div style="padding:8px 10px;border-bottom:1px solid var(--border)">
+              <span style="font-size:12px;color:var(--faint-foreground)">选择模块…</span>
+            </div>
+            <div style="padding:5px">
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12.5px;color:var(--muted-foreground)">
+                <i style="width:7px;height:7px;border-radius:50%;border:1.5px dashed var(--faint-foreground);display:inline-block"></i>无模块（不参与锁定）
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--surface-selected);font-size:12.5px">
+                <i style="width:7px;height:7px;border-radius:50%;background:oklch(0.55 0.16 255);display:inline-block"></i>内核与配置
+                <svg style="margin-left:auto" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12.5px">
+                <i style="width:7px;height:7px;border-radius:50%;background:oklch(0.6 0.17 25);display:inline-block"></i>Flow 与编排
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12.5px">
+                <i style="width:7px;height:7px;border-radius:50%;background:oklch(0.55 0.16 145);display:inline-block"></i>插件生态
+              </div>
+            </div>
+            <div style="border-top:1px solid var(--border);padding:7px 10px;display:flex;align-items:center;gap:6px;color:var(--brand);font-size:12.5px">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>新建模块…
+            </div>
+          </div>
+        </div>
+
+        <!-- ⑦ 避免冲突 -->
+        <div style="margin:0 18px;border-top:1px solid var(--border);padding:12px 0">
+          <div style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px">
+            <span class="anno" style="margin-top:1px">7</span>
+            <span style="width:56px;color:var(--faint-foreground);flex:none">冲突策略</span>
+            <div>
+              <label style="display:flex;align-items:center;gap:7px;font-weight:500;cursor:default">
+                <span style="width:15px;height:15px;border-radius:4px;background:var(--brand);display:inline-flex;align-items:center;justify-content:center">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5"><path d="M20 6 9 17l-5-5"/></svg>
+                </span>
+                避免与其他模块冲突
+              </label>
+              <div style="margin-top:5px;color:var(--muted-foreground);font-size:11.5px;line-height:1.6;max-width:380px">
+                勾选后：本任务执行时将<b>等待其他模块的任务全部完成</b>，其他模块的任务在本任务执行期间也不会启动（模块级互斥）。同模块任务不受影响，仍按依赖并发执行。
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ⑧ 前置依赖 -->
+        <div style="margin:0 18px 16px;border-top:1px solid var(--border);padding:12px 0;position:relative">
+          <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+            <span class="anno">8</span>
+            <span style="width:56px;color:var(--faint-foreground)">前置依赖</span>
+            <span class="module-badge" style="background:oklch(0.95 0.002 286.375);color:var(--muted-foreground);border:1px solid var(--border)">SIRI-11 Cordis Loader 分域隔离默认<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg></span>
+            <span class="module-badge" style="background:oklch(0.95 0.002 286.375);color:var(--muted-foreground);border:1px solid var(--border)">SIRI-12 内核观测面<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg></span>
+            <span class="btn" style="border-style:dashed;color:var(--faint-foreground);padding:3px 9px;font-size:11.5px">+ 添加</span>
+          </div>
+          <!-- 依赖选择面板 -->
+          <div style="position:absolute;left:66px;top:44px;width:340px;background:var(--surface-raised,#fff);border:1px solid var(--surface-border);border-radius:10px;box-shadow:var(--menu-shadow);z-index:9;overflow:hidden">
+            <div style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--faint-foreground)">
+              仅可依赖同模块任务（模块「内核与配置」）
+            </div>
+            <div style="padding:5px;font-size:12.5px">
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--surface-selected)">
+                <span style="width:14px;height:14px;border-radius:4px;background:var(--brand);display:inline-flex;align-items:center;justify-content:center;flex:none"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5"><path d="M20 6 9 17l-5-5"/></svg></span>
+                <span class="mono" style="color:var(--faint-foreground);font-size:11px">SIRI-11</span>[P0-1] Cordis Loader 分域隔离默认
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--surface-selected)">
+                <span style="width:14px;height:14px;border-radius:4px;background:var(--brand);display:inline-flex;align-items:center;justify-content:center;flex:none"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5"><path d="M20 6 9 17l-5-5"/></svg></span>
+                <span class="mono" style="color:var(--faint-foreground);font-size:11px">SIRI-12</span>[P0-2] 内核观测面
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px">
+                <span style="width:14px;height:14px;border-radius:4px;border:1.5px solid var(--input);flex:none"></span>
+                <span class="mono" style="color:var(--faint-foreground);font-size:11px">SIRI-13</span>[P0-3] projection-sync 端侧插件
+                <span style="margin-left:auto;font-size:10.5px;color:oklch(0.5 0.13 85)">会成环</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;color:var(--faint-foreground)">
+                <span style="width:14px;height:14px;border-radius:4px;border:1.5px solid var(--input);flex:none;opacity:.45"></span>
+                <span class="mono" style="font-size:11px">SIRI-9</span><span style="opacity:.55">[前置-A2] 拍板 D1–D5（模块不同，不可选）</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="border-top:1px solid var(--border);padding:12px 18px;display:flex;justify-content:flex-end;gap:8px;background:var(--page-canvas)">
+          <span class="btn">取消</span>
+          <span class="btn primary">创建任务</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 画面 C：任务详情 ================= -->
+<section id="detail">
+  <div class="frame-head">
+    <h2>画面 C · 任务详情 —— 依赖区块与等待状态</h2>
+    <p>⑨ 标题旁模块徽章　⑩ 前置依赖区块（逐条显示前置状态，可增删）　⑪ 依赖阻塞提示条（前置全部「已完成」后自动放行）　⑫ 右侧属性栏新增模块与冲突策略　⑬ 执行日志的等待模块锁状态</p>
+  </div>
+  <div class="frame">
+    <div class="frame-bar"><i></i><i></i><i></i><span>SIRI-13 · projection-sync 端侧插件</span></div>
+    <div style="display:flex;background:var(--page-canvas);min-height:560px">
+      <!-- 详情主栏 -->
+      <div style="flex:1;min-width:0;padding:20px 28px">
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-foreground)">
+          <span>dsk_desktop 项目</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+          <span class="mono">SIRI-13</span>
+          <span class="wait-badge wait-dep" style="margin-left:6px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Qoder_3.8Max · 等待依赖</span>
+        </div>
+        <h1 style="font-size:19px;font-weight:700;margin-top:10px;line-height:1.4">
+          [P0-3] projection-sync 端侧插件（拉取/验签/原子落盘/last_good/ACK）
+          <span class="module-badge new-el" style="background:oklch(0.55 0.16 255/10%);color:oklch(0.42 0.13 255);vertical-align:3px"><i class="dot" style="background:oklch(0.55 0.16 255)"></i>内核与配置<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+          <span class="anno">9</span>
+        </h1>
+
+        <!-- ⑪ 依赖阻塞提示条 -->
+        <div class="new-el" style="margin-top:14px;display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:8px;background:oklch(0.75 0.16 85/10%);border:1px solid oklch(0.75 0.16 85/30%);font-size:12.5px">
+          <span class="anno">11</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="oklch(0.5 0.13 85)" stroke-width="2.4"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <span>等待依赖：<b>SIRI-12</b> 完成后自动开始执行（前置失败/取消时将保持排队，需人工处理后放行）</span>
+        </div>
+
+        <!-- ⑩ 依赖区块 -->
+        <div class="new-el" style="margin-top:16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)">
+          <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border);font-size:12.5px;font-weight:600">
+            <span class="anno">10</span>前置依赖<span style="color:var(--faint-foreground);font-weight:400">2</span>
+            <span class="btn" style="margin-left:auto;padding:2.5px 9px;font-size:11.5px">+ 添加前置</span>
+          </div>
+          <div style="padding:6px 8px">
+            <div style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:6px">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="oklch(0.55 0.16 145)" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="10" fill="oklch(0.55 0.16 145)" stroke="none"/><path d="M20 6 9 17l-5-5" fill="none"/></svg>
+              <span class="mono" style="color:var(--faint-foreground);font-size:11.5px">SIRI-11</span>
+              <span style="font-size:12.5px">[P0-1] Cordis Loader 分域隔离默认（faultDomain 机制）</span>
+              <span style="margin-left:auto;font-size:11.5px;color:oklch(0.5 0.14 145)">已完成</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:6px">
+              <svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="oklch(0.75 0.16 85)" stroke-width="2.5"/><path d="M12 7v5l3 3" fill="none" stroke="oklch(0.75 0.16 85)" stroke-width="2.5" stroke-linecap="round"/></svg>
+              <span class="mono" style="color:var(--faint-foreground);font-size:11.5px">SIRI-12</span>
+              <span style="font-size:12.5px">[P0-2] 内核观测面：隔离事件与熔断计数接入诊断页</span>
+              <span style="margin-left:auto;font-size:11.5px;color:oklch(0.5 0.13 85)">进行中</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:18px;font-size:13px;line-height:1.7;color:var(--foreground)">
+          <h3 style="font-size:13.5px;font-weight:700;margin-bottom:6px">背景</h3>
+          <p style="color:var(--muted-foreground)">新建 projection-sync 端侧插件：拉取/验签/原子落盘/last_good/ACK。依赖 P0-1 的分域隔离默认与 P0-2 的观测面完成后开始。</p>
+        </div>
+
+        <!-- 动态 -->
+        <div style="margin-top:22px;border-top:1px solid var(--border);padding-top:14px">
+          <div style="font-size:12.5px;font-weight:600;color:var(--muted-foreground);margin-bottom:10px">动态</div>
+          <div style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:var(--muted-foreground)">
+            <span class="avatar">Q</span>
+            <div>Qoder_3.8Max 创建了这个任务<span style="color:var(--faint-foreground);margin-left:8px;font-size:11.5px">14 分钟前</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧属性栏 -->
+      <div style="width:248px;flex:none;border-left:1px solid var(--border);padding:16px 14px;background:var(--page-canvas);font-size:12.5px">
+        <div style="font-size:11px;color:var(--faint-foreground);margin-bottom:8px">属性</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:60px;color:var(--faint-foreground)">状态</span><span style="display:inline-flex;align-items:center;gap:5px"><i style="width:8px;height:8px;border-radius:50%;border:2px solid var(--faint-foreground)"></i>待办</span></div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:60px;color:var(--faint-foreground)">负责人</span><span style="display:inline-flex;align-items:center;gap:5px"><span class="avatar">Q</span>Qoder_3.8Max</span></div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:60px;color:var(--faint-foreground)">项目</span><span>dsk_desktop 项目</span></div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:60px;color:var(--faint-foreground)">优先级</span><span class="prio"><i></i><i></i><i></i></span></div>
+          <div class="new-el" style="display:flex;align-items:center;gap:8px">
+            <span class="anno">12</span><span style="width:44px;color:var(--faint-foreground)">模块</span>
+            <span class="module-badge" style="background:oklch(0.55 0.16 255/10%);color:oklch(0.42 0.13 255)"><i class="dot" style="background:oklch(0.55 0.16 255)"></i>内核与配置</span>
+          </div>
+          <div class="new-el" style="display:flex;align-items:center;gap:8px">
+            <span style="width:60px;color:var(--faint-foreground);margin-left:25px">冲突策略</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="oklch(0.45 0.15 250)" stroke-width="2.4"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span style="color:oklch(0.45 0.15 250)">避免冲突 · 开</span>
+          </div>
+        </div>
+
+        <!-- ⑬ 执行日志 -->
+        <div class="new-el" style="margin-top:20px;border-top:1px solid var(--border);padding-top:12px">
+          <div style="font-size:11px;color:var(--faint-foreground);margin-bottom:8px">执行日志<span class="anno" style="margin-left:6px">13</span></div>
+          <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface)">
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px">
+              <span class="avatar" style="width:14px;height:14px">Q</span>首次运行
+              <span class="wait-badge wait-lock" style="margin-left:auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>等待模块锁释放</span>
+            </div>
+            <div style="margin-top:6px;font-size:11px;color:var(--faint-foreground)">模块「内核与配置」held by 模块「Flow 与编排」· SIRI-8</div>
+          </div>
+        </div>
+
+        <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:12px;font-size:11.5px;color:var(--faint-foreground)">
+          <div>创建者 Qoder_3.8Max</div>
+          <div style="margin-top:4px">创建时间 9月4日</div>
+          <div style="margin-top:4px">更新时间 9月4日</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 画面 D：模块管理 ================= -->
+<section id="modules">
+  <div class="frame-head">
+    <h2>画面 D · 项目模块管理</h2>
+    <p>⑭ 项目页新增「模块」入口（项目内维度的轻量管理：命名、颜色、任务数）　⑮ 删除有任务引用的模块时给出回落说明（任务变为无模块、依赖边清除）</p>
+  </div>
+  <div class="frame">
+    <div class="frame-bar"><i></i><i></i><i></i><span>项目 · dsk_desktop · 模块</span></div>
+    <div style="display:flex;background:var(--page-canvas);min-height:420px">
+      <div style="width:218px;flex:none;border-right:1px solid var(--border);padding:14px 10px;font-size:12.5px">
+        <div style="padding:4px 8px 10px;font-weight:700;font-size:14px">dsk_desktop 项目</div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>任务</div>
+        <div class="s-item active new-el"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>模块<span class="anno" style="margin-left:auto">14</span></div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>资源</div>
+        <div class="s-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4M4.2 4.2l2.8 2.8m10 10 2.8 2.8M1 12h4m14 0h4M4.2 19.8l2.8-2.8m10-10 2.8-2.8"/></svg>设置</div>
+      </div>
+      <div style="flex:1;padding:20px 24px">
+        <div style="display:flex;align-items:center">
+          <div>
+            <div style="font-size:15px;font-weight:700">模块</div>
+            <div style="color:var(--muted-foreground);font-size:12px;margin-top:3px">模块是项目内的轻量分组：同模块任务按依赖并发执行；勾选「避免冲突」的任务与其他模块互斥。</div>
+          </div>
+          <span class="btn brand" style="margin-left:auto">+ 新建模块</span>
+        </div>
+
+        <div style="margin-top:16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);overflow:hidden">
+          <div style="display:grid;grid-template-columns:24px 1fr 90px 110px 70px;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:11px;color:var(--faint-foreground)">
+            <span></span><span>名称</span><span>任务数</span><span>勾选避免冲突</span><span></span>
+          </div>
+          <div style="display:grid;grid-template-columns:24px 1fr 90px 110px 70px;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);align-items:center;font-size:12.5px">
+            <i style="width:10px;height:10px;border-radius:50%;background:oklch(0.55 0.16 255)"></i>
+            <span style="font-weight:500">内核与配置</span><span style="color:var(--muted-foreground)">7</span>
+            <span style="color:var(--muted-foreground)">3 个任务</span>
+            <span style="display:flex;gap:6px;justify-content:flex-end;color:var(--faint-foreground)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </span>
+          </div>
+          <div style="display:grid;grid-template-columns:24px 1fr 90px 110px 70px;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);align-items:center;font-size:12.5px">
+            <i style="width:10px;height:10px;border-radius:50%;background:oklch(0.6 0.17 25)"></i>
+            <span style="font-weight:500">Flow 与编排</span><span style="color:var(--muted-foreground)">4</span>
+            <span style="color:var(--muted-foreground)">1 个任务</span>
+            <span style="display:flex;gap:6px;justify-content:flex-end;color:var(--faint-foreground)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </span>
+          </div>
+          <div style="display:grid;grid-template-columns:24px 1fr 90px 110px 70px;gap:10px;padding:10px 14px;align-items:center;font-size:12.5px">
+            <i style="width:10px;height:10px;border-radius:50%;background:oklch(0.55 0.16 145)"></i>
+            <span style="font-weight:500">插件生态</span><span style="color:var(--muted-foreground)">3</span>
+            <span style="color:var(--faint-foreground)">—</span>
+            <span style="display:flex;gap:6px;justify-content:flex-end;color:var(--faint-foreground)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </span>
+          </div>
+        </div>
+
+        <!-- ⑮ 删除确认 -->
+        <div class="new-el" style="margin-top:14px;display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:8px;background:oklch(0.577 0.245 27.325/6%);border:1px solid oklch(0.577 0.245 27.325/25%);font-size:12px;line-height:1.6">
+          <span class="anno" style="margin-top:1px">15</span>
+          <div><b>删除模块「内核与配置」？</b>该模块下 7 个任务将变为「无模块」（不再参与任何锁定），任务间已配置的 4 条依赖将一并移除。此操作不可撤销。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 画面 E：图例 ================= -->
+<section id="legend">
+  <div class="frame-head">
+    <h2>画面 E · 新增视觉元素图例</h2>
+    <p>本次引入的全部新视觉语汇一览，均复用现有 token（brand / success / warning / info / destructive）。</p>
+  </div>
+  <div class="frame">
+    <div class="frame-bar"><i></i><i></i><i></i><span>图例</span></div>
+    <div style="padding:24px 28px;display:grid;grid-template-columns:1fr 1fr;gap:14px 32px;background:var(--page-canvas)">
+      <div style="display:flex;align-items:center;gap:12px;font-size:12.5px">
+        <span class="module-badge" style="background:oklch(0.55 0.16 255/10%);color:oklch(0.42 0.13 255)"><i class="dot" style="background:oklch(0.55 0.16 255)"></i>内核与配置</span>
+        <span style="color:var(--muted-foreground)">模块徽章：色点 + 模块名（色板取自模块管理配置）</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;font-size:12.5px">
+        <span class="module-badge" style="background:oklch(0.55 0.16 255/10%);color:oklch(0.42 0.13 255)"><i class="dot" style="background:oklch(0.55 0.16 255)"></i>内核与配置<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+        <span style="color:var(--muted-foreground)">带盾牌：该任务已勾选「避免与其他模块冲突」</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;font-size:12.5px">
+        <span class="wait-badge wait-dep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>等待依赖 2</span>
+        <span style="color:var(--muted-foreground)">等待依赖（warning 黄）：N 个前置未「已完成」，任务停在队列</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;font-size:12.5px">
+        <span class="wait-badge wait-lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>等待模块锁释放</span>
+        <span style="color:var(--muted-foreground)">等待模块锁（info 蓝）：异模块勾选方持锁，或本任务勾选后等待异模块</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;font-size:12.5px">
+        <span class="wait-badge" style="background:oklch(0.55 0.16 145/12%);color:oklch(0.42 0.13 145)"><span class="running-dot" style="width:7px;height:7px"></span>正在工作</span>
+        <span style="color:var(--muted-foreground)">正在工作（success 绿）：沿用现有执行态样式</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;font-size:12.5px">
+        <span class="module-chip" style="border-style:dashed"><i class="dot" style="background:var(--faint-foreground)"></i>无模块</span>
+        <span style="color:var(--muted-foreground)">无模块（虚线）：不参与任何锁定，不可配置依赖</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+</body>
+</html>

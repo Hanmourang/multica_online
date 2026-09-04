@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 交付物原型 — 任务详情页</title>
+<style>
+  :root {
+    --bg: #ffffff; --surface: #f7f7f8; --border: #e6e6e9; --border-strong: #d8d8dc;
+    --text: #1a1a1e; --text-2: #5a5a62; --text-3: #8b8b94;
+    --accent: #5e5ce6; --accent-soft: #eeeeff;
+    --green: #1a9e54; --green-soft: #e5f6ec; --red: #d64545; --red-soft: #fdecec;
+    --amber: #b27409; --amber-soft: #fdf3e0; --blue-soft: #e8f1fd; --blue: #2467d6;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; background: var(--surface); color: var(--text); font-size: 13px; }
+
+  /* ── 窗口骨架 ─────────────────────────── */
+  .window { display: flex; flex-direction: column; height: 100vh; }
+  .titlebar { height: 38px; background: var(--bg); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; gap: 8px; }
+  .lights { display: flex; gap: 7px; margin-right: 8px; }
+  .light { width: 11px; height: 11px; border-radius: 50%; }
+  .light.r { background: #ff5f57; } .light.y { background: #febc2e; } .light.g { background: #28c840; }
+  .tab { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 12px; color: var(--text-2); }
+  .tab.active { background: var(--surface); border: 1px solid var(--border); color: var(--text); font-weight: 500; }
+  .tab .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+
+  .body { display: flex; flex: 1; min-height: 0; }
+
+  /* ── 左侧收件箱 ──────────────────────── */
+  .inbox { width: 240px; background: var(--bg); border-right: 1px solid var(--border); padding: 10px 8px; overflow: auto; }
+  .inbox h3 { font-size: 12px; font-weight: 600; padding: 4px 8px 8px; display: flex; justify-content: space-between; color: var(--text); }
+  .inbox h3 span:last-child { color: var(--text-3); font-weight: 400; }
+  .inbox-item { display: flex; gap: 8px; padding: 7px 8px; border-radius: 7px; margin-bottom: 2px; }
+  .inbox-item.active { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+  .inbox-item .avatar { width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg,#222,#555); flex: none; margin-top: 1px; }
+  .inbox-item .t { font-size: 12px; font-weight: 500; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+  .inbox-item .s { font-size: 11px; color: var(--text-3); margin-top: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .inbox-item.dim .t { color: var(--text-2); font-weight: 400; }
+
+  /* ── 主区 ────────────────────────────── */
+  .main { flex: 1; overflow: auto; background: var(--bg); }
+  .crumb { padding: 12px 28px 0; font-size: 12px; color: var(--text-3); }
+  .crumb b { color: var(--text-2); font-weight: 500; }
+  .issue-title { padding: 6px 28px 0; font-size: 15px; font-weight: 600; }
+  .issue-meta { padding: 10px 28px 14px; font-size: 12px; color: var(--text-2); border-bottom: 1px solid var(--border); }
+
+  .feed { padding: 16px 28px 80px; max-width: 860px; }
+  .feed-label { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .feed-label .unsub { font-size: 11px; color: var(--text-3); font-weight: 400; }
+  .workdir { font-size: 11px; color: var(--text-3); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; margin-bottom: 14px; font-family: var(--mono); }
+  .workdir b { color: var(--text-2); font-weight: 500; }
+
+  /* 动态消息 */
+  .msg { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; background: var(--bg); }
+  .msg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .msg-head .avatar { width: 20px; height: 20px; border-radius: 50%; background: linear-gradient(135deg,#17301f,#2c5c3c); color: #7fe0a8; font-size: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+  .msg-head .name { font-weight: 600; font-size: 12.5px; }
+  .msg-head .time { color: var(--text-3); font-size: 11px; }
+  .msg p { line-height: 1.65; color: var(--text); }
+  .msg ul { margin: 8px 0 4px 18px; line-height: 1.8; color: var(--text-2); }
+  .msg code { font-family: var(--mono); font-size: 11.5px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+
+  /* ── 交付物板块（新） ─────────────────── */
+  .deliverables { border: 1px solid var(--border); border-radius: 12px; margin: 4px 0 14px; overflow: hidden; background: var(--bg); box-shadow: 0 1px 2px rgba(0,0,0,.03); }
+  .dlv-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: linear-gradient(180deg,#fbfbfd, var(--surface)); border-bottom: 1px solid var(--border); }
+  .dlv-head .ico { width: 20px; height: 20px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .dlv-head .ttl { font-weight: 600; font-size: 12.5px; }
+  .dlv-head .cnt { font-size: 11px; color: var(--text-3); background: var(--bg); border: 1px solid var(--border); border-radius: 99px; padding: 1px 8px; }
+  .dlv-head .stat { margin-left: auto; font-size: 11px; font-family: var(--mono); color: var(--text-3); }
+  .dlv-head .stat b { font-weight: 500; } .dlv-head .stat .add { color: var(--green); } .dlv-head .stat .del { color: var(--red); }
+  .dlv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; padding: 12px 14px; }
+  .dlv-card { border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; cursor: pointer; transition: border-color .12s, box-shadow .12s, transform .12s; background: var(--bg); position: relative; }
+  .dlv-card:hover { border-color: var(--accent); box-shadow: 0 2px 10px rgba(94,92,230,.10); transform: translateY(-1px); }
+  .dlv-card.ref { opacity: .75; border-style: dashed; }
+  .dlv-card.ref:hover { border-color: var(--amber); box-shadow: 0 2px 10px rgba(178,116,9,.10); }
+  .dlv-top { display: flex; align-items: center; gap: 8px; }
+  .dlv-ico { width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 13px; flex: none; }
+  .dlv-ico.md { background: var(--blue-soft); color: var(--blue); }
+  .dlv-ico.log { background: var(--amber-soft); color: var(--amber); }
+  .dlv-name { font-weight: 600; font-size: 12.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .dlv-path { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: 1px; }
+  .dlv-foot { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+  .badge { font-size: 10px; border-radius: 4px; padding: 1px 6px; font-weight: 500; }
+  .badge.new { background: var(--green-soft); color: var(--green); }
+  .badge.mod { background: var(--blue-soft); color: var(--blue); }
+  .badge.ref { background: var(--amber-soft); color: var(--amber); }
+  .dlv-lines { font-family: var(--mono); font-size: 10.5px; margin-left: auto; }
+  .dlv-lines .a { color: var(--green); } .dlv-lines .d { color: var(--red); }
+  .dlv-card .open-hint { position: absolute; right: 10px; top: 10px; font-size: 10px; color: var(--text-3); opacity: 0; transition: opacity .12s; }
+  .dlv-card:hover .open-hint { opacity: 1; }
+
+  /* 活动条目 */
+  .acts { margin-top: 4px; }
+  .act { display: flex; align-items: center; gap: 8px; padding: 7px 2px; font-size: 12px; color: var(--text-2); border-top: 1px dashed var(--border); }
+  .act .who { width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg,#17301f,#2c5c3c); color: #7fe0a8; font-size: 9px; display: flex; align-items: center; justify-content: center; font-weight: 700; flex: none; }
+  .act .when { margin-left: auto; color: var(--text-3); font-size: 11px; }
+  .act.done-marker { background: #f3fbf6; }
+  .hl { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+  /* ── 预览弹窗 ────────────────────────── */
+  .overlay { position: fixed; inset: 0; background: rgba(20,20,30,.42); display: none; align-items: center; justify-content: center; z-index: 50; backdrop-filter: blur(2px); }
+  .overlay.on { display: flex; }
+  .dialog { width: min(880px, 92vw); height: min(640px, 86vh); background: var(--bg); border-radius: 14px; box-shadow: 0 24px 80px rgba(0,0,0,.28); display: flex; flex-direction: column; overflow: hidden; }
+  .dlg-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .dlg-ico { width: 28px; height: 28px; border-radius: 8px; background: var(--blue-soft); color: var(--blue); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .dlg-title { min-width: 0; flex: 1; }
+  .dlg-title .n { font-weight: 600; font-size: 13px; }
+  .dlg-title .p { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .seg { display: flex; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; }
+  .seg button { border: 0; background: transparent; padding: 4px 10px; font-size: 11px; color: var(--text-2); cursor: pointer; }
+  .seg button.on { background: var(--text); color: #fff; }
+  .dlg-nav { display: flex; align-items: center; gap: 4px; }
+  .dlg-nav .pos { font-family: var(--mono); font-size: 11px; color: var(--text-3); padding: 0 4px; }
+  .icon-btn { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text-2); cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  .icon-btn:hover { background: var(--surface); color: var(--text); }
+  .icon-btn:disabled { opacity: .35; cursor: default; }
+  .dlg-body { flex: 1; overflow: auto; padding: 18px 26px; }
+  .doc h1 { font-size: 17px; margin-bottom: 10px; }
+  .doc h2 { font-size: 14px; margin: 16px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+  .doc p, .doc li { font-size: 12.5px; line-height: 1.8; color: var(--text); }
+  .doc ul { margin-left: 18px; }
+  .doc table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 12px; }
+  .doc th, .doc td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  .doc th { background: var(--surface); font-weight: 600; }
+  .doc code { font-family: var(--mono); font-size: 11.5px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+  .diff-line { font-family: var(--mono); font-size: 11.5px; padding: 1.5px 12px; white-space: pre-wrap; }
+  .diff-line.add { background: var(--green-soft); color: #146c3c; }
+  .diff-line.del { background: var(--red-soft); color: #a13232; }
+  .diff-line.ctx { color: var(--text-2); }
+  .diff-line.hunk { color: var(--accent); background: var(--accent-soft); }
+  .ref-note { background: var(--amber-soft); border: 1px solid #ecd9ae; color: var(--amber); border-radius: 8px; padding: 10px 14px; font-size: 12px; line-height: 1.7; }
+  .dlg-foot { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-top: 1px solid var(--border); background: var(--surface); font-size: 11px; color: var(--text-3); }
+  .kbd { font-family: var(--mono); background: var(--bg); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: 10px; }
+
+  .anno { position: fixed; right: 18px; top: 56px; width: 240px; background: #fffbe8; border: 1px solid #ead98b; border-radius: 10px; padding: 12px 14px; font-size: 11.5px; line-height: 1.7; color: #6b5b16; z-index: 40; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+  .anno b { display: block; margin-bottom: 4px; }
+  .anno .x { position: absolute; top: 6px; right: 10px; cursor: pointer; color: #b3a35a; }
+</style>
+</head>
+<body>
+<div class="window">
+  <!-- 标题栏 -->
+  <div class="titlebar">
+    <div class="lights"><span class="light r"></span><span class="light y"></span><span class="light g"></span></div>
+    <div class="tab active"><span class="dot"></span>SIRI-9: [前置-A2] 拍板 D1-D5 五条架构决策并回写文档</div>
+    <div class="tab">SIRI-6: 行程规划</div>
+    <div class="tab">SIRI-3: 分析 projects</div>
+  </div>
+
+  <div class="body">
+    <!-- 左：收件箱 -->
+    <div class="inbox">
+      <h3><span>收件箱</span><span>5</span></h3>
+      <div class="inbox-item active"><div class="avatar"></div><div><div class="t">[前置-A2] 拍板 D1-D5 五条架构决策…</div><div class="s">已完成 D1-D5 的正式归档与回写 · 2 分钟</div></div></div>
+      <div class="inbox-item dim"><div class="avatar"></div><div><div class="t">[前置-A3] Flow Runtime 与 workflo…</div><div class="s">状态设为 审核中 · 15 分钟</div></div></div>
+      <div class="inbox-item dim"><div class="avatar"></div><div><div class="t">[前置-A1] 清理 git 工作区并提交…</div><div class="s">状态设为 审核中 · 30 分钟</div></div></div>
+      <div class="inbox-item dim"><div class="avatar"></div><div><div class="t">存储分析</div><div class="s">状态设为 审核中 · 33 分钟</div></div></div>
+      <div class="inbox-item dim"><div class="avatar"></div><div><div class="t">行程规划</div><div class="s">状态设为 审核中 · 1 小时</div></div></div>
+    </div>
+
+    <!-- 右：任务详情 -->
+    <div class="main">
+      <div class="crumb">dsk_desktop 项目 &nbsp;›&nbsp; <b>SIRI-9 [前置-A2] 拍板 D1-D5 五条架构决策并回写文档</b></div>
+      <div class="issue-title">&nbsp;</div>
+      <div class="issue-meta">受影响文档完成回写</div>
+
+      <div class="feed">
+        <div class="feed-label"><span>动态</span><span class="unsub">取消订阅</span></div>
+        <div class="workdir">智能体将直接在以下目录中工作：<b>dsh_desktop</b> (/Users/eleme/Documents/workspace/…)</div>
+
+        <!-- agent 完成回复 -->
+        <div class="msg">
+          <div class="msg-head"><div class="avatar">Q</div><span class="name">Qoder_3.8Max</span><span class="time">2 分钟前</span></div>
+          <p>已完成 D1-D5 的正式归档与回写。</p>
+          <ul>
+            <li>新增 <code>0.产品设计/dsh_desktop/11-架构决策记录-D1-D5.md</code>：每条决策均包含结论、理由、影响面与撤销时的回写范围。</li>
+            <li>已更新 <code>README.md</code>、<code>08-实施路线与决策清单.md</code>，移除"待拍板/建议"表述，改为已决执行基线与变更控制。</li>
+            <li>已更新 <code>02-目标架构设计.md</code> 至 <code>07-能力迁移与多端动线.md</code>：标注适用的已决依据并升至 v2.1。</li>
+            <li>已归档过程与结果：<code>change_logs/dsh_desktop/20260904-D1-D5架构决策正式归档.md</code>。</li>
+          </ul>
+          <p style="margin-top:8px;color:var(--text-2)">验证通过：决策字段、文档状态、链接、末尾换行均已检查；产品设计文档 <code>git diff --check</code> 通过。</p>
+        </div>
+
+        <!-- ★ 新增：交付物板块（挂在 task_completed 完成事件处） -->
+        <div class="deliverables" id="dlv">
+          <div class="dlv-head">
+            <div class="ico">📦</div>
+            <span class="ttl">交付物</span>
+            <span class="cnt">5</span>
+            <span class="stat">本次运行 · <b class="add">+294</b> / <b class="del">−14</b> · 4 写入 · 1 引用</span>
+          </div>
+          <div class="dlv-grid" id="dlvGrid"></div>
+        </div>
+
+        <!-- 活动条目 -->
+        <div class="acts">
+          <div class="act done-marker"><div class="who">Q</div>Qoder_3.8Max 完成了 task（1 次）<span class="when">2 分钟前</span></div>
+          <div class="act"><div class="who">Q</div>Qoder_3.8Max 状态从 进行中 改为 审核中<span class="when">2 分钟前</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 原型说明 -->
+<div class="anno" id="anno">
+  <span class="x" onclick="document.getElementById('anno').remove()">✕</span>
+  <b>原型说明</b>
+  ① 任务完成时，动态流中出现「交付物」卡片墙，多个交付物同时展示；<br>
+  ② 点击任意卡片打开预览弹窗，←→ 键或按钮在交付物间切换；<br>
+  ③「仅引用」卡片（虚线）为回复中提及但本轮未写入的文件。
+</div>
+
+<!-- 预览弹窗 -->
+<div class="overlay" id="overlay">
+  <div class="dialog">
+    <div class="dlg-head">
+      <div class="dlg-ico" id="dlgIco">📄</div>
+      <div class="dlg-title"><div class="n" id="dlgName"></div><div class="p" id="dlgPath"></div></div>
+      <div class="seg" id="dlgSeg"><button data-v="render" class="on">预览</button><button data-v="diff">变更</button></div>
+      <div class="dlg-nav">
+        <button class="icon-btn" id="prevBtn" title="上一个（←）">←</button>
+        <span class="pos" id="dlgPos">1/5</span>
+        <button class="icon-btn" id="nextBtn" title="下一个（→）">→</button>
+        <button class="icon-btn" id="closeBtn" title="关闭（Esc）" style="margin-left:6px">✕</button>
+      </div>
+    </div>
+    <div class="dlg-body"><div class="doc" id="dlgBody"></div></div>
+    <div class="dlg-foot">
+      <span id="dlgHint">预览为运行轨迹中捕获的最终内容</span>
+      <span><span class="kbd">←</span> <span class="kbd">→</span> 切换交付物 · <span class="kbd">Esc</span> 关闭</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── 样例数据：SIRI-9 本次运行的交付物 ── */
+const DELIVERABLES = [
+  { name: "11-架构决策记录-D1-D5.md", path: "0.产品设计/dsh_desktop/11-架构决策记录-D1-D5.md",
+    kind: "new", src: "write", add: 210, del: 0, view: "markdown",
+    html: `<h1>架构决策记录 D1-D5</h1><p>本文档归档 D1-D5 五条架构决策，每条包含结论、理由、影响面与撤销时的回写范围。</p>
+      <h2>D1 运行时载体</h2><ul><li><b>结论</b>：采用进程内嵌运行时</li><li><b>理由</b>：降低部署与心智成本</li><li><b>影响面</b>：daemon、cli、docs</li></ul>
+      <h2>D2 配置中心</h2><ul><li><b>结论</b>：环境变量 + 平台声明式配置 + 构建期注入</li><li><b>影响面</b>：server、web、desktop</li></ul>
+      <table><tr><th>决策</th><th>状态</th><th>回写范围</th></tr><tr><td>D1</td><td>已决</td><td>02、05、08</td></tr><tr><td>D2</td><td>已决</td><td>02、08</td></tr></table>` },
+  { name: "README.md", path: "README.md", kind: "mod", src: "write", add: 12, del: 8, view: "diff" },
+  { name: "08-实施路线与决策清单.md", path: "0.产品设计/dsh_desktop/08-实施路线与决策清单.md",
+    kind: "mod", src: "write", add: 6, del: 4, view: "diff" },
+  { name: "02-目标架构设计.md", path: "0.产品设计/dsh_desktop/02-目标架构设计.md",
+    kind: "mod", src: "write", add: 3, del: 2, view: "diff" },
+  { name: "20260904-D1-D5架构决策正式归档.md", path: "change_logs/dsh_desktop/20260904-D1-D5架构决策正式归档.md",
+    kind: "new", src: "reply", add: 68, del: 0, view: "ref" },
+];
+
+const DIFF_DEMO = [
+  ["hunk","@@ -10,7 +10,9 @@ ## 实施路线"],
+  ["ctx"," ## 决策清单"],
+  ["del","- D1 运行时载体：<b>待拍板</b>，建议进程内嵌"],
+  ["add","+ D1 运行时载体：<b>已决</b> — 进程内嵌运行时（见 11-架构决策记录-D1-D5.md）"],
+  ["del","- D2 配置中心：<b>建议</b>采用声明式配置"],
+  ["add","+ D2 配置中心：<b>已决</b> — 环境变量 + 声明式配置 + 构建期注入"],
+  ["ctx"," ## 里程碑"],
+  ["add","+ > 变更控制：已决基线的修改须走评审并回写决策记录。"],
+];
+
+const grid = document.getElementById("dlvGrid");
+const overlay = document.getElementById("overlay");
+const dlgName = document.getElementById("dlgName"), dlgPath = document.getElementById("dlgPath");
+const dlgBody = document.getElementById("dlgBody"), dlgPos = document.getElementById("dlgPos");
+const dlgSeg = document.getElementById("dlgSeg"), dlgHint = document.getElementById("dlgHint");
+const prevBtn = document.getElementById("prevBtn"), nextBtn = document.getElementById("nextBtn");
+let cur = 0, view = "render";
+
+const KIND_LABEL = { new: "新增", mod: "修改", };
+function badge(d) {
+  if (d.src === "reply") return `<span class="badge ref">仅引用</span>`;
+  return `<span class="badge ${d.kind}">${KIND_LABEL[d.kind]}</span>`;
+}
+
+DELIVERABLES.forEach((d, i) => {
+  const card = document.createElement("div");
+  card.className = "dlv-card" + (d.src === "reply" ? " ref" : "");
+  card.innerHTML = `
+    <span class="open-hint">点击预览 ›</span>
+    <div class="dlv-top">
+      <div class="dlv-ico ${d.src === "reply" ? "log" : "md"}">${d.src === "reply" ? "🧾" : "📄"}</div>
+      <div style="min-width:0"><div class="dlv-name">${d.name}</div><div class="dlv-path">${d.path}</div></div>
+    </div>
+    <div class="dlv-foot">${badge(d)}<span class="dlv-lines">${d.add ? `<span class="a">+${d.add}</span>` : ""}${d.del ? ` <span class="d">−${d.del}</span>` : ""}</span></div>`;
+  card.onclick = () => openDialog(i);
+  grid.appendChild(card);
+});
+
+function renderBody() {
+  const d = DELIVERABLES[cur];
+  dlgSeg.style.display = d.src === "reply" ? "none" : "";
+  if (d.src === "reply") {
+    dlgBody.innerHTML = `<div class="ref-note">该文件由 agent 在完成回复中声明，但内容未在本次运行轨迹中捕获（非本轮写入）。<br>后续可通过「在工作区中打开」查看实际文件，或由 daemon 文件读取 API 补全预览。</div>`;
+    dlgHint.textContent = "来源：回复声明 · 内容不可用";
+    return;
+  }
+  if (view === "diff" || d.view === "diff") {
+    dlgBody.innerHTML = DIFF_DEMO.map(([t, s]) => `<div class="diff-line ${t}">${s}</div>`).join("");
+    dlgHint.textContent = "编辑类操作捕获为变更片段（diff）";
+  } else {
+    dlgBody.innerHTML = d.html;
+    dlgHint.textContent = "预览为运行轨迹中捕获的最终内容";
+  }
+}
+
+function openDialog(i) {
+  cur = i; view = "render";
+  overlay.classList.add("on");
+  sync();
+}
+function sync() {
+  const d = DELIVERABLES[cur];
+  dlgName.textContent = d.name; dlgPath.textContent = d.path;
+  dlgPos.textContent = `${cur + 1}/${DELIVERABLES.length}`;
+  prevBtn.disabled = cur === 0; nextBtn.disabled = cur === DELIVERABLES.length - 1;
+  dlgSeg.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === view));
+  renderBody();
+}
+dlgSeg.addEventListener("click", e => { if (e.target.dataset.v) { view = e.target.dataset.v; sync(); } });
+prevBtn.onclick = () => { if (cur > 0) { cur--; view = "render"; sync(); } };
+nextBtn.onclick = () => { if (cur < DELIVERABLES.length - 1) { cur++; view = "render"; sync(); } };
+document.getElementById("closeBtn").onclick = () => overlay.classList.remove("on");
+overlay.addEventListener("click", e => { if (e.target === overlay) overlay.classList.remove("on"); });
+document.addEventListener("keydown", e => {
+  if (!overlay.classList.contains("on")) return;
+  if (e.key === "Escape") overlay.classList.remove("on");
+  if (e.key === "ArrowLeft") prevBtn.click();
+  if (e.key === "ArrowRight") nextBtn.click();
+});
+</script>
+</body>
+</html>
