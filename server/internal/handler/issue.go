@@ -2807,6 +2807,12 @@ type CreateIssueRequest struct {
 	// transaction as the create. Unknown or non-issue ids are rejected with
 	// 400 (service.ErrIssueLabelNotFound) rather than silently dropped.
 	LabelIDs []string `json:"label_ids,omitempty"`
+	// 需求日历扩展字段（design §5）。仅顶层需求有意义；子任务可省略。
+	Goal           *string `json:"goal,omitempty"`
+	RepoResourceID *string `json:"repo_resource_id,omitempty"`
+	StartAt        *string `json:"start_at,omitempty"`
+	DecomposeMode  *string `json:"decompose_mode,omitempty"`
+	AutoTrigger    *bool   `json:"auto_trigger,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -2963,6 +2969,44 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		dueDate = d
 	}
 
+	// 需求日历扩展字段：start_at（RFC3339 分钟粒度）、goal、repo_resource_id、
+	// decompose_mode（auto/confirm/manual）、auto_trigger。仅顶层需求有意义。
+	var startAt pgtype.Timestamptz
+	if req.StartAt != nil && *req.StartAt != "" {
+		ts, err := util.ParseTimestamp(*req.StartAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid start_at format, expected RFC3339")
+			return
+		}
+		startAt = ts
+	}
+	var goal pgtype.Text
+	if req.Goal != nil && *req.Goal != "" {
+		goal = pgtype.Text{String: *req.Goal, Valid: true}
+	}
+	var repoResourceID pgtype.UUID
+	if req.RepoResourceID != nil && *req.RepoResourceID != "" {
+		id, ok := parseUUIDOrBadRequest(w, *req.RepoResourceID, "repo_resource_id")
+		if !ok {
+			return
+		}
+		repoResourceID = id
+	}
+	var decomposeMode pgtype.Text
+	if req.DecomposeMode != nil && *req.DecomposeMode != "" {
+		switch *req.DecomposeMode {
+		case "auto", "confirm", "manual":
+			decomposeMode = pgtype.Text{String: *req.DecomposeMode, Valid: true}
+		default:
+			writeError(w, http.StatusBadRequest, "invalid decompose_mode, expected auto|confirm|manual")
+			return
+		}
+	}
+	var autoTrigger pgtype.Bool
+	if req.AutoTrigger != nil {
+		autoTrigger = pgtype.Bool{Bool: *req.AutoTrigger, Valid: true}
+	}
+
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
@@ -3068,6 +3112,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		Stage:          ptrToInt4(req.Stage),
 		ModuleID:       moduleID,
 		AvoidConflict:  avoidConflict,
+		StartAt:        startAt,
+		Goal:           goal,
+		RepoResourceID: repoResourceID,
+		DecomposeMode:  decomposeMode,
+		AutoTrigger:    autoTrigger,
 		AttachmentIDs:  attachmentIDs,
 		LabelIDs:       labelIDs,
 		AllowDuplicate: req.AllowDuplicate,

@@ -354,12 +354,15 @@ INSERT INTO issue (
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
     origin_type, origin_id, stage, last_activity_at, id, module_id, avoid_conflict,
-    root_requirement_id
+    start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
     sqlc.narg('module_id'), COALESCE(sqlc.narg('avoid_conflict')::boolean, false),
-    sqlc.narg('root_requirement_id')
+    sqlc.narg('start_at')::timestamptz, sqlc.narg('goal')::text, sqlc.narg('repo_resource_id')::uuid,
+    COALESCE(sqlc.narg('decompose_mode')::text, 'confirm'),
+    COALESCE(sqlc.narg('auto_trigger')::boolean, true),
+    sqlc.narg('root_requirement_id')::uuid
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec

@@ -141,6 +141,16 @@ func ParseCalendarDate(s string) (pgtype.Date, error) {
 	return pgtype.Date{}, fmt.Errorf("invalid date %q: expected YYYY-MM-DD", s)
 }
 
+// ParseTimestamp parses an RFC3339 timestamp (with optional sub-second precision)
+// into a pgtype.Timestamptz. Returns an error for any other format.
+func ParseTimestamp(s string) (pgtype.Timestamptz, error) {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return pgtype.Timestamptz{}, fmt.Errorf("invalid timestamp %q: expected RFC3339", s)
+	}
+	return pgtype.Timestamptz{Time: t, Valid: true}, nil
+}
+
 func UUIDToPtr(u pgtype.UUID) *string {
 	if !u.Valid {
 		return nil

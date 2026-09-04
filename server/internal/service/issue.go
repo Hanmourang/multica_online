@@ -92,6 +92,13 @@ type IssueCreateParams struct {
 	// 任务互斥执行（spec §5）。
 	ModuleID      pgtype.UUID
 	AvoidConflict bool
+	// 需求日历扩展字段（spec: 2026-09-04-requirement-calendar-design.md §5）。
+	// 仅对顶层需求有意义；子任务创建时置零值即可。
+	StartAt        pgtype.Timestamptz
+	Goal           pgtype.Text
+	RepoResourceID pgtype.UUID
+	DecomposeMode  pgtype.Text
+	AutoTrigger    pgtype.Bool
 	// SourceContext is set only by the comment-scoped manual create endpoint.
 	// Its immutable snapshot and cloned attachment rows commit in the same
 	// transaction as the new issue.
@@ -394,6 +401,11 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			Stage:             p.Stage,
 			ModuleID:          p.ModuleID,
 			AvoidConflict:     pgtype.Bool{Bool: p.AvoidConflict, Valid: true},
+			StartAt:           p.StartAt,
+			Goal:              p.Goal,
+			RepoResourceID:    p.RepoResourceID,
+			DecomposeMode:     p.DecomposeMode,
+			AutoTrigger:       p.AutoTrigger,
 			RootRequirementID: rootID,
 		})
 	} else {
@@ -417,6 +429,11 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			Stage:             p.Stage,
 			ModuleID:          p.ModuleID,
 			AvoidConflict:     pgtype.Bool{Bool: p.AvoidConflict, Valid: true},
+			StartAt:           p.StartAt,
+			Goal:              p.Goal,
+			RepoResourceID:    p.RepoResourceID,
+			DecomposeMode:     p.DecomposeMode,
+			AutoTrigger:       p.AutoTrigger,
 			RootRequirementID: rootID,
 		})
 	}
