@@ -187,12 +187,14 @@
     "tooltip_table": "テーブル表示",
     "tooltip_gantt": "ガント表示",
     "tooltip_swimlane": "スイムレーン表示",
+    "tooltip_calendar": "カレンダー表示",
     "section": "表示",
     "board": "ボード",
     "list": "リスト",
     "table": "テーブル",
     "gantt": "ガント",
-    "swimlane": "スイムレーン"
+    "swimlane": "スイムレーン",
+    "calendar": "カレンダー"
   },
   "table": {
     "select_all": "表示中のタスクをすべて選択",

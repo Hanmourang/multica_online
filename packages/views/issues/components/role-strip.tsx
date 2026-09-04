@@ -33,8 +33,6 @@ interface RoleStripProps {
 }
 
 export function RoleStrip({ entries, onChange, className }: RoleStripProps) {
-  const { t } = useT("issues");
-
   const toggleRole = useCallback(
     (role: string) => {
       if (REQUIRED_ROLES.has(role)) return;
@@ -55,7 +53,6 @@ export function RoleStrip({ entries, onChange, className }: RoleStripProps) {
           entries={entries.filter((e) => e.role === role)}
           required={REQUIRED_ROLES.has(role)}
           onToggle={() => toggleRole(role)}
-          t={t}
         />
       ))}
     </div>
@@ -67,14 +64,16 @@ function RoleCard({
   entries,
   required,
   onToggle,
-  t,
 }: {
   role: RoleKey;
   entries: RoleAssignment[];
   required: boolean;
   onToggle: () => void;
-  t: ReturnType<typeof useT>["t"];
 }) {
+  // Narrow via a fresh hook call inside the card: accepting `t` as a prop
+  // typed `ReturnType<typeof useT>["t"]` would widen the selector to every
+  // namespace union member and break typechecking on $.role_strip.
+  const { t } = useT("issues");
   const isEnabled = entries.some((e) => e.enabled);
   const enabledEntries = entries.filter((e) => e.enabled);
 

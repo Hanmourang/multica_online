@@ -187,12 +187,14 @@
     "tooltip_table": "테이블 보기",
     "tooltip_gantt": "간트 보기",
     "tooltip_swimlane": "스윔레인 보기",
+    "tooltip_calendar": "캘린더 보기",
     "section": "보기",
     "board": "보드",
     "list": "리스트",
     "table": "테이블",
     "gantt": "간트",
-    "swimlane": "스윔레인"
+    "swimlane": "스윔레인",
+    "calendar": "캘린더"
   },
   "table": {
     "select_all": "표시된 모든 태스크 선택",

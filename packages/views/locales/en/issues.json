@@ -190,12 +190,14 @@
     "tooltip_table": "Table view",
     "tooltip_gantt": "Gantt view",
     "tooltip_swimlane": "Swimlane view",
+    "tooltip_calendar": "Calendar view",
     "section": "View",
     "board": "Board",
     "list": "List",
     "table": "Table",
     "gantt": "Gantt",
-    "swimlane": "Swimlane"
+    "swimlane": "Swimlane",
+    "calendar": "Calendar"
   },
   "table": {
     "select_all": "Select all visible issues",

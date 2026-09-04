@@ -187,12 +187,14 @@
     "tooltip_table": "表格视图",
     "tooltip_gantt": "甘特图",
     "tooltip_swimlane": "泳道视图",
+    "tooltip_calendar": "日历视图",
     "section": "视图",
     "board": "看板",
     "list": "列表",
     "table": "表格",
     "gantt": "甘特图",
-    "swimlane": "泳道"
+    "swimlane": "泳道",
+    "calendar": "日历"
   },
   "table": {
     "select_all": "选择所有可见任务",

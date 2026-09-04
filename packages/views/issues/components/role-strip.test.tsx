@@ -43,7 +43,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
 });
 
 function entry(
-  role: string,
+  role: RoleAssignment["role"],
   assigneeId: string,
   enabled: boolean,
 ): RoleAssignment {
@@ -140,7 +140,7 @@ describe("RoleStrip", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
 
     // The callback should produce entries with tester disabled.
-    const newEntries: RoleAssignment[] = onChange.mock.calls[0][0];
+    const newEntries: RoleAssignment[] = onChange.mock.calls[0]?.[0] ?? [];
     const testerEntries = newEntries.filter((e) => e.role === "tester");
     expect(testerEntries.every((e) => !e.enabled)).toBe(true);
   });
