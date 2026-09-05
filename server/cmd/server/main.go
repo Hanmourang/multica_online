@@ -759,11 +759,15 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
 	}
-	// 需求到点触发（requirement-calendar spec §7.1）：每 30s 扫一轮，把已确认
-	// 拆解且到点的需求 stage 3 子任务推进 agent_task_queue。幂等锚点是
-	// triggered_at 的 execrows 守卫，stale-lease 重入不会重复入队。
-	if err := schedulerMgr.Register(scheduler.RequirementTriggerSweepJob(h.IssueService)); err != nil {
-		slog.Warn("scheduler: failed to register requirement_trigger_sweep job", "error", err)
+	// 需求日历（spec 2026-09-04 §7.1，plan 2026-09-06 §WS2）：到点自动触发 loop。
+	// 30s 全局 sweep，命中 start_at <= now() 的已确认拆解需求，跑触发前置预检
+	//（拆解已生效 + 依赖无环 + 验收代码存在 + 互斥窗口可用）后入队 stage3。
+	// 复用 taskSvc（与 router 同一个 TaskService，见 backgroundServices）以免
+	// EmptyClaim 缓存版本不同步导致 daemon 空领取；同一 TaskService 也被
+	// handler.TriggerRequirement 就地包成 scheduler.RequirementTriggerService，
+	// sweep 与手动触发共享幂等锚点。
+	if err := schedulerMgr.Register(scheduler.RequirementTriggerJob(pool, queries, taskSvc)); err != nil {
+		slog.Warn("scheduler: failed to register requirement_trigger_dispatch job", "error", err)
 	}
 	// Manifest-declared Plugin schedules share the same durable lease and retry
 	// machinery. The job is inert while plugins_v1 is disabled.
