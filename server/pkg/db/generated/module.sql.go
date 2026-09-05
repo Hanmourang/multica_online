@@ -64,23 +64,29 @@ func (q *Queries) DeleteProjectModule(ctx context.Context, id pgtype.UUID) error
 }
 
 const getIssueModuleInfo = `-- name: GetIssueModuleInfo :one
-SELECT i.module_id, i.avoid_conflict, m.name AS module_name
+SELECT i.module_id, i.avoid_conflict, i.root_requirement_id,
+       m.name AS module_name, ri.title AS root_requirement_title
 FROM issue i
 LEFT JOIN project_module m ON m.id = i.module_id
+LEFT JOIN issue ri ON ri.id = i.root_requirement_id
 WHERE i.id = $1
 `
 
 type GetIssueModuleInfoRow struct {
-	ModuleID      pgtype.UUID `json:"module_id"`
-	AvoidConflict bool        `json:"avoid_conflict"`
-	ModuleName    pgtype.Text `json:"module_name"`
+	ModuleID             pgtype.UUID `json:"module_id"`
+	AvoidConflict        bool        `json:"avoid_conflict"`
+	RootRequirementID    pgtype.UUID `json:"root_requirement_id"`
+	ModuleName           pgtype.Text `json:"module_name"`
+	RootRequirementTitle pgtype.Text `json:"root_requirement_title"`
 }
 
-// claim 投影：模块 id/名称 + 避免冲突标志。无模块时 module_id/module_name 为 NULL。
+// claim 投影：模块 id/名称 + 避免冲突标志 + 需求组 root（ModuleLocker v2 组级互斥，
+// spec §7.5②）。无模块时 module_id/module_name 为 NULL；root_requirement_id 由 452
+// 回填恒非空（独立 issue = 自身），root 标题供 daemon 等待文案「held by 需求组」。
 func (q *Queries) GetIssueModuleInfo(ctx context.Context, id pgtype.UUID) (GetIssueModuleInfoRow, error) {
 	row := q.db.QueryRow(ctx, getIssueModuleInfo, id)
 	var i GetIssueModuleInfoRow
-	err := row.Scan(&i.ModuleID, &i.AvoidConflict, &i.ModuleName)
+	err := row.Scan(&i.ModuleID, &i.AvoidConflict, &i.RootRequirementID, &i.ModuleName, &i.RootRequirementTitle)
 	return i, err
 }
 
