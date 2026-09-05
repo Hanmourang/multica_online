@@ -99,6 +99,35 @@ export interface RoleRosterResponse {
   total: number;
 }
 
+// --- Requirement decomposition (requirement-calendar spec §8/§9) ---
+
+/** 拆解草稿的功能点明细。kind 必填（new=新增 / modify=改造）；"" = 未标注（待确认前补标）。 */
+export interface DecomposeFeaturePoint {
+  title: string;
+  kind: "new" | "modify" | "";
+  code_objects?: string[];
+}
+
+/** 拆解确认请求体里的子任务草稿。depends_on 元素为同批草稿 temp_id 或已有 issue id。 */
+export interface DecomposeDraftTask {
+  temp_id: string;
+  title: string;
+  description?: string;
+  /** 3=执行，4=验收。 */
+  stage: 3 | 4;
+  assignee_type?: "member" | "agent";
+  assignee_id?: string;
+  feature_points?: DecomposeFeaturePoint[];
+  graph_context?: unknown;
+  acceptance_spec?: unknown;
+  depends_on?: string[];
+}
+
+/** POST /issues/{id}/decomposition/confirm 的响应包。 */
+export interface ConfirmDecompositionResponse {
+  issues: import("./issue").Issue[];
+}
+
 export interface UpdateIssueRequest {
   /** Legacy aggregate compare-and-swap token. New text editors use field
    * baselines so unrelated issue activity does not reject their edits. */

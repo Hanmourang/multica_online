@@ -954,5 +954,29 @@
     "next_aria": "Next period",
     "rescheduled": "Rescheduled — the auto-trigger time moved with it",
     "reschedule_locked": "Already triggered — cancel the run before rescheduling"
+  },
+  "decompose_panel": {
+    "title": "Decomposition",
+    "kv_identifier": "ID",
+    "kv_module": "Module",
+    "kv_repo": "Repo",
+    "kv_window": "Window",
+    "kv_roster": "Roster",
+    "kv_goal": "Goal",
+    "plan_title": "PM Plan",
+    "fp_title": "Feature points",
+    "fp_add": "Add feature point",
+    "fp_kind_new": "New",
+    "fp_kind_modify": "Modify",
+    "fp_kind_missing": "Each feature point must be marked new/modify before confirming",
+    "graph_title": "Graph context",
+    "acc_title": "Acceptance spec",
+    "asg_label": "Assignee",
+    "deps_title": "Dependencies",
+    "acceptance_badge": "Acceptance",
+    "confirm": "Confirm & materialize",
+    "confirming": "Confirming…",
+    "confirmed_title": "Materialized tasks",
+    "confirm_failed": "Failed to confirm decomposition"
   }
 }

@@ -921,5 +921,29 @@
     "next_aria": "下一周期",
     "rescheduled": "已改期，自动触发时间已同步调整",
     "reschedule_locked": "已触发：先取消运行才能改期"
+  },
+  "decompose_panel": {
+    "title": "拆解确认",
+    "kv_identifier": "标识",
+    "kv_module": "模块",
+    "kv_repo": "Git 库",
+    "kv_window": "时间窗",
+    "kv_roster": "班底",
+    "kv_goal": "目标",
+    "plan_title": "PM Plan",
+    "fp_title": "功能点",
+    "fp_add": "添加功能点",
+    "fp_kind_new": "新增",
+    "fp_kind_modify": "改造",
+    "fp_kind_missing": "存在未标注新增/改造的功能点，补齐后才能确认",
+    "graph_title": "图谱上下文",
+    "acc_title": "验收代码",
+    "asg_label": "执行人",
+    "deps_title": "依赖链",
+    "acceptance_badge": "验收",
+    "confirm": "确认并生效",
+    "confirming": "确认中…",
+    "confirmed_title": "已生效子任务",
+    "confirm_failed": "拆解确认失败"
   }
 }

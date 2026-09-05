@@ -921,5 +921,29 @@
     "next_aria": "次の期間",
     "rescheduled": "予定を変更しました。自動トリガー時刻も連動しました",
     "reschedule_locked": "トリガー済み — 改期前に実行をキャンセルしてください"
+  },
+  "decompose_panel": {
+    "title": "分解確認",
+    "kv_identifier": "ID",
+    "kv_module": "モジュール",
+    "kv_repo": "Git リポジトリ",
+    "kv_window": "時間枠",
+    "kv_roster": "ロースター",
+    "kv_goal": "目標",
+    "plan_title": "PM プラン",
+    "fp_title": "機能ポイント",
+    "fp_add": "機能ポイントを追加",
+    "fp_kind_new": "新規",
+    "fp_kind_modify": "改修",
+    "fp_kind_missing": "新規/改修が未表記の機能ポイントがあります。補完してから確認してください",
+    "graph_title": "グラフコンテキスト",
+    "acc_title": "受入コード",
+    "asg_label": "担当者",
+    "deps_title": "依存チェーン",
+    "acceptance_badge": "受入",
+    "confirm": "確認して反映",
+    "confirming": "確認中…",
+    "confirmed_title": "反映されたサブタスク",
+    "confirm_failed": "分解の確認に失敗しました"
   }
 }

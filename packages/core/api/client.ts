@@ -8,6 +8,8 @@ import type {
   ProjectModule,
   RoleAssignment,
   RoleRosterResponse,
+  DecomposeDraftTask,
+  ConfirmDecompositionResponse,
   UpdateIssueRequest,
   GroupedIssuesResponse,
   ListIssuesResponse,
@@ -1294,6 +1296,17 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/roles`, {
       method: "PUT",
       body: JSON.stringify({ entries }),
+    });
+  }
+
+  /** 拆解确认（requirement-calendar spec §9）：校验草稿并批量生效子任务。 */
+  async confirmDecomposition(
+    issueId: string,
+    drafts: DecomposeDraftTask[],
+  ): Promise<ConfirmDecompositionResponse> {
+    return this.fetch(`/api/issues/${issueId}/decomposition/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ drafts }),
     });
   }
 

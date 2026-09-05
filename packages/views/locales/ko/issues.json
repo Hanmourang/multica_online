@@ -921,5 +921,29 @@
     "next_aria": "다음 기간",
     "rescheduled": "일정이 변경되었습니다. 자동 트리거 시간도 함께 조정되었습니다",
     "reschedule_locked": "트리거됨 — 일정 변경 전에 실행을 취소하세요"
+  },
+  "decompose_panel": {
+    "title": "분해 확인",
+    "kv_identifier": "ID",
+    "kv_module": "모듈",
+    "kv_repo": "Git 저장소",
+    "kv_window": "시간 창",
+    "kv_roster": "로스터",
+    "kv_goal": "목표",
+    "plan_title": "PM 플랜",
+    "fp_title": "기능 포인트",
+    "fp_add": "기능 포인트 추가",
+    "fp_kind_new": "신규",
+    "fp_kind_modify": "개조",
+    "fp_kind_missing": "신규/개조가 표시되지 않은 기능 포인트가 있습니다. 보완 후 확인하세요",
+    "graph_title": "그래프 컨텍스트",
+    "acc_title": "인수 코드",
+    "asg_label": "담당자",
+    "deps_title": "의존 체인",
+    "acceptance_badge": "인수",
+    "confirm": "확인 후 반영",
+    "confirming": "확인 중…",
+    "confirmed_title": "반영된 하위 작업",
+    "confirm_failed": "분해 확인에 실패했습니다"
   }
 }
