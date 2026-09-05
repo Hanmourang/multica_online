@@ -552,9 +552,10 @@ type deliverablesStageGate struct {
 	MissingDocTypes []string `json:"missing_doc_types"`
 }
 
-// requirementStatusKeys maps the 9 literals the ListIssues projection emits onto
+// requirementStatusKeys maps the 10 literals the ListIssues projection emits onto
 // stable ASCII enums. A literal missing here yields "unknown" rather than a
-// guessed label.
+// guessed label. The `acceptance_failed` key is a contract with the frontend
+// i18n bundle (`status_acceptance_failed`).
 var requirementStatusKeys = map[string]string{
 	"未拆解":    "not_decomposed",
 	"原型待确认":  "prototype_pending",
@@ -563,6 +564,7 @@ var requirementStatusKeys = map[string]string{
 	"执行中":    "executing",
 	"等待模块释放": "waiting_module_lock",
 	"验收中":    "accepting",
+	"验收失败":   "acceptance_failed",
 	"已完成":    "completed",
 	"已取消":    "cancelled",
 }
@@ -577,6 +579,7 @@ var statusKeyCurrentStage = map[string]int32{
 	"waiting_module_lock":   3,
 	"executing":             3,
 	"accepting":             4,
+	"acceptance_failed":     4,
 	"completed":             4,
 	"cancelled":             4,
 }
@@ -591,6 +594,7 @@ var statusKeyNextAction = map[string]string{
 	"waiting_module_lock":   "wait_module_lock",
 	"executing":             "finish_execution",
 	"accepting":             "finish_acceptance",
+	"acceptance_failed":     "manual_arbitration",
 	"completed":             "none",
 	"cancelled":             "none",
 }
@@ -627,11 +631,21 @@ func (h *Handler) loadDeliverablesProjection(ctx context.Context, issueID pgtype
 		    CASE
 		        WHEN issue_effective_status(i.workspace_id, i.status) = 'done' THEN '已完成'
 		        WHEN issue_effective_status(i.workspace_id, i.status) = 'cancelled' THEN '已取消'
+		        -- 第 10 态（spec §6 增补 / 开放问题 #4）：累计 4 轮打回仍未过 = 验收失败终态。
+		        -- 置于阶段态之前：一旦越界即终态，不再被残留的 open 子任务翻回「执行中/验收中」。
+		        WHEN i.acceptance_round > 3 THEN '验收失败'
 		        WHEN COALESCE(prog.has_open_stage1, FALSE) THEN '原型待确认'
 		        WHEN i.decomposition_confirmed_at IS NULL AND COALESCE(prog.has_stage2, FALSE) THEN '拆解待确认'
 		        WHEN i.decomposition_confirmed_at IS NULL THEN '未拆解'
 		        WHEN i.triggered_at IS NULL THEN '待触发'
-		        WHEN EXISTS (
+		        -- 规则 6 修正（父状态优先于子计数）：仅当没有任何 stage3 子任务正在推进
+		        -- （dispatched/running）且确有子任务在等模块锁时，才判「等待模块释放」；
+		        -- 否则只要还有 stage3 在跑就是「执行中」，等锁只是局部阻塞不代表整体停摆。
+		        WHEN NOT EXISTS (
+		            SELECT 1 FROM issue rc
+		            JOIN agent_task_queue rq ON rq.issue_id = rc.id
+		            WHERE rc.parent_issue_id = i.id AND rq.status IN ('dispatched', 'running')
+		        ) AND EXISTS (
 		            SELECT 1 FROM issue wc
 		            JOIN agent_task_queue wq ON wq.issue_id = wc.id
 		            WHERE wc.parent_issue_id = i.id AND wq.status = 'waiting_module_lock'
