@@ -8923,7 +8923,8 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						// credential) to a peer that does not scrub nested
 						// values yet. Deployment order is not a control we
 						// have, so this side has to be safe on its own.
-						Input: redact.InputMap(msg.Input),
+						Input:  redact.InputMap(msg.Input),
+						CallID: msg.CallID,
 					})
 					mu.Unlock()
 				case agent.MessageToolResult:
@@ -8959,6 +8960,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						Type:   "tool_result",
 						Tool:   toolName,
 						Output: output,
+						CallID: msg.CallID,
 					})
 					mu.Unlock()
 				case agent.MessageThinking:
