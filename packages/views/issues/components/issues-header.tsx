@@ -2330,6 +2330,8 @@ export function IssueDisplayControls({
                           <Table2 className="size-3.5" />
                         ) : viewMode === "swimlane" ? (
                           <Waves className="size-3.5" />
+                        ) : viewMode === "calendar" ? (
+                          <CalendarDays className="size-3.5" />
                         ) : viewMode === "gantt" && allowGantt ? (
                           <ChartGantt className="size-3.5" />
                         ) : (
@@ -2342,6 +2344,8 @@ export function IssueDisplayControls({
                             ? t(($) => $.view.table)
                             : viewMode === "swimlane"
                             ? t(($) => $.view.swimlane)
+                            : viewMode === "calendar"
+                            ? t(($) => $.view.calendar)
                             : viewMode === "gantt" && allowGantt
                             ? t(($) => $.view.gantt)
                             : t(($) => $.view.list)}
@@ -2358,6 +2362,8 @@ export function IssueDisplayControls({
                   ? t(($) => $.view.tooltip_table)
                   : viewMode === "swimlane"
                   ? t(($) => $.view.tooltip_swimlane)
+                  : viewMode === "calendar"
+                  ? t(($) => $.view.tooltip_calendar)
                   : viewMode === "gantt" && allowGantt
                   ? t(($) => $.view.tooltip_gantt)
                   : t(($) => $.view.tooltip_list)}
@@ -2389,6 +2395,10 @@ export function IssueDisplayControls({
                 <DropdownMenuRadioItem value="swimlane">
                   <Waves />
                   {t(($) => $.view.swimlane)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="calendar">
+                  <CalendarDays />
+                  {t(($) => $.view.calendar)}
                 </DropdownMenuRadioItem>
                 {allowGantt && (
                   <DropdownMenuRadioItem value="gantt">

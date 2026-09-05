@@ -27,6 +27,7 @@ import {
 import type { Issue } from "@multica/core/types";
 import { BoardView } from "../components/board-view";
 import { BatchActionToolbar } from "../components/batch-action-toolbar";
+import { CalendarView } from "../components/calendar-view";
 import { GanttView } from "../components/gantt-view";
 import { IssuesHeader } from "../components/issues-header";
 import { ListView } from "../components/list-view";
@@ -342,6 +343,9 @@ function IssueSurfaceContent({
             )}
             {controller.viewMode === "gantt" && (
               <GanttView issues={controller.filteredGanttIssues} />
+            )}
+            {controller.viewMode === "calendar" && (
+              <CalendarView issues={issues} />
             )}
             {controller.viewMode === "swimlane" && (
               <SwimLaneView
