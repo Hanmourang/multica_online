@@ -140,6 +140,36 @@ func (q *Queries) GetLatestPrototypeVersion(ctx context.Context, issueID pgtype.
 	return i, err
 }
 
+const getPrototypeVersion = `-- name: GetPrototypeVersion :one
+SELECT id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at FROM issue_prototype_version
+WHERE issue_id = $1 AND version = $2
+`
+
+type GetPrototypeVersionParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	Version int32       `json:"version"`
+}
+
+// 按版本号取单行（marks 写入与确认门都按 {version} 定位）。
+func (q *Queries) GetPrototypeVersion(ctx context.Context, arg GetPrototypeVersionParams) (IssuePrototypeVersion, error) {
+	row := q.db.QueryRow(ctx, getPrototypeVersion, arg.IssueID, arg.Version)
+	var i IssuePrototypeVersion
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.WorkspaceID,
+		&i.Version,
+		&i.HtmlPath,
+		&i.Prompt,
+		&i.Marks,
+		&i.Status,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const hasWaitingModuleLockDescendant = `-- name: HasWaitingModuleLockDescendant :one
 SELECT EXISTS (
     SELECT 1

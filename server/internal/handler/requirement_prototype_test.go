@@ -226,3 +226,223 @@ func TestGeneratePrototype(t *testing.T) {
 		}
 	})
 }
+
+// 原型标记 + 确认门（spec §5.3/§9 + 画面 4 标注 9）：
+// POST /api/issues/{id}/prototypes/{version}/marks 与 .../confirm。
+//
+//   - marks 仅可写 pending 版本；verdict 非法 → 400
+//   - 确认门：当前 pending 版本存在任一 verdict='no' 标记 → 409（✗ 必须随
+//     新版本消解，note 备注不能替代重生成）；全 ok/pending → 200
+//   - 确认后版本 status=confirmed，stage=1 子任务置 done，并触发既有
+//     notifyParentOfChildDone stage barrier 唤醒父任务执行人（stage 2 PM）
+func TestPrototypeMarksAndConfirmGate(t *testing.T) {
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+
+	insertRequirement := func(t *testing.T, assigneeType, assigneeID string) string {
+		t.Helper()
+		var number int
+		if err := testPool.QueryRow(ctx, `
+			UPDATE workspace
+			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+			WHERE id = $1 RETURNING issue_counter
+		`, testWorkspaceID).Scan(&number); err != nil {
+			t.Fatalf("next issue number: %v", err)
+		}
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id,
+				number, position, goal, decompose_mode, assignee_type, assignee_id)
+			VALUES ($1, $2, 'todo', 'none', 'member', $3, $4, 100, '目标', 'confirm', nullif($5, ''), nullif($6, '')::uuid)
+			RETURNING id
+		`, testWorkspaceID, "Confirm proto "+suffix, testUserID, number, assigneeType, assigneeID).Scan(&id); err != nil {
+			t.Fatalf("insert requirement: %v", err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, id)
+			testPool.Exec(context.Background(), `DELETE FROM issue_prototype_version WHERE issue_id = $1`, id)
+			testPool.Exec(context.Background(), `DELETE FROM issue_role_assignment WHERE issue_id = $1`, id)
+			testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id IN (SELECT id FROM issue WHERE parent_issue_id = $1 OR id = $1)`, id)
+			testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1 OR parent_issue_id = $1`, id)
+		})
+		return id
+	}
+	addPrototyper := func(t *testing.T, issueID string) {
+		t.Helper()
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO issue_role_assignment (issue_id, workspace_id, role, assignee_type, assignee_id, enabled, ordinal)
+			VALUES ($1, $2, 'prototyper', 'member', $3, TRUE, 0)
+		`, issueID, testWorkspaceID, testUserID); err != nil {
+			t.Fatalf("seed prototyper: %v", err)
+		}
+	}
+	generate := func(t *testing.T, issueID string, body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/prototype/generate", body)
+		req = withURLParam(req, "id", issueID)
+		testHandler.GeneratePrototype(w, req)
+		return w
+	}
+	postMarks := func(t *testing.T, issueID string, version int, body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/prototypes/"+fmt.Sprint(version)+"/marks", body)
+		req = withURLParams(req, "id", issueID, "version", fmt.Sprint(version))
+		testHandler.UpdatePrototypeMarks(w, req)
+		return w
+	}
+	confirm := func(t *testing.T, issueID string, version int) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/prototypes/"+fmt.Sprint(version)+"/confirm", nil)
+		req = withURLParams(req, "id", issueID, "version", fmt.Sprint(version))
+		testHandler.ConfirmPrototype(w, req)
+		return w
+	}
+	marksBody := func(marks ...map[string]any) map[string]any {
+		return map[string]any{"marks": marks}
+	}
+
+	t.Run("marks write persists and rejects invalid verdict", func(t *testing.T) {
+		issueID := insertRequirement(t, "", "")
+		addPrototyper(t, issueID)
+		if w := generate(t, issueID, nil); w.Code != http.StatusCreated {
+			t.Fatalf("generate: %d: %s", w.Code, w.Body.String())
+		}
+
+		w := postMarks(t, issueID, 1, marksBody(
+			map[string]any{"detail_id": "d1", "verdict": "ok"},
+			map[string]any{"detail_id": "d2", "verdict": "pending"},
+		))
+		if w.Code != http.StatusOK {
+			t.Fatalf("marks: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var persisted string
+		if err := testPool.QueryRow(ctx, `
+			SELECT marks::text FROM issue_prototype_version WHERE issue_id = $1 AND version = 1
+		`, issueID).Scan(&persisted); err != nil {
+			t.Fatalf("read marks: %v", err)
+		}
+		if !strings.Contains(persisted, `"detail_id":"d1"`) && !strings.Contains(persisted, `"detail_id": "d1"`) {
+			t.Fatalf("marks not persisted: %s", persisted)
+		}
+
+		bad := postMarks(t, issueID, 1, marksBody(map[string]any{"detail_id": "d1", "verdict": "maybe"}))
+		if bad.Code != http.StatusBadRequest {
+			t.Fatalf("invalid verdict: expected 400, got %d: %s", bad.Code, bad.Body.String())
+		}
+	})
+
+	t.Run("confirm is blocked by a no-mark even when the note explains it", func(t *testing.T) {
+		issueID := insertRequirement(t, "", "")
+		addPrototyper(t, issueID)
+		if w := generate(t, issueID, nil); w.Code != http.StatusCreated {
+			t.Fatalf("generate: %d: %s", w.Code, w.Body.String())
+		}
+		// ✗ 项必须随新版本消解；note 写「已重生成覆盖」也不能替代重生成。
+		if w := postMarks(t, issueID, 1, marksBody(
+			map[string]any{"detail_id": "d3", "verdict": "no", "note": "已重生成v2覆盖"},
+		)); w.Code != http.StatusOK {
+			t.Fatalf("marks: %d: %s", w.Code, w.Body.String())
+		}
+		w := confirm(t, issueID, 1)
+		if w.Code != http.StatusConflict {
+			t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "no") {
+			t.Fatalf("expected unresolved no-mark message, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("confirm on a superseded version is a 409", func(t *testing.T) {
+		issueID := insertRequirement(t, "", "")
+		addPrototyper(t, issueID)
+		if w := generate(t, issueID, nil); w.Code != http.StatusCreated {
+			t.Fatalf("generate v1: %d: %s", w.Code, w.Body.String())
+		}
+		if w := generate(t, issueID, nil); w.Code != http.StatusCreated {
+			t.Fatalf("generate v2: %d: %s", w.Code, w.Body.String())
+		}
+		if w := confirm(t, issueID, 1); w.Code != http.StatusConflict {
+			t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("regenerate resets the gate: v2 with ok marks confirms, closes stage-1 and wakes the parent", func(t *testing.T) {
+		agentID := createHandlerTestAgent(t, "proto-gate-"+suffix, nil)
+		issueID := insertRequirement(t, "agent", agentID)
+		addPrototyper(t, issueID)
+
+		if w := generate(t, issueID, nil); w.Code != http.StatusCreated {
+			t.Fatalf("generate v1: %d: %s", w.Code, w.Body.String())
+		}
+		// v1 标 ✗（带修正诉求）→ 携 marks 重生成 v2（prompt 回流〔本轮修正〕）。
+		noMarks := []map[string]any{{"detail_id": "d3", "verdict": "no", "note": "进度条太粗"}}
+		if w := postMarks(t, issueID, 1, marksBody(noMarks...)); w.Code != http.StatusOK {
+			t.Fatalf("marks v1: %d: %s", w.Code, w.Body.String())
+		}
+		if w := generate(t, issueID, map[string]any{"marks": noMarks}); w.Code != http.StatusCreated {
+			t.Fatalf("generate v2: %d: %s", w.Code, w.Body.String())
+		}
+		// v2 全 ok/pending → 确认放行。
+		if w := postMarks(t, issueID, 2, marksBody(
+			map[string]any{"detail_id": "d1", "verdict": "ok"},
+			map[string]any{"detail_id": "d2", "verdict": "pending"},
+		)); w.Code != http.StatusOK {
+			t.Fatalf("marks v2: %d: %s", w.Code, w.Body.String())
+		}
+		w := confirm(t, issueID, 2)
+		if w.Code != http.StatusOK {
+			t.Fatalf("confirm: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var status string
+		if err := testPool.QueryRow(ctx, `
+			SELECT status FROM issue_prototype_version WHERE issue_id = $1 AND version = 2
+		`, issueID).Scan(&status); err != nil {
+			t.Fatalf("read version: %v", err)
+		}
+		if status != "confirmed" {
+			t.Fatalf("expected confirmed, got %s", status)
+		}
+
+		// stage-1 子任务置 done。
+		var childStatus string
+		if err := testPool.QueryRow(ctx, `
+			SELECT status FROM issue WHERE parent_issue_id = $1 AND stage = 1
+		`, issueID).Scan(&childStatus); err != nil {
+			t.Fatalf("read stage-1 child: %v", err)
+		}
+		if childStatus != "done" {
+			t.Fatalf("expected stage-1 child done, got %s", childStatus)
+		}
+
+		// barrier 唤醒：父任务（agent 执行人）收到 stage-1 关闭的系统评论。
+		var comments int
+		if err := testPool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM comment
+			WHERE issue_id = $1 AND author_type = 'system' AND content LIKE '%Stage 1%'
+		`, issueID).Scan(&comments); err != nil {
+			t.Fatalf("count barrier comments: %v", err)
+		}
+		if comments != 1 {
+			t.Fatalf("expected 1 stage-barrier comment on the parent, got %d", comments)
+		}
+	})
+
+	t.Run("marks on a confirmed version are rejected", func(t *testing.T) {
+		issueID := insertRequirement(t, "", "")
+		addPrototyper(t, issueID)
+		if w := generate(t, issueID, nil); w.Code != http.StatusCreated {
+			t.Fatalf("generate: %d: %s", w.Code, w.Body.String())
+		}
+		if w := confirm(t, issueID, 1); w.Code != http.StatusOK {
+			t.Fatalf("confirm: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		w := postMarks(t, issueID, 1, marksBody(map[string]any{"detail_id": "d9", "verdict": "ok"}))
+		if w.Code != http.StatusConflict {
+			t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+}

@@ -60,6 +60,11 @@ WHERE issue_id = $1
 ORDER BY version DESC
 LIMIT 1;
 
+-- name: GetPrototypeVersion :one
+-- 按版本号取单行（marks 写入与确认门都按 {version} 定位）。
+SELECT * FROM issue_prototype_version
+WHERE issue_id = $1 AND version = $2;
+
 -- name: ListPrototypeVersions :many
 SELECT * FROM issue_prototype_version
 WHERE issue_id = $1

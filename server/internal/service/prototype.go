@@ -5,8 +5,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -64,4 +66,114 @@ func (s *IssueService) GeneratePrototypeVersion(ctx context.Context, p GenerateP
 		return db.IssuePrototypeVersion{}, err
 	}
 	return version, nil
+}
+
+// ErrPrototypeVersionNotFound 表示 {issue, version} 不存在 → 404。
+var ErrPrototypeVersionNotFound = errors.New("prototype version not found")
+
+// ErrPrototypeVersionNotPending 表示目标版本不是 pending（marks 只能写
+// pending 版本，确认门也只能作用于 pending 版本）→ 409。
+var ErrPrototypeVersionNotPending = errors.New("prototype version is not pending")
+
+// PrototypeValidationError 是标记内容错误（→ 400）。
+type PrototypeValidationError struct{ Msg string }
+
+func (e *PrototypeValidationError) Error() string { return e.Msg }
+
+// PrototypeConfirmGateError 是确认门拦截（→ 409）：当前 pending 版本仍存在
+// verdict='no' 的标记项。✗ 必须随新版本消解（重生成后 marks 重置），note
+// 备注不能替代重生成（spec 画面 4 标注 9）。
+type PrototypeConfirmGateError struct{ DetailIDs []string }
+
+func (e *PrototypeConfirmGateError) Error() string {
+	return "unresolved no-marks on the pending version: " + strings.Join(e.DetailIDs, ", ")
+}
+
+// validatePrototypeMarks 校验标记集合：detail_id 必填，verdict ∈ ok/no/pending。
+func validatePrototypeMarks(marks []PrototypeMark) error {
+	for _, m := range marks {
+		if strings.TrimSpace(m.DetailID) == "" {
+			return &PrototypeValidationError{Msg: "mark detail_id required"}
+		}
+		switch m.Verdict {
+		case "ok", "no", "pending":
+		default:
+			return &PrototypeValidationError{Msg: "invalid mark verdict: " + m.Verdict}
+		}
+	}
+	return nil
+}
+
+// UpdatePrototypeMarks 整体替换某个 pending 版本的 marks（whole-document
+// write；画面 4 的逐项标记在客户端合并后一次性提交）。
+func (s *IssueService) UpdatePrototypeMarks(ctx context.Context, issueID pgtype.UUID, version int32, marks []PrototypeMark) (db.IssuePrototypeVersion, error) {
+	if marks == nil {
+		marks = []PrototypeMark{}
+	}
+	if err := validatePrototypeMarks(marks); err != nil {
+		return db.IssuePrototypeVersion{}, err
+	}
+	v, err := s.Queries.GetPrototypeVersion(ctx, db.GetPrototypeVersionParams{IssueID: issueID, Version: version})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.IssuePrototypeVersion{}, ErrPrototypeVersionNotFound
+	}
+	if err != nil {
+		return db.IssuePrototypeVersion{}, fmt.Errorf("load prototype version: %w", err)
+	}
+	if v.Status != "pending" {
+		return db.IssuePrototypeVersion{}, ErrPrototypeVersionNotPending
+	}
+	raw, err := json.Marshal(marks)
+	if err != nil {
+		return db.IssuePrototypeVersion{}, fmt.Errorf("marshal marks: %w", err)
+	}
+	updated, err := s.Queries.UpdatePrototypeMarks(ctx, db.UpdatePrototypeMarksParams{
+		Marks:   raw,
+		IssueID: issueID,
+		Version: version,
+	})
+	if err != nil {
+		return db.IssuePrototypeVersion{}, fmt.Errorf("update prototype marks: %w", err)
+	}
+	return updated, nil
+}
+
+// ConfirmPrototypeVersion 确认门（spec §5.3/§9）：目标版本必须是 pending 且
+// marks 中不存在 verdict='no' 项，才置为 confirmed。stage-1 子任务的关闭与
+// barrier 唤醒由调用方（handler）在确认成功后执行。
+func (s *IssueService) ConfirmPrototypeVersion(ctx context.Context, issueID pgtype.UUID, version int32) (db.IssuePrototypeVersion, error) {
+	v, err := s.Queries.GetPrototypeVersion(ctx, db.GetPrototypeVersionParams{IssueID: issueID, Version: version})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.IssuePrototypeVersion{}, ErrPrototypeVersionNotFound
+	}
+	if err != nil {
+		return db.IssuePrototypeVersion{}, fmt.Errorf("load prototype version: %w", err)
+	}
+	if v.Status != "pending" {
+		return db.IssuePrototypeVersion{}, ErrPrototypeVersionNotPending
+	}
+	var marks []PrototypeMark
+	if len(v.Marks) > 0 {
+		if err := json.Unmarshal(v.Marks, &marks); err != nil {
+			return db.IssuePrototypeVersion{}, fmt.Errorf("parse prototype marks: %w", err)
+		}
+	}
+	var blocked []string
+	for _, m := range marks {
+		if m.Verdict == "no" {
+			blocked = append(blocked, m.DetailID)
+		}
+	}
+	if len(blocked) > 0 {
+		return db.IssuePrototypeVersion{}, &PrototypeConfirmGateError{DetailIDs: blocked}
+	}
+	if err := s.Queries.SetPrototypeStatus(ctx, db.SetPrototypeStatusParams{
+		Status:  "confirmed",
+		IssueID: issueID,
+		Version: version,
+	}); err != nil {
+		return db.IssuePrototypeVersion{}, fmt.Errorf("confirm prototype version: %w", err)
+	}
+	v.Status = "confirmed"
+	return v, nil
 }

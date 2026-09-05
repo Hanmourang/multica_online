@@ -262,3 +262,103 @@ func (h *Handler) ListPrototypeVersions(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"versions": out})
 }
+
+// ---- 原型标记 + 确认门（spec §5.3/§9 + 画面 4 标注 9）----
+
+// updatePrototypeMarksRequest 是 marks 写入的请求体：整体替换目标 pending
+// 版本的标记集合（客户端逐项标记合并后一次性提交）。
+type updatePrototypeMarksRequest struct {
+	Marks []service.PrototypeMark `json:"marks"`
+}
+
+// prototypeHandlerError 把 service 层原型错误映射为 HTTP 状态码。
+func prototypeHandlerError(w http.ResponseWriter, err error, fallback string) {
+	var valErr *service.PrototypeValidationError
+	var gateErr *service.PrototypeConfirmGateError
+	switch {
+	case errors.As(err, &valErr):
+		writeError(w, http.StatusBadRequest, valErr.Msg)
+	case errors.Is(err, service.ErrPrototypeVersionNotFound):
+		writeError(w, http.StatusNotFound, "prototype version not found")
+	case errors.Is(err, service.ErrPrototypeVersionNotPending):
+		writeError(w, http.StatusConflict, "prototype version is not pending")
+	case errors.As(err, &gateErr):
+		writeError(w, http.StatusConflict, gateErr.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, fallback+": "+err.Error())
+	}
+}
+
+// UpdatePrototypeMarks handles POST /api/issues/{id}/prototypes/{version}/marks。
+func (h *Handler) UpdatePrototypeMarks(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	versionNum, err := strconv.Atoi(chi.URLParam(r, "version"))
+	if err != nil || versionNum < 1 {
+		writeError(w, http.StatusBadRequest, "invalid version")
+		return
+	}
+	var body updatePrototypeMarksRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	updated, err := h.IssueService.UpdatePrototypeMarks(r.Context(), issue.ID, int32(versionNum), body.Marks)
+	if err != nil {
+		prototypeHandlerError(w, err, "failed to update prototype marks")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": prototypeVersionToResponse(updated)})
+}
+
+// ConfirmPrototype handles POST /api/issues/{id}/prototypes/{version}/confirm。
+//
+// 确认门在 service 内校验（pending + 无 verdict='no' 标记）；通过后这里把
+// stage=1 子任务置 done，并走既有 notifyParentOfChildDone stage barrier——
+// 父任务执行人（stage 2 的 PM）随之被唤醒（spec 画面 4 标注 9：确认 → 进
+// stage 2 由 PM 出 plan + 拆解）。
+func (h *Handler) ConfirmPrototype(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	versionNum, err := strconv.Atoi(chi.URLParam(r, "version"))
+	if err != nil || versionNum < 1 {
+		writeError(w, http.StatusBadRequest, "invalid version")
+		return
+	}
+	confirmed, err := h.IssueService.ConfirmPrototypeVersion(r.Context(), issue.ID, int32(versionNum))
+	if err != nil {
+		prototypeHandlerError(w, err, "failed to confirm prototype version")
+		return
+	}
+
+	ctx := r.Context()
+	children, err := h.Queries.ListRequirementChildren(ctx, issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list requirement children")
+		return
+	}
+	for _, child := range children {
+		if !child.Stage.Valid || child.Stage.Int32 != 1 {
+			continue
+		}
+		if isTerminalChildStatus(issuestatus.Effective(ctx, h.Queries, child.WorkspaceID, child.Status)) {
+			continue
+		}
+		updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          child.ID,
+			Status:      "done",
+			WorkspaceID: child.WorkspaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to close stage-1 prototype task: "+err.Error())
+			return
+		}
+		// 既有 barrier：进入终态的转移才触发；best-effort，失败不回滚确认。
+		h.notifyParentOfChildDone(ctx, child, updated)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": prototypeVersionToResponse(confirmed)})
+}
