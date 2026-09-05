@@ -1888,6 +1888,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteIssue)
 					r.Get("/roles", h.ListIssueRoleAssignments)
 					r.Put("/roles", h.ReplaceIssueRoleAssignments)
+					r.Post("/decompose", h.DecomposeRequirement)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
@@ -1918,6 +1919,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 					r.Get("/dependencies", h.GetIssueDependencies)
 					r.Put("/dependencies", h.PutIssueDependencies)
+					// Project-archive issue-level aggregates (spec 2026-09-05 §5.5):
+					// run history, activity pulse, deliverables, three-layer rollup.
+					r.Get("/agent-runs", h.ListAgentRuns)
+					r.Get("/dynamics", h.GetIssueDynamics)
+					r.Get("/deliverables-overview", h.GetIssueDeliverablesOverview)
+					r.Get("/progress", h.GetIssueProgress)
 				})
 			})
 
@@ -1989,6 +1996,43 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/modules/{moduleId}", h.DeleteProjectModule)
 					r.Get("/role-defaults", h.ListProjectRoleDefaults)
 					r.Put("/role-defaults", h.ReplaceProjectRoleDefaults)
+					// Project archive (spec 2026-09-05-project-archive-design.md §5):
+					// artifacts / graph snapshots / filing readiness. Static
+					// segments (sync, matrix, latest, bus-matrix) precede the
+					// {artifactId} wildcard by chi trie precedence.
+					r.Post("/artifacts/sync", h.SyncProjectArtifacts)
+					r.Get("/artifacts/matrix", h.GetArtifactMatrix)
+					r.Get("/artifacts", h.ListProjectArtifacts)
+					r.Get("/artifacts/{artifactId}", h.GetProjectArtifact)
+					r.Get("/artifacts/{artifactId}/content", h.GetArtifactContent)
+					r.Post("/artifacts/{artifactId}/archive", h.ArchiveDeliverable)
+					r.Post("/graph/sync", h.SyncGraphSnapshot)
+					r.Get("/graph/latest", h.GetLatestGraphSnapshot)
+					r.Get("/graph/latest/detail", h.GetGraphSnapshotDetail)
+					r.Get("/graph/modules", h.ListGraphModules)
+					r.Get("/graph/modules/{nodeId}/changes", h.GetModuleChanges)
+					r.Get("/graph/modules/{nodeId}/objects", h.GetModuleObjects)
+					r.Get("/graph/modules/{nodeId}/strategies", h.GetModuleStrategies)
+					r.Get("/graph/modules/{nodeId}/neighborhood", h.GetModuleNeighborhood)
+					r.Get("/graph/bus-matrix", h.GetBusMatrix)
+					r.Get("/graph/bus-matrix/drilldown", h.GetBusMatrixDrilldown)
+					r.Get("/graph/bus-matrix/alerts", h.GetBusMatrixAlerts)
+					r.Get("/graph/bus-matrix/timeline", h.GetBusMatrixTimeline)
+					r.Get("/filing/readiness", h.GetFilingReadiness)
+					r.Get("/filing/items", h.ListFilingItems)
+					r.Post("/filing/check", h.RunFilingCheck)
+					r.Post("/filing/export", h.ExportFilingPackage)
+				})
+			})
+
+			// Agent runs (project-archive §5.5): the projector's write endpoint
+			// plus run-scoped todo / event reads. Workspace affinity comes from
+			// the run row itself.
+			r.Route("/api/agent-runs", func(r chi.Router) {
+				r.Post("/", h.UpsertAgentRun)
+				r.Route("/{runId}", func(r chi.Router) {
+					r.Get("/todos", h.ListAgentRunTodos)
+					r.Get("/events", h.ListAgentRunEvents)
 				})
 			})
 
