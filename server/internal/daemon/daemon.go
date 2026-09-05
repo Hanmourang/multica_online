@@ -605,6 +605,16 @@ type Daemon struct {
 	// server-side waiting_module_lock status while it waits.
 	moduleLocks *ModuleLocker
 
+	// activeTaskIDs is the set of task IDs currently in handleTask on this
+	// daemon. It backs ModuleLocker.ReleaseGroup's liveness filter (H-1): when a
+	// root requirement's own task reaches a terminal state, ReleaseGroup must only
+	// reclaim holds whose owning task is no longer running, never the holds of
+	// still-running stage3/stage4 siblings in the same group. Guarded by its own
+	// mutex because it is read from ReleaseGroup (a different task's goroutine)
+	// while every dispatched task mutates it on entry/exit.
+	activeTaskIDsMu sync.Mutex
+	activeTaskIDs   map[string]struct{}
+
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
 	// them to drain before tearing the daemon down. Without this the bg
@@ -666,6 +676,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		deletingStores:            make(map[string]bool),
 		localPathLocks:            NewLocalPathLocker(),
 		moduleLocks:               NewModuleLocker(),
+		activeTaskIDs:             make(map[string]struct{}),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		pendingWorkInflight:       make(map[string]struct{}),
 		pendingWorkLastRun:        make(map[string]time.Time),
@@ -5138,6 +5149,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			d.logger.Info("task received", "task", t.ID, "target", taskTarget)
 			taskWG.Add(1)
 			d.activeTasks.Add(1)
+			d.markTaskActive(t.ID)
 			if cache, ok := d.repoCache.(interface{ CancelMaintenance() }); ok {
 				// A task can reuse an existing worktree and never enter the
 				// checkout path that normally preempts repository maintenance.
@@ -5148,6 +5160,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			go func(t Task, slot int) {
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
+				defer d.unmarkTaskActive(t.ID)
 				defer func() {
 					// Release local capacity before waking the poller. The task's
 					// terminal callback and local cleanup have both finished at this
@@ -5415,8 +5428,13 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// 唤醒同模块跨组等待队列。per-task release 只回收本任务的 hold，级联取消
 	// 时尚未各自 release 的同组兄弟任务靠这里兜底；ReleaseGroup 幂等，对无
 	// 模块任务（未持锁）是 no-op，重复调用安全。
+	//
+	// H-1：传入 d.isTaskActive 作为存活判定，ReleaseGroup 只回收「持有方任务确已
+	// 不再活跃」的 hold——root 需求自身任务先终态时，绝不误删同组仍 running 的
+	// stage3/stage4 子任务 hold（否则跨组等待方被唤醒后与本组并发写同一模块）。
+	// 仍活跃子任务的 hold 由各自 handleTask 完成时的 per-task release 回收。
 	if task.RootRequirementID != "" && task.IssueID == task.RootRequirementID {
-		defer d.moduleLocks.ReleaseGroup(task.RootRequirementID)
+		defer d.moduleLocks.ReleaseGroup(task.RootRequirementID, d.isTaskActive)
 	}
 
 	// Hold a process-wide active-root guard for the rest of this task so
@@ -5729,6 +5747,38 @@ func (d *Daemon) resolveLocalDirectoryAssignment(ctx context.Context, task Task,
 		return nil, true
 	}
 	return assignment, false
+}
+
+// markTaskActive records taskID as live on this daemon. Called for every
+// dispatched task before handleTask so ModuleLocker.ReleaseGroup's liveness
+// filter (H-1) can tell still-running siblings from reclaimed ones.
+func (d *Daemon) markTaskActive(taskID string) {
+	if taskID == "" {
+		return
+	}
+	d.activeTaskIDsMu.Lock()
+	d.activeTaskIDs[taskID] = struct{}{}
+	d.activeTaskIDsMu.Unlock()
+}
+
+// unmarkTaskActive clears taskID's live mark once its handleTask returns.
+func (d *Daemon) unmarkTaskActive(taskID string) {
+	if taskID == "" {
+		return
+	}
+	d.activeTaskIDsMu.Lock()
+	delete(d.activeTaskIDs, taskID)
+	d.activeTaskIDsMu.Unlock()
+}
+
+// isTaskActive reports whether taskID is still in handleTask on this daemon.
+// Passed to ModuleLocker.ReleaseGroup so a root task reaching terminal state
+// never reclaims the holds of still-running stage3/stage4 siblings (H-1).
+func (d *Daemon) isTaskActive(taskID string) bool {
+	d.activeTaskIDsMu.Lock()
+	defer d.activeTaskIDsMu.Unlock()
+	_, ok := d.activeTaskIDs[taskID]
+	return ok
 }
 
 // acquireModuleLockIfNeeded 实现 spec §5：有模块任务按 avoid_conflict 参与

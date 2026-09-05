@@ -215,7 +215,7 @@ func TestModuleLockerGroupMutex(t *testing.T) {
 		case <-time.After(50 * time.Millisecond):
 		}
 
-		l.ReleaseGroup("r1")
+		l.ReleaseGroup("r1", nil) // nil 存活判定 = 全部已终态（释放整组）
 		select {
 		case rel3 := <-acquired:
 			rel3()
@@ -281,7 +281,7 @@ func TestModuleLockerGroupMutex(t *testing.T) {
 		}
 		defer rel2()
 
-		l.ReleaseGroup("r1")
+		l.ReleaseGroup("r1", nil) // nil 存活判定 = 全部已终态（释放整组）
 
 		// r1 的持有已释放：同模块跨组任务立即获取成功。
 		rel3, err := l.Acquire(context.Background(), "m1", "内核", "r3", "需求C", "t3", false, nil)
@@ -297,4 +297,57 @@ func TestModuleLockerGroupMutex(t *testing.T) {
 			t.Fatal("m2's hold must survive ReleaseGroup(r1)")
 		}
 	})
+}
+
+// H-1：ReleaseGroup 只回收「持有方任务确已不再活跃」的 hold。root 需求
+// 自身任务先终态时，绝不得误删同组仍 running 的 stage3/stage4 子任务 hold，
+// 否则跨组等待方被 Broadcast 唤醒后与本组仍运行任务并发写同一模块。
+func TestModuleLocker_ReleaseGroupPreservesLiveSiblingHold(t *testing.T) {
+	l := NewModuleLocker()
+	// 同组 r1 的两个同模块持有：t1=root 需求自身任务，t2=仍 running 的子任务。
+	rel1, err := l.Acquire(context.Background(), "m1", "内核", "r1", "需求A", "t1", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rel1()
+	rel2, err := l.Acquire(context.Background(), "m1", "内核", "r1", "需求A", "t2", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rel2()
+
+	// 跨组 r2 在同模块上排队，被 r1 挡住。
+	acquired := make(chan func(), 1)
+	go func() {
+		rel3, err := l.Acquire(context.Background(), "m1", "内核", "r2", "需求B", "t3", false, nil)
+		if err == nil {
+			acquired <- rel3
+		}
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("cross-group acquire succeeded while r1 holds the module")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// root 任务 t1 终态→ReleaseGroup，但 t2 仍活跃（isLive(t2)==true）。
+	live := map[string]bool{"t2": true}
+	l.ReleaseGroup("r1", func(taskID string) bool { return live[taskID] })
+
+	// t2 的存活持有必须保住：跨组 r2 仍被挡，绝不得被唤醒。
+	select {
+	case <-acquired:
+		t.Fatal("H-1 regression: ReleaseGroup reclaimed a live sibling hold and woke the cross-group waiter")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// t2 也终态后再次 ReleaseGroup → 整组释放，跨组 r2 被唤醒。
+	live["t2"] = false
+	l.ReleaseGroup("r1", func(taskID string) bool { return live[taskID] })
+	select {
+	case rel3 := <-acquired:
+		rel3()
+	case <-time.After(time.Second):
+		t.Fatal("cross-group waiter not woken after the whole group went terminal")
+	}
 }

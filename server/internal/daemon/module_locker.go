@@ -120,19 +120,34 @@ func (l *ModuleLocker) blockerLocked(moduleID, rootID string, exclusive bool) (m
 	return moduleHold{}, false
 }
 
-// ReleaseGroup 释放 rootID 需求组的全部持有（root 到达终态 done/cancelled/
-// failed 即释放，spec §7.5②），并唤醒全部等待方重查。任务完成时的逐任务
-// release 是主路径，本 API 兜底「root 终态但持有方任务尚未被 daemon 回收」
-// 的窗口。空 rootID 直接返回。
-func (l *ModuleLocker) ReleaseGroup(rootID string) {
+// ReleaseGroup 释放 rootID 需求组中「持有方任务确已不再活跃」的持有，并唤醒
+// 全部等待方重查（root 到达终态 done/cancelled/failed 即释放，spec §7.5②）。
+// 任务完成时的逐任务 release 是主路径，本 API 兜底「root 终态但持有方任务尚未被
+// daemon 回收」的窗口。空 rootID 直接返回。
+//
+// H-1：isLive 报告某 taskID 是否仍在本 daemon 上运行。ReleaseGroup 只回收
+// isLive(taskID)==false 的持有——若 root 需求自身任务先终态就无条件删同组全部
+// holders，会误删仍 running 的 stage3/stage4 子任务 hold，Broadcast 唤醒跨组等待方
+// 与本组仍运行任务并发写同一模块（推翻 WS3 互斥不变量）。仍活跃的持有被保留，
+// 其逐任务 release 由各自 handleTask 完成时触发。isLive 为 nil 视为「全部已终态」
+//（释放整组，仅测试与已知整组结束的场景使用）。
+//
+// 注：本 API 只过滤终态，不改动 blockerLocked 的「同模块跨组互斥」判定语义
+//（那是待用户决策项）。
+func (l *ModuleLocker) ReleaseGroup(rootID string, isLive func(taskID string) bool) {
 	if rootID == "" {
 		return
 	}
 	l.mu.Lock()
 	for taskID, h := range l.holders {
-		if h.rootID == rootID {
-			delete(l.holders, taskID)
+		if h.rootID != rootID {
+			continue
 		}
+		if isLive != nil && isLive(taskID) {
+			// 持有方任务仍在运行：保留其 hold，避免跨组等待方被误唤醒后与本组并发写。
+			continue
+		}
+		delete(l.holders, taskID)
 	}
 	l.cond.Broadcast()
 	l.mu.Unlock()
