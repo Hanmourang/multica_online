@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -61,13 +63,18 @@ func TestRequirementTriggerSweep(t *testing.T) {
 			t.Fatalf("next issue number: %v", err)
 		}
 		var id string
+		// acceptance_spec 写非空 JSON：默认列值 '{}' 会被预检视为「未填写」
+		// → acceptance_spec_missing，手动触发路径会 409。这里给每个 stage3
+		// 子任务都填一个最小验收规格，让预检能过；service 层 sweep 不读
+		// 该列，不影响 TestRequirementTriggerSweep 的前半断言。
 		if err := testPool.QueryRow(ctx, `
                         INSERT INTO issue (
                                 workspace_id, title, status, priority, creator_type, creator_id,
-                                number, position, parent_issue_id, stage, assignee_type, assignee_id
+                                number, position, parent_issue_id, stage, assignee_type, assignee_id,
+                                acceptance_spec
                         )
                         VALUES ($1, $2, 'todo', 'medium', 'member', $3, $4, 100, $5, $6,
-                                'agent', $7)
+                                'agent', $7, '{"criteria":["smoke"]}'::jsonb)
                         RETURNING id
                 `, testWorkspaceID, title, testUserID, number, parentID, stage, agentID).Scan(&id); err != nil {
 			t.Fatalf("insert stage child: %v", err)
@@ -191,6 +198,22 @@ func TestRequirementTriggerSweep(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("manual trigger: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
+		// 响应体契约（WS6 前端已按此并行编码）：
+		//   {"triggered": bool, "enqueued": number, "issue_id": string}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode response body: %v (raw=%s)", err, w.Body.String())
+		}
+		if triggered, _ := body["triggered"].(bool); !triggered {
+			t.Fatalf("expected triggered=true, got body=%v", body)
+		}
+		// json.Unmarshal 把所有数字解成 float64；子任务只有一个 → enqueued=1。
+		if enq, _ := body["enqueued"].(float64); enq != 1 {
+			t.Fatalf("expected enqueued=1, got body=%v", body)
+		}
+		if idStr, _ := body["issue_id"].(string); idStr != reqB {
+			t.Fatalf("expected issue_id=%s, got body=%v", reqB, body)
+		}
 		if triggeredAt(t, reqB) == nil {
 			t.Fatal("manual trigger should set triggered_at")
 		}
@@ -198,13 +221,16 @@ func TestRequirementTriggerSweep(t *testing.T) {
 			t.Fatalf("manual trigger should enqueue the stage-3 child, got %d", got)
 		}
 
-		// 已触发再调 → 409。
+		// 已触发再调 → 409 already_triggered（MarkRequirementTriggered 返回 0 行）。
 		w2 := httptest.NewRecorder()
 		req2 := newRequest("POST", "/api/issues/"+reqB+"/trigger", nil)
 		req2 = withURLParam(req2, "id", reqB)
 		testHandler.TriggerRequirement(w2, req2)
 		if w2.Code != http.StatusConflict {
 			t.Fatalf("re-trigger: expected 409, got %d: %s", w2.Code, w2.Body.String())
+		}
+		if !strings.Contains(w2.Body.String(), "already_triggered") {
+			t.Fatalf("re-trigger body should carry the stable reason 'already_triggered', got %s", w2.Body.String())
 		}
 	})
 
@@ -217,6 +243,9 @@ func TestRequirementTriggerSweep(t *testing.T) {
 		testHandler.TriggerRequirement(w, req)
 		if w.Code != http.StatusConflict {
 			t.Fatalf("unconfirmed: expected 409, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "decomposition_not_confirmed") {
+			t.Fatalf("unconfirmed body should carry the stable preflight reason, got %s", w.Body.String())
 		}
 
 		reqOK := insertTriggerRequirement(t, "Manual OK", true, &past, true)
@@ -232,4 +261,25 @@ func TestRequirementTriggerSweep(t *testing.T) {
 			t.Fatal("child-trigger attempt must not trigger the parent")
 		}
 	})
+}
+
+// TestTriggerRequirementValidatesBody 是无 DB 依赖的最小验证：非法 UUID
+// 走 loadIssueForUser 的 400/404 分支，不 panic、不 5xx。完整 DB 路径由
+// TestRequirementTriggerSweep 覆盖。
+func TestTriggerRequirementValidatesBody(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/not-a-uuid/trigger", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("handler panicked on invalid id: %v", r)
+			}
+		}()
+		h.TriggerRequirement(w, req)
+	}()
+	if w.Code < 400 || w.Code >= 500 {
+		t.Fatalf("expected 4xx for invalid issue id, got %d (body=%s)", w.Code, w.Body.String())
+	}
 }
