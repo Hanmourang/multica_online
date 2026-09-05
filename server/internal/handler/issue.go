@@ -82,6 +82,15 @@ type IssueResponse struct {
 	DueDate   *string `json:"due_date"`
 	// StartAt 需求开始时间（分钟粒度全量 ISO 时间戳；null = 无计划）。
 	StartAt *string `json:"start_at"`
+	// 需求字段（migration 452，spec §5.1）：目标/git 库/拆解模式/确认与触发时间。
+	// 详情四面板与需求流水线条据此推导阶段；老 issue 为 null/默认值。
+	Goal                     *string `json:"goal"`
+	RepoResourceID           *string `json:"repo_resource_id"`
+	DecomposeMode            string  `json:"decompose_mode"`
+	AutoTrigger              bool    `json:"auto_trigger"`
+	DecompositionConfirmedAt *string `json:"decomposition_confirmed_at"`
+	TriggeredAt              *string `json:"triggered_at"`
+	AcceptanceRound          int32   `json:"acceptance_round"`
 	// RequirementStatus/StageProgress 是需求派生状态投影（spec §6，不落列），
 	// 仅 list 端点计算；详情/写路径不emit（omitempty 语义同 Labels：缺省 = 不动缓存）。
 	RequirementStatus string  `json:"requirement_status,omitempty"`
@@ -311,34 +320,41 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		statusCategory = i.Status
 	}
 	return IssueResponse{
-		ID:             uuidToString(i.ID),
-		WorkspaceID:    uuidToString(i.WorkspaceID),
-		Number:         i.Number,
-		Identifier:     identifier,
-		Title:          i.Title,
-		Description:    textToPtr(i.Description),
-		Status:         i.Status,
-		StatusCategory: statusCategory,
-		Priority:       i.Priority,
-		AssigneeType:   textToPtr(i.AssigneeType),
-		AssigneeID:     uuidToPtr(i.AssigneeID),
-		CreatorType:    i.CreatorType,
-		CreatorID:      uuidToString(i.CreatorID),
-		ParentIssueID:  uuidToPtr(i.ParentIssueID),
-		ProjectID:      uuidToPtr(i.ProjectID),
-		ModuleID:       uuidToPtr(i.ModuleID),
-		AvoidConflict:  i.AvoidConflict,
-		Position:       i.Position,
-		Stage:          int4ToPtr(i.Stage),
-		StartDate:      dateToPtr(i.StartDate),
-		DueDate:        dateToPtr(i.DueDate),
-		StartAt:        timestampToPtr(i.StartAt),
-		CreatedAt:      timestampToString(i.CreatedAt),
-		UpdatedAt:      timestampToString(i.UpdatedAt),
-		Revision:       i.Revision,
-		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
-		Metadata:       parseIssueMetadata(i.Metadata),
-		Properties:     parseIssueProperties(i.Properties),
+		ID:                       uuidToString(i.ID),
+		WorkspaceID:              uuidToString(i.WorkspaceID),
+		Number:                   i.Number,
+		Identifier:               identifier,
+		Title:                    i.Title,
+		Description:              textToPtr(i.Description),
+		Status:                   i.Status,
+		StatusCategory:           statusCategory,
+		Priority:                 i.Priority,
+		AssigneeType:             textToPtr(i.AssigneeType),
+		AssigneeID:               uuidToPtr(i.AssigneeID),
+		CreatorType:              i.CreatorType,
+		CreatorID:                uuidToString(i.CreatorID),
+		ParentIssueID:            uuidToPtr(i.ParentIssueID),
+		ProjectID:                uuidToPtr(i.ProjectID),
+		ModuleID:                 uuidToPtr(i.ModuleID),
+		AvoidConflict:            i.AvoidConflict,
+		Position:                 i.Position,
+		Stage:                    int4ToPtr(i.Stage),
+		StartDate:                dateToPtr(i.StartDate),
+		DueDate:                  dateToPtr(i.DueDate),
+		StartAt:                  timestampToPtr(i.StartAt),
+		Goal:                     textToPtr(i.Goal),
+		RepoResourceID:           uuidToPtr(i.RepoResourceID),
+		DecomposeMode:            i.DecomposeMode,
+		AutoTrigger:              i.AutoTrigger,
+		DecompositionConfirmedAt: timestampToPtr(i.DecompositionConfirmedAt),
+		TriggeredAt:              timestampToPtr(i.TriggeredAt),
+		AcceptanceRound:          i.AcceptanceRound,
+		CreatedAt:                timestampToString(i.CreatedAt),
+		UpdatedAt:                timestampToString(i.UpdatedAt),
+		Revision:                 i.Revision,
+		LastActivityAt:           timestampToNanoPtr(i.LastActivityAt),
+		Metadata:                 parseIssueMetadata(i.Metadata),
+		Properties:               parseIssueProperties(i.Properties),
 	}
 }
 
@@ -351,36 +367,43 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:                uuidToString(i.ID),
-		WorkspaceID:       uuidToString(i.WorkspaceID),
-		Number:            i.Number,
-		Identifier:        identifier,
-		Title:             i.Title,
-		Description:       textToPtr(i.Description),
-		Status:            i.Status,
-		StatusCategory:    statusCategory,
-		Priority:          i.Priority,
-		AssigneeType:      textToPtr(i.AssigneeType),
-		AssigneeID:        uuidToPtr(i.AssigneeID),
-		CreatorType:       i.CreatorType,
-		CreatorID:         uuidToString(i.CreatorID),
-		ParentIssueID:     uuidToPtr(i.ParentIssueID),
-		ProjectID:         uuidToPtr(i.ProjectID),
-		ModuleID:          uuidToPtr(i.ModuleID),
-		AvoidConflict:     i.AvoidConflict,
-		Position:          i.Position,
-		Stage:             int4ToPtr(i.Stage),
-		StartDate:         dateToPtr(i.StartDate),
-		DueDate:           dateToPtr(i.DueDate),
-		StartAt:           timestampToPtr(i.StartAt),
-		RequirementStatus: i.RequirementStatus,
-		StageProgress:     nonemptyTextPtr(i.StageProgress),
-		CreatedAt:         timestampToString(i.CreatedAt),
-		UpdatedAt:         timestampToString(i.UpdatedAt),
-		Revision:          i.Revision,
-		LastActivityAt:    timestampToNanoPtr(i.LastActivityAt),
-		Metadata:          parseIssueMetadata(i.Metadata),
-		Properties:        parseIssueProperties(i.Properties),
+		ID:                       uuidToString(i.ID),
+		WorkspaceID:              uuidToString(i.WorkspaceID),
+		Number:                   i.Number,
+		Identifier:               identifier,
+		Title:                    i.Title,
+		Description:              textToPtr(i.Description),
+		Status:                   i.Status,
+		StatusCategory:           statusCategory,
+		Priority:                 i.Priority,
+		AssigneeType:             textToPtr(i.AssigneeType),
+		AssigneeID:               uuidToPtr(i.AssigneeID),
+		CreatorType:              i.CreatorType,
+		CreatorID:                uuidToString(i.CreatorID),
+		ParentIssueID:            uuidToPtr(i.ParentIssueID),
+		ProjectID:                uuidToPtr(i.ProjectID),
+		ModuleID:                 uuidToPtr(i.ModuleID),
+		AvoidConflict:            i.AvoidConflict,
+		Position:                 i.Position,
+		Stage:                    int4ToPtr(i.Stage),
+		StartDate:                dateToPtr(i.StartDate),
+		DueDate:                  dateToPtr(i.DueDate),
+		StartAt:                  timestampToPtr(i.StartAt),
+		RequirementStatus:        i.RequirementStatus,
+		StageProgress:            nonemptyTextPtr(i.StageProgress),
+		Goal:                     textToPtr(i.Goal),
+		RepoResourceID:           uuidToPtr(i.RepoResourceID),
+		DecomposeMode:            i.DecomposeMode,
+		AutoTrigger:              i.AutoTrigger,
+		DecompositionConfirmedAt: timestampToPtr(i.DecompositionConfirmedAt),
+		TriggeredAt:              timestampToPtr(i.TriggeredAt),
+		AcceptanceRound:          i.AcceptanceRound,
+		CreatedAt:                timestampToString(i.CreatedAt),
+		UpdatedAt:                timestampToString(i.UpdatedAt),
+		Revision:                 i.Revision,
+		LastActivityAt:           timestampToNanoPtr(i.LastActivityAt),
+		Metadata:                 parseIssueMetadata(i.Metadata),
+		Properties:               parseIssueProperties(i.Properties),
 	}
 }
 
@@ -425,34 +448,41 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:             uuidToString(i.ID),
-		WorkspaceID:    uuidToString(i.WorkspaceID),
-		Number:         i.Number,
-		Identifier:     identifier,
-		Title:          i.Title,
-		Description:    textToPtr(i.Description),
-		Status:         i.Status,
-		StatusCategory: statusCategory,
-		Priority:       i.Priority,
-		AssigneeType:   textToPtr(i.AssigneeType),
-		AssigneeID:     uuidToPtr(i.AssigneeID),
-		CreatorType:    i.CreatorType,
-		CreatorID:      uuidToString(i.CreatorID),
-		ParentIssueID:  uuidToPtr(i.ParentIssueID),
-		ProjectID:      uuidToPtr(i.ProjectID),
-		ModuleID:       uuidToPtr(i.ModuleID),
-		AvoidConflict:  i.AvoidConflict,
-		Position:       i.Position,
-		Stage:          int4ToPtr(i.Stage),
-		StartDate:      dateToPtr(i.StartDate),
-		DueDate:        dateToPtr(i.DueDate),
-		StartAt:        timestampToPtr(i.StartAt),
-		CreatedAt:      timestampToString(i.CreatedAt),
-		UpdatedAt:      timestampToString(i.UpdatedAt),
-		Revision:       i.Revision,
-		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
-		Metadata:       parseIssueMetadata(i.Metadata),
-		Properties:     parseIssueProperties(i.Properties),
+		ID:                       uuidToString(i.ID),
+		WorkspaceID:              uuidToString(i.WorkspaceID),
+		Number:                   i.Number,
+		Identifier:               identifier,
+		Title:                    i.Title,
+		Description:              textToPtr(i.Description),
+		Status:                   i.Status,
+		StatusCategory:           statusCategory,
+		Priority:                 i.Priority,
+		AssigneeType:             textToPtr(i.AssigneeType),
+		AssigneeID:               uuidToPtr(i.AssigneeID),
+		CreatorType:              i.CreatorType,
+		CreatorID:                uuidToString(i.CreatorID),
+		ParentIssueID:            uuidToPtr(i.ParentIssueID),
+		ProjectID:                uuidToPtr(i.ProjectID),
+		ModuleID:                 uuidToPtr(i.ModuleID),
+		AvoidConflict:            i.AvoidConflict,
+		Position:                 i.Position,
+		Stage:                    int4ToPtr(i.Stage),
+		StartDate:                dateToPtr(i.StartDate),
+		DueDate:                  dateToPtr(i.DueDate),
+		StartAt:                  timestampToPtr(i.StartAt),
+		Goal:                     textToPtr(i.Goal),
+		RepoResourceID:           uuidToPtr(i.RepoResourceID),
+		DecomposeMode:            i.DecomposeMode,
+		AutoTrigger:              i.AutoTrigger,
+		DecompositionConfirmedAt: timestampToPtr(i.DecompositionConfirmedAt),
+		TriggeredAt:              timestampToPtr(i.TriggeredAt),
+		AcceptanceRound:          i.AcceptanceRound,
+		CreatedAt:                timestampToString(i.CreatedAt),
+		UpdatedAt:                timestampToString(i.UpdatedAt),
+		Revision:                 i.Revision,
+		LastActivityAt:           timestampToNanoPtr(i.LastActivityAt),
+		Metadata:                 parseIssueMetadata(i.Metadata),
+		Properties:               parseIssueProperties(i.Properties),
 	}
 }
 
@@ -3220,9 +3250,9 @@ type UpdateIssueRequest struct {
 	DueDate         *string  `json:"due_date"`
 	// StartAt 需求开始时间（分钟粒度 RFC3339；null = 清空）。已触发需求
 	// （triggered_at 非空）改期会被 409 拒绝——排期归运行中流水线所有。
-	StartAt         *string  `json:"start_at"`
-	ParentIssueID   *string  `json:"parent_issue_id"`
-	ProjectID       *string  `json:"project_id"`
+	StartAt       *string `json:"start_at"`
+	ParentIssueID *string `json:"parent_issue_id"`
+	ProjectID     *string `json:"project_id"`
 	// ModuleID：显式 null = 清空模块；省略 = 不动。AvoidConflict 同理
 	//（省略保持现值）。模块必须属于 issue 所在项目，违反 409。
 	ModuleID      *string `json:"module_id"`
@@ -3555,28 +3585,28 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if _, ok := rawFields["start_at"]; ok {
-	        if req.StartAt != nil && *req.StartAt != "" {
-	                ts, err := util.ParseTimestamp(*req.StartAt)
-	                if err != nil {
-	                        writeError(w, http.StatusBadRequest, "invalid start_at format, expected RFC3339")
-	                        return
-	                }
-	                // 触发联动（spec §7.2）：已触发需求的排期归运行中流水线所有，
-	                // 改 start_at 即重写历史 → 409，提示先取消运行。值未变的幂等
-	                // 重放逐行。
-	                if prevIssue.TriggeredAt.Valid && !ts.Time.Equal(prevIssue.StartAt.Time) {
-	                        writeError(w, http.StatusConflict, "requirement already triggered; cancel the run before rescheduling")
-	                        return
-	                }
-	                params.StartAt = ts
-	        } else {
-	                // 显式清空同样是改期：已触发且有排期则拒绝。
-	                if prevIssue.TriggeredAt.Valid && prevIssue.StartAt.Valid {
-	                        writeError(w, http.StatusConflict, "requirement already triggered; cancel the run before rescheduling")
-	                        return
-	                }
-	                params.StartAt = pgtype.Timestamptz{Valid: false} // explicit null = clear start_at
-	        }
+		if req.StartAt != nil && *req.StartAt != "" {
+			ts, err := util.ParseTimestamp(*req.StartAt)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid start_at format, expected RFC3339")
+				return
+			}
+			// 触发联动（spec §7.2）：已触发需求的排期归运行中流水线所有，
+			// 改 start_at 即重写历史 → 409，提示先取消运行。值未变的幂等
+			// 重放逐行。
+			if prevIssue.TriggeredAt.Valid && !ts.Time.Equal(prevIssue.StartAt.Time) {
+				writeError(w, http.StatusConflict, "requirement already triggered; cancel the run before rescheduling")
+				return
+			}
+			params.StartAt = ts
+		} else {
+			// 显式清空同样是改期：已触发且有排期则拒绝。
+			if prevIssue.TriggeredAt.Valid && prevIssue.StartAt.Valid {
+				writeError(w, http.StatusConflict, "requirement already triggered; cancel the run before rescheduling")
+				return
+			}
+			params.StartAt = pgtype.Timestamptz{Valid: false} // explicit null = clear start_at
+		}
 	}
 	if _, ok := rawFields["parent_issue_id"]; ok {
 		if req.ParentIssueID != nil {

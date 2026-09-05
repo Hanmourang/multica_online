@@ -1277,6 +1277,9 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
        i.revision, i.module_id, i.avoid_conflict,
        i.start_at,
+       -- 需求字段（migration 452）：详情四面板与日历色块都要读，响应层透传。
+       i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
+       i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round,
        -- 需求派生状态投影（spec: 2026-09-04-requirement-calendar-design.md §6，9 条规则按序命中）。
        -- 不落列，永远与事实一致；子任务终态判定用 issue_effective_status 与 stage barrier 同语义。
        CASE
@@ -1381,34 +1384,41 @@ type ListIssuesParams struct {
 }
 
 type ListIssuesRow struct {
-	ID                pgtype.UUID        `json:"id"`
-	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	Title             string             `json:"title"`
-	Description       pgtype.Text        `json:"description"`
-	Status            string             `json:"status"`
-	Priority          string             `json:"priority"`
-	AssigneeType      pgtype.Text        `json:"assignee_type"`
-	AssigneeID        pgtype.UUID        `json:"assignee_id"`
-	CreatorType       string             `json:"creator_type"`
-	CreatorID         pgtype.UUID        `json:"creator_id"`
-	ParentIssueID     pgtype.UUID        `json:"parent_issue_id"`
-	Position          float64            `json:"position"`
-	StartDate         pgtype.Date        `json:"start_date"`
-	DueDate           pgtype.Date        `json:"due_date"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	LastActivityAt    pgtype.Timestamptz `json:"last_activity_at"`
-	Number            int32              `json:"number"`
-	ProjectID         pgtype.UUID        `json:"project_id"`
-	Metadata          []byte             `json:"metadata"`
-	Stage             pgtype.Int4        `json:"stage"`
-	Properties        []byte             `json:"properties"`
-	Revision          int64              `json:"revision"`
-	ModuleID          pgtype.UUID        `json:"module_id"`
-	AvoidConflict     bool               `json:"avoid_conflict"`
-	StartAt           pgtype.Timestamptz `json:"start_at"`
-	RequirementStatus string             `json:"requirement_status"`
-	StageProgress     string             `json:"stage_progress"`
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	Title                    string             `json:"title"`
+	Description              pgtype.Text        `json:"description"`
+	Status                   string             `json:"status"`
+	Priority                 string             `json:"priority"`
+	AssigneeType             pgtype.Text        `json:"assignee_type"`
+	AssigneeID               pgtype.UUID        `json:"assignee_id"`
+	CreatorType              string             `json:"creator_type"`
+	CreatorID                pgtype.UUID        `json:"creator_id"`
+	ParentIssueID            pgtype.UUID        `json:"parent_issue_id"`
+	Position                 float64            `json:"position"`
+	StartDate                pgtype.Date        `json:"start_date"`
+	DueDate                  pgtype.Date        `json:"due_date"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	LastActivityAt           pgtype.Timestamptz `json:"last_activity_at"`
+	Number                   int32              `json:"number"`
+	ProjectID                pgtype.UUID        `json:"project_id"`
+	Metadata                 []byte             `json:"metadata"`
+	Stage                    pgtype.Int4        `json:"stage"`
+	Properties               []byte             `json:"properties"`
+	Revision                 int64              `json:"revision"`
+	ModuleID                 pgtype.UUID        `json:"module_id"`
+	AvoidConflict            bool               `json:"avoid_conflict"`
+	StartAt                  pgtype.Timestamptz `json:"start_at"`
+	Goal                     pgtype.Text        `json:"goal"`
+	RepoResourceID           pgtype.UUID        `json:"repo_resource_id"`
+	DecomposeMode            string             `json:"decompose_mode"`
+	AutoTrigger              bool               `json:"auto_trigger"`
+	DecompositionConfirmedAt pgtype.Timestamptz `json:"decomposition_confirmed_at"`
+	TriggeredAt              pgtype.Timestamptz `json:"triggered_at"`
+	AcceptanceRound          int32              `json:"acceptance_round"`
+	RequirementStatus        string             `json:"requirement_status"`
+	StageProgress            string             `json:"stage_progress"`
 }
 
 // involves_user_id widens the assignee filter to surface issues where the user
@@ -1466,6 +1476,13 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 			&i.ModuleID,
 			&i.AvoidConflict,
 			&i.StartAt,
+			&i.Goal,
+			&i.RepoResourceID,
+			&i.DecomposeMode,
+			&i.AutoTrigger,
+			&i.DecompositionConfirmedAt,
+			&i.TriggeredAt,
+			&i.AcceptanceRound,
 			&i.RequirementStatus,
 			&i.StageProgress,
 		); err != nil {
@@ -1484,7 +1501,9 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
        i.revision, i.module_id, i.avoid_conflict,
-       i.start_at
+       i.start_at,
+       i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
+       i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round
 FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains visible.
@@ -1601,32 +1620,39 @@ type ListOpenIssuesParams struct {
 }
 
 type ListOpenIssuesRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Title          string             `json:"title"`
-	Description    pgtype.Text        `json:"description"`
-	Status         string             `json:"status"`
-	Priority       string             `json:"priority"`
-	AssigneeType   pgtype.Text        `json:"assignee_type"`
-	AssigneeID     pgtype.UUID        `json:"assignee_id"`
-	CreatorType    string             `json:"creator_type"`
-	CreatorID      pgtype.UUID        `json:"creator_id"`
-	ParentIssueID  pgtype.UUID        `json:"parent_issue_id"`
-	Position       float64            `json:"position"`
-	StartDate      pgtype.Date        `json:"start_date"`
-	DueDate        pgtype.Date        `json:"due_date"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
-	Number         int32              `json:"number"`
-	ProjectID      pgtype.UUID        `json:"project_id"`
-	Metadata       []byte             `json:"metadata"`
-	Stage          pgtype.Int4        `json:"stage"`
-	Properties     []byte             `json:"properties"`
-	Revision       int64              `json:"revision"`
-	ModuleID       pgtype.UUID        `json:"module_id"`
-	AvoidConflict  bool               `json:"avoid_conflict"`
-	StartAt        pgtype.Timestamptz `json:"start_at"`
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	Title                    string             `json:"title"`
+	Description              pgtype.Text        `json:"description"`
+	Status                   string             `json:"status"`
+	Priority                 string             `json:"priority"`
+	AssigneeType             pgtype.Text        `json:"assignee_type"`
+	AssigneeID               pgtype.UUID        `json:"assignee_id"`
+	CreatorType              string             `json:"creator_type"`
+	CreatorID                pgtype.UUID        `json:"creator_id"`
+	ParentIssueID            pgtype.UUID        `json:"parent_issue_id"`
+	Position                 float64            `json:"position"`
+	StartDate                pgtype.Date        `json:"start_date"`
+	DueDate                  pgtype.Date        `json:"due_date"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	LastActivityAt           pgtype.Timestamptz `json:"last_activity_at"`
+	Number                   int32              `json:"number"`
+	ProjectID                pgtype.UUID        `json:"project_id"`
+	Metadata                 []byte             `json:"metadata"`
+	Stage                    pgtype.Int4        `json:"stage"`
+	Properties               []byte             `json:"properties"`
+	Revision                 int64              `json:"revision"`
+	ModuleID                 pgtype.UUID        `json:"module_id"`
+	AvoidConflict            bool               `json:"avoid_conflict"`
+	StartAt                  pgtype.Timestamptz `json:"start_at"`
+	Goal                     pgtype.Text        `json:"goal"`
+	RepoResourceID           pgtype.UUID        `json:"repo_resource_id"`
+	DecomposeMode            string             `json:"decompose_mode"`
+	AutoTrigger              bool               `json:"auto_trigger"`
+	DecompositionConfirmedAt pgtype.Timestamptz `json:"decomposition_confirmed_at"`
+	TriggeredAt              pgtype.Timestamptz `json:"triggered_at"`
+	AcceptanceRound          int32              `json:"acceptance_round"`
 }
 
 // See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
@@ -1678,6 +1704,13 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 			&i.ModuleID,
 			&i.AvoidConflict,
 			&i.StartAt,
+			&i.Goal,
+			&i.RepoResourceID,
+			&i.DecomposeMode,
+			&i.AutoTrigger,
+			&i.DecompositionConfirmedAt,
+			&i.TriggeredAt,
+			&i.AcceptanceRound,
 		); err != nil {
 			return nil, err
 		}

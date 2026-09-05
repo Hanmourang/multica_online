@@ -148,6 +148,55 @@ func fullyPopulatedIssue(t *testing.T) db.Issue {
 		LastActivityAt: pgtype.Timestamptz{Time: utcDate(2026, time.January, 3), Valid: true},
 		Metadata:       []byte(`{"pr_url":"https://example.test/pr/1"}`),
 		Properties:     []byte(`{"77777777-7777-7777-7777-777777777777":"done"}`),
+		// 需求字段（migration 452）：response 与 map 两种渲染都必须透传，
+		// 前端需求详情四面板（目标/git 库/拆解模式/确认与触发时间）依赖它们。
+		Goal:                     pgtype.Text{String: "P99 30min → 5min", Valid: true},
+		RepoResourceID:           parseUUID("88888888-8888-8888-8888-888888888888"),
+		DecomposeMode:            "confirm",
+		AutoTrigger:              true,
+		DecompositionConfirmedAt: pgtype.Timestamptz{Time: utcDate(2026, time.January, 4), Valid: true},
+		TriggeredAt:              pgtype.Timestamptz{Time: utcDate(2026, time.January, 5), Valid: true},
+		AcceptanceRound:          2,
+	}
+}
+
+// 需求字段透传（spec 2026-09-04-requirement-calendar-design.md §5.1）：详情与
+// 事件两种渲染都要携带 goal/repo/拆解模式/确认与触发时间，前端需求流水线条
+// 与四面板据此推导当前阶段。
+func TestIssueResponse_RequirementFields(t *testing.T) {
+	issue := fullyPopulatedIssue(t)
+
+	resp := issueToResponse(issue, "MUL")
+	if resp.Goal == nil || *resp.Goal != "P99 30min → 5min" {
+		t.Errorf("goal = %v, want P99 30min → 5min", resp.Goal)
+	}
+	if resp.RepoResourceID == nil || *resp.RepoResourceID != "88888888-8888-8888-8888-888888888888" {
+		t.Errorf("repo_resource_id = %v", resp.RepoResourceID)
+	}
+	if resp.DecomposeMode != "confirm" {
+		t.Errorf("decompose_mode = %q, want confirm", resp.DecomposeMode)
+	}
+	if !resp.AutoTrigger {
+		t.Errorf("auto_trigger = false, want true")
+	}
+	if resp.DecompositionConfirmedAt == nil {
+		t.Errorf("decomposition_confirmed_at = nil, want set")
+	}
+	if resp.TriggeredAt == nil {
+		t.Errorf("triggered_at = nil, want set")
+	}
+	if resp.AcceptanceRound != 2 {
+		t.Errorf("acceptance_round = %d, want 2", resp.AcceptanceRound)
+	}
+
+	fromMap := service.IssueToMap(issue, "MUL")
+	for _, key := range []string{
+		"goal", "repo_resource_id", "decompose_mode", "auto_trigger",
+		"decomposition_confirmed_at", "triggered_at", "acceptance_round",
+	} {
+		if _, ok := fromMap[key]; !ok {
+			t.Errorf("IssueToMap missing %q", key)
+		}
 	}
 }
 

@@ -10,6 +10,9 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
        i.revision, i.module_id, i.avoid_conflict,
        i.start_at,
+       -- 需求字段（migration 452）：详情四面板与日历色块都要读，响应层透传。
+       i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
+       i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round,
        -- 需求派生状态投影（spec: 2026-09-04-requirement-calendar-design.md §6，9 条规则按序命中）。
        -- 不落列，永远与事实一致；子任务终态判定用 issue_effective_status 与 stage barrier 同语义。
        CASE
@@ -436,7 +439,9 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
        i.revision, i.module_id, i.avoid_conflict,
-       i.start_at
+       i.start_at,
+       i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
+       i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round
 FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains visible.
