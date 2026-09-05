@@ -149,6 +149,15 @@ SET acceptance_round = acceptance_round + 1, updated_at = now()
 WHERE id = $1
 RETURNING acceptance_round;
 
+-- name: IncrementAcceptanceRoundIfExpected :one
+-- M-1 幂等守卫：仅当 acceptance_round 仍等于调用方读到的期望值时才 +1 并返回新值。
+-- 并发验收裁决下只有一个能命中（另一个 0 行 → pgx.ErrNoRows → 409），杜绝 round
+-- 重复自增与重复修复子任务。与修复子任务创建同事务（见 requirement_acceptance.go）。
+UPDATE issue
+SET acceptance_round = acceptance_round + 1, updated_at = now()
+WHERE id = @id AND acceptance_round = @expected
+RETURNING acceptance_round;
+
 -- name: ModuleBusyForOtherRoot :one
 -- 触发窗口预检（plan 2026-09-06-requirement-calendar-phase1-completion §WS2 Task 2.3，
 -- 开放问题 #10）：检测同 module_id 上是否存在「其它 root 需求组」的活动任务。

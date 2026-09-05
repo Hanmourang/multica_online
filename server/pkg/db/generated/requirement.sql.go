@@ -611,6 +611,28 @@ func (q *Queries) IncrementAcceptanceRound(ctx context.Context, id pgtype.UUID) 
 	return acceptanceRound, err
 }
 
+const incrementAcceptanceRoundIfExpected = `-- name: IncrementAcceptanceRoundIfExpected :one
+UPDATE issue
+SET acceptance_round = acceptance_round + 1, updated_at = now()
+WHERE id = $1 AND acceptance_round = $2
+RETURNING acceptance_round
+`
+
+type IncrementAcceptanceRoundIfExpectedParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Expected int32       `json:"expected"`
+}
+
+// M-1 幂等守卫：仅当 acceptance_round 仍等于调用方读到的期望值时才 +1 并返回新值。
+// 并发验收裁决下只有一个能命中（另一个 0 行 → pgx.ErrNoRows → 409），杜绝 round
+// 重复自增与重复修复子任务。与修复子任务创建同事务（见 requirement_acceptance.go）。
+func (q *Queries) IncrementAcceptanceRoundIfExpected(ctx context.Context, arg IncrementAcceptanceRoundIfExpectedParams) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementAcceptanceRoundIfExpected, arg.ID, arg.Expected)
+	var acceptanceRound int32
+	err := row.Scan(&acceptanceRound)
+	return acceptanceRound, err
+}
+
 const moduleBusyForOtherRoot = `-- name: ModuleBusyForOtherRoot :one
 SELECT EXISTS (
     SELECT 1

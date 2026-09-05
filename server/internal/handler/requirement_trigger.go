@@ -14,7 +14,7 @@
 //   - 409 decomposition_not_confirmed：拆解未确认
 //   - 409 dependency_cycle：组内 blocked_by 成环
 //   - 409 acceptance_spec_missing：无 stage3 子任务写了非空 acceptance_spec
-//   - 409 module_window_busy：同模块上有其它 root 组活动任务（v1 桩恒不触发）
+//   - 409 module_window_busy：同模块上有其它 root 组活动任务（ModuleBusyForOtherRoot 已真实接线）
 //   - 409 already_triggered：MarkRequirementTriggered 返回 0 行（并发触发竞争）
 package handler
 
@@ -41,8 +41,9 @@ func (h *Handler) TriggerRequirement(w http.ResponseWriter, r *http.Request) {
 	}
 	if issue.ParentIssueID.Valid {
 		// 只有顶层需求可被触发；子任务由 451 claim 闸门按依赖放行，
-		// 不接受显式触发（避免绕过组的预检）。
-		writeError(w, http.StatusBadRequest, "only top-level requirements can be triggered")
+		// 不接受显式触发（避免绕过组的预检）。L-4：返回稳定枚举串（与顶部
+		// 响应体契约声明一致），前端 toast/i18n 直接消费 e.message。
+		writeError(w, http.StatusBadRequest, "not_a_top_level_requirement")
 		return
 	}
 
