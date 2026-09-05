@@ -37,6 +37,10 @@ func newAcceptanceRequirement(t *testing.T, projectID string) string {
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1), $3, now(), now())
 		RETURNING id`,
 		testWorkspaceID, testUserID, projectID).Scan(&id)
+	// C-3 契约对齐：server 创建路径回填 root_requirement_id=自身（service/issue.go:371），
+	// 裸 SQL INSERT 必须手动设，否则本需求 RootRequirementID 无效——stage3 barrier 关闭的
+	// 日历专属自动派发闸门（issue_child_done.go:362）会漏判（同 requirement_trigger_test.go:317）。
+	dbfx.Exec(t, `UPDATE issue SET root_requirement_id = id WHERE id = $1`, id)
 	// 同步 workspace issue_counter，避免后续 AllocateIssueNumber 分配重复号。
 	dbfx.Exec(t, `
 		UPDATE workspace SET issue_counter = (
