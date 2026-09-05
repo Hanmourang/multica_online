@@ -30,6 +30,8 @@ import { toast } from "sonner";
 import { useT } from "../../i18n";
 import { RequirementPrototypePanel } from "./requirement-prototype-panel";
 import { RequirementDecomposePanel } from "./requirement-decompose-panel";
+import { RequirementSchedulePanel } from "./requirement-schedule-panel";
+import { RequirementAcceptancePanel } from "./requirement-acceptance-panel";
 
 /** 流水线阶段：1=原型 2=plan+拆解 3=执行 4=验收。 */
 export type FlowStage = 1 | 2 | 3 | 4;
@@ -179,6 +181,38 @@ export function RequirementFlowSection({
           }),
         ]);
         return r.issues;
+      }),
+    [queryClient, issue.workspace_id],
+  );
+  const triggerRequirement = useCallback(
+    (issueId: string) =>
+      api.triggerRequirement(issueId).then(async (r) => {
+        // 触发后 stage3 子任务入队 → 刷新子任务列表与需求详情（triggered_at / 派生态）。
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: issueKeys.children(issue.workspace_id, issueId),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: issueKeys.detail(issue.workspace_id, issueId),
+          }),
+        ]);
+        return r;
+      }),
+    [queryClient, issue.workspace_id],
+  );
+  const submitAcceptanceVerdict = useCallback(
+    (issueId: string, body: { verdict: "pass" | "fail"; evidence: string }) =>
+      api.submitAcceptanceVerdict(issueId, body).then(async (r) => {
+        // pass → 需求 done（WS3 释放组锁）；fail → round+1 + 新 stage3 修复子任务入队。
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: issueKeys.children(issue.workspace_id, issueId),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: issueKeys.detail(issue.workspace_id, issueId),
+          }),
+        ]);
+        return r;
       }),
     [queryClient, issue.workspace_id],
   );
@@ -334,6 +368,22 @@ export function RequirementFlowSection({
             </button>
           </div>
         ))}
+
+      {stage === 3 && (
+        <RequirementSchedulePanel
+          issue={issue}
+          childIssues={childIssues}
+          triggerRequirement={triggerRequirement}
+        />
+      )}
+
+      {stage === 4 && (
+        <RequirementAcceptancePanel
+          issue={issue}
+          childIssues={childIssues}
+          submitAcceptanceVerdict={submitAcceptanceVerdict}
+        />
+      )}
     </section>
   );
 }

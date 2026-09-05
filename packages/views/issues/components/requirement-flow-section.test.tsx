@@ -32,6 +32,8 @@ const mockApi = vi.hoisted(() => ({
   confirmPrototype: vi.fn(),
   decomposeRequirement: vi.fn(),
   confirmDecomposition: vi.fn(),
+  triggerRequirement: vi.fn(),
+  submitAcceptanceVerdict: vi.fn(),
   listProjectModules: vi.fn(),
   listProjectResources: vi.fn(),
 }));
@@ -128,6 +130,8 @@ beforeEach(() => {
   });
   mockApi.decomposeRequirement.mockResolvedValue({});
   mockApi.confirmDecomposition.mockResolvedValue({ issues: [] });
+  mockApi.triggerRequirement.mockResolvedValue({ triggered: true, enqueued: 0, issue_id: "req-1" });
+  mockApi.submitAcceptanceVerdict.mockResolvedValue({ verdict: "pass", acceptance_round: 0, terminal: true });
   mockApi.listProjectModules.mockResolvedValue([]);
   mockApi.listProjectResources.mockResolvedValue({ resources: [] });
 });
@@ -362,5 +366,29 @@ describe("RequirementFlowSection", () => {
     );
     await screen.findByTestId("decompose-panel");
     expect(screen.queryByTestId("decompose-start")).toBeNull();
+  });
+
+  it("stage3 渲染执行调度面板（画面6）", async () => {
+    renderSection(
+      <RequirementFlowSection
+        issue={requirement({ decomposition_confirmed_at: "2026-09-05T00:00:00Z" })}
+        childIssues={[
+          { id: "c1", identifier: "REQ-2", title: "执行子任务", stage: 3, status: "todo" } as unknown as Issue,
+        ]}
+      />,
+    );
+    expect(await screen.findByTestId("schedule-panel")).toBeTruthy();
+  });
+
+  it("stage4 渲染验收面板（画面7）", async () => {
+    renderSection(
+      <RequirementFlowSection
+        issue={requirement({ decomposition_confirmed_at: "2026-09-05T00:00:00Z" })}
+        childIssues={[
+          { id: "t1", identifier: "REQ-3", title: "整体验收", stage: 4, status: "todo" } as unknown as Issue,
+        ]}
+      />,
+    );
+    expect(await screen.findByTestId("acceptance-panel")).toBeTruthy();
   });
 });
