@@ -206,7 +206,8 @@ INSERT INTO issue (
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
     stage, last_activity_at, id, module_id, avoid_conflict,
-    start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id
+    start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id,
+    feature_points, graph_context, acceptance_spec
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, now(), COALESCE($17::uuid, gen_random_uuid()),
@@ -215,7 +216,11 @@ INSERT INTO issue (
     $20::timestamptz, $21::text, $22::uuid,
     COALESCE($23::text, 'confirm'),
     COALESCE($24::boolean, true),
-    $25::uuid
+    $25::uuid,
+    -- 拆解确认落列的子任务三要素（spec §8）：NULL = 非拆解产物，回落列默认值。
+    COALESCE($26::jsonb, '[]'::jsonb),
+    COALESCE($27::jsonb, '{}'::jsonb),
+    COALESCE($28::jsonb, '{}'::jsonb)
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec
 `
 
@@ -245,6 +250,9 @@ type CreateIssueParams struct {
 	DecomposeMode     pgtype.Text        `json:"decompose_mode"`
 	AutoTrigger       pgtype.Bool        `json:"auto_trigger"`
 	RootRequirementID pgtype.UUID        `json:"root_requirement_id"`
+	FeaturePoints     []byte             `json:"feature_points"`
+	GraphContext      []byte             `json:"graph_context"`
+	AcceptanceSpec    []byte             `json:"acceptance_spec"`
 }
 
 func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error) {
@@ -274,6 +282,9 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		arg.DecomposeMode,
 		arg.AutoTrigger,
 		arg.RootRequirementID,
+		arg.FeaturePoints,
+		arg.GraphContext,
+		arg.AcceptanceSpec,
 	)
 	var i Issue
 	err := row.Scan(

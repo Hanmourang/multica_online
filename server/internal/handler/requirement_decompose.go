@@ -1,6 +1,8 @@
 package handler
 
 import (
+        "encoding/json"
+        "errors"
         "fmt"
         "net/http"
         "strings"
@@ -167,4 +169,89 @@ func buildDecomposeBrief(issue db.Issue, repoLabel, prototypePath string) string
                 "输出 plan 评论 + 子任务草稿：每个草稿含 feature_points（kind: new|modify + 代码对象）、" +
                 "graph_context、acceptance_spec、依赖链与指派角色。")
         return b.String()
+}
+
+// ---- 拆解确认（spec §9：POST /issues/{id}/decomposition/confirm）----
+
+// confirmDecompositionRequest 是确认请求体：PM 产出（或人工整理）的子任务草稿
+// 列表，服务端校验通过后批量生效。depends_on 元素为同批草稿 temp_id 或已有
+// issue id（须与需求同模块）。
+type confirmDecompositionRequest struct {
+        Drafts []confirmDraft `json:"drafts"`
+}
+
+type confirmDraft struct {
+        TempID         string                          `json:"temp_id"`
+        Title          string                          `json:"title"`
+        Description    string                          `json:"description"`
+        Stage          int32                           `json:"stage"`
+        AssigneeType   string                          `json:"assignee_type"`
+        AssigneeID     string                          `json:"assignee_id"`
+        FeaturePoints  []service.DecomposeFeaturePoint `json:"feature_points"`
+        GraphContext   json.RawMessage                 `json:"graph_context"`
+        AcceptanceSpec json.RawMessage                 `json:"acceptance_spec"`
+        DependsOn      []string                        `json:"depends_on"`
+}
+
+// ConfirmDecomposition handles POST /api/issues/{id}/decomposition/confirm。
+// 错误映射：草稿内容错误 400；班底/依赖/重复确认 409。
+func (h *Handler) ConfirmDecomposition(w http.ResponseWriter, r *http.Request) {
+        issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+        if !ok {
+                return
+        }
+        var body confirmDecompositionRequest
+        if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+                writeError(w, http.StatusBadRequest, "invalid request body")
+                return
+        }
+        drafts := make([]service.DecomposeDraftTask, 0, len(body.Drafts))
+        for _, d := range body.Drafts {
+                drafts = append(drafts, service.DecomposeDraftTask{
+                        TempID:         d.TempID,
+                        Title:          d.Title,
+                        Description:    d.Description,
+                        Stage:          d.Stage,
+                        AssigneeType:   d.AssigneeType,
+                        AssigneeID:     d.AssigneeID,
+                        FeaturePoints:  d.FeaturePoints,
+                        GraphContext:   d.GraphContext,
+                        AcceptanceSpec: d.AcceptanceSpec,
+                        DependsOn:      d.DependsOn,
+                })
+        }
+
+        userID := requestUserID(r)
+        actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+        created, err := h.IssueService.ConfirmDecomposition(r.Context(), service.ConfirmDecompositionParams{
+                RequirementID: issue.ID,
+                Drafts:        drafts,
+                CreatorType:   actorType,
+                CreatorID:     parseUUID(actorID),
+        })
+        if err != nil {
+                var valErr *service.DecompositionValidationError
+                var conErr *service.DecompositionConflictError
+                switch {
+                case errors.As(err, &valErr):
+                        writeError(w, http.StatusBadRequest, valErr.Msg)
+                case errors.As(err, &conErr):
+                        writeError(w, http.StatusConflict, conErr.Msg)
+                case errors.Is(err, service.ErrDecompositionAlreadyConfirmed):
+                        writeError(w, http.StatusConflict, "decomposition already confirmed")
+                default:
+                        writeError(w, http.StatusInternalServerError, "failed to confirm decomposition: "+err.Error())
+                }
+                return
+        }
+
+        prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+        fill := h.newStatusCategoryFiller(r.Context(), issue.WorkspaceID)
+        out := make([]IssueResponse, 0, len(created))
+        for _, child := range created {
+                resp := issueToResponse(child, prefix)
+                fill(&resp)
+                out = append(out, resp)
+        }
+        writeJSON(w, http.StatusOK, map[string]any{"issues": out})
 }

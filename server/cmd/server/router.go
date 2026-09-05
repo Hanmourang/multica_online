@@ -1889,6 +1889,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/roles", h.ListIssueRoleAssignments)
 					r.Put("/roles", h.ReplaceIssueRoleAssignments)
 					r.Post("/decompose", h.DecomposeRequirement)
+					r.Post("/decomposition/confirm", h.ConfirmDecomposition)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)

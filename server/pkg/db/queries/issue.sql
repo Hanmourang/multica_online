@@ -182,7 +182,8 @@ INSERT INTO issue (
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
     stage, last_activity_at, id, module_id, avoid_conflict,
-    start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id
+    start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id,
+    feature_points, graph_context, acceptance_spec
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
@@ -191,7 +192,11 @@ INSERT INTO issue (
     sqlc.narg('start_at')::timestamptz, sqlc.narg('goal')::text, sqlc.narg('repo_resource_id')::uuid,
     COALESCE(sqlc.narg('decompose_mode')::text, 'confirm'),
     COALESCE(sqlc.narg('auto_trigger')::boolean, true),
-    sqlc.narg('root_requirement_id')::uuid
+    sqlc.narg('root_requirement_id')::uuid,
+    -- 拆解确认落列的子任务三要素（spec §8）：NULL = 非拆解产物，回落列默认值。
+    COALESCE(sqlc.narg('feature_points')::jsonb, '[]'::jsonb),
+    COALESCE(sqlc.narg('graph_context')::jsonb, '{}'::jsonb),
+    COALESCE(sqlc.narg('acceptance_spec')::jsonb, '{}'::jsonb)
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one

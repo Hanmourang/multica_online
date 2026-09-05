@@ -229,3 +229,119 @@ func TestDecomposeRequirement(t *testing.T) {
                 }
         })
 }
+
+// 拆解确认 API（POST /api/issues/{id}/decomposition/confirm）：解析草稿 →
+// service.ConfirmDecomposition → 错误码映射（400/409）→ 生效结果列表。
+func TestConfirmDecompositionHandler(t *testing.T) {
+        ctx := context.Background()
+        suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+
+        insertRequirement := func(t *testing.T) string {
+                t.Helper()
+                var number int
+                if err := testPool.QueryRow(ctx, `
+                        UPDATE workspace
+                        SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+                        WHERE id = $1 RETURNING issue_counter
+                `, testWorkspaceID).Scan(&number); err != nil {
+                        t.Fatalf("next issue number: %v", err)
+                }
+                var id string
+                if err := testPool.QueryRow(ctx, `
+                        INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id,
+                                number, position, decompose_mode)
+                        VALUES ($1, $2, 'todo', 'none', 'member', $3, $4, 100, 'confirm')
+                        RETURNING id
+                `, testWorkspaceID, "Confirm "+suffix, testUserID, number).Scan(&id); err != nil {
+                        t.Fatalf("insert requirement: %v", err)
+                }
+                t.Cleanup(func() {
+                        testPool.Exec(context.Background(), `DELETE FROM issue_dependency WHERE issue_id IN
+                                (SELECT id FROM issue WHERE parent_issue_id = $1)`, id)
+                        testPool.Exec(context.Background(), `DELETE FROM issue_role_assignment WHERE issue_id = $1`, id)
+                        testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1 OR parent_issue_id = $1`, id)
+                })
+                return id
+        }
+        addRole := func(t *testing.T, issueID, role, userID string, enabled bool) {
+                t.Helper()
+                if _, err := testPool.Exec(ctx, `
+                        INSERT INTO issue_role_assignment (issue_id, workspace_id, role, assignee_type, assignee_id, enabled, ordinal)
+                        VALUES ($1, $2, $3, 'member', $4, $5, 0)
+                `, issueID, testWorkspaceID, role, userID, enabled); err != nil {
+                        t.Fatalf("seed roster %s: %v", role, err)
+                }
+        }
+        post := func(t *testing.T, issueID string, body map[string]any) *httptest.ResponseRecorder {
+                t.Helper()
+                w := httptest.NewRecorder()
+                req := newRequest("POST", "/api/issues/"+issueID+"/decomposition/confirm", body)
+                req = withURLParam(req, "id", issueID)
+                testHandler.ConfirmDecomposition(w, req)
+                return w
+        }
+        execDraft := func(tempID, title, assigneeID string) map[string]any {
+                return map[string]any{
+                        "temp_id": tempID, "title": title, "stage": 3,
+                        "assignee_type": "member", "assignee_id": assigneeID,
+                        "feature_points": []map[string]any{
+                                {"title": title + " fp", "kind": "new", "code_objects": []string{"x.go"}},
+                        },
+                        "acceptance_spec": map[string]any{"version": 1, "cases": []any{map[string]any{"name": "c1"}}},
+                }
+        }
+
+        t.Run("happy path materializes exec + acceptance children", func(t *testing.T) {
+                issueID := insertRequirement(t)
+                addRole(t, issueID, "pm", testUserID, true)
+                addRole(t, issueID, "developer", testUserID, true)
+                addRole(t, issueID, "tester", testUserID, true)
+
+                w := post(t, issueID, map[string]any{"drafts": []map[string]any{
+                        execDraft("t1", "账户模型扩展", testUserID),
+                        {"temp_id": "t2", "title": "整体验收", "stage": 4, "depends_on": []string{"t1"}},
+                }})
+                if w.Code != http.StatusOK {
+                        t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+                }
+                var resp struct {
+                        Issues []IssueResponse `json:"issues"`
+                }
+                if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+                        t.Fatalf("decode: %v", err)
+                }
+                if len(resp.Issues) != 2 {
+                        t.Fatalf("expected 2 materialized issues, got %d", len(resp.Issues))
+                }
+        })
+
+        t.Run("feature point without kind is a 400", func(t *testing.T) {
+                issueID := insertRequirement(t)
+                addRole(t, issueID, "pm", testUserID, true)
+                addRole(t, issueID, "developer", testUserID, true)
+
+                bad := execDraft("t1", "账户模型扩展", testUserID)
+                bad["feature_points"] = []map[string]any{{"title": "缺 kind"}}
+                w := post(t, issueID, map[string]any{"drafts": []map[string]any{bad}})
+                if w.Code != http.StatusBadRequest {
+                        t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+                }
+                if !strings.Contains(w.Body.String(), "feature_point kind required") {
+                        t.Fatalf("unexpected body: %s", w.Body.String())
+                }
+        })
+
+        t.Run("second confirm is a 409", func(t *testing.T) {
+                issueID := insertRequirement(t)
+                addRole(t, issueID, "pm", testUserID, true)
+                addRole(t, issueID, "developer", testUserID, true)
+
+                body := map[string]any{"drafts": []map[string]any{execDraft("t1", "账户模型扩展", testUserID)}}
+                if w := post(t, issueID, body); w.Code != http.StatusOK {
+                        t.Fatalf("first confirm: expected 200, got %d: %s", w.Code, w.Body.String())
+                }
+                if w := post(t, issueID, body); w.Code != http.StatusConflict {
+                        t.Fatalf("second confirm: expected 409, got %d: %s", w.Code, w.Body.String())
+                }
+        })
+}
