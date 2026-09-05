@@ -117,10 +117,19 @@ export interface DecomposeDraftTask {
   stage: 3 | 4;
   assignee_type?: "member" | "agent";
   assignee_id?: string;
+  /** PM 草稿里的角色指派（developer|data|tester）；面板确认前解析为班底成员。 */
+  assignee_role?: string;
   feature_points?: DecomposeFeaturePoint[];
   graph_context?: unknown;
   acceptance_spec?: unknown;
   depends_on?: string[];
+}
+
+/** GET /issues/{id}/decomposition 的响应包（spec §9）：plan 正文 + 最新有效草稿块。 */
+export interface GetDecompositionResponse {
+  plan: string | null;
+  drafts: DecomposeDraftTask[];
+  source_comment_id: string | null;
 }
 
 /** POST /issues/{id}/decomposition/confirm 的响应包。 */

@@ -2,7 +2,8 @@
  * RequirementFlowSection — 需求流水线区块（spec 2026-09-04-requirement-calendar
  * 画面 4/5 落点）：顶层 issue 详情页顶部的四节点 stage 条
  * （原型 → plan+拆解 → 执行 → 验收），当前阶段高亮；条下渲染当前阶段的面板 ——
- * stage 1 挂原型确认面板（班底有启用原型师时），stage 2 给拆解入口/进行中态。
+ * stage 1 挂原型确认面板（班底有启用原型师时），stage 2 挂拆解入口/进行中态；
+ * PM 产出草稿评论后（含 manual 模式人工贴块）直接换挂拆解确认面板。
  *
  * 子 issue 永不渲染（stage 标记只对需求本身有意义）；班底无启用原型师时
  * 原型节点渲染跳过态，流水线从 stage 2 起步。
@@ -13,14 +14,22 @@ import { cn } from "@multica/ui/lib/utils";
 import { api } from "@multica/core/api";
 import { issueBehavesAsAny } from "@multica/core/issues";
 import {
+  decompositionOptions,
   issueKeys,
   issueRolesOptions,
   prototypeVersionsOptions,
 } from "@multica/core/issues/queries";
-import type { Issue } from "@multica/core/types";
+import { projectModulesOptions } from "@multica/core/modules";
+import { projectResourcesOptions } from "@multica/core/projects";
+import type {
+  DecomposeDraftTask,
+  Issue,
+  RoleAssignment,
+} from "@multica/core/types";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 import { RequirementPrototypePanel } from "./requirement-prototype-panel";
+import { RequirementDecomposePanel } from "./requirement-decompose-panel";
 
 /** 流水线阶段：1=原型 2=plan+拆解 3=执行 4=验收。 */
 export type FlowStage = 1 | 2 | 3 | 4;
@@ -60,6 +69,23 @@ export function deriveFlowStage({
   return 2;
 }
 
+/**
+ * PM 草稿只带 assignee_role（developer|data|tester）；确认前解析为班底里第一个
+ * 启用的同角色成员。已有具体 assignee_id 的草稿（用户手调过）保持不动。
+ */
+export function resolveDraftAssignees(
+  drafts: DecomposeDraftTask[],
+  roster: RoleAssignment[],
+): DecomposeDraftTask[] {
+  return drafts.map((d) => {
+    if (d.assignee_id || !d.assignee_role) return d;
+    const m = roster.find((r) => r.enabled && r.role === d.assignee_role);
+    return m
+      ? { ...d, assignee_type: m.assignee_type, assignee_id: m.assignee_id }
+      : d;
+  });
+}
+
 export interface RequirementFlowSectionProps {
   issue: Issue;
   /** 挂载点已查询的子任务列表，避免重复请求。 */
@@ -73,8 +99,16 @@ export function RequirementFlowSection({
   const { t } = useT("issues");
   const queryClient = useQueryClient();
   const [decomposeStarting, setDecomposeStarting] = useState(false);
+  // 面板内的草稿微调按来源评论归档：新一轮 PM 产出（新 source）到来时丢弃旧编辑。
+  const [draftState, setDraftState] = useState<{
+    source: string | null;
+    drafts: DecomposeDraftTask[];
+  } | null>(null);
 
   const isTopLevel = issue.parent_issue_id == null;
+  const projectId = issue.project_id ?? null;
+  // PM 子任务在跑时轮询拆解产出，草稿出现即停（confirm 后 drafts 仍在，不会长轮询）。
+  const hasStage2Child = childIssues.some((c) => c.stage === 2);
   const rosterQuery = useQuery({
     ...issueRolesOptions(issue.id),
     enabled: isTopLevel,
@@ -82,6 +116,24 @@ export function RequirementFlowSection({
   const versionsQuery = useQuery({
     ...prototypeVersionsOptions(issue.id),
     enabled: isTopLevel,
+  });
+  const decompQuery = useQuery({
+    ...decompositionOptions(issue.id),
+    enabled: isTopLevel,
+    refetchInterval: (query) =>
+      !query.state.data || query.state.data.drafts.length > 0
+        ? false
+        : hasStage2Child
+          ? 4000
+          : false,
+  });
+  const modulesQuery = useQuery({
+    ...projectModulesOptions(issue.workspace_id, projectId ?? ""),
+    enabled: isTopLevel && !!projectId,
+  });
+  const resourcesQuery = useQuery({
+    ...projectResourcesOptions(issue.workspace_id, projectId ?? ""),
+    enabled: isTopLevel && !!projectId,
   });
 
   // 面板回调走同一 queryKey 的缓存：面板内部的版本轮询与容器共享结果。
@@ -110,12 +162,33 @@ export function RequirementFlowSection({
       }),
     [queryClient],
   );
+  const confirmDecomposition = useCallback(
+    (issueId: string, drafts: DecomposeDraftTask[]) =>
+      api.confirmDecomposition(issueId, drafts).then(async (r) => {
+        // 批量生效后：子任务列表出现新任务、需求详情落 decomposition_confirmed_at，
+        // 拆解产出保留（面板内部切换到已生效视图）。
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: issueKeys.children(issue.workspace_id, issueId),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: issueKeys.decomposition(issueId),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: issueKeys.detail(issue.workspace_id, issueId),
+          }),
+        ]);
+        return r.issues;
+      }),
+    [queryClient, issue.workspace_id],
+  );
 
   if (!isTopLevel) return null;
   // 数据未齐不渲染：阶段推导依赖班底与版本列表，半态渲染会闪错节点。
   const roster = rosterQuery.data;
   const versions = versionsQuery.data;
-  if (!roster || !versions) return null;
+  const decomp = decompQuery.data;
+  if (!roster || !versions || !decomp) return null;
 
   const hasPrototyper = roster.roles.some(
     (r) => r.role === "prototyper" && r.enabled,
@@ -131,6 +204,19 @@ export function RequirementFlowSection({
     decompositionConfirmed: issue.decomposition_confirmed_at != null,
   });
   const stage2Children = childIssues.filter((c) => c.stage === 2);
+
+  // 草稿：面板编辑优先（同一来源评论内），否则用服务端产出解析角色指派。
+  const sourceId = decomp.source_comment_id ?? null;
+  const serverDrafts = resolveDraftAssignees(decomp.drafts, roster.roles);
+  const drafts =
+    draftState && draftState.source === sourceId
+      ? draftState.drafts
+      : serverDrafts;
+  const moduleName =
+    modulesQuery.data?.find((m) => m.id === issue.module_id)?.name ?? null;
+  const repoLabel =
+    resourcesQuery.data?.find((r) => r.id === issue.repo_resource_id)?.label ??
+    null;
 
   const STAGES: { n: FlowStage; label: string }[] = [
     { n: 1, label: t(($) => $.requirement_flow.stage_prototype) },
@@ -212,7 +298,21 @@ export function RequirementFlowSection({
       )}
 
       {stage === 2 &&
-        (stage2Children.length > 0 ? (
+        (drafts.length > 0 ? (
+          <RequirementDecomposePanel
+            key={sourceId ?? "local"}
+            issue={issue}
+            moduleName={moduleName}
+            repoLabel={repoLabel}
+            roster={roster.roles}
+            plan={decomp.plan}
+            drafts={drafts}
+            onDraftsChange={(next) =>
+              setDraftState({ source: sourceId, drafts: next })
+            }
+            confirmDecomposition={confirmDecomposition}
+          />
+        ) : stage2Children.length > 0 ? (
           <p
             data-testid="decompose-running"
             className="text-xs text-muted-foreground"

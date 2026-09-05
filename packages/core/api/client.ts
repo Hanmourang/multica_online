@@ -10,6 +10,7 @@ import type {
   RoleRosterResponse,
   DecomposeDraftTask,
   ConfirmDecompositionResponse,
+  GetDecompositionResponse,
   UpdateIssueRequest,
   GroupedIssuesResponse,
   ListIssuesResponse,
@@ -1313,6 +1314,11 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/decompose`, {
       method: "POST",
     });
+  }
+
+  /** 拆解产出读取（requirement-calendar spec §9）：从最新有效 plan 评论拆出 plan 与草稿。 */
+  async getDecomposition(issueId: string): Promise<GetDecompositionResponse> {
+    return this.fetch(`/api/issues/${issueId}/decomposition`);
   }
 
   /** 拆解确认（requirement-calendar spec §9）：校验草稿并批量生效子任务。 */

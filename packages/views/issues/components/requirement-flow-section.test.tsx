@@ -16,7 +16,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
-import type { Issue, PrototypeVersion, RoleAssignment } from "@multica/core/types";
+import type { Issue, PrototypeVersion, RoleAssignment, DecomposeDraftTask } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import {
   RequirementFlowSection,
@@ -26,15 +26,30 @@ import {
 const mockApi = vi.hoisted(() => ({
   listIssueRoleAssignments: vi.fn(),
   listPrototypeVersions: vi.fn(),
+  getDecomposition: vi.fn(),
   generatePrototype: vi.fn(),
   updatePrototypeMarks: vi.fn(),
   confirmPrototype: vi.fn(),
   decomposeRequirement: vi.fn(),
+  confirmDecomposition: vi.fn(),
+  listProjectModules: vi.fn(),
+  listProjectResources: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
   api: mockApi,
   ApiError: class ApiError extends Error {},
+}));
+
+// 与 requirement-decompose-panel.test.tsx 同一约定：拆解面板内的 actor 名称/头像
+// 依赖 workspace hooks，stub 掉以保持容器测试可断言。
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({
+    getActorName: (_type: string, id: string) => `actor-${id}`,
+  }),
+}));
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: () => null,
 }));
 
 function requirement(overrides: Partial<Issue> = {}): Issue {
@@ -106,7 +121,15 @@ function renderSection(ui: ReactElement) {
 beforeEach(() => {
   mockApi.listIssueRoleAssignments.mockResolvedValue({ roles: [], total: 0 });
   mockApi.listPrototypeVersions.mockResolvedValue({ versions: [] });
+  mockApi.getDecomposition.mockResolvedValue({
+    plan: null,
+    drafts: [],
+    source_comment_id: null,
+  });
   mockApi.decomposeRequirement.mockResolvedValue({});
+  mockApi.confirmDecomposition.mockResolvedValue({ issues: [] });
+  mockApi.listProjectModules.mockResolvedValue([]);
+  mockApi.listProjectResources.mockResolvedValue({ resources: [] });
 });
 
 afterEach(() => {
@@ -268,5 +291,76 @@ describe("RequirementFlowSection", () => {
     });
     // 原型面板不再占主区（已确认）
     expect(screen.queryByTestId("proto-generate")).toBeNull();
+  });
+
+  it("拆解草稿已产出 → 渲染确认面板，角色指派解析为班底成员", async () => {
+    mockApi.listIssueRoleAssignments.mockResolvedValue({
+      roles: [
+        rosterRow({ role: "pm" }),
+        rosterRow({
+          id: "ra-2",
+          role: "developer",
+          assignee_type: "agent",
+          assignee_id: "agent-dev-1",
+        }),
+      ],
+      total: 2,
+    });
+    mockApi.getDecomposition.mockResolvedValue({
+      plan: "## plan 正文",
+      drafts: [
+        {
+          temp_id: "t1",
+          title: "账户模型",
+          stage: 3,
+          assignee_role: "developer",
+          feature_points: [{ title: "积分账户", kind: "new" }],
+        },
+      ],
+      source_comment_id: "c-1",
+    });
+    renderSection(
+      <RequirementFlowSection
+        issue={requirement()}
+        childIssues={[{ stage: 2, status: "in_progress" } as unknown as Issue]}
+      />,
+    );
+    // 面板替代进行中占位
+    await screen.findByTestId("decompose-panel");
+    expect(screen.queryByTestId("decompose-running")).toBeNull();
+
+    fireEvent.click(await screen.findByTestId("decompose-confirm"));
+    await waitFor(() => {
+      expect(mockApi.confirmDecomposition).toHaveBeenCalled();
+    });
+    const calls = mockApi.confirmDecomposition.mock.calls;
+    expect(calls.length).toBe(1);
+    const drafts = calls[0]?.[1] as DecomposeDraftTask[];
+    expect(drafts[0]?.assignee_type).toBe("agent");
+    expect(drafts[0]?.assignee_id).toBe("agent-dev-1");
+  });
+
+  it("无 PM 子任务但草稿已产出（manual 模式） → 直接渲染确认面板", async () => {
+    mockApi.listIssueRoleAssignments.mockResolvedValue({
+      roles: [rosterRow({ role: "pm" })],
+      total: 1,
+    });
+    mockApi.getDecomposition.mockResolvedValue({
+      plan: "人工整理",
+      drafts: [
+        {
+          temp_id: "t1",
+          title: "手工任务",
+          stage: 3,
+          feature_points: [{ title: "fp", kind: "modify" }],
+        },
+      ],
+      source_comment_id: "c-9",
+    });
+    renderSection(
+      <RequirementFlowSection issue={requirement()} childIssues={[]} />,
+    );
+    await screen.findByTestId("decompose-panel");
+    expect(screen.queryByTestId("decompose-start")).toBeNull();
   });
 });

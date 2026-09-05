@@ -188,6 +188,9 @@ export const issueKeys = {
   /** 原型版本历史（requirement-calendar §5.3）。 */
   prototypeVersions: (issueId: string) =>
     ["prototype-versions", issueId] as const,
+  /** 拆解产出（plan + 草稿，requirement-calendar §9）。 */
+  decomposition: (issueId: string) =>
+    ["decomposition", issueId] as const,
 };
 
 /** 项目默认班底查询。 */
@@ -213,6 +216,15 @@ export function prototypeVersionsOptions(issueId: string | undefined) {
   return queryOptions({
     queryKey: issueKeys.prototypeVersions(issueId ?? ""),
     queryFn: async () => (await api.listPrototypeVersions(issueId!)).versions,
+    enabled: !!issueId,
+  });
+}
+
+/** 拆解产出查询：PM 评论中最新有效的 plan 正文 + 子任务草稿。 */
+export function decompositionOptions(issueId: string | undefined) {
+  return queryOptions({
+    queryKey: issueKeys.decomposition(issueId ?? ""),
+    queryFn: () => api.getDecomposition(issueId!),
     enabled: !!issueId,
   });
 }
