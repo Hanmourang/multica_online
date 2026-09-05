@@ -27,10 +27,14 @@ UPDATE project_module SET name = @name, color = @color WHERE id = @id RETURNING 
 DELETE FROM project_module WHERE id = $1;
 
 -- name: GetIssueModuleInfo :one
--- claim 投影：模块 id/名称 + 避免冲突标志。无模块时 module_id/module_name 为 NULL。
-SELECT i.module_id, i.avoid_conflict, m.name AS module_name
+-- claim 投影：模块 id/名称 + 避免冲突标志 + 需求组 root（ModuleLocker v2 组级互斥，
+-- spec §7.5②）。无模块时 module_id/module_name 为 NULL；root_requirement_id 由 452
+-- 回填恒非空（独立 issue = 自身），root 标题供 daemon 等待文案「held by 需求组」。
+SELECT i.module_id, i.avoid_conflict, i.root_requirement_id,
+       m.name AS module_name, ri.title AS root_requirement_title
 FROM issue i
 LEFT JOIN project_module m ON m.id = i.module_id
+LEFT JOIN issue ri ON ri.id = i.root_requirement_id
 WHERE i.id = $1;
 
 -- name: ListIssueDependencies :many

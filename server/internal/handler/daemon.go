@@ -2334,6 +2334,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.ModuleID = uuidToString(info.ModuleID)
 			resp.ModuleName = info.ModuleName.String
 			resp.AvoidConflict = info.AvoidConflict
+			// 需求组维度与 ModuleID 同源透传：无模块任务 daemon 不取锁，root 空即可。
+			resp.RootRequirementID = uuidToString(info.RootRequirementID)
+			resp.RootRequirementTitle = info.RootRequirementTitle.String
 		}
 
 		// Squad-leader briefing injection: keyed off the task being a

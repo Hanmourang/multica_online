@@ -6,20 +6,24 @@ import (
 	"sync"
 )
 
-// ModuleLocker 实现跨模块的「避免冲突」互斥（spec §5）。
+// ModuleLocker 实现「模块 × 需求组」二维互斥
+//（spec 2026-09-04-requirement-calendar-design.md §7.5②，451 §5 修订版）。
 //
-// 锁模型：每个模块记两组计数 —— total（本模块全部持有数）与
-// exclusive（其中勾选「避免冲突」的持有数）。
+// 锁 key = (moduleID, rootID)。判定规则（判定与计入在同一临界区内完成）：
 //
-//	勾选方（排他）：等待「异模块 total 全归零」；计入本模块 total+exclusive
-//	未勾选方（共享）：等待「异模块 exclusive 全归零」；计入本模块 total
-//	同模块之间永不互斥（同模块顺序由依赖 DAG 表达）
-//	无模块任务不参与（调用方直接跳过 Acquire）
+//	同模块同组（rootID 相同且非空）：永不互斥——组内并行子任务的执行
+//	  顺序由依赖 DAG 表达
+//	同模块跨组：无条件互斥（不看 exclusive）——同模块的不同需求串行，
+//	  onWait 注明持有方需求标题
+//	异模块：维持 451 语义——任一方 exclusive（avoid_conflict）即互斥，
+//	  onWait 注明持有方模块名
+//	任一方 rootID 为空（回填前的存量行等）：同模块维度退化为 451
+//	  （不互斥），异模块规则不变
+//	moduleID 为空：不参与（调用方直接跳过 Acquire）
 //
-// 由此「一方勾选即锁」双向成立。判定与计入在同一临界区内完成，
-// 防止两个异模块勾选方同时判定通过。onWait（上报 waiting_module_lock）
-// 在锁外调用，网络上报不阻塞其他任务的获取路径。不保证严格 FIFO，
-// 与 LocalPathLocker 的公平性约定一致。
+// onWait（上报 waiting_module_lock）在锁外调用一次。不保证严格 FIFO，
+// 与 LocalPathLocker 的公平性约定一致；等待队列按 start_at 升序唤醒由
+// server 侧 claim 闸门保证，不在本组件职责内。
 type ModuleLocker struct {
 	mu      sync.Mutex
 	cond    *sync.Cond
@@ -29,6 +33,8 @@ type ModuleLocker struct {
 type moduleHold struct {
 	moduleID   string
 	moduleName string
+	rootID     string
+	rootTitle  string
 	exclusive  bool
 }
 
@@ -40,14 +46,15 @@ func NewModuleLocker() *ModuleLocker {
 	return l
 }
 
-// Acquire 以 moduleID 名义为 taskID 取锁；返回幂等 release。
-// ctx 取消时返回 ctx.Err() 且未取锁。onWait 在首次判定受阻时于锁外调用一次，
-// 参数是挡住本任务的持有者模块名（可为空字符串表示未知）。
+// Acquire 以 (moduleID, rootID) 名义为 taskID 取锁；返回幂等 release。
+// ctx 取消时返回 ctx.Err() 且未取锁。onWait 在首次判定受阻时于锁外调用一次：
+// 异模块阻塞时 holderModule 为持有方模块名（holderRootTitle 为空）；同模块
+// 跨组阻塞时 holderRootTitle 为持有方需求标题（holderModule 为空）。
 //
 // 注：计数等价于 holders 映射的派生量，直接遍历求判定即可——任务量级 ≤
-// daemon 并发上限，O(n) 判定足够；显式 total/exclusive 计数是 spec 的语义
-// 表述，实现用 holders 单事实源避免计数漂移。
-func (l *ModuleLocker) Acquire(ctx context.Context, moduleID, moduleName, taskID string, exclusive bool, onWait func(holderModule string)) (func(), error) {
+// daemon 并发上限，O(n) 判定足够；显式计数是 spec 的语义表述，实现用
+// holders 单事实源避免计数漂移。
+func (l *ModuleLocker) Acquire(ctx context.Context, moduleID, moduleName, rootID, rootTitle, taskID string, exclusive bool, onWait func(holderModule, holderRootTitle string)) (func(), error) {
 	if moduleID == "" {
 		return nil, errors.New("module_locker: moduleID required")
 	}
@@ -69,9 +76,9 @@ func (l *ModuleLocker) Acquire(ctx context.Context, moduleID, moduleName, taskID
 			l.mu.Unlock()
 			return nil, err
 		}
-		blocker, blocked := l.blockerLocked(moduleID, exclusive)
+		blocker, blocked := l.blockerLocked(moduleID, rootID, exclusive)
 		if !blocked {
-			l.holders[taskID] = moduleHold{moduleID: moduleID, moduleName: moduleName, exclusive: exclusive}
+			l.holders[taskID] = moduleHold{moduleID: moduleID, moduleName: moduleName, rootID: rootID, rootTitle: rootTitle, exclusive: exclusive}
 			l.mu.Unlock()
 			var once sync.Once
 			return func() { once.Do(func() { l.release(taskID) }) }, nil
@@ -80,7 +87,11 @@ func (l *ModuleLocker) Acquire(ctx context.Context, moduleID, moduleName, taskID
 			waited = true
 			if onWait != nil {
 				l.mu.Unlock()
-				onWait(blocker) // 锁外：可能是一次 HTTP 上报
+				if blocker.moduleID == moduleID {
+					onWait("", blocker.rootTitle) // 锁外：可能是一次 HTTP 上报
+				} else {
+					onWait(blocker.moduleName, "")
+				}
 				continue
 			}
 		}
@@ -89,18 +100,42 @@ func (l *ModuleLocker) Acquire(ctx context.Context, moduleID, moduleName, taskID
 	}
 }
 
-// blockerLocked 返回挡住本次获取的持有者的模块名。
-// 规则：异模块持有 ×（本请求排他 或 持有方为排他）⇒ 阻塞。
-func (l *ModuleLocker) blockerLocked(moduleID string, exclusive bool) (string, bool) {
+// blockerLocked 返回挡住本次获取的持有者。规则见类型注释：同模块跨组
+// 无条件互斥；异模块维持 451 的 exclusive 语义。
+func (l *ModuleLocker) blockerLocked(moduleID, rootID string, exclusive bool) (moduleHold, bool) {
 	for _, h := range l.holders {
 		if h.moduleID == moduleID {
-			continue
+			// 同模块：组内放行；任一方组未知退化为 451（不互斥）；
+			// 跨组无条件互斥。
+			if rootID == "" || h.rootID == "" || h.rootID == rootID {
+				continue
+			}
+			return h, true
 		}
+		// 异模块：维持 451 exclusive 语义。
 		if exclusive || h.exclusive {
-			return h.moduleName, true
+			return h, true
 		}
 	}
-	return "", false
+	return moduleHold{}, false
+}
+
+// ReleaseGroup 释放 rootID 需求组的全部持有（root 到达终态 done/cancelled/
+// failed 即释放，spec §7.5②），并唤醒全部等待方重查。任务完成时的逐任务
+// release 是主路径，本 API 兜底「root 终态但持有方任务尚未被 daemon 回收」
+// 的窗口。空 rootID 直接返回。
+func (l *ModuleLocker) ReleaseGroup(rootID string) {
+	if rootID == "" {
+		return
+	}
+	l.mu.Lock()
+	for taskID, h := range l.holders {
+		if h.rootID == rootID {
+			delete(l.holders, taskID)
+		}
+	}
+	l.cond.Broadcast()
+	l.mu.Unlock()
 }
 
 func (l *ModuleLocker) release(taskID string) {

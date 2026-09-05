@@ -5410,6 +5410,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	if moduleRelease != nil {
 		defer moduleRelease()
 	}
+	// design §7.3：root 需求任务到达终态（completed/failed/cancelled 任一路径，
+	// handleTask 返回即终态）→ 释放该需求组在本 daemon 上的全部残留 hold，
+	// 唤醒同模块跨组等待队列。per-task release 只回收本任务的 hold，级联取消
+	// 时尚未各自 release 的同组兄弟任务靠这里兜底；ReleaseGroup 幂等，对无
+	// 模块任务（未持锁）是 no-op，重复调用安全。
+	if task.RootRequirementID != "" && task.IssueID == task.RootRequirementID {
+		defer d.moduleLocks.ReleaseGroup(task.RootRequirementID)
+	}
 
 	// Hold a process-wide active-root guard for the rest of this task so
 	// the GC loop never sees a window where the env root has neither the
@@ -5766,17 +5774,21 @@ func (d *Daemon) acquireModuleLockIfNeeded(ctx context.Context, task Task, assig
 		}
 	}()
 
-	onWait := func(holderModule string) {
+	onWait := func(holderModule, holderRootTitle string) {
 		// ModuleLocker invokes onWait synchronously and at most once for an
 		// Acquire call. Count the actual mutex wait even if the best-effort
 		// server status update below fails.
 		d.resourceWaitTasks.Add(1)
 		waitCounted = true
 		reason := fmt.Sprintf("模块「%s」", task.ModuleName)
-		if holderModule != "" {
+		switch {
+		case holderRootTitle != "":
+			// 同模块跨组互斥（spec §7.5②）：注明持有方需求组。
+			reason = fmt.Sprintf("%s (held by 需求组「%s」)", reason, holderRootTitle)
+		case holderModule != "":
 			reason = fmt.Sprintf("%s (held by 模块「%s」)", reason, holderModule)
 		}
-		taskLog.Info("module lock: waiting", "module", task.ModuleName, "holder_module", holderModule)
+		taskLog.Info("module lock: waiting", "module", task.ModuleName, "holder_module", holderModule, "holder_requirement", holderRootTitle)
 		if waitErr := d.client.MarkTaskWaitingModuleLock(ctx, task.ID, reason); waitErr != nil {
 			// Non-fatal: even if the server-side flag fails to update,
 			// we still want to block on the lock and proceed when free.
@@ -5802,7 +5814,7 @@ func (d *Daemon) acquireModuleLockIfNeeded(ctx context.Context, task Task, assig
 			}()
 		})
 	}
-	releaseFn, err := d.moduleLocks.Acquire(waitCtx, task.ModuleID, task.ModuleName, task.ID, task.AvoidConflict, onWait)
+	releaseFn, err := d.moduleLocks.Acquire(waitCtx, task.ModuleID, task.ModuleName, task.RootRequirementID, task.RootRequirementTitle, task.ID, task.AvoidConflict, onWait)
 	if err != nil {
 		// If the wait was cut short because the server finalized the task
 		// (terminal state) or deleted the row, the row is already in a

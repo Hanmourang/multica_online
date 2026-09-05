@@ -148,6 +148,7 @@ const STATUS_ICON: Record<string, string> = {
   验收中: "🧪",
   已完成: "✅",
   已取消: "—",
+  验收失败: "✗",
 };
 
 const STATUS_TONE: Record<string, string> = {
@@ -156,6 +157,7 @@ const STATUS_TONE: Record<string, string> = {
   等待模块释放: "text-muted-foreground",
   已完成: "text-emerald-600 dark:text-emerald-400",
   已取消: "text-muted-foreground",
+  验收失败: "text-destructive",
 };
 
 /**
@@ -170,6 +172,7 @@ const RESCHEDULE_LOCKED_STATUSES = new Set([
   "验收中",
   "已完成",
   "已取消",
+  "验收失败",
 ]);
 
 // ---------------------------------------------------------------------------

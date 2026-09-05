@@ -268,4 +268,26 @@ describe("CalendarView", () => {
       "Already triggered — cancel the run before rescheduling",
     );
   });
+
+  it("第10态「验收失败」渲染✗色块且锁改期（终态不可拖拽）", () => {
+    renderCalendar([
+      requirement({
+        id: "req-fail",
+        identifier: "REQ-9",
+        start_at: "2026-09-15T09:00:00Z",
+        due_date: "2026-09-16",
+        requirement_status: "验收失败",
+      }),
+    ]);
+
+    const block = screen.getByTestId("req-block-req-fail-2026-09-15");
+    // 派生态文案 + ✗ 图标（STATUS_ICON["验收失败"]）都落在 start 段。
+    expect(block.textContent).toContain("验收失败");
+    expect(block.textContent).toContain("✗");
+    // 终态锁改期：与「执行中/已完成」同款不可拖拽 + title 说明。
+    expect(block.getAttribute("draggable")).toBe("false");
+    expect(block.getAttribute("title")).toBe(
+      "Already triggered — cancel the run before rescheduling",
+    );
+  });
 });

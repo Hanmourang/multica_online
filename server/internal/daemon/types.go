@@ -80,6 +80,11 @@ type Task struct {
 	ModuleID      string `json:"module_id,omitempty"`
 	ModuleName    string `json:"module_name,omitempty"`
 	AvoidConflict bool   `json:"avoid_conflict,omitempty"`
+	// 需求组投影（spec §7.5②）：锁 key 的第二维。RootRequirementID 取自
+	// issue.root_requirement_id（无 parent 的独立 issue = 自身 id）；空值
+	// （旧 server 不下发）时同模块维度退化为 451 语义，不引入新互斥。
+	RootRequirementID    string `json:"root_requirement_id,omitempty"`
+	RootRequirementTitle string `json:"root_requirement_title,omitempty"`
 	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
 	// RemoteMCPDaemonToken stays inside the daemon and authenticates the local
 	// broker's credential-resolution calls. It must never enter agent env/config.

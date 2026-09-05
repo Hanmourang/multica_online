@@ -352,6 +352,10 @@ type AgentTaskResponse struct {
 	ModuleID      string `json:"module_id,omitempty"`
 	ModuleName    string `json:"module_name,omitempty"`
 	AvoidConflict bool   `json:"avoid_conflict,omitempty"`
+	// 需求组投影（ModuleLocker v2，spec §7.5②）：锁 key 的第二维 + 等待文案的
+	// 持有方需求标题。omitempty 兼容旧 daemon（忽略未知字段，行为退化 v1）。
+	RootRequirementID    string `json:"root_requirement_id,omitempty"`
+	RootRequirementTitle string `json:"root_requirement_title,omitempty"`
 	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
 	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
 	// daemon renders as MCP tools for this task. Resolved at claim time so
