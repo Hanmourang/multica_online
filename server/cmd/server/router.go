@@ -2013,12 +2013,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/artifacts/sync", h.SyncProjectArtifacts)
 					r.Get("/artifacts/matrix", h.GetArtifactMatrix)
 					r.Get("/artifacts/unbound", h.ListUnboundArtifacts)
+					// bind-candidates 是静态段，必须先于 {artifactId} 通配注册
+					// （§4.9.3 批量绑定候选：标题相似度 + key 后缀 + 时间窗）。
+					r.Get("/artifacts/bind-candidates", h.ListArtifactBindCandidates)
 					r.Get("/artifacts", h.ListProjectArtifacts)
 					r.Get("/artifacts/{artifactId}", h.GetProjectArtifact)
 					r.Get("/artifacts/{artifactId}/content", h.GetArtifactContent)
 					r.Patch("/artifacts/{artifactId}", h.PatchProjectArtifact)
 					r.Post("/artifacts/{artifactId}/archive", h.ArchiveDeliverable)
 					r.Post("/artifacts/{artifactId}/bind", h.BindProjectArtifact)
+					// Archive sync config / diagnostics（migration 461，§4.9.6/4.9.7）：
+					// 同步控制台的配置读写与 CLI 分阶段诊断上报/查询。
+					r.Get("/archive/sync-config", h.GetArchiveSyncConfig)
+					r.Put("/archive/sync-config", h.PutArchiveSyncConfig)
+					r.Post("/archive/sync-diagnostics", h.PostArchiveSyncDiagnostics)
+					r.Get("/archive/sync-diagnostics", h.ListArchiveSyncDiagnostics)
 					r.Post("/graph/sync", h.SyncGraphSnapshot)
 					// rebridge (task 27): static segment, bridge-only re-run with
 					// no graph body re-upload. Sits beside sync and ahead of the
