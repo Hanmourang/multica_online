@@ -1005,5 +1005,20 @@
     "triggering": "トリガー中…",
     "trigger_ok": "要求をトリガーしました —— 実行サブタスクをキューに追加しました",
     "trigger_failed": "要求のトリガーに失敗しました"
+  },
+  "acceptance_panel": {
+    "title": "受け入れ",
+    "round_label": "ラウンド",
+    "failed_banner": "3 回の差し戻し後も未通過 —— 手動仲裁が必要です",
+    "report_title": "受け入れレポート",
+    "no_report": "テスターサブタスクはまだありません",
+    "repairs_title": "差し戻し修復チェーン",
+    "evidence_placeholder": "仲裁の根拠（必須）…",
+    "evidence_required": "判定を送信する前に根拠を入力してください",
+    "pass": "合格",
+    "fail": "差し戻し",
+    "submitting": "送信中…",
+    "verdict_ok": "判定を送信しました",
+    "verdict_failed": "判定の送信に失敗しました"
   }
 }

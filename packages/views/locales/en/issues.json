@@ -1038,5 +1038,20 @@
     "triggering": "Triggering…",
     "trigger_ok": "Requirement triggered — execution subtasks enqueued",
     "trigger_failed": "Failed to trigger requirement"
+  },
+  "acceptance_panel": {
+    "title": "Acceptance",
+    "round_label": "Round",
+    "failed_banner": "Acceptance failed after 3 rounds — manual arbitration required",
+    "report_title": "Acceptance report",
+    "no_report": "No tester subtask yet",
+    "repairs_title": "Repair chain",
+    "evidence_placeholder": "Arbitration evidence (required)…",
+    "evidence_required": "Evidence is required before submitting a verdict",
+    "pass": "Pass",
+    "fail": "Reject",
+    "submitting": "Submitting…",
+    "verdict_ok": "Verdict submitted",
+    "verdict_failed": "Failed to submit verdict"
   }
 }

@@ -1005,5 +1005,20 @@
     "triggering": "触发中…",
     "trigger_ok": "需求已触发 —— 执行子任务已入队",
     "trigger_failed": "触发需求失败"
+  },
+  "acceptance_panel": {
+    "title": "验收",
+    "round_label": "轮次",
+    "failed_banner": "已打回 3 轮仍未通过 —— 需人工仲裁",
+    "report_title": "验收报告",
+    "no_report": "暂无验收子任务",
+    "repairs_title": "打回修复链",
+    "evidence_placeholder": "仲裁依据（必填）…",
+    "evidence_required": "提交裁决前必须填写仲裁依据",
+    "pass": "通过",
+    "fail": "打回",
+    "submitting": "提交中…",
+    "verdict_ok": "裁决已提交",
+    "verdict_failed": "提交裁决失败"
   }
 }

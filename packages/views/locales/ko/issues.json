@@ -1005,5 +1005,20 @@
     "triggering": "트리거 중…",
     "trigger_ok": "요구 사항이 트리거되었습니다 —— 실행 하위 작업이 대기열에 추가되었습니다",
     "trigger_failed": "요구 사항 트리거에 실패했습니다"
+  },
+  "acceptance_panel": {
+    "title": "검수",
+    "round_label": "라운드",
+    "failed_banner": "3회 반려 후에도 미통과 —— 수동 중재가 필요합니다",
+    "report_title": "검수 보고서",
+    "no_report": "테스터 하위 작업이 아직 없습니다",
+    "repairs_title": "반려 수리 체인",
+    "evidence_placeholder": "중재 근거(필수)…",
+    "evidence_required": "판정을 제출하기 전에 근거를 입력해야 합니다",
+    "pass": "통과",
+    "fail": "반려",
+    "submitting": "제출 중…",
+    "verdict_ok": "판정이 제출되었습니다",
+    "verdict_failed": "판정 제출에 실패했습니다"
   }
 }
