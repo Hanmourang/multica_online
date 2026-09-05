@@ -25,10 +25,17 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // JobNameRequirementTrigger 是写入 sys_cron_executions 的稳定 job 名。
 // 跨版本勿改：改名会让历史审计行成为孤儿（无法按 job 名回查）。
+//
+// 改名审计（M-9）：本 Phase I 内曾短暂用 requirement_trigger_sweep，随即在
+// 同一未发布分支（feat/requirement-calendar）改为 requirement_trigger_dispatch。
+// git 核实：旧名仅出现于本分支 commit（9fccf53 / 1e9bc9c），从未合入
+// master/main/release，也无任何 migration 引用它——故旧名从未在生产库
+// sys_cron_executions 留下审计行，无需补数据 migration，仅此处记录。
 const JobNameRequirementTrigger = "requirement_trigger_dispatch"
 
 // RequirementTriggerDispatcher 是本 job 对 service.TaskService 的窄契约。
@@ -101,9 +108,9 @@ func RequirementTriggerJob(
 		ScheduleDelay:     0,
 		CatchUpMode:       CatchUpLatestOnly, // 停机后只补最近一次 sweep；历史到点需求本轮一次扫全
 		CatchUpWindow:     1 * time.Hour,
-		RunTimeout:        1 * time.Minute,
+		RunTimeout:        2 * time.Minute,
 		StaleTimeout:      3 * time.Minute,
-		HeartbeatInterval: 20 * time.Second,
+		HeartbeatInterval: 10 * time.Second,
 		AllowStaleReentry: true, // MarkRequirementTriggered 幂等 ⇒ 重入安全
 		MaxAttempts:       3,
 		RetryBackoff:      []time.Duration{30 * time.Second, 2 * time.Minute},
@@ -177,9 +184,17 @@ func (s *RequirementTriggerService) Sweep(ctx context.Context) (SweepSummary, er
 	return summary, nil
 }
 
+// requirementSweeper 是 sweep 汇总的窄契约，*RequirementTriggerService 满足之。
+// 抽接口（而非直接收 *RequirementTriggerService）是为了让 handler 的
+// RowsAffected 映射与 error 穿透可用 stub 覆盖（M-8：重建被删的
+// TestRequirementTriggerSweepHandler 等价覆盖）。
+type requirementSweeper interface {
+	Sweep(ctx context.Context) (SweepSummary, error)
+}
+
 // requirementTriggerHandler 单次 sweep：调 svc.Sweep 拿汇总，映射到 HandlerResult
 //（RowsAffected = triggered 数，Result = 审计 map）。
-func requirementTriggerHandler(svc *RequirementTriggerService) Handler {
+func requirementTriggerHandler(svc requirementSweeper) Handler {
 	return func(ctx context.Context, in HandlerInput) (HandlerResult, error) {
 		summary, err := svc.Sweep(ctx)
 		if err != nil {
@@ -243,8 +258,8 @@ func triggerOneRequirement(
 			}
 		}
 	}
-	// 互斥窗口：同模块无其它 root 组活动任务。
-	windowFree, err := moduleWindowFree(ctx, queries, req)
+	// 互斥窗口：需求自身模块 + 每个 stage3 子任务各自模块都无其它 root 组活动任务。
+	windowFree, err := moduleWindowFree(ctx, queries, req, stage3)
 	if err != nil {
 		return false, "", 0, fmt.Errorf("module window check: %w", err)
 	}
@@ -256,6 +271,16 @@ func triggerOneRequirement(
 		ModuleWindowFree:       windowFree,
 	})
 	if !pass {
+		// H-3：acceptance_spec_missing 是永久阻断，且此前只落 sys_cron_executions
+		// 计数、零用户可见信号。补一条去重护栏下的 system 评论（对照 handler 层
+		// postAcceptanceFailedComment），让用户在需求详情看到卡点原因。已核实：
+		// migration 452 同时新增 auto_trigger/decomposition_confirmed_at/triggered_at/
+		// start_at，存量行 decomposition_confirmed_at 与 start_at 均为 NULL，永远进不了
+		// ListTriggerableRequirements → 本闸门对存量行不可达；仅对「拆解草稿未填
+		// acceptance_spec」的新需求生效，故无需存量豁免，只补可见信号。
+		if reason == "acceptance_spec_missing" {
+			postAcceptanceSpecMissingNotice(ctx, queries, req)
+		}
 		return false, reason, 0, nil
 	}
 
@@ -271,42 +296,116 @@ func triggerOneRequirement(
 	// 入队全部 stage3 子任务：依赖闸门由 ClaimAgentTask 在领取时把关
 	// （451 的 NOT EXISTS 前置未 done 判定），未满足依赖的会停在 queued。
 	// 非 agent 执行人的子任务跳过 —— 人自己领活，不进 agent 队列。
+	//
+	// 写序修复（C-1）：triggered_at 已在上面 CAS 落库。若某个入队失败就 return
+	// 中断，需求会永久卡「已触发/零任务」——sweep（谓词含 triggered_at IS NULL）
+	// /手动（CAS 0 行→already_triggered）/重试（重跑 CAS 仍 0 行）三通道全关闭。
+	// 因此单个子任务入队失败改为 slog.Warn + continue 处理完剩余；仅当「已 CAS
+	// 但零入队且确有失败」时调用 ResetRequirementTrigger 回退 triggered_at，让下轮
+	// sweep 重扫重试。部分成功（enqueued>0）不回退 —— 否则会重复入队已成功者。
 	enqueued := 0
+	enqueueFailures := 0
 	for _, c := range stage3 {
 		if c.AssigneeType.String != "agent" || !c.AssigneeID.Valid {
 			continue
 		}
 		if _, err := dispatcher.EnqueueTaskForIssue(ctx, c); err != nil {
-			// 已标记 triggered_at，本轮部分入队失败不会自动重试；返回 err
-			// 让 sweep 把这次记入 blocked["error"]，运维从审计里定位。
-			return true, "", enqueued, fmt.Errorf("enqueue stage3 %s: %w", util.UUIDToString(c.ID), err)
+			enqueueFailures++
+			slog.Warn("requirement trigger: enqueue stage3 child failed",
+				"requirement_id", util.UUIDToString(req.ID),
+				"child_id", util.UUIDToString(c.ID), "error", err)
+			continue
 		}
 		enqueued++
+	}
+	// 「已 CAS 但零入队且全部失败」→ 回退 triggered_at，返回 error 让 sweep 记入
+	// blocked["error"] 并下一 tick 重扫（此时 triggered_at 已 NULL，可再次触发）。
+	// enqueued==0 && enqueueFailures==0 是合法态（stage3 全为 member/squad 指派，
+	// 无 agent 可入队）——不回退，需求确已触发，人自己领活。
+	if enqueued == 0 && enqueueFailures > 0 {
+		if _, rerr := queries.ResetRequirementTrigger(ctx, req.ID); rerr != nil {
+			slog.Error("requirement trigger: reset triggered_at after all-failed enqueue failed",
+				"requirement_id", util.UUIDToString(req.ID), "error", rerr)
+			return false, "", 0, fmt.Errorf("all %d stage3 enqueues failed and triggered_at rollback failed: %w", enqueueFailures, rerr)
+		}
+		return false, "", 0, fmt.Errorf("all %d stage3 enqueues failed; triggered_at rolled back for retry", enqueueFailures)
 	}
 	return true, "", enqueued, nil
 }
 
-// moduleWindowFree 报告该需求所在模块是否对其 root 组空闲（无其它组活动任务）。
+// moduleWindowFree 报告该需求组涉及的模块是否对其 root 组空闲（无其它组活动任务）。
 //
 // 对齐 WS3 ModuleLocker v2（daemon/module_locker.go blockerLocked）：同模块跨组
-// 无条件互斥，同组内部并行不阻。触发前置只在「有模块 + 有 root」时才检查 ——
-// 任一方缺失即退化为 451 语义（不互斥），避免把回填前的存量行卡死。
+// 无条件互斥，同组内部并行不阻。触发前置只在「有 root」时才检查 —— root 缺失
+// 即退化为 451 语义（不互斥），避免把回填前的存量行卡死。
+//
+// L-1：daemon ModuleLocker 用每个子任务自己的 task.ModuleID（daemon.go:5817）
+// 逐任务判定，子任务拆解到不同模块时只看 req.ModuleID 会漏判。故这里收集
+// 「需求自身 + 全部 stage3 子任务」的 distinct module_id，逐个执行
+// ModuleBusyForOtherRoot；任一模块被其它组占用即判窗口忙。
 //
 // 活动任务口径 = CountRunningTasks（agent.sql:1749）：dispatched / running /
 // waiting_local_directory / waiting_module_lock —— waiting_* 也算占用（daemon
 // 已在等锁，触发新组只会加剧排队）；queued 不算（尚未占用互斥窗口）。
-func moduleWindowFree(ctx context.Context, queries *db.Queries, req db.Issue) (bool, error) {
-	if !req.ModuleID.Valid || !req.RootRequirementID.Valid {
-		return true, nil
+func moduleWindowFree(ctx context.Context, queries *db.Queries, req db.Issue, stage3 []db.Issue) (bool, error) {
+	if !req.RootRequirementID.Valid {
+		return true, nil // 组未知 → 退化为 451（不互斥）
 	}
-	busy, err := queries.ModuleBusyForOtherRoot(ctx, db.ModuleBusyForOtherRootParams{
-		ModuleID:          req.ModuleID,
-		RootRequirementID: req.RootRequirementID,
+	// distinct module_id：需求自身 + 每个 stage3 子任务（按 UUID 串去重）。
+	modules := make(map[string]pgtype.UUID)
+	collect := func(id pgtype.UUID) {
+		if id.Valid {
+			modules[util.UUIDToString(id)] = id
+		}
+	}
+	collect(req.ModuleID)
+	for _, c := range stage3 {
+		collect(c.ModuleID)
+	}
+	for _, moduleID := range modules {
+		busy, err := queries.ModuleBusyForOtherRoot(ctx, db.ModuleBusyForOtherRootParams{
+			ModuleID:          moduleID,
+			RootRequirementID: req.RootRequirementID,
+		})
+		if err != nil {
+			return false, err
+		}
+		if busy {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// postAcceptanceSpecMissingNotice 在需求因 acceptance_spec_missing 被永久阻断时，
+// 于需求上补一条 system 评论作为用户可见信号（对照 handler.postAcceptanceFailedComment）。
+// 去重护栏：已有带 [acceptance_spec_missing] 标记前缀的系统评论则跳过 —— sweep 每
+// 30s 重扫同一被阻断需求，无护栏会刷屏。best-effort：任何错误只记日志，不影响阻断返回。
+func postAcceptanceSpecMissingNotice(ctx context.Context, queries *db.Queries, req db.Issue) {
+	noticed, err := queries.HasAcceptanceSpecMissingNotice(ctx, req.ID)
+	if err != nil {
+		slog.Warn("requirement trigger: acceptance_spec_missing notice dedup check failed",
+			"requirement_id", util.UUIDToString(req.ID), "error", err)
+		return
+	}
+	if noticed {
+		return
+	}
+	content := "[acceptance_spec_missing] 自动触发被阻断：本需求的 stage3 子任务均未填写非空验收代码"
+	_, err = queries.CreateComment(ctx, db.CreateCommentParams{
+		ID:          dbid.NewV7(),
+		IssueID:     req.ID,
+		WorkspaceID: req.WorkspaceID,
+		AuthorType:  "system",
+		AuthorID:    pgtype.UUID{Valid: true},
+		Content:     content,
+		Type:        "system",
+		ParentID:    pgtype.UUID{Valid: false},
 	})
 	if err != nil {
-		return false, err
+		slog.Warn("requirement trigger: post acceptance_spec_missing notice failed",
+			"requirement_id", util.UUIDToString(req.ID), "error", err)
 	}
-	return !busy, nil
 }
 
 // acceptanceSpecNonEmpty 判断 JSONB 列是否填了实际内容。列默认值 '{}' /

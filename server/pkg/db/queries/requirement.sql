@@ -104,6 +104,22 @@ ORDER BY i.start_at ASC;
 UPDATE issue SET triggered_at = now()
 WHERE id = $1 AND triggered_at IS NULL;
 
+-- name: ResetRequirementTrigger :execrows
+-- 触发已 CAS 但 stage3 入队全部失败时回退 triggered_at，让下轮 sweep 重扫重试
+--（否则需求永久卡「已触发/零任务」，sweep/手动/重试三通道全关闭）。仅回退已触发
+-- 行；影响 0 行 = 该行未被本进程触发（或已被并发重置），无副作用。
+UPDATE issue SET triggered_at = NULL
+WHERE id = $1 AND triggered_at IS NOT NULL;
+
+-- name: HasAcceptanceSpecMissingNotice :one
+-- H-3 可见信号去重护栏：sweep 每 30s 重扫被 acceptance_spec_missing 阻断的需求，
+-- 为避免评论刷屏，发系统评论前先查是否已有带固定标记前缀的系统评论。
+SELECT EXISTS (
+    SELECT 1 FROM comment
+    WHERE issue_id = $1 AND author_type = 'system'
+      AND content LIKE '[acceptance_spec_missing]%'
+) AS noticed;
+
 -- name: ConfirmDecomposition :execrows
 -- 幂等：仅当未确认时写入；影响 0 行 = 重复确认，调用方转 409。
 UPDATE issue SET decomposition_confirmed_at = now()

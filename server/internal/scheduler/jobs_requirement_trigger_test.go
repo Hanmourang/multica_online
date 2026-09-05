@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -139,4 +140,68 @@ func TestRequirementTriggerJobSpec(t *testing.T) {
 	if job.MaxAttempts < 1 {
 		t.Fatalf("MaxAttempts must be >= 1, got %d", job.MaxAttempts)
 	}
+}
+
+// stubSweeper 是 requirementSweeper 的测试替身，用于覆盖 handler 的汇总映射
+// 与错误穿透而无需真库（M-8：等价重建被删的 TestRequirementTriggerSweepHandler）。
+type stubSweeper struct {
+	summary SweepSummary
+	err     error
+}
+
+func (s stubSweeper) Sweep(context.Context) (SweepSummary, error) { return s.summary, s.err }
+
+// TestRequirementTriggerHandlerRowsAffectedAndError 断言 sweep handler 把
+// Triggered 计数映射为 HandlerResult.RowsAffected、把汇总序列化进 Result，
+// 并在 Sweep 失败时用 %w 包裹错误向上传递（manager 据此记 FAILED 重试）。
+// 这是被删测试的等价覆盖：旧 stub 断言的正是 RowsAffected 映射 + errors.Is 穿透。
+func TestRequirementTriggerHandlerRowsAffectedAndError(t *testing.T) {
+	h := requirementTriggerHandler(stubSweeper{summary: SweepSummary{
+		Scanned:   4,
+		Triggered: 2,
+		Enqueued:  5,
+		Blocked:   map[string]int{"module_window_busy": 1, "error": 1},
+	}})
+	res, err := h(context.Background(), HandlerInput{})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if res.RowsAffected != 2 {
+		t.Fatalf("RowsAffected = %d, want triggered count 2", res.RowsAffected)
+	}
+	if got := res.Result["enqueued"]; got != 5 {
+		t.Fatalf("Result[enqueued] = %v, want 5", got)
+	}
+	blocked, ok := res.Result["blocked"].(map[string]int)
+	if !ok || blocked["module_window_busy"] != 1 || blocked["error"] != 1 {
+		t.Fatalf("Result[blocked] = %v, want the per-reason tally", res.Result["blocked"])
+	}
+
+	wantErr := errors.New("sweep blew up")
+	h = requirementTriggerHandler(stubSweeper{err: wantErr})
+	if _, err := h(context.Background(), HandlerInput{}); !errors.Is(err, wantErr) {
+		t.Fatalf("handler error = %v, want it to wrap %v (errors.Is)", err, wantErr)
+	}
+}
+
+// TestRequirementTriggerHandlerContextCancel 断言 ctx 已取消时错误仍能穿透
+//（manager 的租约心跳/终态写回依赖 handler 如实回传 ctx 错误，而非吞掉）。
+func TestRequirementTriggerHandlerContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h := requirementTriggerHandler(contextAwareSweeper{})
+	if _, err := h(ctx, HandlerInput{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("handler error = %v, want context.Canceled to propagate", err)
+	}
+}
+
+// contextAwareSweeper 把 ctx.Err() 如实回传，模拟 ListTriggerableRequirements
+// 在 ctx 取消时的行为。
+type contextAwareSweeper struct{}
+
+func (contextAwareSweeper) Sweep(ctx context.Context) (SweepSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return SweepSummary{}, err
+	}
+	return SweepSummary{}, nil
 }

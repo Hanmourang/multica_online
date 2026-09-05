@@ -502,6 +502,39 @@ func (q *Queries) MarkRequirementTriggered(ctx context.Context, id pgtype.UUID) 
 	return result.RowsAffected(), nil
 }
 
+const resetRequirementTrigger = `-- name: ResetRequirementTrigger :execrows
+UPDATE issue SET triggered_at = NULL
+WHERE id = $1 AND triggered_at IS NOT NULL
+`
+
+// 触发已 CAS 但 stage3 入队全部失败时回退 triggered_at，让下轮 sweep 重扫重试
+//（否则需求永久卡「已触发/零任务」，sweep/手动/重试三通道全关闭）。仅回退已触发
+// 行；影响 0 行 = 该行未被本进程触发（或已被并发重置），无副作用。
+func (q *Queries) ResetRequirementTrigger(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, resetRequirementTrigger, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const hasAcceptanceSpecMissingNotice = `-- name: HasAcceptanceSpecMissingNotice :one
+SELECT EXISTS (
+    SELECT 1 FROM comment
+    WHERE issue_id = $1 AND author_type = 'system'
+      AND content LIKE '[acceptance_spec_missing]%'
+) AS noticed
+`
+
+// H-3 可见信号去重护栏：sweep 每 30s 重扫被 acceptance_spec_missing 阻断的需求，
+// 为避免评论刷屏，发系统评论前先查是否已有带固定标记前缀的系统评论。
+func (q *Queries) HasAcceptanceSpecMissingNotice(ctx context.Context, issueID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasAcceptanceSpecMissingNotice, issueID)
+	var noticed bool
+	err := row.Scan(&noticed)
+	return noticed, err
+}
+
 const setPrototypeStatus = `-- name: SetPrototypeStatus :exec
 UPDATE issue_prototype_version
 SET status = $1
