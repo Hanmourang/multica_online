@@ -1010,5 +1010,15 @@
     "generate_failed": "Failed to generate prototype",
     "save_failed": "Failed to save marks",
     "confirm_failed": "Failed to confirm prototype"
+  },
+  "requirement_flow": {
+    "stage_prototype": "Prototype",
+    "stage_decompose": "Plan + Decompose",
+    "stage_execute": "Execute",
+    "stage_accept": "Acceptance",
+    "decompose_start": "Start decomposition",
+    "decompose_starting": "Starting…",
+    "decompose_running": "Decomposition in progress — PM is drafting the plan and sub-issue drafts.",
+    "decompose_start_failed": "Failed to start decomposition"
   }
 }

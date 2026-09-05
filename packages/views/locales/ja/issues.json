@@ -977,5 +977,15 @@
     "generate_failed": "プロトタイプ生成に失敗しました",
     "save_failed": "マークの保存に失敗しました",
     "confirm_failed": "プロトタイプの確認に失敗しました"
+  },
+  "requirement_flow": {
+    "stage_prototype": "プロトタイプ",
+    "stage_decompose": "plan + 分解",
+    "stage_execute": "実行",
+    "stage_accept": "受入",
+    "decompose_start": "分解を開始",
+    "decompose_starting": "開始中…",
+    "decompose_running": "分解中 —— PM が plan とサブタスク草案を作成しています。",
+    "decompose_start_failed": "分解の開始に失敗しました"
   }
 }

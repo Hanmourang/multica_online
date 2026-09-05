@@ -228,6 +228,12 @@ import type {
   CreateCommentSubIssueAgentRequest,
   CreateCommentSubIssueRequest,
 } from "../types";
+import type {
+  GeneratePrototypeRequest,
+  GeneratePrototypeResponse,
+  PrototypeMark,
+  PrototypeVersion,
+} from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
   CreateFeedbackResponse,
@@ -268,12 +274,6 @@ import {
   AgentBuilderSessionListSchema,
   EMPTY_AGENT_BUILDER_SESSION_LIST,
   agentBuilderRuntimeSwitchFallback,
-import type {
-  GeneratePrototypeRequest,
-  GeneratePrototypeResponse,
-  PrototypeMark,
-  PrototypeVersion,
-} from "../types";
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardFailureDailyListSchema,
@@ -1305,6 +1305,16 @@ export class ApiClient {
     });
   }
 
+  /** 发起拆解（requirement-calendar spec §9）：建 stage-2 PM 子任务并派发。
+   *  manual 模式服务端返回 { mode, template_schema }，不建任务。 */
+  async decomposeRequirement(
+    issueId: string,
+  ): Promise<{ mode?: string; template_schema?: unknown } & Record<string, unknown>> {
+    return this.fetch(`/api/issues/${issueId}/decompose`, {
+      method: "POST",
+    });
+  }
+
   /** 拆解确认（requirement-calendar spec §9）：校验草稿并批量生效子任务。 */
   async confirmDecomposition(
     issueId: string,
@@ -1313,6 +1323,44 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/decomposition/confirm`, {
       method: "POST",
       body: JSON.stringify({ drafts }),
+    });
+  }
+
+  /** 原型一键生成/重生成（requirement-calendar spec §9）：登记新版本并派 stage-1 子任务。 */
+  async generatePrototype(
+    issueId: string,
+    body: GeneratePrototypeRequest,
+  ): Promise<GeneratePrototypeResponse> {
+    return this.fetch(`/api/issues/${issueId}/prototype/generate`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** 原型版本历史（version 降序）。 */
+  async listPrototypeVersions(issueId: string): Promise<{ versions: PrototypeVersion[] }> {
+    return this.fetch(`/api/issues/${issueId}/prototypes`);
+  }
+
+  /** 整体替换某个 pending 版本的逐项标记。 */
+  async updatePrototypeMarks(
+    issueId: string,
+    version: number,
+    marks: PrototypeMark[],
+  ): Promise<{ version: PrototypeVersion }> {
+    return this.fetch(`/api/issues/${issueId}/prototypes/${version}/marks`, {
+      method: "POST",
+      body: JSON.stringify({ marks }),
+    });
+  }
+
+  /** 确认门：无未处理 ✗ 才放行，确认后进 stage 2 PM 拆解。 */
+  async confirmPrototype(
+    issueId: string,
+    version: number,
+  ): Promise<{ version: PrototypeVersion }> {
+    return this.fetch(`/api/issues/${issueId}/prototypes/${version}/confirm`, {
+      method: "POST",
     });
   }
 
@@ -1403,44 +1451,6 @@ export class ApiClient {
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
       }),
     });
-  /** 原型一键生成/重生成（requirement-calendar spec §9）：登记新版本并派 stage-1 子任务。 */
-  async generatePrototype(
-    issueId: string,
-    body: GeneratePrototypeRequest,
-  ): Promise<GeneratePrototypeResponse> {
-    return this.fetch(`/api/issues/${issueId}/prototype/generate`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
-  /** 原型版本历史（version 降序）。 */
-  async listPrototypeVersions(issueId: string): Promise<{ versions: PrototypeVersion[] }> {
-    return this.fetch(`/api/issues/${issueId}/prototypes`);
-  }
-
-  /** 整体替换某个 pending 版本的逐项标记。 */
-  async updatePrototypeMarks(
-    issueId: string,
-    version: number,
-    marks: PrototypeMark[],
-  ): Promise<{ version: PrototypeVersion }> {
-    return this.fetch(`/api/issues/${issueId}/prototypes/${version}/marks`, {
-      method: "POST",
-      body: JSON.stringify({ marks }),
-    });
-  }
-
-  /** 确认门：无未处理 ✗ 才放行，确认后进 stage 2 PM 拆解。 */
-  async confirmPrototype(
-    issueId: string,
-    version: number,
-  ): Promise<{ version: PrototypeVersion }> {
-    return this.fetch(`/api/issues/${issueId}/prototypes/${version}/confirm`, {
-      method: "POST",
-    });
-  }
-
   }
 
   async previewCommentTriggers(issueId: string, content: string, parentId?: string, editingCommentId?: string): Promise<CommentTriggerPreview> {

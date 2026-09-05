@@ -977,5 +977,15 @@
     "generate_failed": "原型生成失败",
     "save_failed": "标记保存失败",
     "confirm_failed": "原型确认失败"
+  },
+  "requirement_flow": {
+    "stage_prototype": "原型",
+    "stage_decompose": "plan + 拆解",
+    "stage_execute": "执行",
+    "stage_accept": "验收",
+    "decompose_start": "发起拆解",
+    "decompose_starting": "发起中…",
+    "decompose_running": "拆解进行中 —— PM 正在产出 plan 与子任务草稿。",
+    "decompose_start_failed": "发起拆解失败"
   }
 }

@@ -185,6 +185,9 @@ export const issueKeys = {
   /** 需求班底快照。 */
   issueRoles: (issueId: string) =>
     ["issue-roles", issueId] as const,
+  /** 原型版本历史（requirement-calendar §5.3）。 */
+  prototypeVersions: (issueId: string) =>
+    ["prototype-versions", issueId] as const,
 };
 
 /** 项目默认班底查询。 */
@@ -201,6 +204,15 @@ export function issueRolesOptions(issueId: string | undefined) {
   return queryOptions({
     queryKey: issueKeys.issueRoles(issueId ?? ""),
     queryFn: () => api.listIssueRoleAssignments(issueId!),
+    enabled: !!issueId,
+  });
+}
+
+/** 原型版本历史查询（version 降序）。 */
+export function prototypeVersionsOptions(issueId: string | undefined) {
+  return queryOptions({
+    queryKey: issueKeys.prototypeVersions(issueId ?? ""),
+    queryFn: async () => (await api.listPrototypeVersions(issueId!)).versions,
     enabled: !!issueId,
   });
 }

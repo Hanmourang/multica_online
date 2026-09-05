@@ -977,5 +977,15 @@
     "generate_failed": "프로토타입 생성에 실패했습니다",
     "save_failed": "마크 저장에 실패했습니다",
     "confirm_failed": "프로토타입 확인에 실패했습니다"
+  },
+  "requirement_flow": {
+    "stage_prototype": "프로토타입",
+    "stage_decompose": "plan + 분해",
+    "stage_execute": "실행",
+    "stage_accept": "수용",
+    "decompose_start": "분해 시작",
+    "decompose_starting": "시작 중…",
+    "decompose_running": "분해 진행 중 —— PM이 plan과 하위 작업 초안을 작성하고 있습니다.",
+    "decompose_start_failed": "분해 시작에 실패했습니다"
   }
 }

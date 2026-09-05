@@ -83,6 +83,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { SourceContextBadge } from "./source-context-viewer";
+import { RequirementFlowSection } from "./requirement-flow-section";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { CommentInput } from "./comment-input";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
@@ -3243,6 +3244,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
             {descDragOver && <FileDropOverlay />}
           </div>
+
+          {/* 需求流水线条 + 当前阶段面板：仅顶层 issue 渲染（spec 画面 4/5 落点） */}
+          <RequirementFlowSection issue={issue} childIssues={childIssues} />
 
           {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
