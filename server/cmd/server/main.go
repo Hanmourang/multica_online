@@ -759,6 +759,12 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
 	}
+	// 需求到点触发（requirement-calendar spec §7.1）：每 30s 扫一轮，把已确认
+	// 拆解且到点的需求 stage 3 子任务推进 agent_task_queue。幂等锚点是
+	// triggered_at 的 execrows 守卫，stale-lease 重入不会重复入队。
+	if err := schedulerMgr.Register(scheduler.RequirementTriggerSweepJob(h.IssueService)); err != nil {
+		slog.Warn("scheduler: failed to register requirement_trigger_sweep job", "error", err)
+	}
 	// Manifest-declared Plugin schedules share the same durable lease and retry
 	// machinery. The job is inert while plugins_v1 is disabled.
 	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
