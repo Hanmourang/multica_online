@@ -128,6 +128,42 @@ export interface ConfirmDecompositionResponse {
   issues: import("./issue").Issue[];
 }
 
+/** 原型版本上的单项实现细节标记（spec 2026-09-04-requirement-calendar-design.md §5.3）。 */
+export interface PrototypeMark {
+  detail_id: string;
+  /** ok=符合 / no=不符 / pending=待定。 */
+  verdict: "ok" | "no" | "pending";
+  /** verdict=no 时必填的修正诉求，回流为提示词〔本轮修正〕段。 */
+  note: string;
+}
+
+/** issue_prototype_version 行的 API 投影。 */
+export interface PrototypeVersion {
+  id: string;
+  issue_id: string;
+  version: number;
+  html_path: string;
+  prompt: string;
+  marks: PrototypeMark[];
+  status: "pending" | "confirmed" | "superseded";
+  created_by_type: string;
+  created_by_id: string | null;
+  created_at: string;
+}
+
+/** POST /issues/{id}/prototype/generate 的请求体。 */
+export interface GeneratePrototypeRequest {
+  /** 重生成时携带当前 marks，服务端组装〔本轮修正〕段。 */
+  marks?: PrototypeMark[];
+  prompt_append?: string;
+}
+
+/** POST /issues/{id}/prototype/generate 的响应包：新版本行 + stage-1 子任务。 */
+export interface GeneratePrototypeResponse {
+  version: PrototypeVersion;
+  task: import("./issue").Issue;
+}
+
 export interface UpdateIssueRequest {
   /** Legacy aggregate compare-and-swap token. New text editors use field
    * baselines so unrelated issue activity does not reject their edits. */
