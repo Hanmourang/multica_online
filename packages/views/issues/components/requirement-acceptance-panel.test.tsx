@@ -56,6 +56,20 @@ describe("RequirementAcceptancePanel", () => {
     expect(screen.getByTestId("acceptance-failed-banner")).toBeTruthy();
   });
 
+  it("验收失败终态（round>3）：即使填了 evidence，pass/fail 仍禁用（前端校验，服务端另有守卫）", () => {
+    renderWithI18n(
+      <RequirementAcceptancePanel
+        issue={requirement({ acceptance_round: 4 })}
+        childIssues={[]}
+        submitAcceptanceVerdict={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("acceptance-failed-banner")).toBeTruthy();
+    fireEvent.change(screen.getByTestId("acceptance-evidence"), { target: { value: "仲裁证据" } });
+    expect((screen.getByTestId("acceptance-pass") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("acceptance-fail") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("evidence 为空时 pass/fail 均禁用", () => {
     renderWithI18n(
       <RequirementAcceptancePanel issue={requirement()} childIssues={[]} submitAcceptanceVerdict={vi.fn()} />,

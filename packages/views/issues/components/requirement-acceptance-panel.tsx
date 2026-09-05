@@ -53,7 +53,9 @@ export function RequirementAcceptancePanel({
     }
   };
 
-  const canSubmit = evidence.trim().length > 0 && submitting == null;
+  // 验收失败终态（round>MAX）后禁止再次裁决：否则按钮仍可点，喂给服务端持续累加
+  // round + 追加仲裁评论。前端校验（服务端另有守卫，前端不可作唯一防线）。
+  const canSubmit = !failed && evidence.trim().length > 0 && submitting == null;
 
   return (
     <section className="rounded-md border bg-card p-3" data-testid="acceptance-panel">
