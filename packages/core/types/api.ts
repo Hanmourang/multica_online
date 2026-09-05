@@ -74,6 +74,10 @@ export interface ProjectModule {
   /** Only the list endpoint fills this (module management table); absent on
    *  older servers and 0 on create/update responses. */
   task_count?: number;
+  /** GitNexus Community 节点 ID；null = 未绑定 */
+  graph_node_id?: string | null;
+  /** 模块描述 */
+  description?: string;
 }
 
 /** 依赖边 API 的列表项（GET/PUT /api/issues/:id/dependencies）。 */
@@ -135,6 +139,25 @@ export interface GetDecompositionResponse {
 /** POST /issues/{id}/decomposition/confirm 的响应包。 */
 export interface ConfirmDecompositionResponse {
   issues: import("./issue").Issue[];
+}
+
+/** POST /issues/{id}/trigger 的响应（spec §7.1 手动触发，与 30s sweep 共用服务）。 */
+export interface TriggerRequirementResponse {
+  triggered: boolean;
+  /** 本次入队 agent_task_queue 的 stage3 子任务数。 */
+  enqueued: number;
+  issue_id: string;
+}
+
+/** POST /issues/{id}/acceptance/verdict 的响应（WS4 / spec §7.5③）。 */
+export interface AcceptanceVerdictResponse {
+  verdict: "pass" | "fail";
+  /** 裁决后的轮次：pass 不变，fail 已 +1。 */
+  acceptance_round: number;
+  /** pass=true（需求转 done）；fail 未越界=false，越界（>3）由派生态呈现「验收失败」。 */
+  terminal: boolean;
+  /** 仅 fail 分支：新建的 stage3 修复子任务 id。 */
+  repair_issue_id?: string;
 }
 
 /** 原型版本上的单项实现细节标记（spec 2026-09-04-requirement-calendar-design.md §5.3）。 */

@@ -2627,3 +2627,45 @@ describe("clientErrorMessage", () => {
     expect(clientErrorMessage(undefined)).toBeUndefined();
   });
 });
+
+describe("ApiClient requirement calendar endpoints", () => {
+  it("triggerRequirement POSTs an empty body to /trigger", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ triggered: true, enqueued: 2, issue_id: "req-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await new ApiClient("https://api.example.test").triggerRequirement("req-1");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/issues/req-1/trigger");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
+    expect(res).toEqual({ triggered: true, enqueued: 2, issue_id: "req-1" });
+  });
+
+  it("submitAcceptanceVerdict POSTs verdict+evidence to /acceptance/verdict", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ verdict: "fail", acceptance_round: 1, terminal: false, repair_issue_id: "child-9" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await new ApiClient("https://api.example.test").submitAcceptanceVerdict(
+      "req-1",
+      { verdict: "fail", evidence: "登录态刷新后丢失" },
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/issues/req-1/acceptance/verdict",
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      verdict: "fail",
+      evidence: "登录态刷新后丢失",
+    });
+    expect(res.repair_issue_id).toBe("child-9");
+  });
+});

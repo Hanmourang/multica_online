@@ -11,6 +11,8 @@ import type {
   DecomposeDraftTask,
   ConfirmDecompositionResponse,
   GetDecompositionResponse,
+  TriggerRequirementResponse,
+  AcceptanceVerdictResponse,
   UpdateIssueRequest,
   GroupedIssuesResponse,
   ListIssuesResponse,
@@ -110,6 +112,49 @@ import type {
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
+  // Project archive (spec 2026-09-05-project-archive-design.md §5)
+  ProjectArtifact,
+  ArtifactSyncPayload,
+  ArtifactSyncResult,
+  ListArtifactsParams,
+  ListProjectArtifactsResponse,
+  GetArtifactContentResponse,
+  ArchiveDeliverableRequest,
+  ArtifactMatrixResponse,
+  GraphSyncPayload,
+  GraphSyncResponse,
+  RebridgeGraphResponse,
+  GraphSnapshotSummary,
+  ProjectGraphSnapshot,
+  ListGraphModulesResponse,
+  ModuleChangesResponse,
+  ModuleObjectsResponse,
+  ModuleStrategiesResponse,
+  ModuleNeighborhoodResponse,
+  BusMatrixResponse,
+  BusMatrixDrilldownResponse,
+  BusMatrixAlertsResponse,
+  BusMatrixTimelineResponse,
+  FilingReadinessResponse,
+  ListFilingItemsResponse,
+  FilingCheckResponse,
+  FilingExportRequest,
+  FilingExportResponse,
+  FilingTrack,
+  FilingTier,
+  FilingItem,
+  FilingItemPatchRequest,
+  UpsertAgentRunRequest,
+  AgentRun,
+  ListAgentRunsResponse,
+  ListAgentRunTodosResponse,
+  ListAgentRunEventsResponse,
+  TodoStatus,
+  TodoSource,
+  EventType,
+  IssueDynamicsResponse,
+  IssueDeliverablesOverviewResponse,
+  IssueProgressResponse,
   Label,
   IssueProperty,
   IssuePropertyValue,
@@ -236,6 +281,10 @@ import type {
   PrototypeVersion,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
+import type {
+  CrossProjectReadiness,
+  FilingWritebackResponse,
+} from "../filing/types";
 import type {
   CreateFeedbackResponse,
   FeedbackContext,
@@ -500,6 +549,49 @@ export interface ClientUsageRequest {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+// Agent-run projection writes (migration 459; spec §5.5). The read-side
+// shapes live in ../types/agent-run; these are the write-side inputs, keyed by
+// the columns the handlers in server/internal/handler/agent_run.go accept.
+
+/** One todo in a POST /api/agent-runs/{runId}/todos batch. `todo_key` is the
+ *  merge key (stable across runs), so re-sending a key updates in place. */
+export interface AgentRunTodoInput {
+  todo_key: string;
+  /** CLI-defined phase (P0 / 设计 / 实现 / 验收 …); null keeps it unphased. */
+  phase?: string | null;
+  title: string;
+  /** Defaults to `pending` server-side when omitted. */
+  status?: TodoStatus;
+  seq?: number;
+  /** Defaults to `tool_trace` server-side when omitted. */
+  source?: TodoSource;
+  /** Row id (not todo_key) of the newer todo that replaces this one. */
+  superseded_by?: string | null;
+}
+
+export interface UpsertAgentRunTodosRequest {
+  todos: AgentRunTodoInput[];
+}
+
+export interface UpsertAgentRunTodosResponse {
+  upserted_count: number;
+}
+
+/** One event in a POST /api/agent-runs/{runId}/events batch. API `type` maps
+ *  to DB column `event_type`, API `payload` to DB column `detail`. */
+export interface AgentRunEventInput {
+  type: EventType;
+  payload?: Record<string, unknown> | null;
+}
+
+export interface AppendAgentRunEventsRequest {
+  events: AgentRunEventInput[];
+}
+
+export interface AppendAgentRunEventsResponse {
+  appended_count: number;
 }
 
 export class ApiError extends Error {
@@ -1329,6 +1421,24 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/decomposition/confirm`, {
       method: "POST",
       body: JSON.stringify({ drafts }),
+    });
+  }
+
+  /** 手动触发需求（spec §7.1/§9）：与 30s sweep 共用触发服务，幂等写 triggered_at
+   *  并把无未完成依赖的 stage3 子任务入队。非顶层 / 预检不过 → 服务端 409，this.fetch 抛 ApiError。 */
+  async triggerRequirement(issueId: string): Promise<TriggerRequirementResponse> {
+    return this.fetch(`/api/issues/${issueId}/trigger`, { method: "POST" });
+  }
+
+  /** 上报验收裁决（WS4 / spec §7.5③，member-authed）：pass 让需求落 done；fail 让
+   *  acceptance_round+1 并新建 stage3 修复子任务。画面 7 的人工仲裁按钮调用。 */
+  async submitAcceptanceVerdict(
+    issueId: string,
+    body: { verdict: "pass" | "fail"; evidence: string },
+  ): Promise<AcceptanceVerdictResponse> {
+    return this.fetch(`/api/issues/${issueId}/acceptance/verdict`, {
+      method: "POST",
+      body: JSON.stringify(body),
     });
   }
 
@@ -3770,6 +3880,352 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
       method: "DELETE",
     });
+  }
+
+  // Project archive — artifacts (spec 2026-09-05-project-archive-design.md §5.1).
+  // Paths must match server/cmd/server/router.go exactly; response shapes
+  // mirror the handlers in server/internal/handler/project_artifact.go.
+  async syncProjectArtifacts(
+    projectId: string,
+    payload: ArtifactSyncPayload,
+  ): Promise<ArtifactSyncResult> {
+    return this.fetch(`/api/projects/${projectId}/artifacts/sync`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async listProjectArtifacts(
+    projectId: string,
+    params?: ListArtifactsParams,
+  ): Promise<ListProjectArtifactsResponse> {
+    const search = new URLSearchParams();
+    if (params?.scope) search.set("scope", params.scope);
+    if (params?.stage) search.set("stage", String(params.stage));
+    if (params?.doc_type) search.set("doc_type", params.doc_type);
+    if (params?.issue_id) search.set("issue_id", params.issue_id);
+    const qs = search.toString();
+    return this.fetch(
+      `/api/projects/${projectId}/artifacts${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async getProjectArtifact(
+    projectId: string,
+    artifactId: string,
+  ): Promise<ProjectArtifact> {
+    return this.fetch(`/api/projects/${projectId}/artifacts/${artifactId}`);
+  }
+
+  async getProjectArtifactContent(
+    projectId: string,
+    artifactId: string,
+  ): Promise<GetArtifactContentResponse> {
+    return this.fetch(
+      `/api/projects/${projectId}/artifacts/${artifactId}/content`,
+    );
+  }
+
+  async archiveProjectDeliverable(
+    projectId: string,
+    artifactId: string,
+    data: ArchiveDeliverableRequest,
+  ): Promise<ProjectArtifact> {
+    return this.fetch(`/api/projects/${projectId}/artifacts/${artifactId}/archive`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getProjectArtifactMatrix(
+    projectId: string,
+  ): Promise<ArtifactMatrixResponse> {
+    return this.fetch(`/api/projects/${projectId}/artifacts/matrix`);
+  }
+
+  // Partial reclassification of one artifact (scope / stage / doc_type /
+  // issue binding). Only the keys present in `patch` are written; the server
+  // stamps source="manual" and returns the full updated artifact.
+  async patchProjectArtifact(
+    projectId: string,
+    artifactId: string,
+    patch: Record<string, unknown>,
+  ): Promise<ProjectArtifact> {
+    return this.fetch(`/api/projects/${projectId}/artifacts/${artifactId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  }
+
+  // The 存量回填 (backfill) queue: requirement-scope artifacts whose issue
+  // binding is still null. Bare array response (newest sync first).
+  async listUnboundArtifacts(projectId: string): Promise<ProjectArtifact[]> {
+    return this.fetch(`/api/projects/${projectId}/artifacts/unbound`);
+  }
+
+  // Attach an artifact to a requirement (issue) in the same project; the
+  // server validates both sides and stamps source="manual".
+  async bindProjectArtifact(
+    projectId: string,
+    artifactId: string,
+    issueId: string,
+  ): Promise<ProjectArtifact> {
+    return this.fetch(
+      `/api/projects/${projectId}/artifacts/${artifactId}/bind`,
+      {
+        method: "POST",
+        body: JSON.stringify({ issue_id: issueId }),
+      },
+    );
+  }
+
+  // Project archive — graph snapshots + ontology + bus matrix (§5.2/§5.3).
+  // Response shapes mirror server/internal/handler/project_graph.go.
+  async syncGraphSnapshot(
+    projectId: string,
+    payload: GraphSyncPayload,
+  ): Promise<GraphSyncResponse> {
+    return this.fetch(`/api/projects/${projectId}/graph/sync`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // Bridge-only re-run (task 27): the server re-runs the module ↔ community
+  // match against the latest stored snapshot WITHOUT the client re-uploading
+  // the 9–20 MiB nodes/edges body. 404 when the project has no snapshot yet.
+  async rebridgeGraphSnapshot(
+    projectId: string,
+  ): Promise<RebridgeGraphResponse> {
+    return this.fetch(`/api/projects/${projectId}/graph/rebridge`, {
+      method: "POST",
+    });
+  }
+
+  async getLatestGraphSnapshot(
+    projectId: string,
+  ): Promise<GraphSnapshotSummary> {
+    return this.fetch(`/api/projects/${projectId}/graph/latest`);
+  }
+
+  async getGraphSnapshotDetail(
+    projectId: string,
+  ): Promise<ProjectGraphSnapshot> {
+    return this.fetch(`/api/projects/${projectId}/graph/latest/detail`);
+  }
+
+  async listGraphModules(projectId: string): Promise<ListGraphModulesResponse> {
+    return this.fetch(`/api/projects/${projectId}/graph/modules`);
+  }
+
+  async getModuleChanges(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ModuleChangesResponse> {
+    return this.fetch(
+      `/api/projects/${projectId}/graph/modules/${encodeURIComponent(nodeId)}/changes`,
+    );
+  }
+
+  async getModuleObjects(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ModuleObjectsResponse> {
+    return this.fetch(
+      `/api/projects/${projectId}/graph/modules/${encodeURIComponent(nodeId)}/objects`,
+    );
+  }
+
+  async getModuleStrategies(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ModuleStrategiesResponse> {
+    return this.fetch(
+      `/api/projects/${projectId}/graph/modules/${encodeURIComponent(nodeId)}/strategies`,
+    );
+  }
+
+  async getModuleNeighborhood(
+    projectId: string,
+    nodeId: string,
+  ): Promise<ModuleNeighborhoodResponse> {
+    return this.fetch(
+      `/api/projects/${projectId}/graph/modules/${encodeURIComponent(nodeId)}/neighborhood`,
+    );
+  }
+
+  async getBusMatrix(projectId: string): Promise<BusMatrixResponse> {
+    return this.fetch(`/api/projects/${projectId}/graph/bus-matrix`);
+  }
+
+  async getBusMatrixDrilldown(
+    projectId: string,
+    filters: { module_node_id?: string; page_key?: string; domain?: string },
+  ): Promise<BusMatrixDrilldownResponse> {
+    const search = new URLSearchParams();
+    if (filters.module_node_id)
+      search.set("module_node_id", filters.module_node_id);
+    if (filters.page_key) search.set("page_key", filters.page_key);
+    if (filters.domain) search.set("domain", filters.domain);
+    const qs = search.toString();
+    return this.fetch(
+      `/api/projects/${projectId}/graph/bus-matrix/drilldown${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async getBusMatrixAlerts(
+    projectId: string,
+  ): Promise<BusMatrixAlertsResponse> {
+    return this.fetch(`/api/projects/${projectId}/graph/bus-matrix/alerts`);
+  }
+
+  async getBusMatrixTimeline(
+    projectId: string,
+    limit?: number,
+  ): Promise<BusMatrixTimelineResponse> {
+    const qs = limit ? `?limit=${limit}` : "";
+    return this.fetch(`/api/projects/${projectId}/graph/bus-matrix/timeline${qs}`);
+  }
+
+  // Project archive — filing readiness (§5.4). Response shapes mirror
+  // server/internal/handler/project_filing.go.
+  async getFilingReadiness(projectId: string): Promise<FilingReadinessResponse> {
+    return this.fetch(`/api/projects/${projectId}/filing/readiness`);
+  }
+
+  async listFilingItems(
+    projectId: string,
+    filters?: { track?: FilingTrack; tier?: FilingTier },
+  ): Promise<ListFilingItemsResponse> {
+    const search = new URLSearchParams();
+    if (filters?.track) search.set("track", filters.track);
+    if (filters?.tier) search.set("tier", filters.tier);
+    const qs = search.toString();
+    return this.fetch(
+      `/api/projects/${projectId}/filing/items${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async runFilingCheck(projectId: string): Promise<FilingCheckResponse> {
+    return this.fetch(`/api/projects/${projectId}/filing/check`, {
+      method: "POST",
+    });
+  }
+
+  async exportFilingPackage(
+    projectId: string,
+    data?: FilingExportRequest,
+  ): Promise<FilingExportResponse> {
+    return this.fetch(`/api/projects/${projectId}/filing/export`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+  }
+
+  /**
+   * GET /projects/{id}/filing/cross-project — must-tier readiness for every
+   * project in the same workspace, one row per project × track, most-ready
+   * first. 原型 f12 标注 4：申报期挑必备件已齐的项目先报.
+   *
+   * The response is a bare array (no wrapper): the ranking *is* the payload,
+   * and a `{ rows: [...] }` envelope would only add a level every consumer
+   * immediately unwraps.
+   */
+  async getFilingCrossProject(
+    projectId: string,
+  ): Promise<CrossProjectReadiness[]> {
+    return this.fetch(`/api/projects/${projectId}/filing/cross-project`);
+  }
+
+  /**
+   * POST /projects/{id}/filing/writeback — render the current readiness as
+   * markdown and upsert it into `project_artifact` at `filing/READINESS.md`.
+   * No request body: the server derives everything from the filing_item rows.
+   */
+  async writebackFilingReadiness(
+    projectId: string,
+  ): Promise<FilingWritebackResponse> {
+    return this.fetch(`/api/projects/${projectId}/filing/writeback`, {
+      method: "POST",
+    });
+  }
+
+  /**
+   * PATCH /projects/{id}/filing/items/{itemId} — manual override of a filing
+   * item's status or artifact binding (anno⑤ escape hatch). override_reason
+   * is REQUIRED. The reason is stored in rule_expr JSONB until a dedicated
+   * column is added by a future migration.
+   */
+  async patchFilingItem(
+    projectId: string,
+    itemId: string,
+    data: FilingItemPatchRequest,
+  ): Promise<FilingItem> {
+    return this.fetch(`/api/projects/${projectId}/filing/items/${itemId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Project archive — agent runs + issue aggregates (§5.5). Response shapes
+  // mirror server/internal/handler/{agent_run,issue_archive}.go.
+  async upsertAgentRun(data: UpsertAgentRunRequest): Promise<AgentRun> {
+    return this.fetch(`/api/agent-runs`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listAgentRunsForIssue(issueId: string): Promise<ListAgentRunsResponse> {
+    return this.fetch(`/api/issues/${issueId}/agent-runs`);
+  }
+
+  async listAgentRunTodos(runId: string): Promise<ListAgentRunTodosResponse> {
+    return this.fetch(`/api/agent-runs/${runId}/todos`);
+  }
+
+  async listAgentRunEvents(
+    runId: string,
+    limit?: number,
+  ): Promise<ListAgentRunEventsResponse> {
+    const qs = limit ? `?limit=${limit}` : "";
+    return this.fetch(`/api/agent-runs/${runId}/events${qs}`);
+  }
+
+  /** Batch-upsert a run's todos; (run_id, todo_key) is the merge key. */
+  async upsertAgentRunTodos(
+    runId: string,
+    todos: AgentRunTodoInput[],
+  ): Promise<UpsertAgentRunTodosResponse> {
+    return this.fetch(`/api/agent-runs/${runId}/todos`, {
+      method: "POST",
+      body: JSON.stringify({ todos }),
+    });
+  }
+
+  /** Append-only batch write of a run's event stream. */
+  async appendAgentRunEvents(
+    runId: string,
+    events: AgentRunEventInput[],
+  ): Promise<AppendAgentRunEventsResponse> {
+    return this.fetch(`/api/agent-runs/${runId}/events`, {
+      method: "POST",
+      body: JSON.stringify({ events }),
+    });
+  }
+
+  async getIssueDynamics(issueId: string): Promise<IssueDynamicsResponse> {
+    return this.fetch(`/api/issues/${issueId}/dynamics`);
+  }
+
+  async getIssueDeliverablesOverview(
+    issueId: string,
+  ): Promise<IssueDeliverablesOverviewResponse> {
+    return this.fetch(`/api/issues/${issueId}/deliverables-overview`);
+  }
+
+  async getIssueProgress(issueId: string): Promise<IssueProgressResponse> {
+    return this.fetch(`/api/issues/${issueId}/progress`);
   }
 
   // Labels

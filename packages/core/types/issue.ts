@@ -242,4 +242,6 @@ export interface Issue {
   requirement_status?: string | null;
   /** 阶段进度 "N/M"。 */
   stage_progress?: string | null;
+  /** 验收轮次（DEFAULT 0）；每次 verdict=fail +1，>3 判「验收失败」终态。服务端 issue.go:93 恒发。 */
+  acceptance_round?: number;
 }
