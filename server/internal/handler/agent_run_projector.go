@@ -52,11 +52,9 @@ func projectAgentRunFromMessages(msgs []TaskMessageRequest) agentRunProjection {
 	if len(msgs) == 0 {
 		return proj
 	}
+	// 非空批恒置 Heartbeat=true：它驱动 run upsert 刷新 last_heartbeat_at（liveness，
+	// 供 M-5 reaper 判定僵尸 running）。这与「是否追加 heartbeat 事件」是两回事（见 M-7）。
 	proj.Heartbeat = true
-	proj.Events = append(proj.Events, projectedEvent{
-		Type:    "heartbeat",
-		Payload: mustJSONObject(map[string]any{"messages": len(msgs)}),
-	})
 
 	for _, msg := range msgs {
 		switch msg.Type {
@@ -98,6 +96,21 @@ func projectAgentRunFromMessages(msgs []TaskMessageRequest) agentRunProjection {
 			proj.StallReason = stallReasonForEvent(eventType)
 		}
 	}
+
+	// M-7：heartbeat 事件降频。agent_run_event 是 append-only 且无 TTL，而本投影挂在
+	// 每 ~500ms 触发一次的最热写路径上——纯文本/思考批（无工具、无错误）若每批都追加
+	// 一条低信息量 heartbeat 事件，会让事件表无界膨胀。故仅当本批确实带来状态变化
+	// （产生了 todo 或 error 事件）时，才在事件序列头部补一条 heartbeat 作为活动标记；
+	// liveness 已由 run.last_heartbeat_at upsert 独立承载，不受影响。
+	//
+	// 后续项（本轮不做，避免改动热路径架构）：完整异步 flush / 批量去抖，以及
+	// agent_run_event 的保留策略（TTL 或 run 归档后清理）。
+	if len(proj.Todos) > 0 || len(proj.Events) > 0 {
+		proj.Events = append([]projectedEvent{{
+			Type:    "heartbeat",
+			Payload: mustJSONObject(map[string]any{"messages": len(msgs)}),
+		}}, proj.Events...)
+	}
 	return proj
 }
 
@@ -138,14 +151,16 @@ func stallReasonForEvent(eventType string) string {
 	}
 }
 
-// truncateRunError 把错误文本截断到 512 字，避免 detail JSONB 膨胀。
+// truncateRunError 把错误文本截断到 512 字节，避免 detail JSONB 膨胀。
 func truncateRunError(s string) string {
 	const max = 512
 	s = strings.TrimSpace(s)
 	if len(s) <= max {
 		return s
 	}
-	return s[:max]
+	// L-2：直接 s[:max] 按字节切分会把多字节 rune（中文错误文本）切成半截，
+	// 落 JSONB 变成 \ufffd 替换符。ToValidUTF8 丢弃末尾不完整的 rune，保证结果合法。
+	return strings.ToValidUTF8(s[:max], "")
 }
 
 // mustJSONObject 把 map 序列化为 JSON 对象；map 只含 string/int，序列化不会失败，
@@ -239,7 +254,10 @@ func (h *Handler) applyAgentRunProjection(ctx context.Context, task db.AgentTask
 				workspace_id, run_id, todo_key, phase, title, status, seq, source, superseded_by
 			) VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, NULL)
 			ON CONFLICT (run_id, todo_key) DO UPDATE SET
-				title = EXCLUDED.title,
+				-- L-3：tool_result 不带 Tool 时投影 title 回退为 "tool"，若直接
+				-- EXCLUDED.title 覆盖，会把先前 tool_use 写入的正确标题（如 "bash"）
+				-- 抹成 "tool"。NULLIF(...,'tool') 让占位标题不参与覆盖，保留既有真名。
+				title = COALESCE(NULLIF(EXCLUDED.title, 'tool'), agent_run_todo.title),
 				status = EXCLUDED.status,
 				seq = EXCLUDED.seq,
 				source = EXCLUDED.source,
@@ -289,35 +307,70 @@ func (h *Handler) resolveRunCliKind(ctx context.Context, runtimeID pgtype.UUID) 
 // ---------------------------------------------------------------------------
 
 // finalizeAgentRunStatus 把 run 置为终态（completed/failed/cancelled）。
-// WHERE status='running' 是幂等 + 防覆盖守卫：daemon 可能对同一 task 多次回调
-// （如 cancel ack 与 fail 竞态），只有仍 running 的 run 才翻终态，已终态的不动。
-// best-effort：错误只记日志，绝不阻断终态回调自身的权威事务。
-func (h *Handler) finalizeAgentRunStatus(ctx context.Context, taskID pgtype.UUID, status string) {
+//
+// M-4：改为 upsert 而非裸 UPDATE。run 行只在心跳（applyAgentRunProjection）时
+// INSERT，而 finalize 可能先于首次心跳到达（waitForDrain 10s 超时、或
+// AckTaskCancelled 不经 waitForDrain）——裸 UPDATE...WHERE status='running' 命中
+// 0 行，随后迟到的心跳又 INSERT 出一个 'running' 行，永久卡死。upsert 在行不存在
+// 时直接落一条终态占位行（心跳的 ON CONFLICT DO UPDATE 不触碰 status，故不会被
+// 复活），行存在时仅在仍 running 时翻终态（保留 complete/fail/cancel 多次回调的
+// 幂等 + 防覆盖守卫）。best-effort：错误只记日志，绝不阻断终态回调自身的权威事务。
+func (h *Handler) finalizeAgentRunStatus(ctx context.Context, task db.AgentTaskQueue, wsID string, status string) {
+	if !task.ID.Valid {
+		return
+	}
+	wsUUID := parseUUID(wsID)
+	if !wsUUID.Valid {
+		slog.Warn("agent run finalize: invalid workspace id",
+			"task_id", uuidToString(task.ID), "status", status)
+		return
+	}
+	agentID := uuidToString(task.AgentID)
+	if agentID == "" {
+		agentID = "unknown"
+	}
+	cliKind := h.resolveRunCliKind(ctx, task.RuntimeID)
+	if _, err := h.DB.Exec(ctx, `
+		INSERT INTO agent_run (
+			id, workspace_id, task_queue_id, issue_id, root_issue_id,
+			agent_id, cli_kind, status, last_heartbeat_at
+		) VALUES (
+			$1, $2, $3, $4, (SELECT COALESCE(root_requirement_id, id) FROM issue WHERE id = $4),
+			$5, $6, $7, NULL
+		)
+		ON CONFLICT (id) DO UPDATE SET
+			status = $7,
+			updated_at = now()
+		WHERE agent_run.status = 'running'`,
+		agentRunIDForTask(task.ID), wsUUID, task.ID, task.IssueID, agentID, cliKind, status,
+	); err != nil {
+		slog.Warn("agent run finalize: upsert status failed",
+			"task_id", uuidToString(task.ID), "status", status, "error", err)
+	}
+}
+
+// recomputeAgentRunTokens 按事实源重算覆盖 run.token_used（M-3）。
+// task_usage 是 daemon 上报的 replace 语义累计快照（UpsertTaskUsage ON CONFLICT
+// (task_id,provider,model) DO UPDATE），同一 task_queue_id 被 Reclaim/Requeue 重跑
+// 再上报时，若沿用 token_used=token_used+delta 累加会让计数单调膨胀。改为
+// SUM(task_usage) 覆盖写，与事实源恒等、天然幂等。AND status='running' 与
+// finalizeAgentRunStatus 对齐——已终态的 run 不再被迟到 usage 回写（终态值即最终值）。
+// best-effort，同上。
+func (h *Handler) recomputeAgentRunTokens(ctx context.Context, taskID pgtype.UUID) {
 	if !taskID.Valid {
 		return
 	}
 	if _, err := h.DB.Exec(ctx, `
-		UPDATE agent_run SET status = $2, updated_at = now()
+		UPDATE agent_run SET
+			token_used = (
+				SELECT COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens), 0)
+				FROM task_usage WHERE task_id = $2
+			),
+			updated_at = now()
 		WHERE id = $1 AND status = 'running'`,
-		agentRunIDForTask(taskID), status,
+		agentRunIDForTask(taskID), taskID,
 	); err != nil {
-		slog.Warn("agent run finalize: update status failed",
-			"task_id", uuidToString(taskID), "status", status, "error", err)
-	}
-}
-
-// addAgentRunTokens 把一次 usage 上报的 token 数累加到 run.token_used。
-// best-effort，同上。
-func (h *Handler) addAgentRunTokens(ctx context.Context, taskID pgtype.UUID, tokens int64) {
-	if !taskID.Valid || tokens <= 0 {
-		return
-	}
-	if _, err := h.DB.Exec(ctx, `
-		UPDATE agent_run SET token_used = token_used + $2, updated_at = now()
-		WHERE id = $1`,
-		agentRunIDForTask(taskID), tokens,
-	); err != nil {
-		slog.Warn("agent run tokens: accumulate failed",
-			"task_id", uuidToString(taskID), "tokens", tokens, "error", err)
+		slog.Warn("agent run tokens: recompute failed",
+			"task_id", uuidToString(taskID), "error", err)
 	}
 }

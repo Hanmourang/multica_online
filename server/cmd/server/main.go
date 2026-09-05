@@ -769,6 +769,13 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.RequirementTriggerJob(pool, queries, taskSvc)); err != nil {
 		slog.Warn("scheduler: failed to register requirement_trigger_dispatch job", "error", err)
 	}
+	// 需求日历 Phase I（WS5 agent_run 投影）M-5：僵尸 running reaper。agent_run 的终态
+	// 此前只由 daemon 的 complete/fail/cancel 回调驱动；daemon 被 kill / 宕机时回调
+	// 永不到达，run 会永久停在 running。本 job 周期性把心跳过期的 running run 据其
+	// task 权威终态收敛（task 终态→同步；否则→'stalled'）。纯 SQL、只依赖 pool。
+	if err := schedulerMgr.Register(scheduler.AgentRunReaperJob(pool)); err != nil {
+		slog.Warn("scheduler: failed to register agent_run_stalled_reaper job", "error", err)
+	}
 	// Manifest-declared Plugin schedules share the same durable lease and retry
 	// machinery. The job is inert while plugins_v1 is disabled.
 	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {

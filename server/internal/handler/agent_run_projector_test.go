@@ -189,45 +189,93 @@ func TestApplyAgentRunProjection_UpsertsRunTodosEvents(t *testing.T) {
 	}
 }
 
-// TestFinalizeAgentRunStatus_AndTokens 验证终态收尾：completed/failed/cancelled
-// 幂等守卫 + token 累加。
-func TestFinalizeAgentRunStatus_AndTokens(t *testing.T) {
+// TestFinalizeAgentRunStatus_IdempotentAndPreInsert 验证终态收尾：
+// (a) completed/failed/cancelled 幂等守卫——已终态的 run 不被后续回调覆盖；
+// (b) M-4：finalize 先于首次心跳（run 行尚不存在）时，upsert 直接落终态占位行，
+//     且随后迟到的心跳 INSERT 不会把它复活成 running（也不再新建第二行）。
+func TestFinalizeAgentRunStatus_IdempotentAndPreInsert(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	runtimeID := dbfx.Runtime(t, "fin-rt", testutil.Cols{"provider": "openai"})
 	agentID := dbfx.Agent(t, "fin-agent", runtimeID)
-	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "running"})
-	task := db.AgentTaskQueue{
-		ID: parseUUID(taskID), AgentID: parseUUID(agentID), RuntimeID: parseUUID(runtimeID),
-	}
 	ctx := context.Background()
 
-	// 先由投影建出一条 running run。
-	testHandler.applyAgentRunProjection(ctx, task, testWorkspaceID,
+	// (a) 常规：投影建 running → finalize completed → 再 finalize failed 不覆盖。
+	taskIDA := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "running"})
+	taskA := db.AgentTaskQueue{ID: parseUUID(taskIDA), AgentID: parseUUID(agentID), RuntimeID: parseUUID(runtimeID)}
+	testHandler.applyAgentRunProjection(ctx, taskA, testWorkspaceID,
 		projectAgentRunFromMessages([]TaskMessageRequest{{Seq: 1, Type: "tool_use", Tool: "bash", CallID: "c1"}}))
-
-	// 终态：completed。
-	testHandler.finalizeAgentRunStatus(ctx, task.ID, "completed")
+	testHandler.finalizeAgentRunStatus(ctx, taskA, testWorkspaceID, "completed")
 	var status string
-	dbfx.QueryRow(t, `SELECT status FROM agent_run WHERE task_queue_id = $1`, taskID).Scan(&status)
+	dbfx.QueryRow(t, `SELECT status FROM agent_run WHERE task_queue_id = $1`, taskIDA).Scan(&status)
 	if status != "completed" {
 		t.Fatalf("status = %q, want completed", status)
 	}
-
-	// 幂等守卫：已终态的 run 不被后续 failed 覆盖（WHERE status='running'）。
-	testHandler.finalizeAgentRunStatus(ctx, task.ID, "failed")
-	dbfx.QueryRow(t, `SELECT status FROM agent_run WHERE task_queue_id = $1`, taskID).Scan(&status)
+	testHandler.finalizeAgentRunStatus(ctx, taskA, testWorkspaceID, "failed")
+	dbfx.QueryRow(t, `SELECT status FROM agent_run WHERE task_queue_id = $1`, taskIDA).Scan(&status)
 	if status != "completed" {
 		t.Fatalf("terminal run clobbered: status = %q, want completed", status)
 	}
 
-	// token 累加。
-	testHandler.addAgentRunTokens(ctx, task.ID, 100)
-	testHandler.addAgentRunTokens(ctx, task.ID, 50)
+	// (b) M-4 竞态：finalize 先于任何心跳（run 行不存在）→ 落 cancelled 占位行；
+	//     随后迟到心跳不得复活为 running。
+	taskIDB := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "running"})
+	taskB := db.AgentTaskQueue{ID: parseUUID(taskIDB), AgentID: parseUUID(agentID), RuntimeID: parseUUID(runtimeID)}
+	testHandler.finalizeAgentRunStatus(ctx, taskB, testWorkspaceID, "cancelled")
+	dbfx.QueryRow(t, `SELECT status FROM agent_run WHERE task_queue_id = $1`, taskIDB).Scan(&status)
+	if status != "cancelled" {
+		t.Fatalf("pre-insert finalize status = %q, want cancelled", status)
+	}
+	testHandler.applyAgentRunProjection(ctx, taskB, testWorkspaceID,
+		projectAgentRunFromMessages([]TaskMessageRequest{{Seq: 1, Type: "tool_use", Tool: "bash", CallID: "c2"}}))
+	dbfx.QueryRow(t, `SELECT status FROM agent_run WHERE task_queue_id = $1`, taskIDB).Scan(&status)
+	if status != "cancelled" {
+		t.Fatalf("late heartbeat resurrected terminal run: status = %q, want cancelled", status)
+	}
+	if got := dbfx.Count(t, `SELECT count(*) FROM agent_run WHERE task_queue_id = $1`, taskIDB); got != 1 {
+		t.Fatalf("run rows = %d, want 1 (deterministic id upsert, no duplicate)", got)
+	}
+}
+
+// TestRecomputeAgentRunTokens_FromSource 验证 M-3：token_used 按事实源 task_usage
+// 重算覆盖，重复上报（Reclaim/Requeue 语义）不单调膨胀，天然幂等。
+func TestRecomputeAgentRunTokens_FromSource(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := dbfx.Runtime(t, "tok-rt", testutil.Cols{"provider": "openai"})
+	agentID := dbfx.Agent(t, "tok-agent", runtimeID)
+	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "running"})
+	task := db.AgentTaskQueue{ID: parseUUID(taskID), AgentID: parseUUID(agentID), RuntimeID: parseUUID(runtimeID)}
+	ctx := context.Background()
+
+	testHandler.applyAgentRunProjection(ctx, task, testWorkspaceID,
+		projectAgentRunFromMessages([]TaskMessageRequest{{Seq: 1, Type: "tool_use", Tool: "bash", CallID: "c1"}}))
+
+	// 事实源：两条 (provider,model) usage 行，合计 (60+40)+(30+20)=150。
+	dbfx.Exec(t, `INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+	              VALUES ($1, 'openai', 'gpt-4o', 60, 40, 0, 0)`, taskID)
+	dbfx.Exec(t, `INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+	              VALUES ($1, 'openai', 'gpt-4o-mini', 30, 20, 0, 0)`, taskID)
+
+	testHandler.recomputeAgentRunTokens(ctx, parseUUID(taskID))
+	// 重复重算：仍等于事实源之和，不膨胀（幂等）。
+	testHandler.recomputeAgentRunTokens(ctx, parseUUID(taskID))
 	var tokens int64
 	dbfx.QueryRow(t, `SELECT token_used FROM agent_run WHERE task_queue_id = $1`, taskID).Scan(&tokens)
 	if tokens != 150 {
-		t.Fatalf("token_used = %d, want 150", tokens)
+		t.Fatalf("token_used = %d, want 150 (recomputed from task_usage, idempotent)", tokens)
+	}
+
+	// UpsertTaskUsage replace 语义：同 (task,provider,model) 再次上报累计快照 90，
+	// 重算后应为 90+50=140，而非 150+90=240（这正是 M-3 修正的双计）。
+	dbfx.Exec(t, `INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+	              VALUES ($1, 'openai', 'gpt-4o', 90, 0, 0, 0)
+	              ON CONFLICT (task_id, provider, model) DO UPDATE SET input_tokens = EXCLUDED.input_tokens, output_tokens = EXCLUDED.output_tokens`, taskID)
+	testHandler.recomputeAgentRunTokens(ctx, parseUUID(taskID))
+	dbfx.QueryRow(t, `SELECT token_used FROM agent_run WHERE task_queue_id = $1`, taskID).Scan(&tokens)
+	if tokens != 140 {
+		t.Fatalf("token_used after replace = %d, want 140 (not accumulated)", tokens)
 	}
 }

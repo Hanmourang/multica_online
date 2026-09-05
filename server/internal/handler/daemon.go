@@ -3871,7 +3871,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	h.emitIssueExecutedOnFirstCompletion(r, task)
 
 	// WS5：把该 task 的 agent_run 置为 completed（best-effort）。
-	h.finalizeAgentRunStatus(r.Context(), task.ID, "completed")
+	h.finalizeAgentRunStatus(r.Context(), *task, workspaceID, "completed")
 
 	// MUL-4195: guarantee at-least-once processing. If a member posted a
 	// deliberate comment while this run was executing (or one was merged into
@@ -4425,7 +4425,6 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	// resolve to a provider instead of landing as '' and pricing $0.
 	var runtimeProvider string
 	runtimeProviderLoaded := false
-	var runTokens int64 // WS5：本批 usage 的总 token，循环后一次性累加到 agent_run
 	for _, u := range req.Usage {
 		provider := normalizeProvider(u.Provider)
 		if provider == "" {
@@ -4453,7 +4452,6 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
 		}
-		runTokens += u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheWriteTokens
 		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSDTicks)
 
 		// Surface prompt-cache effectiveness per run so cache hit rates are
@@ -4475,8 +4473,10 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// WS5：把本批 token 累加到 agent_run.token_used（best-effort）。
-	h.addAgentRunTokens(r.Context(), task.ID, runTokens)
+	// WS5：按事实源（task_usage）重算覆盖 agent_run.token_used（best-effort）。
+	// M-3：daemon 上报的 usage 是 replace 语义的累计快照，同一 task 被 Reclaim/Requeue
+	// 重跑再上报时，累加会让 token 单调膨胀；改为重算 SUM(task_usage) 覆盖，天然幂等。
+	h.recomputeAgentRunTokens(r.Context(), task.ID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -4567,7 +4567,7 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	h.TaskService.NotifyTaskFinished(*task)
 
 	// WS5：把该 task 的 agent_run 置为 failed（best-effort）。
-	h.finalizeAgentRunStatus(r.Context(), task.ID, "failed")
+	h.finalizeAgentRunStatus(r.Context(), *task, workspaceID, "failed")
 
 	// Best-effort revoke of the mat_ task token minted at claim. Same
 	// rationale as CompleteTask — eager deletion shrinks the post-
@@ -4759,13 +4759,14 @@ type TaskCancelAckRequest struct {
 
 func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
-	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	task, wsID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
 	if !ok {
 		return
 	}
-	// WS5：把该 task 的 agent_run 置为 cancelled（best-effort；WHERE status='running'
-	// 守卫确保晚到的 ack 不覆盖已由 complete/fail 落定的终态）。
-	h.finalizeAgentRunStatus(r.Context(), task.ID, "cancelled")
+	// WS5：把该 task 的 agent_run 置为 cancelled（best-effort；M-4 upsert 的
+	// ON CONFLICT DO UPDATE ... WHERE status='running' 守卫确保晚到的 ack 不覆盖
+	// 已由 complete/fail 落定的终态）。
+	h.finalizeAgentRunStatus(r.Context(), task, wsID, "cancelled")
 
 	// Body is optional: older daemons send `{}`, and a decode failure must not
 	// break the cancellation contract this endpoint exists for.
