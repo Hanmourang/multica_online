@@ -1108,9 +1108,11 @@ func (h *Handler) QueryIssues(w http.ResponseWriter, r *http.Request) {
 // 三处必须逐列对齐 —— TestListIssues_RequirementFieldsProjection 锁死该约定；
 // 缺了这些列，列表/日历/看板拿到零值：日历色块消失（start_at null）、
 // 派生状态徽标缺失（requirement_status 空串被 omitempty 吃掉）。
-const requirementListExtraColumns = `i.module_id, i.avoid_conflict,
-	   i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
+const requirementCalendarColumns = `i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
 	   i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round`
+
+const requirementListExtraColumns = `i.module_id, i.avoid_conflict,
+	   ` + requirementCalendarColumns
 
 const requirementProgressJoin = `LEFT JOIN LATERAL (
 	SELECT

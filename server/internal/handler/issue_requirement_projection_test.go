@@ -162,4 +162,41 @@ func TestListIssues_RequirementFieldsProjection(t *testing.T) {
 		}
 		assertRequirementFields(t, "grouped", a, b)
 	})
+
+	// table/rows 契约是前端 status/group 分支（含日历视图数据源）的实际供给：
+	// 同一投影缺列在这里会让日历色块与状态徽标静默消失。
+	t.Run("ListIssueTableRows dynamic SQL", func(t *testing.T) {
+		fetchRow := func(t *testing.T, groupKey string, wantID string) IssueResponse {
+			t.Helper()
+			w := httptest.NewRecorder()
+			testHandler.ListIssueTableRows(w, newRequest(http.MethodPost, "/api/issues/table/rows", issueTableRowsRequest{
+				Query: issueTableQuerySpec{
+					Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+					Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+				},
+				Group:     issueTableGroupSpec{Kind: "status"},
+				GroupKey:  &groupKey,
+				Hierarchy: issueTableHierarchyRequest{Enabled: false},
+				Page:      issueTablePageRequest{Limit: 50},
+			}))
+			if w.Code != http.StatusOK {
+				t.Fatalf("ListIssueTableRows(%s): expected 200, got %d: %s", groupKey, w.Code, w.Body.String())
+			}
+			var resp issueTableRowsResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode table rows: %v", err)
+			}
+			for _, row := range resp.Rows {
+				if row.Issue.ID == wantID {
+					return row.Issue
+				}
+			}
+			t.Fatalf("issue %s not found in table rows (group %s)", wantID, groupKey)
+			return IssueResponse{}
+		}
+		assertRequirementFields(t, "table-rows",
+			fetchRow(t, "status:todo", issueA),
+			fetchRow(t, "status:in_progress", issueB),
+		)
+	})
 }

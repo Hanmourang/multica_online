@@ -370,9 +370,12 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
 	       i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
 	       i.revision, i.module_id, i.avoid_conflict,
+	       %s,
+	       %s,
 	       %s AS direct_child_count, i.table_sort_key
 	FROM page i
-	ORDER BY %s`, cte, childCountExpr, resolvedSort.orderBy())
+	%s
+	ORDER BY %s`, cte, requirementCalendarColumns, requirementStatusProjection, childCountExpr, requirementProgressJoin, resolvedSort.orderBy())
 
 	rows, err := h.DB.Query(r.Context(), query, args...)
 	if err != nil {
@@ -416,6 +419,16 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			&row.issue.Revision,
 			&row.issue.ModuleID,
 			&row.issue.AvoidConflict,
+			&row.issue.StartAt,
+			&row.issue.Goal,
+			&row.issue.RepoResourceID,
+			&row.issue.DecomposeMode,
+			&row.issue.AutoTrigger,
+			&row.issue.DecompositionConfirmedAt,
+			&row.issue.TriggeredAt,
+			&row.issue.AcceptanceRound,
+			&row.issue.RequirementStatus,
+			&row.issue.StageProgress,
 			&row.childCount,
 			&row.sortKey,
 		); err != nil {
