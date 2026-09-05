@@ -1100,6 +1100,56 @@ func (h *Handler) QueryIssues(w http.ResponseWriter, r *http.Request) {
 	h.ListIssues(w, r)
 }
 
+// requirementListExtraColumns / requirementStatusProjection /
+// requirementProgressJoin 是需求字段（migration 452）与派生状态投影
+// （spec 2026-09-04-requirement-calendar-design.md §6）在两条动态 list 路径
+// （ListIssues / ListGroupedIssues —— 排序与多值过滤无法静态化）上的共享片段。
+// sqlc 静态版 ListIssues（pkg/db/queries/issue.sql）是同一投影的唯一事实源，
+// 三处必须逐列对齐 —— TestListIssues_RequirementFieldsProjection 锁死该约定；
+// 缺了这些列，列表/日历/看板拿到零值：日历色块消失（start_at null）、
+// 派生状态徽标缺失（requirement_status 空串被 omitempty 吃掉）。
+const requirementListExtraColumns = `i.module_id, i.avoid_conflict,
+	   i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
+	   i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round`
+
+const requirementProgressJoin = `LEFT JOIN LATERAL (
+	SELECT
+		COUNT(*) FILTER (WHERE c.stage = 3)::int AS stage3_total,
+		COUNT(*) FILTER (WHERE c.stage = 3 AND issue_effective_status(c.workspace_id, c.status) IN ('done', 'cancelled'))::int AS stage3_done,
+		BOOL_OR(c.stage = 1 AND issue_effective_status(c.workspace_id, c.status) NOT IN ('done', 'cancelled')) AS has_open_stage1,
+		BOOL_OR(c.stage = 2) AS has_stage2,
+		BOOL_OR(c.stage = 3 AND issue_effective_status(c.workspace_id, c.status) NOT IN ('done', 'cancelled')) AS has_open_stage3,
+		BOOL_OR(c.stage = 4 AND issue_effective_status(c.workspace_id, c.status) NOT IN ('done', 'cancelled')) AS has_open_stage4
+	FROM issue c
+	WHERE c.parent_issue_id = i.id
+) prog ON TRUE`
+
+const requirementStatusProjection = `CASE
+		WHEN issue_effective_status(i.workspace_id, i.status) = 'done' THEN '已完成'
+		WHEN issue_effective_status(i.workspace_id, i.status) = 'cancelled' THEN '已取消'
+		WHEN i.acceptance_round > 3 THEN '验收失败'
+		WHEN COALESCE(prog.has_open_stage1, FALSE) THEN '原型待确认'
+		WHEN i.decomposition_confirmed_at IS NULL AND COALESCE(prog.has_stage2, FALSE) THEN '拆解待确认'
+		WHEN i.decomposition_confirmed_at IS NULL THEN '未拆解'
+		WHEN i.triggered_at IS NULL THEN '待触发'
+		WHEN NOT EXISTS (
+			SELECT 1 FROM issue rc
+			JOIN agent_task_queue rq ON rq.issue_id = rc.id
+			WHERE rc.parent_issue_id = i.id AND rq.status IN ('dispatched', 'running')
+		) AND EXISTS (
+			SELECT 1 FROM issue wc
+			JOIN agent_task_queue wq ON wq.issue_id = wc.id
+			WHERE wc.parent_issue_id = i.id AND wq.status = 'waiting_module_lock'
+		) THEN '等待模块释放'
+		WHEN COALESCE(prog.has_open_stage3, FALSE) THEN '执行中'
+		WHEN COALESCE(prog.has_open_stage4, FALSE) THEN '验收中'
+		ELSE '已完成'
+	END AS requirement_status,
+	(CASE WHEN COALESCE(prog.stage3_total, 0) > 0
+		THEN concat(prog.stage3_done, '/', prog.stage3_total)
+		ELSE ''
+	END)::text AS stage_progress`
+
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -1553,11 +1603,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-	   i.revision
+	   i.revision,
+	   %s,
+	   %s
 FROM issue i
+%s
 WHERE %s
 ORDER BY %s
-LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
+LIMIT %s OFFSET %s`, requirementListExtraColumns, requirementStatusProjection, requirementProgressJoin, whereSql, orderBy, limitRef, offsetRef)
 
 	rows, err := h.DB.Query(ctx, query, args...)
 	if err != nil {
@@ -1594,6 +1647,18 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Stage,
 			&row.Properties,
 			&row.Revision,
+			&row.ModuleID,
+			&row.AvoidConflict,
+			&row.StartAt,
+			&row.Goal,
+			&row.RepoResourceID,
+			&row.DecomposeMode,
+			&row.AutoTrigger,
+			&row.DecompositionConfirmedAt,
+			&row.TriggeredAt,
+			&row.AcceptanceRound,
+			&row.RequirementStatus,
+			&row.StageProgress,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -2144,20 +2209,26 @@ WITH ranked AS (
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at,
-		i.number, i.project_id, i.metadata, i.stage, i.properties, i.revision, i.module_id, i.avoid_conflict,
+		i.number, i.project_id, i.metadata, i.stage, i.properties, i.revision,
+		%s,
+		%s,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
 			ORDER BY %s
 		) AS rn
 	FROM issue i
+	%s
 	WHERE %s
 )
 SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
 	parent_issue_id, position, start_date, due_date, created_at, updated_at, last_activity_at,
-	number, project_id, metadata, stage, properties, revision, module_id, avoid_conflict, group_total
+	number, project_id, metadata, stage, properties, revision, module_id, avoid_conflict,
+	start_at, goal, repo_resource_id, decompose_mode, auto_trigger,
+	decomposition_confirmed_at, triggered_at, acceptance_round,
+	requirement_status, stage_progress, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
@@ -2169,7 +2240,7 @@ ORDER BY
 	END,
 	assignee_type NULLS LAST,
 	assignee_id NULLS LAST,
-	rn`, intraGroupOrder, strings.Join(where, " AND "), offsetRef, offsetRef, limitRef)
+	rn`, requirementListExtraColumns, requirementStatusProjection, intraGroupOrder, requirementProgressJoin, strings.Join(where, " AND "), offsetRef, offsetRef, limitRef)
 
 	rows, err := h.DB.Query(ctx, query, args...)
 	if err != nil {
@@ -2208,6 +2279,16 @@ ORDER BY
 			&row.Revision,
 			&row.ModuleID,
 			&row.AvoidConflict,
+			&row.StartAt,
+			&row.Goal,
+			&row.RepoResourceID,
+			&row.DecomposeMode,
+			&row.AutoTrigger,
+			&row.DecompositionConfirmedAt,
+			&row.TriggeredAt,
+			&row.AcceptanceRound,
+			&row.RequirementStatus,
+			&row.StageProgress,
 			&row.GroupTotal,
 		); err != nil {
 			slog.Warn("ListGroupedIssues scan failed", "error", err)
