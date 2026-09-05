@@ -896,7 +896,12 @@
     "prev": "이전 산출물",
     "next": "다음 산출물",
     "close": "미리보기 닫기",
-    "open_hint": "클릭하여 미리보기"
+    "open_hint": "클릭하여 미리보기",
+    "archive_all": "전체 보관",
+    "archive_all_pending": "보관 중…",
+    "archive": "보관",
+    "archived": "보관됨",
+    "archive_reference_blocked": "참조만 보관할 수 없습니다"
   },
   "role_strip": {
     "pm": "PM",
@@ -987,5 +992,18 @@
     "decompose_starting": "시작 중…",
     "decompose_running": "분해 진행 중 —— PM이 plan과 하위 작업 초안을 작성하고 있습니다.",
     "decompose_start_failed": "분해 시작에 실패했습니다"
+  },
+  "schedule_panel": {
+    "title": "실행 스케줄",
+    "countdown_label": "시작 시각",
+    "started_at": "트리거 시각",
+    "already_triggered": "트리거됨",
+    "waiting_lock": "모듈 락 해제 대기 중 —— 이 모듈에서 다른 요구 사항 그룹이 실행 중입니다",
+    "progress_label": "단계 진행률",
+    "no_children": "실행 하위 작업이 아직 없습니다",
+    "trigger": "지금 트리거",
+    "triggering": "트리거 중…",
+    "trigger_ok": "요구 사항이 트리거되었습니다 —— 실행 하위 작업이 대기열에 추가되었습니다",
+    "trigger_failed": "요구 사항 트리거에 실패했습니다"
   }
 }

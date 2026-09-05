@@ -896,7 +896,12 @@
     "prev": "前の成果物",
     "next": "次の成果物",
     "close": "プレビューを閉じる",
-    "open_hint": "クリックしてプレビュー"
+    "open_hint": "クリックしてプレビュー",
+    "archive_all": "すべてアーカイブ",
+    "archive_all_pending": "アーカイブ中…",
+    "archive": "アーカイブ",
+    "archived": "アーカイブ済み",
+    "archive_reference_blocked": "参照のみはアーカイブできません"
   },
   "role_strip": {
     "pm": "PM",
@@ -987,5 +992,18 @@
     "decompose_starting": "開始中…",
     "decompose_running": "分解中 —— PM が plan とサブタスク草案を作成しています。",
     "decompose_start_failed": "分解の開始に失敗しました"
+  },
+  "schedule_panel": {
+    "title": "実行スケジュール",
+    "countdown_label": "開始時刻",
+    "started_at": "トリガー時刻",
+    "already_triggered": "トリガー済み",
+    "waiting_lock": "モジュールロックの解放を待機中 —— このモジュールでは他の要求グループが実行中です",
+    "progress_label": "ステージ進捗",
+    "no_children": "実行サブタスクはまだありません",
+    "trigger": "今すぐトリガー",
+    "triggering": "トリガー中…",
+    "trigger_ok": "要求をトリガーしました —— 実行サブタスクをキューに追加しました",
+    "trigger_failed": "要求のトリガーに失敗しました"
   }
 }

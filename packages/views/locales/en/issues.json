@@ -929,7 +929,12 @@
     "prev": "Previous deliverable",
     "next": "Next deliverable",
     "close": "Close preview",
-    "open_hint": "Click to preview"
+    "open_hint": "Click to preview",
+    "archive_all": "Archive all",
+    "archive_all_pending": "Archiving…",
+    "archive": "Archive",
+    "archived": "Archived",
+    "archive_reference_blocked": "Referenced files can't be archived"
   },
   "role_strip": {
     "pm": "PM",
@@ -1020,5 +1025,18 @@
     "decompose_starting": "Starting…",
     "decompose_running": "Decomposition in progress — PM is drafting the plan and sub-issue drafts.",
     "decompose_start_failed": "Failed to start decomposition"
+  },
+  "schedule_panel": {
+    "title": "Execution schedule",
+    "countdown_label": "Starts at",
+    "started_at": "Triggered at",
+    "already_triggered": "Triggered",
+    "waiting_lock": "Waiting for the module lock — another requirement group is running on this module",
+    "progress_label": "Stage progress",
+    "no_children": "No execution subtasks yet",
+    "trigger": "Trigger now",
+    "triggering": "Triggering…",
+    "trigger_ok": "Requirement triggered — execution subtasks enqueued",
+    "trigger_failed": "Failed to trigger requirement"
   }
 }
