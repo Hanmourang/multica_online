@@ -329,6 +329,11 @@ export function useIssueSurfaceController({
   const debouncedActiveSearch = useDebouncedTableSearch(activeSearch);
   const usesServerStatusSurface =
     effectiveViewMode === "list" ||
+    // The calendar draws requirement bars out of `controller.issues`, which
+    // only the status/group branches fill. Without a branch of its own the
+    // view received EMPTY_ISSUES and rendered a blank grid regardless of the
+    // server's data.
+    effectiveViewMode === "calendar" ||
     (effectiveViewMode === "board" && effectiveGrouping === "status");
   const usesServerGroupSurface =
     (effectiveViewMode === "board" && effectiveGrouping !== "status") ||
@@ -496,7 +501,11 @@ export function useIssueSurfaceController({
         ...(agentRunningFilter
           ? { working_issue_ids: [...workingIssueIDs] }
           : {}),
-        include_sub_issues: showSubIssues,
+        // The calendar renders top-level requirement bars only — sub-issues
+        // never draw there, so they must not spend the per-status page
+        // window a requirement could have occupied.
+        include_sub_issues:
+          effectiveViewMode === "calendar" ? false : showSubIssues,
       },
       ...(debouncedActiveSearch ? { search: debouncedActiveSearch } : {}),
       sort: {
@@ -511,6 +520,7 @@ export function useIssueSurfaceController({
     dateParams,
     debouncedActiveSearch,
     effectivePropertyFilters,
+    effectiveViewMode,
     includeNoAssignee,
     labelFilters,
     priorityFilters,

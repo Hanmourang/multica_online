@@ -368,6 +368,46 @@ describe("useIssueSurfaceController", () => {
     expect(legacyListIssues).not.toHaveBeenCalled();
   });
 
+  it("pages the calendar through the status branches, top-level rows only", async () => {
+    // The calendar draws requirement bars out of `controller.issues`, which
+    // only the status/group branches fill — without a branch of its own the
+    // view received EMPTY_ISSUES and rendered a blank grid regardless of the
+    // server's data. And because sub-issues never draw on the calendar, they
+    // must not spend the per-status page window a requirement could occupy.
+    mockListByStatus({
+      todo: [
+        makeIssue({ id: "req-1", status: "todo" }),
+        makeIssue({ id: "child-1", status: "todo", parent_issue_id: "req-1" }),
+      ],
+      in_progress: [makeIssue({ id: "req-2", status: "in_progress" })],
+    });
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("calendar");
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list", "calendar"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.viewMode).toBe("calendar");
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({ group_key: "status:todo" }),
+    );
+    expect(result.current.tableQuerySpec.filters.include_sub_issues).toBe(false);
+    expect(result.current.issues.map((issue) => issue.id).sort()).toEqual([
+      "req-1",
+      "req-2",
+    ]);
+    expect(result.current.statusPagination).toBeDefined();
+  });
+
   it("maps my assigned scope to the unified personal query contract", async () => {
     const { result } = renderHook(
       () =>
