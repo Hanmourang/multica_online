@@ -374,3 +374,56 @@ func uuidToStringSvc(u pgtype.UUID) string {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// #11（spec §8 研发输入）：stage3 执行子任务的 description 必须把三要素
+// （feature_points/acceptance_spec/graph_context）注入进去——执行 agent 运行时
+// 经 CLI 只读得到 description（服务端不存任务快照、IssueResponse 不渲染这三列）。
+func TestBuildExecBriefInjectsThreeElements(t *testing.T) {
+        d := DecomposeDraftTask{
+                Description:    "实现账户模型扩展",
+                Stage:          3,
+                FeaturePoints:  []DecomposeFeaturePoint{{Title: "账户模型扩展", Kind: "modify", CodeObjects: []string{"server/internal/x.go", "server/internal/y.go"}}},
+                AcceptanceSpec: json.RawMessage(`{"version":1,"cases":[{"name":"c1"}]}`),
+                GraphContext:   json.RawMessage(`{}`),
+        }
+        got := buildExecBrief(d)
+        for _, want := range []string{
+                "实现账户模型扩展", // PM 草稿正文保留为前缀
+                "## 功能点", "[modify] 账户模型扩展", "server/internal/x.go", "server/internal/y.go",
+                "## 验收标准", `"version":1`,
+                "## 图谱上下文", "档案未就绪", // graph_context='{}' → 降级
+        } {
+                if !contains(got, want) {
+                        t.Errorf("buildExecBrief missing %q\n got: %s", want, got)
+                }
+        }
+}
+
+// graph_context 非空时原样嵌入，不触发「档案未就绪」降级。
+func TestBuildExecBriefEmbedsNonEmptyGraphContext(t *testing.T) {
+        d := DecomposeDraftTask{
+                Stage:         3,
+                FeaturePoints: []DecomposeFeaturePoint{{Title: "fp", Kind: "new"}},
+                GraphContext:  json.RawMessage(`{"nodes":["n1"],"edges":["e1"]}`),
+        }
+        got := buildExecBrief(d)
+        if !contains(got, `"nodes"`) || !contains(got, "## 图谱上下文") {
+                t.Errorf("non-empty graph_context should be embedded verbatim\n got: %s", got)
+        }
+        if contains(got, "档案未就绪") {
+                t.Errorf("non-empty graph_context must NOT degrade to 档案未就绪\n got: %s", got)
+        }
+}
+
+// spec §8 测试角色输入含 graph_context：stage4 验收 brief 也附图谱上下文段，
+// 空则降级「档案未就绪」，且不破坏既有「汇总各执行子任务验收点」内容。
+func TestBuildAcceptanceBriefIncludesGraphDegradation(t *testing.T) {
+        exec := []DecomposeDraftTask{{Title: "账户模型扩展", Stage: 3, AcceptanceSpec: json.RawMessage(`{"version":1}`)}}
+        d := DecomposeDraftTask{Title: "整体验收", Stage: 4, GraphContext: json.RawMessage(`{}`)}
+        got := buildAcceptanceBrief(d, exec, "")
+        for _, want := range []string{"账户模型扩展", "## 图谱上下文", "档案未就绪"} {
+                if !contains(got, want) {
+                        t.Errorf("buildAcceptanceBrief missing %q\n got: %s", want, got)
+                }
+        }
+}

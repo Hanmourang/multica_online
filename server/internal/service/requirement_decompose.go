@@ -248,6 +248,11 @@ func (s *IssueService) ConfirmDecomposition(ctx context.Context, p ConfirmDecomp
                         if err != nil {
                                 return nil, fmt.Errorf("marshal feature points: %w", err)
                         }
+                        // #11（spec §8 研发输入）：执行 agent 运行时经 multica CLI 取 issue，
+                        // 服务端不存任务上下文快照（task.go:1091），IssueResponse 又不渲染
+                        // feature_points/acceptance_spec/graph_context 三列；故把三要素注入
+                        // description——与 stage4 buildAcceptanceBrief 同源的既有透传通道。
+                        description = buildExecBrief(d)
                 } else {
                         if testerID == "" {
                                 return nil, &DecompositionConflictError{Msg: "tester role disabled: no enabled tester or pm in the requirement roster"}
@@ -363,5 +368,59 @@ func buildAcceptanceBrief(d DecomposeDraftTask, execDrafts []DecomposeDraftTask,
         if d.Description != "" {
                 b.WriteString("\n\n" + d.Description)
         }
+        // #11（spec §8 测试输入含 graph_context）：附图谱上下文段，空则降级「档案未就绪」。
+        b.WriteString("\n\n" + graphContextSectionBody(d.GraphContext))
         return b.String()
+}
+
+// jsonRawEmpty 判 JSONB 原始值是否「空」（未填写）：nil/空白/{}/[]/null 均视为空。
+// graph WS 未落地时 graph_context 落库默认 '{}'，据此触发「档案未就绪」降级。
+func jsonRawEmpty(raw json.RawMessage) bool {
+        switch strings.TrimSpace(string(raw)) {
+        case "", "{}", "[]", "null":
+                return true
+        }
+        return false
+}
+
+// graphContextNotReady 是 spec §14 #11 的图谱缺失降级文案：GitNexus 本体/快照未
+// 就绪（graph WS 未落地）时输出「档案未就绪」，不阻断流水线，待就绪后自动接管。
+const graphContextNotReady = "档案未就绪：GitNexus 图谱本体/快照尚未就绪（graph WS 未落地）。" +
+        "本段不阻断执行——待档案就绪后由后续轮次自动接管；本轮影响面请以「功能点」中的 code_objects 为准。"
+
+// graphContextSectionBody 渲染「## 图谱上下文」段正文：graph_context 非空则原样嵌入
+// JSON，空（多为 '{}'）则降级为「档案未就绪」（spec §8/§14 #11）。
+func graphContextSectionBody(raw json.RawMessage) string {
+        if jsonRawEmpty(raw) {
+                return "## 图谱上下文\n" + graphContextNotReady
+        }
+        return "## 图谱上下文\n```json\n" + strings.TrimSpace(string(raw)) + "\n```"
+}
+
+// buildExecBrief 组装 stage 3 执行子任务的 description（spec §8 研发输入：子任务
+// 三要素 feature_points/acceptance_spec/graph_context + 图谱上下文）。以 PM 草稿正文
+// 打头（保持既有「description = 草稿正文」语义为前缀，纯追加），再附功能点 / 验收
+// 标准 / 图谱上下文三段——执行 agent 运行时经 CLI 读 description 即可拿到本任务三要素
+// （服务端不存任务快照，IssueResponse 不渲染这三列，见 task.go:1091）。
+func buildExecBrief(d DecomposeDraftTask) string {
+        var sections []string
+        if strings.TrimSpace(d.Description) != "" {
+                sections = append(sections, strings.TrimSpace(d.Description))
+        }
+        if len(d.FeaturePoints) > 0 {
+                var b strings.Builder
+                b.WriteString("## 功能点")
+                for _, fp := range d.FeaturePoints {
+                        b.WriteString("\n- [" + fp.Kind + "] " + fp.Title)
+                        if len(fp.CodeObjects) > 0 {
+                                b.WriteString("：" + strings.Join(fp.CodeObjects, "、"))
+                        }
+                }
+                sections = append(sections, b.String())
+        }
+        if !jsonRawEmpty(d.AcceptanceSpec) {
+                sections = append(sections, "## 验收标准\n```json\n"+strings.TrimSpace(string(d.AcceptanceSpec))+"\n```")
+        }
+        sections = append(sections, graphContextSectionBody(d.GraphContext))
+        return strings.Join(sections, "\n\n")
 }
