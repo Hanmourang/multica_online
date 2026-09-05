@@ -6,22 +6,24 @@
 
 现状：multica daemon 对挂载了 `local_directory` 项目资源的任务按**目录路径互斥**（`LocalPathLocker`，MUL-2663），同一本地目录上的任务强制串行，等待方显示"等待本地目录释放"。`issue_dependency` 表自 migration 001 起存在但从未接线（无 CRUD、无调度消费）。
 
-目标：引入**模块（Module）**与**依赖（Dependency）**两个任务级概念。核心理念：**一个项目通常就是一个产品——产品同一模块下的修改通过显式依赖串行编排，跨模块的修改默认互不阻塞、充分并发**，用显式依赖取代一刀切的目录锁：
+目标：引入**模块（Module）**与**依赖（Dependency）**两个任务级概念。核心理念：**一个项目通常就是一个产品——同一模块下的修改通过显式依赖 + 需求组互斥串行编排，跨模块的修改默认互不阻塞、充分并发**，用显式依赖取代一刀切的目录锁：
 
-- 相同模块内：任务按配置的依赖 DAG 拓扑执行，无依赖关系的任务并发执行，不再目录互斥。
-- 不同模块间：创建任务时可选「避免冲突」，勾选则该任务与其他模块的任务在**模块粒度**互斥（与目录无关）。
+- 相同模块内：**同一需求组（`root_requirement_id`）内**任务按依赖 DAG 拓扑执行、无依赖关系的并发；**跨需求组自动互斥串行**（同模块的不同需求不并发）。强制点在 daemon 内存 `ModuleLocker`（锁 key = `(moduleID, rootRequirementID)`），不再目录互斥。
+- 不同模块间：创建任务时可选「避免冲突」（`avoid_conflict`），勾选则该任务与其他模块的任务在**模块粒度**互斥（与目录无关）；勾选后跨模块也互斥，锁 key 退化为 module 级。
 - 无模块任务：不参与任何锁。
+
+> **修订（requirement-calendar WS3）**：本文初版（451）的同模块语义为「无依赖即并发、同模块永不互斥」；需求日历 WS3 将其升级为 **ModuleLocker v2**——同模块**同组**按 DAG 并发、同模块**跨组**无条件互斥串行（详见 `2026-09-04-requirement-calendar-design.md` §7.3/§7.4 与 `ARCHITECTURE.md` §5.2）。下文 §5 的 total/exclusive 双计数为 v1 历史模型。
 
 ## 2. 已确认的需求语义
 
 | 决策点 | 结论 |
 | --- | --- |
 | 模块 | issue 上的**单选**轻量标签，归属于项目（project） |
-| 避免冲突 | 创建/编辑任务时勾选；勾选后**按模块互斥**：异模块串行，与目录无关；一方勾选即双向生效（详见 §5 锁模型） |
-| 依赖 | 任务间多对多 DAG；**限定同模块内配置**；同模块内按拓扑序执行，入度为 0 的可并发 |
+| 避免冲突 | 创建/编辑任务时勾选；勾选后**跨模块互斥**：异模块串行，与目录无关；一方勾选即双向生效（详见 §5 锁模型）。**WS3 注**：同模块跨需求组已自动互斥（不依赖本开关），本开关额外管跨模块 |
+| 依赖 | 任务间多对多 DAG；**限定同模块内配置**；**同一需求组内**按拓扑序执行、入度为 0 的可并发；同模块跨需求组由 ModuleLocker v2 自动串行 |
 | 前置失败/取消 | 后继**阻塞在 queued**，等人工修复前置（重跑至"已完成"）后自动放行 |
 | 无模块任务 | 不参与任何锁（目录互斥语义废弃） |
-| 实现方案 | A：server 端依赖闸门 + daemon 端模块锁 |
+| 实现方案 | A：server 端依赖闸门 + daemon 端模块锁（`ModuleLocker` v2：锁 key = `(moduleID, rootRequirementID)`，WS3） |
 
 ## 3. 数据模型（migration，编号按仓库现有序号顺延）
 
@@ -86,6 +88,11 @@ AND NOT EXISTS (
 **claim payload 投影**：`ClaimAgentTask` 的返回扩展 JOIN issue → `module_id`、module `name`、`avoid_conflict`；daemon `Task` 结构新增三个 `omitempty` 字段（旧 server 不下发时 daemon 视为无模块，行为安全退化）。chat / quick-create 等无 issue 的任务行三字段为空。
 
 ## 5. 模块锁（daemon 端，取代目录互斥）
+
+> ⚠️ **本节为 451 初版（v1）锁模型的历史设计记录**。requirement-calendar **WS3 已升级为 ModuleLocker v2**：
+> 锁 key = `(moduleID, rootRequirementID)`——同模块**同组不互斥**（组内并行子任务顺序由依赖 DAG 表达）、
+> 同模块**跨组无条件互斥**、异模块维持 `avoid_conflict` 语义；root 终态 `ReleaseGroup` 整组释放。
+> 下文 total/exclusive 双计数模型已被 `(moduleID, rootID)` 二维判定取代，详见 `ARCHITECTURE.md` §5.2。
 
 `acquireLocalDirectoryLockIfNeeded`（server/internal/daemon/daemon.go）的互斥语义整体替换：
 

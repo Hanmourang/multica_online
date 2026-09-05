@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Multica 架构图 · 需求日历与角色化流水线（2026-09-04）</title>
+<title>Multica 架构图 · 需求日历与角色化流水线（最终态 · 对齐 migrations 451–460）</title>
 <style>
 /* ===== Multica 设计 token（packages/ui/styles/tokens.css 浅色主题抄录） ===== */
 :root {
@@ -175,7 +175,7 @@ body {
   <a href="#f3">③ 数据模型 ER</a>
   <a href="#f4">④ 需求状态机</a>
   <a href="#f5">⑤ 部署视图</a>
-  <span style="margin-left:auto;font-size:11px;color:oklch(0.6 0.01 286)">2026-09-04 · 配套 design 文档同目录</span>
+  <span style="margin-left:auto;font-size:11px;color:oklch(0.6 0.01 286)">最终态 2026-09-06 · 以 migrations 451–460 + 代码为准 · 配套 ARCHITECTURE.md / ER 文档</span>
 </nav>
 
 <div class="frame-wrap">
@@ -183,7 +183,7 @@ body {
 <!-- ============ 图 1：分层架构 ============ -->
 <div class="frame-head" id="f1">
   <h2>① 分层架构 — 需求日历在 multica 中的位置</h2>
-  <p>自上而下六层。<b>新增</b>组件 9 个（虚线蓝框）、<b>扩展</b>既有组件 6 个（橙框）、<b>原样复用</b>（灰框）。核心原则：stage barrier（migration 123）、依赖闸门（451）、ModuleLocker、autopilot 调度器全部复用，需求日历只做「编排」不发明新机制。</p>
+  <p>自上而下六层。<b>新增</b>组件（虚线蓝框）、<b>扩展</b>既有组件（橙框）、<b>原样复用</b>（灰框）。核心原则：stage barrier（migration 123）、依赖闸门（451）、ModuleLocker、autopilot 调度器全部复用，需求日历只做「编排」不发明新机制。<b>纠偏（以代码为准）</b>：ModuleLocker <b>v2</b>（WS3）锁 key = <span class="mono">(module_id, root_requirement_id)</span> 二维互斥——同模块同组不互斥（顺序靠依赖 DAG）、同模块跨组无条件互斥、异模块维持 <span class="mono">avoid_conflict</span>、root 终态 ReleaseGroup 整组释放；agent_run 三表（459）为 daemon→server 单向投影；档案/图谱/本体/申报/阶段门（455–460）构成需求交付的沉淀层。</p>
 </div>
 <div class="frame">
   <div class="frame-bar"><i></i><i></i><i></i><span>architecture — layered view</span></div>
@@ -231,9 +231,10 @@ body {
   <div class="layer">
     <div class="layer-tag">执行层<small>daemon（agent 运行时）</small></div>
     <div class="layer-body">
-      <div class="comp ext"><div class="c-t">ModuleLocker v2</div><div class="c-d">锁 key (module_id, root_requirement_id)：同组并发 / 跨组互斥 / 终态即释放</div><div class="c-f mono">server/internal/daemon/module_locker.go</div></div>
+      <div class="comp ext"><div class="c-t">ModuleLocker v2</div><div class="c-d"><b>锁 key = (module_id, root_requirement_id)</b>：同模块同组不互斥（顺序靠依赖 DAG）/ <b>同模块跨组无条件互斥</b> / 异模块「一方勾选即锁」/ root 终态 ReleaseGroup 整组释放。<span style="color:var(--foreground)">WS3 已落地</span></div><div class="c-f mono">server/internal/daemon/module_locker.go</div></div>
       <div class="comp"><div class="c-t">任务执行器</div><div class="c-d">研发 agent 执行 stage 3 子任务；测试 agent 跑 acceptance/*.spec.ts</div><div class="c-f mono">server/internal/daemon/task_*.go</div></div>
       <div class="comp"><div class="c-t">等待态上报</div><div class="c-d">waiting_module_lock + wait_reason（451 已交付）</div><div class="c-f mono">agent_task_queue</div></div>
+      <div class="comp new"><div class="c-t">agent_run 投影器</div><div class="c-d">task_message 为事实源 → 单向投影 run/todo/event；daemon 经 <b>三写端点</b> POST /api/agent-runs · /todos · /events 回传（root_issue_id 上卷需求）</div><div class="c-f mono">459 · internal/handler/agent_run.go</div></div>
     </div>
   </div>
   <div class="flow-down">▼</div>
@@ -246,6 +247,8 @@ body {
       <div class="comp new"><div class="c-t">issue_role_assignment</div><div class="c-d">需求班底快照（创建时拷贝项目默认）</div><div class="c-f mono">453_requirement_roles</div></div>
       <div class="comp new"><div class="c-t">issue_prototype_version</div><div class="c-d">原型版本：html_path + prompt + marks + status</div><div class="c-f mono">454_requirement_prototype</div></div>
       <div class="comp"><div class="c-t">project_module · issue_dependency · autopilot</div><div class="c-d">451 / 042 既有，原样复用</div><div class="c-f mono">migration 451 / 042</div></div>
+      <div class="comp new"><div class="c-t">档案沉淀层（455–458）</div><div class="c-d">project_artifact（Git 为事实源，DB 存 rel_path+blob_sha）· project_graph_snapshot · ontology_object/link/changelog（降级先行·无 embedding）· filing_item/check_run/export_log</div><div class="c-f mono">migration 455 / 456 / 457 / 458</div></div>
+      <div class="comp new"><div class="c-t">运行投影 + 阶段门（459–460）</div><div class="c-d">agent_run/_todo/_event（单向投影）· stage_gate_rule（每 stage 要求哪些 doc_type 齐备；blocking 计入完整度环）</div><div class="c-f mono">migration 459 / 460</div></div>
     </div>
   </div>
   <div class="flow-down">▼</div>
@@ -262,7 +265,7 @@ body {
 <!-- ============ 图 2：端到端流水线 ============ -->
 <div class="frame-head" id="f2">
   <h2>② 端到端流水线 — 四 stage + barrier 门 + 打回环</h2>
-  <p>stage 编号 1-based（复用 migration 123）。<b>启用原型师才有 stage 1</b>，停用则跳过；stage 之间由 barrier 门隔离——上一 stage 全部子任务终态才唤醒下一 stage 责任人。验收不通过打回 stage 3（上限 3 轮，超限转人工）。</p>
+  <p>stage 编号 1-based（复用 migration 123）。<b>五角色班底</b>（migration 453，assignee_type∈member/agent）：<b>pm</b>（Atlas·拆解主责）/ <b>prototyper</b>（Nova·原型，可选）/ <b>developer</b>（Orion/Rex/Kai·多 agent 并行执行）/ <b>data</b>（数据支持）/ <b>tester</b>（Vera·验收，停用回落 pm）；pm/developer 必选。<b>启用原型师才有 stage 1</b>，停用则跳过；stage 之间由 barrier 门隔离——上一 stage 全部子任务终态才唤醒下一 stage 责任人。<span style="color:var(--foreground)">验收不通过打回 stage 3 <b>[已交付]</b>（WS4：verdict=fail → acceptance_round+1，&gt;3 转「验收失败」终态，见下方）。</span></p>
 </div>
 <div class="frame">
   <div class="frame-bar"><i></i><i></i><i></i><span>pipeline — stage flow with barriers</span></div>
@@ -320,17 +323,17 @@ body {
     </div>
   </div>
   <div class="pipe-loop">
-    <div class="loop-box">↩ 打回环：验收不通过 → 定位失败断言 + 图谱反查 → 新建 stage 3 修复子任务（依赖挂到相关任务）→ 修复终态后 barrier 再唤醒验收。轮次上限 3，超限需求转「验收失败」并通知负责人 + PM，<b>终态即释放</b>模块占用。</div>
+    <div class="loop-box">↩ 打回环 <b>[已交付·WS4]</b>：验收不通过（verdict=fail）→ 定位失败断言 + 图谱反查 → 新建 stage 3 修复子任务（依赖挂到相关任务）→ 修复终态后 barrier 再唤醒验收。轮次上限 3，超限需求转「验收失败」并发人工仲裁评论，<b>终态即释放</b>模块占用。<br><b style="color:var(--foreground)">落地实现</b>：<span class="mono">handler/requirement_acceptance.go</span> 的 <span class="mono">RecordAcceptanceVerdict</span>——pass → 需求 done（随后 ReleaseGroup）；fail → <span class="mono">IncrementAcceptanceRound</span> +1，<span class="mono">newRound&gt;3</span> 转「验收失败」终态（<span class="mono">postAcceptanceFailedComment</span> 人工仲裁），否则建 stage3 修复子任务并入队；<span class="mono">requirement_status</span> CASE 第 10 态 <span class="mono">acceptance_round&gt;3 → 验收失败</span>（10 个互异态）。</div>
   </div>
   <div class="trigger-note">
-    <b>定时触发语义</b>：<span class="mono">jobs_requirement_trigger.go</span> 每 30s 扫描 <span class="mono">auto_trigger=true ∧ triggered_at IS NULL ∧ decomposition_confirmed_at IS NOT NULL ∧ start_at ≤ now()</span> 的需求，同事务写 <span class="mono">triggered_at</span> 防重 → 无未完成依赖的 stage 3 子任务入队。改期（拖拽/PATCH）在触发前自由，触发后拒绝（409）。手动触发按钮走同一函数，忽略 start_at。
+    <b>定时触发语义</b>：<b>[已交付·查询层]</b> <span class="mono">requirement.sql</span> 的 <span class="mono">ListTriggerableRequirements</span> 命中部分索引 <span class="mono">idx_issue_trigger_sweep</span>，扫描 <span class="mono">parent_issue_id IS NULL ∧ auto_trigger=true ∧ triggered_at IS NULL ∧ decomposition_confirmed_at IS NOT NULL ∧ start_at IS NOT NULL ∧ start_at ≤ now() ∧ 非终态</span>；<span class="mono">MarkRequirementTriggered</span> 幂等写 <span class="mono">triggered_at</span>（影响 0 行 = 已并发触发）。<b style="color:var(--foreground)">[已交付·调度层]</b> 独立 <span class="mono">jobs_requirement_trigger.go</span>（WS2，镜像 <span class="mono">jobs_autopilot.go</span>：JobSpec（<span class="mono">requirement_trigger_dispatch</span>）注册 scheduler.Manager + sys_cron_executions 审计 + 30s sweep）<b>已落地</b>——<span class="mono">RequirementTriggerJob</span> 每 30s 扫描派发，与手动 <span class="mono">POST /issues/{id}/trigger</span> 共用 <span class="mono">triggerOneRequirement</span>。改期（拖拽/PATCH）在触发前自由，触发后拒绝（409）。
   </div>
 </div>
 
 <!-- ============ 图 3：数据模型 ER ============ -->
 <div class="frame-head" id="f3">
-  <h2>③ 数据模型 ER — migration 452 / 453 / 454</h2>
-  <p>中央 <b class="mono">issue</b> 为扩展表（蓝底行 = 452 新增列）；中列三张<b>新增表</b>（虚线蓝框）：项目默认班底 / 需求班底快照 / 原型版本；右列为<b>原样复用</b>的既有表。两个自引用：<span class="mono">parent_issue_id</span>（需求→子任务层级）与 <span class="mono">root_requirement_id</span>（任务组标识，452 递归回填）。</p>
+  <h2>③ 数据模型 ER — migration 452 / 453 / 454（主图）+ 455–460（补充面板）</h2>
+  <p>中央 <b class="mono">issue</b> 为扩展表（蓝底行 = 452 新增的 <b>12 列</b>需求/触发字段；另有 451 的 module_id/avoid_conflict）；中列三张<b>新增表</b>（虚线蓝框）：项目默认班底 / 需求班底快照 / 原型版本；右列为<b>原样复用</b>的既有表。两个自引用：<span class="mono">parent_issue_id</span>（需求→子任务层级）与 <span class="mono">root_requirement_id</span>（任务组标识，452 递归回填）。<b>下方补充面板</b>列出 455–460 新增的档案/图谱/本体/申报/运行投影/阶段门实体（完整列级 ER 见 <span class="mono">2026-09-06-requirement-calendar-er.md</span>）。</p>
 </div>
 <div class="frame">
   <div class="frame-bar"><i></i><i></i><i></i><span>data model — entity relationship</span></div>
@@ -504,12 +507,27 @@ body {
     </div>
   </div>
   </div>
+
+  <!-- 补充面板：455–460 新增实体（flow 布局，与上方绝对定位 ER 主图并列） -->
+  <div style="padding:16px 18px 20px;border-top:1px solid var(--border);background:var(--app-shell)">
+    <div style="font-size:12px;font-weight:700;margin-bottom:4px">补充 · migration 455–460 新增实体（档案 / 图谱 / 本体 / 申报 / 运行投影 / 阶段门）</div>
+    <div style="font-size:10.5px;color:var(--muted-foreground);line-height:1.6;margin-bottom:10px">蓝框 = 新增表；「派生/死列/注入位」标注见每卡右下角。完整列/类型/约束见 ER 文档。</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <div class="comp new" style="max-width:320px"><div class="c-t">project_artifact <span class="mono" style="font-weight:400;color:var(--faint-foreground)">455</span></div><div class="c-d">scope(shared/project/requirement) · stage(1-4) · doc_type · version · rel_path · blob_sha · source · deleted_at。UNIQUE(resource_id,rel_path,version)。FK→resource/issue/task/attachment</div><div class="c-f">Git 为事实源，DB 只存指针</div></div>
+      <div class="comp new" style="max-width:320px"><div class="c-t">project_graph_snapshot <span class="mono" style="font-weight:400;color:var(--faint-foreground)">456</span></div><div class="c-d">scan_id · gitnexus_version · git_sha · nodes/edges/communities/stats/module_summary/bus_matrix(JSONB)。UNIQUE(project_id,scan_id)，同 project 最多 5 份</div><div class="c-f">CLI sync 导入，server 只存不解析</div></div>
+      <div class="comp new" style="max-width:320px"><div class="c-t">ontology_object / _link / _changelog <span class="mono" style="font-weight:400;color:var(--faint-foreground)">457</span></div><div class="c-d">object：entity_type(code/semantic/table/biz) UNIQUE(snapshot_id,node_id)；link：link_type(QUERIES/ACCESSES/MEMBER_OF/CALLS/HANDLES_ROUTE/STEP_IN_PROCESS/FETCHES)；changelog：change_type(added/modified/removed/status_change)</div><div class="c-f" style="color:var(--destructive)">降级先行·无 embedding/vector 列（非 entity/relation/embedding）</div></div>
+      <div class="comp new" style="max-width:320px"><div class="c-t">filing_item / _check_run / _export_log <span class="mono" style="font-weight:400;color:var(--faint-foreground)">458</span></div><div class="c-d">item：track(software_copyright/patent) tier(must/conditional/aux) status(missing/partial/ready) UNIQUE(project_id,track,item_key)；check_run.verdict(pass/fail/warning)；export_log.export_type(full/diagnostic)</div><div class="c-f" style="color:var(--destructive)">filing_item.source_path = 死列（从不写入）</div></div>
+      <div class="comp new" style="max-width:320px"><div class="c-t">agent_run / _todo / _event <span class="mono" style="font-weight:400;color:var(--faint-foreground)">459</span></div><div class="c-d">run：status(running/completed/failed/cancelled/stalled) stall_reason(rate_limited/network_lost/crashed/waiting_module_lock/waiting_local_directory) issue_id+root_issue_id 上卷；todo：UNIQUE(run_id,todo_key) superseded_by 血缘；event：event_type(heartbeat/todo_change/rate_limit/net_err/crash)</div><div class="c-f">task_message 为事实源的单向投影</div></div>
+      <div class="comp new" style="max-width:320px"><div class="c-t">stage_gate_rule <span class="mono" style="font-weight:400;color:var(--faint-foreground)">460</span></div><div class="c-d">stage(1-4) required_doc_type blocking(default true) track(可空) project_id(可空=ws默认)。UNIQUE(workspace_id,COALESCE(project_id,zero),COALESCE(track,''),stage,required_doc_type)。种子 8 行/7 blocking</div><div class="c-f">doc_type ↔ project_artifact.doc_type 同名匹配</div></div>
+      <div class="comp ext" style="max-width:320px"><div class="c-t">project <span class="mono" style="font-weight:400;color:var(--faint-foreground)">+455</span> · issue <span class="mono" style="font-weight:400;color:var(--faint-foreground)">+452 注入位</span></div><div class="c-d">project.archive_resource_id(FK→resource SET NULL)；issue.graph_context DEFAULT '{}' <b>[注入位]</b>（agent MCP 查询结果）；feature_points '[]' / acceptance_spec '{}' 拆解 confirm 写入</div><div class="c-f">requirement_status = 派生不落列</div></div>
+    </div>
+  </div>
 </div>
 
 <!-- ============ 图 4：需求状态机 ============ -->
 <div class="frame-head" id="f4">
-  <h2>④ 需求状态机 — 8 态派生投影（不落列，SQL 计算）</h2>
-  <p>与 <span class="mono">issue_effective_status</span> 同一思路：日历色块与详情状态由子任务 stage/status + 队列状态实时派生，永远与事实一致。主流程一条直线；「等待模块释放」是执行期的可逆分支；「验收不通过」打回执行（≤3 轮）。</p>
+  <h2>④ 需求状态机 — 10 态派生投影（不落列，SQL 计算）</h2>
+  <p>与 <span class="mono">issue_effective_status</span> 同一思路：日历色块与详情状态由子任务 stage/status + 队列状态实时派生，永远与事实一致。主流程一条直线；「等待模块释放」是执行期的可逆分支。<b style="color:var(--foreground)">代码中 <span class="mono">requirement_status</span> CASE 实为 <b>10 个互异态</b>（已完成/已取消/原型待确认/拆解待确认/未拆解/待触发/等待模块释放/执行中/验收中/验收失败）；第 10 态「验收失败」（<span class="mono">acceptance_round&gt;3</span>）已接线（WS4），置于阶段态之前——一旦越界即终态，不再被残留 open 子任务翻回「执行中/验收中」。</b></p>
 </div>
 <div class="frame">
   <div class="frame-bar"><i></i><i></i><i></i><span>state machine — derived projection</span></div>
@@ -534,30 +552,31 @@ body {
       <span style="flex-basis:100%"></span>
       <span class="sm" style="border-color:oklch(0.72 0.15 75/45%);background:oklch(0.72 0.15 75/8%)">🔒 等待模块释放 <small>组间互斥</small></span>
       <span class="sm-arrow">⇄</span>
-      <span style="font-size:11px;color:var(--muted-foreground)">与「▶ 执行中」互转：他组持有同模块 → 等待；对方组<b>终态即释放</b> → 按 start_at 升序唤醒</span>
+      <span style="font-size:11px;color:var(--muted-foreground)">与「▶ 执行中」互转：他组持有同模块 → 等待；对方组<b>终态即释放</b>（ReleaseGroup）→ daemon ModuleLocker.Acquire cond 重试 + 30s 轮询恢复。<b>v1 实现说明</b>：不做 server 侧唤醒队列，不保证 start_at 升序/严格 FIFO</span>
       <span style="flex-basis:100%"></span>
-      <span style="font-size:11px;color:var(--destructive)">↩ 验收不通过：建 stage 3 修复子任务 → 回到「▶ 执行中」；轮次上限 3，超限 → 需求转「验收失败」（终态，释放模块，通知负责人+PM）</span>
+      <span style="font-size:11px;color:var(--foreground)">↩ 验收不通过 <b>[已交付·WS4]</b>：verdict=fail → <span class="mono">IncrementAcceptanceRound</span> +1 → 建 stage 3 修复子任务 → 回到「▶ 执行中」；轮次上限 3，超限（<span class="mono">acceptance_round&gt;3</span>）→ 需求转「验收失败」终态（<span class="mono">postAcceptanceFailedComment</span> 人工仲裁，释放模块占用）。<b>落地</b>：<span class="mono">handler/requirement_acceptance.go</span> 的 <span class="mono">RecordAcceptanceVerdict</span>；requirement_status CASE 第 10 态已接线。</span>
     </div>
 
     <div class="sm-table">
       <div class="sm-r hd"><div>优先级</div><div>派生条件（自上而下命中即返回）</div><div>需求状态</div></div>
       <div class="sm-r"><div class="prio">1</div><div>issue 自身到达终态</div><div>✅ 已完成 / 已取消</div></div>
-      <div class="sm-r"><div class="prio">2</div><div>存在 stage 1 子任务未终态</div><div>🎨 原型待确认</div></div>
-      <div class="sm-r"><div class="prio">3</div><div><span class="mono">decomposition_confirmed_at IS NULL</span> 且存在 stage 2 子任务</div><div>⚠ 拆解待确认</div></div>
-      <div class="sm-r"><div class="prio">4</div><div><span class="mono">decomposition_confirmed_at IS NULL</span></div><div>○ 未拆解</div></div>
-      <div class="sm-r"><div class="prio">5</div><div><span class="mono">triggered_at IS NULL</span></div><div>⏱ 待触发</div></div>
-      <div class="sm-r"><div class="prio">6</div><div>存在子孙任务 <span class="mono">queue.status='waiting_module_lock'</span></div><div>🔒 等待模块释放</div></div>
-      <div class="sm-r"><div class="prio">7</div><div>stage 3 子任务未全部终态</div><div>▶ 执行中（N/M）</div></div>
-      <div class="sm-r"><div class="prio">8</div><div>stage 4 子任务未终态</div><div>🧪 验收中</div></div>
-      <div class="sm-r"><div class="prio">9</div><div>其余（stage 4 已终态但需求自身未关）</div><div>✅ 已完成</div></div>
+      <div class="sm-r"><div class="prio">2</div><div><span class="mono">acceptance_round &gt; 3</span>（累计 4 轮打回仍未过，置于阶段态之前）</div><div>❌ 验收失败（第 10 态·终态）</div></div>
+      <div class="sm-r"><div class="prio">3</div><div>存在 stage 1 子任务未终态</div><div>🎨 原型待确认</div></div>
+      <div class="sm-r"><div class="prio">4</div><div><span class="mono">decomposition_confirmed_at IS NULL</span> 且存在 stage 2 子任务</div><div>⚠ 拆解待确认</div></div>
+      <div class="sm-r"><div class="prio">5</div><div><span class="mono">decomposition_confirmed_at IS NULL</span></div><div>○ 未拆解</div></div>
+      <div class="sm-r"><div class="prio">6</div><div><span class="mono">triggered_at IS NULL</span></div><div>⏱ 待触发</div></div>
+      <div class="sm-r"><div class="prio">7</div><div>无 stage3 子孙在推进（<span class="mono">NOT EXISTS dispatched/running</span>）且存在子孙 <span class="mono">queue.status='waiting_module_lock'</span></div><div>🔒 等待模块释放</div></div>
+      <div class="sm-r"><div class="prio">8</div><div>stage 3 子任务未全部终态</div><div>▶ 执行中（N/M）</div></div>
+      <div class="sm-r"><div class="prio">9</div><div>stage 4 子任务未终态</div><div>🧪 验收中</div></div>
+      <div class="sm-r"><div class="prio">10</div><div>其余（stage 4 已终态但需求自身未关）</div><div>✅ 已完成</div></div>
     </div>
   </div>
 </div>
 
 <!-- ============ 图 5：部署视图 ============ -->
 <div class="frame-head" id="f5">
-  <h2>⑤ 部署视图 — server 集中编排 · daemon 分布执行 · agent 端 MCP 直连 GitNexus</h2>
-  <p>调度与状态全部收敛在 server 单点（Postgres 为事实源）；daemon 只负责任务执行与模块锁持有；GitNexus 由 <b>agent 端</b>经 MCP 自主查询（已确认决策，server 不落图谱快照，仅把查询结果以 <span class="mono">graph_context</span> JSONB 存到子任务上）。</p>
+  <h2>⑤ 部署视图 — server 集中编排 · daemon 分布执行 + 运行投影 · agent 端 MCP 直连 GitNexus</h2>
+  <p>调度与状态全部收敛在 server 单点（Postgres 为事实源）；daemon 负责任务执行、模块锁持有、以及 <b>agent_run 单向投影</b>（task_message → run/todo/event，经三写端点回传）；GitNexus 由 <b>agent 端</b>经 MCP 自主查询（server 不落图谱快照于需求，仅把查询结果以 <span class="mono">graph_context</span> JSONB 存到子任务上；项目级图谱快照另走 project_graph_snapshot / 456）。<b>到点触发 loop</b> 镜像 jobs_autopilot（查询层 + 调度 job 均已交付·WS2：独立 jobs_requirement_trigger.go，30s sweep）。</p>
 </div>
 <div class="frame" style="margin-bottom:0">
   <div class="frame-bar"><i></i><i></i><i></i><span>deployment — server / daemon / external</span></div>
@@ -572,18 +591,19 @@ body {
     <div class="dcol" style="border-color:oklch(0.55 0.16 255/35%)">
       <div class="d-t">🗄 server（单点编排） <small>Postgres = 事实源</small></div>
       <div class="comp new"><div class="c-t">requirement handler</div><div class="c-d">roles / decompose / prototype / trigger API</div></div>
-      <div class="comp new"><div class="c-t">scheduler · 需求触发 loop</div><div class="c-d">30s sweep start_at 到期 → 入队（triggered_at 防重）</div></div>
+      <div class="comp new"><div class="c-t">scheduler · 需求触发 loop</div><div class="c-d">ListTriggerableRequirements 扫 start_at 到期 → MarkRequirementTriggered 幂等入队。<b>[已交付]</b>（WS2）独立 jobs_requirement_trigger.go 镜像 jobs_autopilot（JobSpec requirement_trigger_dispatch 注册 scheduler.Manager + 30s sweep，与手动 POST /issues/{id}/trigger 共用 triggerOneRequirement）</div></div>
       <div class="comp new"><div class="c-t">拆解编排 service</div><div class="c-d">确认校验 → 批量建子任务（parent/stage/依赖/指派）</div></div>
       <div class="comp ext"><div class="c-t">stage barrier 唤醒</div><div class="c-d">issue_child_done.go（123 复用）</div></div>
-      <div class="comp ext"><div class="c-t">依赖闸门 + 组间互斥判定</div><div class="c-d">issuestatus + claim 查询（root 维度）</div></div>
-      <div class="comp"><div class="c-t">Postgres</div><div class="c-d mono">issue(452) · role_default(453) · role_assignment(453) · prototype_version(454) · module/dependency(451)</div></div>
+      <div class="comp ext"><div class="c-t">依赖闸门 + 模块互斥判定</div><div class="c-d">issuestatus + claim 查询（同模块顺序靠 blocked_by DAG；跨模块互斥靠 daemon ModuleLocker）</div></div>
+      <div class="comp"><div class="c-t">Postgres 17 (pgvector)</div><div class="c-d mono">issue(452) · role_default/assignment(453) · prototype_version(454) · module/dependency(451) · artifact(455) · graph_snapshot(456) · ontology_*(457) · filing_*(458) · agent_run_*(459) · stage_gate_rule(460)</div></div>
       <span class="dlink">任务派发 / 状态回传</span>
     </div>
     <div class="dcol">
       <div class="d-t">⚙ daemon（每 agent） <small>分布式执行</small></div>
-      <div class="comp ext"><div class="c-t">ModuleLocker v2</div><div class="c-d">锁 key (module, root)：同组并发 / 跨组互斥 / 终态即释放</div></div>
+      <div class="comp ext"><div class="c-t">ModuleLocker v2</div><div class="c-d"><b>锁 key = (module_id, root_requirement_id)</b>：同模块同组不互斥（依赖 DAG）/ 同模块跨组无条件互斥 / 异模块 avoid_conflict / root 终态 ReleaseGroup（WS3）</div></div>
       <div class="comp"><div class="c-t">任务执行器</div><div class="c-d">研发写码 · 原型师出 HTML · 测试跑 acceptance/*.spec.ts</div></div>
       <div class="comp"><div class="c-t">业务仓工作区</div><div class="c-d">git clone：docs/prototypes/ + acceptance/ 同仓提交</div></div>
+      <div class="comp new"><div class="c-t">agent_run 投影回传</div><div class="c-d">task_message → run/todo/event；POST /api/agent-runs · /todos · /events（heartbeat + stall_reason）</div></div>
       <span class="dlink">agent 端 MCP 直连</span>
     </div>
     <div class="dcol" style="flex:0.8">
