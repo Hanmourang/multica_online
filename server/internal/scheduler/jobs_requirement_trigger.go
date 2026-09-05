@@ -113,44 +113,79 @@ func RequirementTriggerJob(
 	}
 }
 
-// requirementTriggerHandler 单次 sweep：扫全量到点需求，逐个跑 triggerOneRequirement，
-// 汇总审计结果（scanned / triggered / enqueued / blocked[reason]）。单个需求失败
-// 不阻断本轮其余需求 —— 下一 tick 会重扫（triggered_at 守卫保证幂等）。
+// SweepSummary 是一轮 sweep 的审计汇总。导出为结构体（而非直接返回
+// map[string]any）是为了让测试能强类型断言各字段，也方便未来加新维度
+//（例如按 stage 拆分入队数）而不破坏 handler 层契约。
+type SweepSummary struct {
+	// Scanned 是 ListTriggerableRequirements 返回的行数（本轮扫到的到点需求）。
+	Scanned int
+	// Triggered 是本轮新写入 triggered_at 的需求数（不含 already_triggered）。
+	Triggered int
+	// Enqueued 是本轮新入队的 stage3 子任务总数（跨所有 Triggered 需求）。
+	Enqueued int
+	// Blocked 按原因串汇总被预检 / 已触发 / 错误挡下的需求数。原因串稳定枚举：
+	//   decomposition_not_confirmed / dependency_cycle / acceptance_spec_missing /
+	//   module_window_busy / already_triggered / error
+	Blocked map[string]int
+}
+
+// ResultMap 把汇总转成 sys_cron_executions.result 可写的 map[string]any。
+// 单独抽方法是为了让 handler 与测试共享同一份序列化形态。
+func (s SweepSummary) ResultMap() map[string]any {
+	result := map[string]any{
+		"scanned":   s.Scanned,
+		"triggered": s.Triggered,
+		"enqueued":  s.Enqueued,
+	}
+	if len(s.Blocked) > 0 {
+		result["blocked"] = s.Blocked
+	}
+	return result
+}
+
+// Sweep 扫一轮 ListTriggerableRequirements，逐个跑 TriggerRequirementNow，汇总审计
+// 结果。单个需求失败不阻断本轮其余需求 —— 错误计入 Blocked["error"] 并打 warn 日志，
+// 下一 tick 重扫（MarkRequirementTriggered 的 execrows 守卫保证已触发的行不会
+// 被重复入队）。
+//
+// 导出为方法（而非只在 handler 闭包里）有两个理由：
+//  1. 集成测试可直接调 svc.Sweep(ctx) 断言汇总，无需通过 HandlerInput 绕一圈；
+//  2. 未来若要把 sweep 拆成多 tx（例如按 workspace 分片），这里是唯一切入点。
+func (s *RequirementTriggerService) Sweep(ctx context.Context) (SweepSummary, error) {
+	reqs, err := s.queries.ListTriggerableRequirements(ctx)
+	if err != nil {
+		return SweepSummary{}, fmt.Errorf("list triggerable: %w", err)
+	}
+	summary := SweepSummary{Scanned: len(reqs), Blocked: map[string]int{}}
+	for _, req := range reqs {
+		res, err := s.TriggerRequirementNow(ctx, req)
+		if err != nil {
+			// 单需求失败：记入审计，下一 tick 重试。不 return err
+			// 是为了让本轮其余需求继续被扫。
+			summary.Blocked["error"]++
+			slog.Warn("requirement trigger sweep: trigger failed",
+				"requirement_id", util.UUIDToString(req.ID), "error", err)
+			continue
+		}
+		if !res.Pass {
+			summary.Blocked[res.Reason]++
+			continue
+		}
+		summary.Triggered++
+		summary.Enqueued += res.Enqueued
+	}
+	return summary, nil
+}
+
+// requirementTriggerHandler 单次 sweep：调 svc.Sweep 拿汇总，映射到 HandlerResult
+//（RowsAffected = triggered 数，Result = 审计 map）。
 func requirementTriggerHandler(svc *RequirementTriggerService) Handler {
 	return func(ctx context.Context, in HandlerInput) (HandlerResult, error) {
-		reqs, err := svc.queries.ListTriggerableRequirements(ctx)
+		summary, err := svc.Sweep(ctx)
 		if err != nil {
-			return HandlerResult{}, fmt.Errorf("requirement trigger: list triggerable: %w", err)
+			return HandlerResult{}, fmt.Errorf("requirement trigger: %w", err)
 		}
-		triggered := 0
-		enqueued := 0
-		blocked := map[string]int{}
-		for _, req := range reqs {
-			res, err := svc.TriggerRequirementNow(ctx, req)
-			if err != nil {
-				// 单需求失败：记入审计，下一 tick 重试。不 return err
-				// 是为了让本轮其余需求继续被扫。
-				blocked["error"]++
-				slog.Warn("requirement trigger sweep: trigger failed",
-					"requirement_id", util.UUIDToString(req.ID), "error", err)
-				continue
-			}
-			if !res.Pass {
-				blocked[res.Reason]++
-				continue
-			}
-			triggered++
-			enqueued += res.Enqueued
-		}
-		result := map[string]any{
-			"scanned":   len(reqs),
-			"triggered": triggered,
-			"enqueued":  enqueued,
-		}
-		if len(blocked) > 0 {
-			result["blocked"] = blocked
-		}
-		return HandlerResult{RowsAffected: int64(triggered), Result: result}, nil
+		return HandlerResult{RowsAffected: int64(summary.Triggered), Result: summary.ResultMap()}, nil
 	}
 }
 
@@ -161,8 +196,8 @@ func requirementTriggerHandler(svc *RequirementTriggerService) Handler {
 //   - decomposition_not_confirmed：issue.decomposition_confirmed_at IS NULL
 //   - dependency_cycle：组内 stage3 子任务的 blocked_by 边成环
 //   - acceptance_spec_missing：无任何 stage3 子任务写了非空 acceptance_spec
-//   - module_window_busy：同模块上有其它 root 组的活动任务（v1 桩恒 false，
-//     待 WS3 ModuleLocker v2 落地后接入实查询）
+//   - module_window_busy：同模块上有其它 root 组的活动任务（ModuleBusyForOtherRoot
+//     查询命中；WS3 ModuleLocker v2 组级互斥语义，见 moduleWindowFree 注释）
 //   - already_triggered：MarkRequirementTriggered 返回 0 行（并发竞争输给
 //     另一 sweep 实例或手动触发）
 func triggerOneRequirement(
@@ -253,18 +288,25 @@ func triggerOneRequirement(
 
 // moduleWindowFree 报告该需求所在模块是否对其 root 组空闲（无其它组活动任务）。
 //
-// v1 桩：始终返回 true —— 组级互斥窗口是 WS3 ModuleLocker v2 的产出，本轮
-// WS2 不改 .sql、不引新查询，先让触发链路跑通；等 WS3 落地后把这里换成
-// ModuleBusyForOtherRoot（或 WS3 定稿的等价查询）即可，其余触发逻辑无需改。
+// 对齐 WS3 ModuleLocker v2（daemon/module_locker.go blockerLocked）：同模块跨组
+// 无条件互斥，同组内部并行不阻。触发前置只在「有模块 + 有 root」时才检查 ——
+// 任一方缺失即退化为 451 语义（不互斥），避免把回填前的存量行卡死。
 //
-// 无模块需求（module_id 为 NULL）恒返回 true —— 不参与互斥。
-func moduleWindowFree(_ context.Context, _ *db.Queries, req db.Issue) (bool, error) {
-	if !req.ModuleID.Valid {
+// 活动任务口径 = CountRunningTasks（agent.sql:1749）：dispatched / running /
+// waiting_local_directory / waiting_module_lock —— waiting_* 也算占用（daemon
+// 已在等锁，触发新组只会加剧排队）；queued 不算（尚未占用互斥窗口）。
+func moduleWindowFree(ctx context.Context, queries *db.Queries, req db.Issue) (bool, error) {
+	if !req.ModuleID.Valid || !req.RootRequirementID.Valid {
 		return true, nil
 	}
-	// TODO(WS3): replace with real ModuleBusyForOtherRoot query once
-	// ModuleLocker v2 lands group-level mutex (root_requirement_id keyed).
-	return true, nil
+	busy, err := queries.ModuleBusyForOtherRoot(ctx, db.ModuleBusyForOtherRootParams{
+		ModuleID:          req.ModuleID,
+		RootRequirementID: req.RootRequirementID,
+	})
+	if err != nil {
+		return false, err
+	}
+	return !busy, nil
 }
 
 // acceptanceSpecNonEmpty 判断 JSONB 列是否填了实际内容。列默认值 '{}' /

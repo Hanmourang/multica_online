@@ -577,3 +577,44 @@ func (q *Queries) IncrementAcceptanceRound(ctx context.Context, id pgtype.UUID) 
 	err := row.Scan(&acceptanceRound)
 	return acceptanceRound, err
 }
+
+const moduleBusyForOtherRoot = `-- name: ModuleBusyForOtherRoot :one
+SELECT EXISTS (
+    SELECT 1
+    FROM agent_task_queue q
+    JOIN issue ti ON ti.id = q.issue_id
+    WHERE ti.module_id = $1
+      AND ti.root_requirement_id IS NOT NULL
+      AND ti.root_requirement_id <> $2
+      AND q.status IN ('dispatched', 'running', 'waiting_local_directory', 'waiting_module_lock')
+) AS busy
+`
+
+type ModuleBusyForOtherRootParams struct {
+	ModuleID          pgtype.UUID `json:"module_id"`
+	RootRequirementID pgtype.UUID `json:"root_requirement_id"`
+}
+
+// 触发窗口预检（plan 2026-09-06-requirement-calendar-phase1-completion §WS2 Task 2.3，
+// 开放问题 #10）：检测同 module_id 上是否存在「其它 root 需求组」的活动任务。
+//
+// 与 WS3 ModuleLocker v2 的组级互斥语义严格对齐（daemon/module_locker.go
+// blockerLocked）：同模块跨组无条件互斥；同组内部并行不阻。本查询只看
+// 「其他组」，本组自己的活动任务不算 busy（否则同组多个 stage3 子任务
+// 会互相卡住触发）。
+//
+// 活动任务状态 = CountRunningTasks 同口径（agent.sql:1749）：dispatched / running /
+// waiting_local_directory / waiting_module_lock —— waiting_* 也算占用（daemon
+// 已在等锁，触发新组只会加剧排队）；queued 不算（尚未占用互斥窗口）。
+//
+// NULL 处理：
+// - module_id 为 NULL（无模块需求）→ 调用方直接跳过本查询（无模块不互斥）；
+// - root_requirement_id 为 NULL（回填前的存量行）→ 调用方跳过（WS3 语义：
+//   任一方 rootID 为空则同模块维度退化为 451，不互斥）；
+// - SQL 层面 IS NOT NULL + <> 双重保护：避免 NULL <> x 返回 UNKNOWN 而漏检。
+func (q *Queries) ModuleBusyForOtherRoot(ctx context.Context, arg ModuleBusyForOtherRootParams) (bool, error) {
+	row := q.db.QueryRow(ctx, moduleBusyForOtherRoot, arg.ModuleID, arg.RootRequirementID)
+	var busy bool
+	err := row.Scan(&busy)
+	return busy, err
+}

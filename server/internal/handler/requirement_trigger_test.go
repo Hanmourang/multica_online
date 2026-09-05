@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/scheduler"
 )
 
 // TestRequirementTriggerSweep covers spec §7.1 / §7.5①: the 30s sweep picks up
@@ -143,12 +145,16 @@ func TestRequirementTriggerSweep(t *testing.T) {
 		reqD := insertTriggerRequirement(t, "Sweep D 未确认拆解", true, &past, false)
 		insertStageChild(t, reqD, "D-T1", 3, agentID)
 
-		n, err := testHandler.IssueService.SweepRequirementTriggers(ctx)
+		// sweep 已迁到 scheduler 层（带触发前置预检的 RequirementTriggerService.Sweep）；
+		// service.IssueService.SweepRequirementTriggers 死代码已删除。这里就地构造
+		// 与 handler 生产路径同一份 service（h.Queries + h.TaskService）跑一轮。
+		svc := scheduler.NewRequirementTriggerService(testHandler.Queries, testHandler.TaskService)
+		summary, err := svc.Sweep(ctx)
 		if err != nil {
-			t.Fatalf("SweepRequirementTriggers: %v", err)
+			t.Fatalf("Sweep: %v", err)
 		}
-		if n != 1 {
-			t.Fatalf("expected 1 requirement triggered, got %d", n)
+		if summary.Triggered != 1 {
+			t.Fatalf("expected 1 requirement triggered, got %d (summary=%+v)", summary.Triggered, summary)
 		}
 		if triggeredAt(t, reqA) == nil {
 			t.Fatal("requirement A: triggered_at should be set")
@@ -174,12 +180,12 @@ func TestRequirementTriggerSweep(t *testing.T) {
 		}
 
 		// 幂等：再扫一轮，A 不重复触发、队列行数不变。
-		n, err = testHandler.IssueService.SweepRequirementTriggers(ctx)
+		summary, err = svc.Sweep(ctx)
 		if err != nil {
 			t.Fatalf("second sweep: %v", err)
 		}
-		if n != 0 {
-			t.Fatalf("second sweep should trigger nothing, got %d", n)
+		if summary.Triggered != 0 {
+			t.Fatalf("second sweep should trigger nothing, got %d (summary=%+v)", summary.Triggered, summary)
 		}
 		if got := queuedCount(t, t1); got != 1 {
 			t.Fatalf("second sweep must not duplicate T1's task, got %d", got)
@@ -259,6 +265,131 @@ func TestRequirementTriggerSweep(t *testing.T) {
 		}
 		if triggeredAt(t, reqOK) != nil {
 			t.Fatal("child-trigger attempt must not trigger the parent")
+		}
+	})
+
+	// module_window_busy 预检（plan §WS2 Task 2.3 / 开放问题#10）：接线
+	// ModuleBusyForOtherRoot 真实查询后，同模块跨 root 组互斥、同组并行。
+	// 对齐 WS3 ModuleLocker v2（daemon/module_locker.go）语义。
+	t.Run("module window busy blocks cross-root and frees same-root", func(t *testing.T) {
+		agentID := testAgentID(t)
+
+		// 同模块互斥的载体：project + project_module。
+		var projectID string
+		if err := testPool.QueryRow(ctx,
+			`INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id`,
+			testWorkspaceID, "Module Window "+suffix).Scan(&projectID); err != nil {
+			t.Fatalf("insert project: %v", err)
+		}
+		var moduleID string
+		if err := testPool.QueryRow(ctx,
+			`INSERT INTO project_module (project_id, workspace_id, name) VALUES ($1, $2, $3) RETURNING id`,
+			projectID, testWorkspaceID, "mod-"+suffix).Scan(&moduleID); err != nil {
+			t.Fatalf("insert project_module: %v", err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM project_module WHERE id = $1`, moduleID)
+			testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+		})
+
+		nextNumber := func() int {
+			var number int
+			if err := testPool.QueryRow(ctx, `
+				UPDATE workspace SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number),0) FROM issue WHERE workspace_id=$1))+1
+				WHERE id=$1 RETURNING issue_counter`, testWorkspaceID).Scan(&number); err != nil {
+				t.Fatalf("next issue number: %v", err)
+			}
+			return number
+		}
+
+		// insertRoot 建顶层可触发需求，显式写 module_id + root_requirement_id=自身
+		//（server 创建路径回填 root；测试走裸 SQL 必须手动设，否则
+		// ModuleBusyForOtherRoot 的 IS NOT NULL 过滤会漏判）。
+		insertRoot := func(title string) string {
+			var id string
+			if err := testPool.QueryRow(ctx, `
+				INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position,
+					auto_trigger, start_at, decomposition_confirmed_at, module_id)
+				VALUES ($1,$2,'todo','medium','member',$3,$4,100,true,$5,now(),$6)
+				RETURNING id`, testWorkspaceID, title+" "+suffix, testUserID, nextNumber(), past, moduleID).Scan(&id); err != nil {
+				t.Fatalf("insert root requirement: %v", err)
+			}
+			if _, err := testPool.Exec(ctx, `UPDATE issue SET root_requirement_id = id WHERE id = $1`, id); err != nil {
+				t.Fatalf("set root_requirement_id: %v", err)
+			}
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id IN (SELECT id FROM issue WHERE parent_issue_id=$1 OR id=$1)`, id)
+				testPool.Exec(context.Background(), `DELETE FROM issue WHERE id=$1 OR parent_issue_id=$1`, id)
+			})
+			return id
+		}
+
+		// insertChild 建 stage3 子任务，写 acceptance_spec（过预检）+ root_requirement_id=rootID
+		//（子任务归属其父需求组，跨组互斥按 root 比较）。
+		insertChild := func(parentID, rootID, title string) string {
+			var id string
+			if err := testPool.QueryRow(ctx, `
+				INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position,
+					parent_issue_id, stage, assignee_type, assignee_id, acceptance_spec, module_id, root_requirement_id)
+				VALUES ($1,$2,'todo','medium','member',$3,$4,100,$5,$6,'agent',$7,'{"criteria":["smoke"]}'::jsonb,$8,$9)
+				RETURNING id`, testWorkspaceID, title, testUserID, nextNumber(), parentID, 3, agentID, moduleID, rootID).Scan(&id); err != nil {
+				t.Fatalf("insert group child: %v", err)
+			}
+			return id
+		}
+
+		// X 组：塑一个 running 任务占用模块（模拟 WS3 已持有该模块的其它 root 组）。
+		reqX := insertRoot("Window X")
+		childX := insertChild(reqX, reqX, "X-T1")
+		var taskX string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, started_at)
+			VALUES ($1,(SELECT runtime_id FROM agent WHERE id=$1),'running',0,$2,now())
+			RETURNING id`, agentID, childX).Scan(&taskX); err != nil {
+			t.Fatalf("insert running task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id=$1`, taskX) })
+
+		// Y 组：同模块、不同 root。触发应被 module_window_busy 挡下（命中）。
+		reqY := insertRoot("Window Y")
+		insertChild(reqY, reqY, "Y-T1")
+
+		wY := httptest.NewRecorder()
+		rY := withURLParam(newRequest("POST", "/api/issues/"+reqY+"/trigger", nil), "id", reqY)
+		testHandler.TriggerRequirement(wY, rY)
+		if wY.Code != http.StatusConflict {
+			t.Fatalf("cross-root trigger: expected 409 module_window_busy, got %d: %s", wY.Code, wY.Body.String())
+		}
+		if !strings.Contains(wY.Body.String(), "module_window_busy") {
+			t.Fatalf("cross-root trigger body should carry 'module_window_busy', got %s", wY.Body.String())
+		}
+		if triggeredAt(t, reqY) != nil {
+			t.Fatal("Y must not be triggered while another root group occupies the module")
+		}
+
+		// X 组自身：running 任务属于同一 root（X），同组并行不阻 → 放行。
+		wX := httptest.NewRecorder()
+		rX := withURLParam(newRequest("POST", "/api/issues/"+reqX+"/trigger", nil), "id", reqX)
+		testHandler.TriggerRequirement(wX, rX)
+		if wX.Code != http.StatusOK {
+			t.Fatalf("same-root trigger: expected 200 (window free for own group), got %d: %s", wX.Code, wX.Body.String())
+		}
+		if triggeredAt(t, reqX) == nil {
+			t.Fatal("X (same root group as the running task) should trigger — same-group parallel allowed")
+		}
+
+		// 释放 X 组的 running 任务后，Y 应放行（互斥窗口腾出）。
+		if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status='completed' WHERE id=$1`, taskX); err != nil {
+			t.Fatalf("complete running task: %v", err)
+		}
+		wY2 := httptest.NewRecorder()
+		rY2 := withURLParam(newRequest("POST", "/api/issues/"+reqY+"/trigger", nil), "id", reqY)
+		testHandler.TriggerRequirement(wY2, rY2)
+		if wY2.Code != http.StatusOK {
+			t.Fatalf("after window release: expected 200, got %d: %s", wY2.Code, wY2.Body.String())
+		}
+		if triggeredAt(t, reqY) == nil {
+			t.Fatal("Y should trigger once the other root group's task completes")
 		}
 	})
 }
