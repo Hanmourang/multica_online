@@ -166,9 +166,92 @@ func buildDecomposeBrief(issue db.Issue, repoLabel, prototypePath string) string
 		fmt.Fprintf(&b, "\n\n## 已确认原型\n%s", prototypePath)
 	}
 	b.WriteString("\n\n## 产出约定\n" +
-		"输出 plan 评论 + 子任务草稿：每个草稿含 feature_points（kind: new|modify + 代码对象）、" +
-		"graph_context、acceptance_spec、依赖链与指派角色。")
+		"在本需求（父 issue）发表一条评论：正文为 plan（markdown），末尾附子任务草稿机读块" +
+		"（" + decompositionDraftsFence + " 围栏内为 JSON 数组）。" +
+		"每个草稿含 temp_id/title/stage（3=执行，4=验收）/assignee_role（developer|data|tester）/" +
+		"feature_points（kind: new|modify + 代码对象）/graph_context/acceptance_spec/depends_on（同批 temp_id）。")
 	return b.String()
+}
+
+// ---- 拆解读取（spec §9：GET /issues/{id}/decomposition）----
+
+// decompositionDraftsFence 是 PM plan 评论里子任务草稿机读块的围栏标记
+// （quick-actions 同款约定：人类可读正文 + 一段 ```<tag> 包裹的 JSON）。
+const decompositionDraftsFence = "```decomposition-drafts"
+
+// splitDecompositionComment 把 PM 评论拆成（plan 正文, 草稿 JSON 数组, ok）。
+// plan = 围栏前正文 + 围栏后的尾部说明；机读块必须是合法 JSON 数组，
+// 否则整条评论不算产出（半截输出回退到更早的有效评论）。
+func splitDecompositionComment(content string) (plan string, drafts json.RawMessage, ok bool) {
+	idx := strings.Index(content, decompositionDraftsFence)
+	if idx < 0 {
+		return "", nil, false
+	}
+	rest := strings.TrimPrefix(content[idx+len(decompositionDraftsFence):], "\n")
+	close := strings.Index(rest, "```")
+	if close < 0 {
+		return "", nil, false
+	}
+	raw := strings.TrimSpace(rest[:close])
+	var arr []json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil || arr == nil {
+		return "", nil, false
+	}
+	plan = strings.TrimSpace(content[:idx])
+	if tail := strings.TrimSpace(rest[close+3:]); tail != "" {
+		if plan != "" {
+			plan += "\n\n" + tail
+		} else {
+			plan = tail
+		}
+	}
+	return plan, json.RawMessage(raw), true
+}
+
+// decompositionResponse 是 GET 的响应：plan 评论正文（机读块之外的部分）+
+// 草稿数组原样透传；草稿字段由确认门（ConfirmDecomposition）校验，读取侧不解释。
+type decompositionResponse struct {
+	Plan            *string         `json:"plan"`
+	Drafts          json.RawMessage `json:"drafts"`
+	SourceCommentID *string         `json:"source_comment_id"`
+}
+
+// GetDecomposition handles GET /api/issues/{id}/decomposition（spec §9）：
+// 最新一条带有效机读块的需求评论拆出 plan 与草稿；无产出时 plan=null、drafts=[]。
+func (h *Handler) GetDecomposition(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	// 与评论区同源的读窗口（足够覆盖 PM 产出所在的近期时间线）。
+	comments, err := h.Queries.ListCommentsForIssue(r.Context(), db.ListCommentsForIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Limit:       200,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list comments")
+		return
+	}
+	// 列表按时间升序；从尾向前取第一条带有效机读块的评论。
+	for i := len(comments) - 1; i >= 0; i-- {
+		c := comments[i]
+		plan, drafts, found := splitDecompositionComment(c.Content)
+		if !found {
+			continue
+		}
+		commentID := uuidToString(c.ID)
+		writeJSON(w, http.StatusOK, decompositionResponse{
+			Plan:            &plan,
+			Drafts:          drafts,
+			SourceCommentID: &commentID,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, decompositionResponse{
+		Plan:   nil,
+		Drafts: json.RawMessage("[]"),
+	})
 }
 
 // ---- 拆解确认（spec §9：POST /issues/{id}/decomposition/confirm）----

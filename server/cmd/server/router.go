@@ -1889,6 +1889,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/roles", h.ListIssueRoleAssignments)
 					r.Put("/roles", h.ReplaceIssueRoleAssignments)
 					r.Post("/decompose", h.DecomposeRequirement)
+					r.Get("/decomposition", h.GetDecomposition)
 					r.Post("/decomposition/confirm", h.ConfirmDecomposition)
 					// 原型（spec 2026-09-04-requirement-calendar-design.md §9）：
 					// 一键生成/重生成 + 版本历史 + 逐项标记 + 确认门。

@@ -345,3 +345,191 @@ func TestConfirmDecompositionHandler(t *testing.T) {
 		}
 	})
 }
+
+// TestSplitDecompositionComment 覆盖 plan 评论的机读块拆析：无围栏/坏 JSON/
+// 非数组都不算产出；围栏后的尾部说明并入 plan。
+func TestSplitDecompositionComment(t *testing.T) {
+	t.Run("no fence is not a decomposition comment", func(t *testing.T) {
+		if _, _, ok := splitDecompositionComment("普通 plan 正文"); ok {
+			t.Fatal("expected ok=false without the fence")
+		}
+	})
+
+	t.Run("plan plus drafts block splits cleanly", func(t *testing.T) {
+		content := "## 目标\n拆解为两个执行任务\n\n```decomposition-drafts\n" +
+			`[{"temp_id":"t1","title":"账户模型","stage":3},{"temp_id":"t2","title":"验收","stage":4,"depends_on":["t1"]}]` +
+			"\n```"
+		plan, drafts, ok := splitDecompositionComment(content)
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if plan != "## 目标\n拆解为两个执行任务" {
+			t.Fatalf("plan = %q", plan)
+		}
+		var arr []map[string]any
+		if err := json.Unmarshal(drafts, &arr); err != nil {
+			t.Fatalf("drafts not valid JSON: %v", err)
+		}
+		if len(arr) != 2 || arr[0]["temp_id"] != "t1" {
+			t.Fatalf("drafts = %s", drafts)
+		}
+	})
+
+	t.Run("trailing text after the fence folds back into plan", func(t *testing.T) {
+		content := "plan 正文\n```decomposition-drafts\n[]\n```\n\n备注：验收依赖 t1"
+		plan, _, ok := splitDecompositionComment(content)
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if plan != "plan 正文\n\n备注：验收依赖 t1" {
+			t.Fatalf("plan = %q", plan)
+		}
+	})
+
+	t.Run("broken json is not a valid block", func(t *testing.T) {
+		if _, _, ok := splitDecompositionComment("p\n```decomposition-drafts\n[{oops]\n```"); ok {
+			t.Fatal("expected ok=false for broken JSON")
+		}
+	})
+
+	t.Run("non-array json is not a valid block", func(t *testing.T) {
+		if _, _, ok := splitDecompositionComment("p\n```decomposition-drafts\n{\"a\":1}\n```"); ok {
+			t.Fatal("expected ok=false for object payload")
+		}
+		if _, _, ok := splitDecompositionComment("p\n```decomposition-drafts\nnull\n```"); ok {
+			t.Fatal("expected ok=false for null payload")
+		}
+	})
+}
+
+// TestGetDecomposition covers GET /api/issues/{id}/decomposition (spec §9)：
+// PM 产出的载体是需求评论（plan 正文 + ```decomposition-drafts 机读块），
+// 端点取最新一条带有效块的评论拆出 plan 与草稿；无产出时 plan=null、drafts=[]。
+func TestGetDecomposition(t *testing.T) {
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+
+	insertRequirement := func(t *testing.T) string {
+		t.Helper()
+		var number int
+		if err := testPool.QueryRow(ctx, `
+                        UPDATE workspace
+                        SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+                        WHERE id = $1 RETURNING issue_counter
+                `, testWorkspaceID).Scan(&number); err != nil {
+			t.Fatalf("next issue number: %v", err)
+		}
+		var id string
+		if err := testPool.QueryRow(ctx, `
+                        INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
+                        VALUES ($1, $2, 'todo', 'none', 'member', $3, $4, 100)
+                        RETURNING id
+                `, testWorkspaceID, "DecompGET "+suffix, testUserID, number).Scan(&id); err != nil {
+			t.Fatalf("insert requirement: %v", err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, id)
+			testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id)
+		})
+		return id
+	}
+	insertComment := func(t *testing.T, issueID, content string, createdAt time.Time) string {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `
+                        INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, created_at, updated_at)
+                        VALUES ($1, $2, 'member', $3, $4, $5, $5)
+                        RETURNING id
+                `, issueID, testWorkspaceID, testUserID, content, createdAt).Scan(&id); err != nil {
+			t.Fatalf("insert comment: %v", err)
+		}
+		return id
+	}
+	get := func(t *testing.T, issueID string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("GET", "/api/issues/"+issueID+"/decomposition", nil)
+		req = withURLParam(req, "id", issueID)
+		testHandler.GetDecomposition(w, req)
+		return w
+	}
+
+	t.Run("no decomposition comment yields empty payload", func(t *testing.T) {
+		issueID := insertRequirement(t)
+		insertComment(t, issueID, "普通讨论评论", time.Now())
+
+		w := get(t, issueID)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Plan   *string          `json:"plan"`
+			Drafts []map[string]any `json:"drafts"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Plan != nil {
+			t.Fatalf("plan = %v, want null", *resp.Plan)
+		}
+		if resp.Drafts == nil || len(resp.Drafts) != 0 {
+			t.Fatalf("drafts = %v, want []", resp.Drafts)
+		}
+	})
+
+	t.Run("plan and drafts split from the latest fenced comment", func(t *testing.T) {
+		issueID := insertRequirement(t)
+		older := time.Now().Add(-time.Hour)
+		newer := time.Now()
+		insertComment(t, issueID, "旧 plan\n```decomposition-drafts\n"+`[{"temp_id":"old","title":"旧稿","stage":3}]`+"\n```", older)
+		latestID := insertComment(t, issueID, "新 plan 正文\n\n```decomposition-drafts\n"+
+			`[{"temp_id":"t1","title":"账户模型","stage":3,"assignee_role":"developer","feature_points":[{"title":"积分账户","kind":"new"}]},{"temp_id":"t2","title":"验收","stage":4,"depends_on":["t1"]}]`+
+			"\n```", newer)
+
+		w := get(t, issueID)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Plan            *string          `json:"plan"`
+			Drafts          []map[string]any `json:"drafts"`
+			SourceCommentID *string          `json:"source_comment_id"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Plan == nil || *resp.Plan != "新 plan 正文" {
+			t.Fatalf("plan = %v", resp.Plan)
+		}
+		if len(resp.Drafts) != 2 || resp.Drafts[0]["temp_id"] != "t1" {
+			t.Fatalf("drafts = %v", resp.Drafts)
+		}
+		// 草稿字段原样透传（assignee_role 等非确认门字段不丢失）。
+		if resp.Drafts[0]["assignee_role"] != "developer" {
+			t.Fatalf("draft[0] lost assignee_role: %v", resp.Drafts[0])
+		}
+		if resp.SourceCommentID == nil || *resp.SourceCommentID != latestID {
+			t.Fatalf("source_comment_id = %v, want %s", resp.SourceCommentID, latestID)
+		}
+	})
+
+	t.Run("broken latest block falls back to an older valid one", func(t *testing.T) {
+		issueID := insertRequirement(t)
+		insertComment(t, issueID, "有效 plan\n```decomposition-drafts\n"+`[{"temp_id":"ok","title":"稿","stage":3}]`+"\n```", time.Now().Add(-time.Hour))
+		insertComment(t, issueID, "半截输出\n```decomposition-drafts\n[{被截断", time.Now())
+
+		w := get(t, issueID)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Drafts []map[string]any `json:"drafts"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Drafts) != 1 || resp.Drafts[0]["temp_id"] != "ok" {
+			t.Fatalf("drafts = %v, want fallback to the older valid block", resp.Drafts)
+		}
+	})
+}
