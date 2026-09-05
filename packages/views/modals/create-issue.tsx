@@ -84,6 +84,7 @@ import {
   useSetIssueProperty,
 } from "@multica/core/properties";
 import { projectRoleDefaultsOptions } from "@multica/core/issues/queries";
+import { projectResourcesOptions } from "@multica/core/projects";
 import type { RoleAssignment } from "@multica/core/types";
 import {
   ApiError,
@@ -341,6 +342,7 @@ export function ManualCreatePanel({
   const [decomposeMode, setDecomposeMode] = useState<"auto" | "confirm" | "manual">("confirm");
   const [autoTrigger, setAutoTrigger] = useState(true);
   const [roleEntries, setRoleEntries] = useState<RoleAssignment[]>([]);
+  const [repoResourceId, setRepoResourceId] = useState("");
   const showRequirementFields = !parentIssueId && !!projectId;
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
@@ -365,6 +367,12 @@ export function ManualCreatePanel({
     ...projectRoleDefaultsOptions(projectId),
     enabled: showRequirementFields,
   });
+  // git 库选择器数据源：项目资源里过滤出 github_repo（spec §10:378）。
+  const { data: projectResources = [] } = useQuery({
+    ...projectResourcesOptions(wsId, projectId ?? ""),
+    enabled: showRequirementFields,
+  });
+  const repoResources = projectResources.filter((r) => r.resource_type === "github_repo");
   // Sync server-fetched role defaults into local state (only when the user
   // hasn't customized yet — entries are empty until the first project load).
   useEffect(() => {
@@ -598,6 +606,7 @@ export function ManualCreatePanel({
             start_at: startAt ? new Date(startAt).toISOString() : undefined,
             decompose_mode: decomposeMode,
             auto_trigger: autoTrigger,
+            repo_resource_id: repoResourceId || undefined,
           } : {}),
         });
       }
@@ -1535,6 +1544,26 @@ export function ManualCreatePanel({
                     onChange={(e) => setGoal(e.target.value)}
                     placeholder={t(($) => $.create_issue.goal_placeholder)}
                   />
+                </div>
+
+                {/* Git repo (project_resource) — spec §10:378, between goal and start time */}
+                <div>
+                  <label className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.create_issue.repo_label)}
+                  </label>
+                  <select
+                    data-testid="create-issue-repo"
+                    className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-body focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={repoResourceId}
+                    onChange={(e) => setRepoResourceId(e.target.value)}
+                  >
+                    <option value="">{t(($) => $.create_issue.repo_none)}</option>
+                    {repoResources.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.label ?? r.id}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Start time — minute-precision */}

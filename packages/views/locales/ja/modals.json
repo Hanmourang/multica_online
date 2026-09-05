@@ -265,6 +265,8 @@
       "manual": "自動分解なし、手動でサブタスク作成"
     },
     "auto_trigger_label": "開始時刻で自動トリガー",
-    "auto_trigger_hint": "開始時刻にサブタスクが自動でスケジュールに入る"
+    "auto_trigger_hint": "開始時刻にサブタスクが自動でスケジュールに入る",
+    "repo_label": "Git リポジトリ",
+    "repo_none": "リポジトリなし"
   }
 }

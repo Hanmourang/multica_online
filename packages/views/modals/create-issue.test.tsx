@@ -227,6 +227,19 @@ vi.mock("@multica/core/issues/queries", () => ({
   }),
 }));
 
+vi.mock("@multica/core/projects", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/projects")>()),
+  // git 库选择器的数据源：一个 github_repo + 一个 local_directory，验证只列前者。
+  projectResourcesOptions: (wsId: string, projectId: string) => ({
+    queryKey: ["project-resources", wsId, projectId],
+    queryFn: () =>
+      Promise.resolve([
+        { id: "res-1", project_id: projectId, workspace_id: wsId, resource_type: "github_repo", resource_ref: {}, label: "multica/app", position: 0, created_at: "2026-09-01T00:00:00Z", created_by: null },
+        { id: "res-2", project_id: projectId, workspace_id: wsId, resource_type: "local_directory", resource_ref: {}, label: "local-dir", position: 1, created_at: "2026-09-01T00:00:00Z", created_by: null },
+      ]),
+  }),
+}));
+
 // CreateRunHint's pre-trigger preview + actor-name lookup are exercised in
 // their own suites; here we only need the create form to render without query
 // infra, so stub them to the inert "no run will start" state.
@@ -1253,6 +1266,34 @@ describe("CreateIssueModal", () => {
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
     expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "proj-1");
+  });
+
+  it("顶层需求选项目后渲染 git 库选择器（仅 github_repo），创建带 repo_resource_id", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.shared.projectId = "proj-1";
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    // 选择器出现，只列 github_repo（multica/app），不列 local_directory（local-dir）。
+    const repo = (await screen.findByTestId("create-issue-repo")) as HTMLSelectElement;
+    await waitFor(() => expect(repo.textContent).toContain("multica/app"));
+    expect(repo.textContent).not.toContain("local-dir");
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Refactor auth" },
+    });
+    fireEvent.change(repo, { target: { value: "res-1" } });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Refactor auth",
+          project_id: "proj-1",
+          repo_resource_id: "res-1",
+        }),
+      );
+    });
   });
 
   // Manual → agent must forward parent_issue_id when the modal was opened

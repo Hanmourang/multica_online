@@ -267,6 +267,8 @@
       "manual": "No auto-decompose, create subtasks manually"
     },
     "auto_trigger_label": "Auto-trigger at start time",
-    "auto_trigger_hint": "Subtasks enter scheduling automatically at start time"
+    "auto_trigger_hint": "Subtasks enter scheduling automatically at start time",
+    "repo_label": "Git repository",
+    "repo_none": "No repository"
   }
 }

@@ -265,6 +265,8 @@
       "manual": "系统不拆解，人工按模板建子任务"
     },
     "auto_trigger_label": "到达开始时间自动触发",
-    "auto_trigger_hint": "开始时间起子任务自动进入调度；关闭则需手动触发"
+    "auto_trigger_hint": "开始时间起子任务自动进入调度；关闭则需手动触发",
+    "repo_label": "Git 库",
+    "repo_none": "不绑定 Git 库"
   }
 }

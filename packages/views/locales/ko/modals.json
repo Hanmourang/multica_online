@@ -265,6 +265,8 @@
       "manual": "자동 분해 없음, 수동으로 하위 작업 생성"
     },
     "auto_trigger_label": "시작 시간에 자동 트리거",
-    "auto_trigger_hint": "시작 시간에 하위 작업이 자동으로 스케줄링에 진입"
+    "auto_trigger_hint": "시작 시간에 하위 작업이 자동으로 스케줄링에 진입",
+    "repo_label": "Git 저장소",
+    "repo_none": "저장소 없음"
   }
 }
