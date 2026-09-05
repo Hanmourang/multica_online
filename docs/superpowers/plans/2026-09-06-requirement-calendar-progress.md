@@ -7,7 +7,7 @@
 
 - **仓库**：`ai_workspace_online/ai_agents/multica_online`
 - **分支**：`feat/requirement-calendar`（基线 main = `7dcc53e`）
-- **最近更新**：2026-09-06（WS3 daemon 侧完成、测试全绿，未提交）
+- **最近更新**：2026-09-06（archive 差距补齐线：d9aa3a2 三端点 + df5b689 CLI sync 管道，E2E 全链路验证通过）
 
 ---
 
@@ -65,6 +65,12 @@
 | 3ef0bbc | **修复F**：ListIssues/ListGroupedIssues 动态 SQL 补齐需求字段 + 派生状态投影（86047ef 修的 sqlc 静态查询是死代码，列表 handler 走手工拼 SQL） | 产品接入 |
 | 5af7801 | **修复G**：`POST /issues/table/rows` 契约补齐同一投影（拆 `requirementCalendarColumns` 共享常量，三条动态 SQL 路径逐列对齐，测试锁死） | 产品接入 |
 | 89fc327 | **修复H**：前端 calendar 纳入 `usesServerStatusSurface`（此前 `controller.issues` 恒为空，月历空白）+ 日历强制 `include_sub_issues=false` | 产品接入 |
+| d9aa3a2 | **archive 差距补齐①**：migration 461（sync_diagnostics + project_archive_sync_config + confidence/override_reason）+ sync-config GET/PUT + diagnostics 上报/查询 + bind-candidates 三因子置信度端点 + workspace 删除 manifest 补齐 14 表 | archive Phase 1 |
+| df5b689 | **archive 差距补齐②**：`multica archive sync` CLI 五阶段管道（扫描→CONTRACT.md §1 契约解析→blob_sha 差量上传→全量清单 sync→诊断上报）+ CONTRACT.md §5 存量迁移脚本 | archive Phase 2 |
+
+**archive 线 E2E 证据（2026-09-06，dev api :18227 + dev 库 :55433）**：fixture 仓库 3 文件首次同步全量入库（frontmatter `multica_issue_id` 绑定成功 1 行）；幂等重跑「变更 0 · 未变 3 · 更新 3 · 软删 0」；`sync_diagnostics` 成功（scan/index info）与失败（index error，FK 违反）路径均正确落库。差距分析归档：`change_logs/multica/2026-09-06-双原型功能差距分析与补齐范围.md`。
+
+**archive 线刻意不做项**：`migrate-archive-structure.sh --apply` 实跑（projects_mgmt 是用户真实文档仓库，20k+ 文件，dry-run 已验证 16 组映射全命中，实跑留给用户确认）；CONTRACT.md 已写入 projects_mgmt 仓库但未提交（该仓库有用户自己的未提交改动）。
 
 **产品接入状态**：日历视图、原型面板、拆解面板均已实际挂载进 issue 详情页（不再是「做了没接」）。
 
@@ -97,23 +103,31 @@
 
 ---
 
-## 4. 待办（功能未实现）
+## 4. 待办核销（2026-09-06 双原型差距盘点实证）
 
-| 工作流 | 范围 | 状态 |
+按两个原型 HTML 逐画面盘点后发现：**并行会话实际进度远超本文件此前记录**，WS4/WS5/WS6 主体均已完成（测试实跑全绿）：
+
+| 工作流 | 实证状态 | 证据 |
 |---|---|---|
-| **WS4** 验收闭环 | `POST /issues/{id}/acceptance/verdict`：pass→关 stage4→需求可 done；fail→round+1→建 stage3 修复子任务（依赖=相关执行任务、assignee=原执行人、附失败断言清单）→打回；round>3→第 10 态「验收失败」+ 评论通知负责人+PM；验收代码版本约束（agent 不得自行改断言，需求变更回退 PM 确认后同 PR 升版）；派生状态 CASE 增第 10 态 | 未开始 |
-| **WS5** agent_run 投影器 | daemon 上报 `call_id`（tool_use/tool_result 配对键）→ server ingest 派生 `agent_run`/`agent_run_todo`/`agent_run_event`（459 表已建，server 只读不反写之外的唯一写入方是 ingest）；终态收尾（complete/fail/cancel→run 终态，不被晚到回调覆盖）+ token 累计；**原生 SQL 写，不进 sqlc 查询文件**；run id 用确定性 UUID v5 免新迁移；旧 daemon 无 call_id 降级（不建 tool 待办） | 未开始 |
-| **WS6** 前端动线补全 | 画面 6 执行调度面板（分钟倒计时/触发前预检清单/子任务进度/waiting_module_lock 等待原因渲染/立即触发按钮）；画面 7 验收报告面板（溯源/执行/回归/目标覆盖四板块 + verdict + 打回链 + 轮次时间线）；decompose 面板 DraftCard 补 gn-box/acc-box；日历拖拽视觉反馈 + RequirementBlock 角色头像；创建弹窗补 git 库选择器；client 增 `triggerRequirement`/`submitAcceptanceVerdict`；view-store FilterSnapshot 增 PM/拆解状态过滤；module-filter-bar 补控件 | 未开始（phase1-completion plan 仅列文件清单，详细步骤待展开） |
-| **T21** 全量回归收尾 | server 全量 `go test ./...`；前端全量 + parity；playwright e2e 主链路（创建→原型→拆解→触发→执行→验收→done）；迁移 down/up 幂等终验；设计文档状态收尾 | 未开始 |
+| **WS4** 验收闭环 | ✅ 已由并行会话完成 | `requirement_acceptance.go` + `POST /issues/{id}/acceptance/verdict`；日历第 10 态「验收失败」已入前端 |
+| **WS5** agent_run 投影器 | ✅ 已由并行会话完成 | server `agent_run_projector.go`（提交 71a9f9d/df12b9a）；daemon CallID 已透传 |
+| **WS6** 前端动线 | ✅ 已由并行会话完成 | schedule/acceptance 面板、create-issue git 库选择器、decompose 面板 graph/acceptance 摘要、client.triggerRequirement/submitAcceptanceVerdict |
+| **archive server** | ✅ 大部分已由并行会话完成 | project_artifact/project_graph/project_filing/issue_archive handlers + migrations 455-460 + `source='manual'` P0 保护 |
+| **archive 前端** | 🔄 并行会话在途（未提交） | `packages/views/projects/components/{archive,filing,graph,requirement-drill}/` 工作区 untracked，**不可触碰** |
+| **archive 真缺口** | ✅ 本线已补齐 | d9aa3a2（461 + 三端点）+ df5b689（CLI + 迁移脚本）+ projects_mgmt/CONTRACT.md |
+| **WS3** ModuleLocker v2 | 🔄 见 §3（并行会话在途，daemon 侧代码完成未提交；`ReleaseGroup` 已演进为带 isLive 回调签名） | 工作区 `module_locker*.go` 改动，**不可触碰** |
+| **T21** 全量回归收尾 | 🔄 server 全量已跑：7 个失败全部为环境问题（pg 本地用户无 CREATEDB / 无权读 pg_statistic ×5；dashboard 两例为 DB 时区 UTC+8 与查询 tz=UTC 在凌晨时段的「今天」定义分歧，dashboard 文件自基线导入后无人改动）——与本线改动零交集；前端全量 + playwright e2e 仍待做 | 见 §5 |
 
 ---
 
 ## 5. 验收状态边界（诚实声明）
 
-- ✅ **单测级**：T1~T16 + 修复 A~E + ModuleLocker v2 的 TDD 测试全部通过
-- ⚠️ **未做**：server/前端全量回归、playwright e2e、迁移终验（均属 T21）
-- ⚠️ **已知无关失败**：`TestWorkspaceDeletionManifestCoversPublicSchema` 因 archive 并行流的 untracked migration 455~459 失败，与本需求线无关，不在本线修
-- ⚠️ **WS5 的门禁提醒**：`agent_run` 端点用 handler 内原生 SQL，**勿**塞进 `pkg/db/queries/*.sql`（会触发 sqlc 重生成门禁）
+- ✅ **单测级**：T1~T16 + 修复 A~H + archive 差距补齐（461 三端点 + CLI）的 TDD 测试全部通过
+- ✅ **archive CLI E2E**：dev api 全链路（上传→sync→绑定→诊断落库→幂等重跑）实测通过
+- ⚠️ **未做**：前端全量回归、playwright e2e、迁移 down/up 幂等终验（均属 T21 剩余）
+- ⚠️ **已知环境问题（T21 实证，均与代码无关）**：`backfill_codex_usage_cache` + `taskusagebackfill` 4 例需 CREATE DATABASE 权限；`cmd/migrate` 1 例需读 pg_statistic；handler dashboard 2 例为 UTC+8 凌晨时段 vs tz=UTC 的日期窗 flake（基线即存在）
+- ✅ **已消解**：`TestWorkspaceDeletionManifestCoversPublicSchema` 此前因 455~459 未注册失败——d9aa3a2 已补齐 455-461 全部 14 张新表注册，测试转绿
+- ⚠️ **WS5 的门禁提醒**：`agent_run` 端点用 handler 内原生 SQL，**勿**塞进 `pkg/db/queries/*.sql`（会触发 sqlc 重生成门禁）；461 新 schema 同此模式（committed generated 落后由并行会话统一 regen）
 
 ---
 
