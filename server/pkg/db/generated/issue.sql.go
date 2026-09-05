@@ -1285,11 +1285,16 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        CASE
            WHEN issue_effective_status(i.workspace_id, i.status) = 'done' THEN '已完成'
            WHEN issue_effective_status(i.workspace_id, i.status) = 'cancelled' THEN '已取消'
+           WHEN i.acceptance_round > 3 THEN '验收失败'
            WHEN COALESCE(prog.has_open_stage1, FALSE) THEN '原型待确认'
            WHEN i.decomposition_confirmed_at IS NULL AND COALESCE(prog.has_stage2, FALSE) THEN '拆解待确认'
            WHEN i.decomposition_confirmed_at IS NULL THEN '未拆解'
            WHEN i.triggered_at IS NULL THEN '待触发'
-           WHEN EXISTS (
+           WHEN NOT EXISTS (
+               SELECT 1 FROM issue rc
+               JOIN agent_task_queue rq ON rq.issue_id = rc.id
+               WHERE rc.parent_issue_id = i.id AND rq.status IN ('dispatched', 'running')
+           ) AND EXISTS (
                SELECT 1 FROM issue wc
                JOIN agent_task_queue wq ON wq.issue_id = wc.id
                WHERE wc.parent_issue_id = i.id AND wq.status = 'waiting_module_lock'

@@ -1891,6 +1891,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/decompose", h.DecomposeRequirement)
 					r.Get("/decomposition", h.GetDecomposition)
 					r.Post("/decomposition/confirm", h.ConfirmDecomposition)
+					r.Post("/acceptance/verdict", h.RecordAcceptanceVerdict)
 					r.Post("/trigger", h.TriggerRequirement)
 					// 原型（spec 2026-09-04-requirement-calendar-design.md §9）：
 					// 一键生成/重生成 + 版本历史 + 逐项标记 + 确认门。
@@ -2007,15 +2008,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/role-defaults", h.ReplaceProjectRoleDefaults)
 					// Project archive (spec 2026-09-05-project-archive-design.md §5):
 					// artifacts / graph snapshots / filing readiness. Static
-					// segments (sync, matrix, latest, bus-matrix) precede the
-					// {artifactId} wildcard by chi trie precedence.
+					// segments (sync, matrix, unbound, latest, bus-matrix) precede
+					// the {artifactId} wildcard by chi trie precedence.
 					r.Post("/artifacts/sync", h.SyncProjectArtifacts)
 					r.Get("/artifacts/matrix", h.GetArtifactMatrix)
+					r.Get("/artifacts/unbound", h.ListUnboundArtifacts)
 					r.Get("/artifacts", h.ListProjectArtifacts)
 					r.Get("/artifacts/{artifactId}", h.GetProjectArtifact)
 					r.Get("/artifacts/{artifactId}/content", h.GetArtifactContent)
+					r.Patch("/artifacts/{artifactId}", h.PatchProjectArtifact)
 					r.Post("/artifacts/{artifactId}/archive", h.ArchiveDeliverable)
+					r.Post("/artifacts/{artifactId}/bind", h.BindProjectArtifact)
 					r.Post("/graph/sync", h.SyncGraphSnapshot)
+					// rebridge (task 27): static segment, bridge-only re-run with
+					// no graph body re-upload. Sits beside sync and ahead of the
+					// /graph/modules/{nodeId} + /graph/bus-matrix wildcards, so chi
+					// trie precedence keeps it unambiguous (verified via chi.Walk).
+					r.Post("/graph/rebridge", h.RebridgeGraphSnapshot)
 					r.Get("/graph/latest", h.GetLatestGraphSnapshot)
 					r.Get("/graph/latest/detail", h.GetGraphSnapshotDetail)
 					r.Get("/graph/modules", h.ListGraphModules)
@@ -2029,19 +2038,31 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/graph/bus-matrix/timeline", h.GetBusMatrixTimeline)
 					r.Get("/filing/readiness", h.GetFilingReadiness)
 					r.Get("/filing/items", h.ListFilingItems)
+					// cross-project is a static segment and MUST stay ahead of any
+					// future /filing/{itemId} wildcard (chi trie precedence); today
+					// the filing group has no wildcard at all.
+					r.Get("/filing/cross-project", h.GetFilingCrossProject)
 					r.Post("/filing/check", h.RunFilingCheck)
 					r.Post("/filing/export", h.ExportFilingPackage)
+					r.Post("/filing/writeback", h.WritebackFilingReadiness)
+					// PATCH /filing/items/{itemId} — manual override (anno⑤ escape hatch).
+					// Static segments (readiness, items, cross-project, check, export,
+					// writeback) are registered above; the wildcard below cannot shadow
+					// them because chi trie gives static segments precedence.
+					r.Patch("/filing/items/{itemId}", h.PatchFilingItem)
 				})
 			})
 
-			// Agent runs (project-archive §5.5): the projector's write endpoint
-			// plus run-scoped todo / event reads. Workspace affinity comes from
-			// the run row itself.
+			// Agent runs (project-archive §5.5): the projector's write endpoints
+			// (run upsert + batch todo / event writes) plus run-scoped todo /
+			// event reads. Workspace affinity comes from the run row itself.
 			r.Route("/api/agent-runs", func(r chi.Router) {
 				r.Post("/", h.UpsertAgentRun)
 				r.Route("/{runId}", func(r chi.Router) {
 					r.Get("/todos", h.ListAgentRunTodos)
+					r.Post("/todos", h.UpsertAgentRunTodos)
 					r.Get("/events", h.ListAgentRunEvents)
+					r.Post("/events", h.AppendAgentRunEvents)
 				})
 			})
 

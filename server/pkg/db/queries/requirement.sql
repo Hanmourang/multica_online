@@ -124,3 +124,11 @@ SELECT EXISTS (
     WHERE c.parent_issue_id = @issue_id
       AND q.status = 'waiting_module_lock'
 ) AS waiting;
+
+-- name: IncrementAcceptanceRound :one
+-- 验收打回：acceptance_round + 1 并返回新值（DEFAULT 0，见 migration 452:15）。
+-- 调用方据返回值判「> 3 = 验收失败终态」。updated_at 同步刷新以驱动列表重排。
+UPDATE issue
+SET acceptance_round = acceptance_round + 1, updated_at = now()
+WHERE id = $1
+RETURNING acceptance_round;

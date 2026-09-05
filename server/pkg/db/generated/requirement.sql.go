@@ -561,3 +561,19 @@ func (q *Queries) UpdatePrototypeMarks(ctx context.Context, arg UpdatePrototypeM
 	)
 	return i, err
 }
+
+const incrementAcceptanceRound = `-- name: IncrementAcceptanceRound :one
+UPDATE issue
+SET acceptance_round = acceptance_round + 1, updated_at = now()
+WHERE id = $1
+RETURNING acceptance_round
+`
+
+// 验收打回：acceptance_round + 1 并返回新值（DEFAULT 0，见 migration 452:15）。
+// 调用方据返回值判「> 3 = 验收失败终态」。updated_at 同步刷新以驱动列表重排。
+func (q *Queries) IncrementAcceptanceRound(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementAcceptanceRound, id)
+	var acceptanceRound int32
+	err := row.Scan(&acceptanceRound)
+	return acceptanceRound, err
+}

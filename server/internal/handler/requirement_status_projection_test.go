@@ -74,6 +74,17 @@ func TestRequirementStatusProjection(t *testing.T) {
 			agentID, testRuntimeID, issueID)
 	}
 
+	markRunning := func(t *testing.T, issueID string) {
+		t.Helper()
+		var agentID string
+		dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+			testWorkspaceID).Scan(&agentID)
+		dbfx.Exec(t, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+			VALUES ($1, $2, $3, 'running', 5)`,
+			agentID, testRuntimeID, issueID)
+	}
+
 	projectStatus := func(t *testing.T, projectID string) db.ListIssuesRow {
 		t.Helper()
 		projUUID, err := util.ParseUUID(projectID)
@@ -203,6 +214,43 @@ func TestRequirementStatusProjection(t *testing.T) {
 		row := projectStatus(t, proj)
 		if row.RequirementStatus != "已完成" {
 			t.Errorf("requirement_status = %q, want 已完成", row.RequirementStatus)
+		}
+	})
+
+	t.Run("规则10 acceptance_round>3→验收失败", func(t *testing.T) {
+		proj := newProject(t, "accfail")
+		reqID := newRequirement(t, proj, "todo", true, true)
+		newStageChild(t, proj, reqID, 3, "done")
+		newStageChild(t, proj, reqID, 4, "done")
+		// 4 轮打回后仍未过：acceptance_round 累加到 4（>3）判验收失败终态。
+		dbfx.Exec(t, `UPDATE issue SET acceptance_round = 4 WHERE id = $1`, reqID)
+		row := projectStatus(t, proj)
+		if row.RequirementStatus != "验收失败" {
+			t.Errorf("requirement_status = %q, want 验收失败", row.RequirementStatus)
+		}
+	})
+
+	t.Run("规则10 acceptance_round=3 未越界→不判验收失败", func(t *testing.T) {
+		proj := newProject(t, "acc3")
+		reqID := newRequirement(t, proj, "todo", true, true)
+		newStageChild(t, proj, reqID, 3, "todo")
+		dbfx.Exec(t, `UPDATE issue SET acceptance_round = 3 WHERE id = $1`, reqID)
+		row := projectStatus(t, proj)
+		if row.RequirementStatus != "执行中" {
+			t.Errorf("requirement_status = %q, want 执行中（round=3 仍在修复）", row.RequirementStatus)
+		}
+	})
+
+	t.Run("规则6修正 有stage3正在跑→执行中而非等待模块释放", func(t *testing.T) {
+		proj := newProject(t, "waitlock-running")
+		reqID := newRequirement(t, proj, "todo", true, true)
+		running := newStageChild(t, proj, reqID, 3, "in_progress")
+		waiting := newStageChild(t, proj, reqID, 3, "in_progress")
+		markRunning(t, running)           // 有一个 stage3 正在跑：需求仍在推进
+		markWaitingModuleLock(t, waiting) // 另一个在等锁：不应盖过「执行中」
+		row := projectStatus(t, proj)
+		if row.RequirementStatus != "执行中" {
+			t.Errorf("requirement_status = %q, want 执行中（父状态优先于子计数）", row.RequirementStatus)
 		}
 	})
 }

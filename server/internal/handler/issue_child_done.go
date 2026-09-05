@@ -348,6 +348,13 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
 	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
+
+	// 需求流水线：stage3 执行 barrier 关闭 → 直接入队 stage4 tester 子任务，
+	// 让验收真正启动（现状只唤醒父需求 PM，无人入队 tester，验收永不触发）。
+	// 非需求场景（无 stage4 子任务）时 enqueueStageChildren 自然 no-op。
+	if staged && closedStage == 3 {
+		h.enqueueStageChildren(ctx, parent, children, 4)
+	}
 }
 
 // isTerminalChildStatus reports whether a child issue status counts as
@@ -725,5 +732,35 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 			"parent_id", uuidToString(parent.ID),
 			"squad_id", uuidToString(squad.ID),
 			"leader_id", uuidToString(squad.LeaderID))
+	}
+}
+
+// enqueueStageChildren 把 parent 下处于指定 stage、非终态、有 agent assignee 的子任务入队。
+// 幂等保护：先查 HasPendingTaskForIssueAndAgent，已有 pending 行则跳过（镜像 triggerChildDoneAgent
+// 的 dedup）。EnqueueTaskForIssue 本身不去重（service/task.go:1213）。
+// best-effort：单个子任务入队失败仅记录，不影响其余子任务与父需求唤醒。
+func (h *Handler) enqueueStageChildren(ctx context.Context, parent db.Issue, children []db.Issue, stage int32) {
+	for _, c := range children {
+		if !c.Stage.Valid || c.Stage.Int32 != stage {
+			continue
+		}
+		if isTerminalChildStatus(issuestatus.Effective(ctx, h.Queries, c.WorkspaceID, c.Status)) {
+			continue
+		}
+		if !c.AssigneeID.Valid {
+			continue
+		}
+		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+			IssueID: c.ID,
+			AgentID: c.AssigneeID,
+			HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, c.ID),
+		})
+		if err != nil || hasPending {
+			continue
+		}
+		if _, err := h.TaskService.EnqueueTaskForIssue(ctx, c); err != nil {
+			slog.Warn("child done: enqueue stage tester failed",
+				"error", err, "child_id", uuidToString(c.ID))
+		}
 	}
 }
