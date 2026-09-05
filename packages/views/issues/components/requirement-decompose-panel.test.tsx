@@ -149,6 +149,20 @@ describe("RequirementDecomposePanel", () => {
     expect(within(card2).getByText("New")).toBeTruthy();
   });
 
+  it("草稿卡渲染图谱上下文与验收代码摘要框（display-only）", () => {
+    renderPanel();
+    // exec 草稿 t1 带 graph_context.nodes=["n1"] 与 acceptance_spec.cases=[{name:"c1"}]。
+    const gn = screen.getByTestId("draft-gn-t1");
+    expect(within(gn).getByText("Graph context")).toBeTruthy();
+    expect(within(gn).getByText("n1")).toBeTruthy();
+    const acc = screen.getByTestId("draft-acc-t1");
+    expect(within(acc).getByText("Acceptance spec")).toBeTruthy();
+    expect(within(acc).getByText("c1")).toBeTruthy();
+    // stage4 验收草稿 t3 二者皆无 → 不渲染摘要框（防御式：空数据不出框）。
+    expect(screen.queryByTestId("draft-gn-t3")).toBeNull();
+    expect(screen.queryByTestId("draft-acc-t3")).toBeNull();
+  });
+
   it("存在未标注 kind 的功能点时确认按钮禁用并提示", () => {
     renderPanel({
       drafts: [

@@ -57,6 +57,41 @@ function hasUnmarkedFeaturePoint(drafts: DecomposeDraftTask[]): boolean {
   );
 }
 
+/**
+ * graph_context / acceptance_spec 在 DecomposeDraftTask 里是 `unknown`（api.ts:127-128，
+ * PM agent 产出形状未定型）。防御式提取可识别的数组项作为 display-only 芯片：
+ * nodes 取字符串或 {id|label}，cases 取字符串或 {name}；无法识别 → 空数组（不出框）。
+ */
+function graphNodeLabels(graph: unknown): string[] {
+  if (!graph || typeof graph !== "object") return [];
+  const nodes = (graph as Record<string, unknown>).nodes;
+  if (!Array.isArray(nodes)) return [];
+  return nodes
+    .map((n) =>
+      typeof n === "string"
+        ? n
+        : n && typeof n === "object"
+          ? String((n as Record<string, unknown>).id ?? (n as Record<string, unknown>).label ?? "")
+          : "",
+    )
+    .filter((s) => s.length > 0);
+}
+
+function acceptanceCaseNames(spec: unknown): string[] {
+  if (!spec || typeof spec !== "object") return [];
+  const cases = (spec as Record<string, unknown>).cases;
+  if (!Array.isArray(cases)) return [];
+  return cases
+    .map((c) =>
+      typeof c === "string"
+        ? c
+        : c && typeof c === "object"
+          ? String((c as Record<string, unknown>).name ?? "")
+          : "",
+    )
+    .filter((s) => s.length > 0);
+}
+
 export function RequirementDecomposePanel({
   issue,
   moduleName,
@@ -286,6 +321,28 @@ function DraftCard({
             ))}
           </select>
         </label>
+      )}
+
+      {graphNodeLabels(draft.graph_context).length > 0 && (
+        <div className="mt-1" data-testid={`draft-gn-${draft.temp_id}`}>
+          <h5 className="text-2xs text-muted-foreground">{t(($) => $.decompose_panel.graph_title)}</h5>
+          <div className="flex flex-wrap gap-1">
+            {graphNodeLabels(draft.graph_context).map((n) => (
+              <code key={n} className="rounded bg-muted px-1 text-2xs">{n}</code>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {acceptanceCaseNames(draft.acceptance_spec).length > 0 && (
+        <div className="mt-1" data-testid={`draft-acc-${draft.temp_id}`}>
+          <h5 className="text-2xs text-muted-foreground">{t(($) => $.decompose_panel.acc_title)}</h5>
+          <div className="flex flex-wrap gap-1">
+            {acceptanceCaseNames(draft.acceptance_spec).map((c) => (
+              <code key={c} className="rounded bg-muted px-1 text-2xs">{c}</code>
+            ))}
+          </div>
+        </div>
       )}
     </section>
   );
