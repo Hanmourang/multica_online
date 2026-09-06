@@ -408,6 +408,47 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.statusPagination).toBeDefined();
   });
 
+  // 日历提升为一级模块后，任务子视图的 modes 不再含 calendar：残留偏好
+  // 弹回首 mode，且 header 视图菜单经 allowCalendar 隐藏日历项。
+  it("bounces a persisted calendar preference to the first mode and reports allowCalendar=false when modes exclude it", async () => {
+    mockListByStatus({ todo: [makeIssue({ id: "issue-1", status: "todo" })] });
+
+    const store = getIssueSurfaceViewStore("project:no-calendar");
+    store.getState().setViewMode("calendar");
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "no-calendar" },
+          modes: ["board", "list", "table", "swimlane"],
+        }),
+      { wrapper: makeWrapper(qc, "project:no-calendar") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.viewMode).toBe("board");
+    expect(result.current.allowCalendar).toBe(false);
+  });
+
+  it("reports allowCalendar=true when modes include calendar", async () => {
+    mockListByStatus({ todo: [makeIssue({ id: "issue-1", status: "todo" })] });
+
+    const store = getIssueSurfaceViewStore("project:has-calendar");
+    store.getState().setViewMode("list");
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "has-calendar" },
+          modes: ["board", "list", "table", "swimlane", "calendar"],
+        }),
+      { wrapper: makeWrapper(qc, "project:has-calendar") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.allowCalendar).toBe(true);
+  });
+
   it("maps my assigned scope to the unified personal query contract", async () => {
     const { result } = renderHook(
       () =>

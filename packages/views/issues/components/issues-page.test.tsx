@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -803,6 +803,20 @@ describe("IssuesPage (shared)", () => {
     expect(await screen.findAllByText("All")).not.toHaveLength(0);
     expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
+  });
+
+  // 日历已提升为一级模块（侧边栏 /calendar）：任务子视图的视图切换菜单
+  // 不再提供「Calendar」项，其余四态保留。
+  it("view switcher omits the calendar mode", async () => {
+    renderWithQuery(<IssuesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Board" }));
+
+    expect(screen.queryByRole("menuitemradio", { name: "Calendar" })).toBeNull();
+    expect(screen.getByRole("menuitemradio", { name: "Board" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "List" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "Table" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "Swimlane" })).toBeInTheDocument();
   });
 
   // The Members/Agents tabs filter server-side via assignee_types (the same

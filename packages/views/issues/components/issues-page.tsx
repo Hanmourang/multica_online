@@ -17,6 +17,7 @@ import { IssuesHeader } from "./issues-header";
 function IssuesSurfaceHeader({
   issues,
   workingAgents,
+  allowCalendar,
   isRefreshing,
   facetCountsExact,
   tableFacetCounts,
@@ -24,6 +25,7 @@ function IssuesSurfaceHeader({
 }: {
   issues: Issue[];
   workingAgents: WorkingAgentSummary[] | undefined;
+  allowCalendar: boolean;
   isRefreshing: boolean;
   facetCountsExact: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
@@ -36,6 +38,7 @@ function IssuesSurfaceHeader({
     <IssuesHeader
       scopedIssues={issues}
       workingAgents={workingAgents}
+      allowCalendar={allowCalendar}
       dateFilter={dateFilter}
       onDateFilterChange={setDateFilter}
       isRefreshing={isRefreshing}
@@ -59,12 +62,14 @@ export function IssuesPage() {
 
       <IssueSurface
         scope={{ type: "workspace", actorKind: scope }}
-        modes={["board", "list", "table", "swimlane", "calendar"]}
+        // 日历已提升为一级模块（侧边栏 /calendar），任务子视图不再提供日历 tab。
+        modes={["board", "list", "table", "swimlane"]}
         batchToolbar="list"
         renderHeader={({ controller }) => (
           <IssuesSurfaceHeader
             issues={controller.surfaceIssues}
             workingAgents={controller.workingAgents}
+            allowCalendar={controller.allowCalendar}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={controller.facetCountsExact}
             tableFacetCounts={controller.tableFacetCounts}

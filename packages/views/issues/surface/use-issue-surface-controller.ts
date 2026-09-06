@@ -70,6 +70,8 @@ export interface IssueSurfaceController {
   createDefaults: IssueCreateDefaults;
   viewMode: IssueSurfaceMode;
   allowGantt: boolean;
+  /** modes 是否含 calendar —— header 视图菜单据此决定是否展示日历项。 */
+  allowCalendar: boolean;
   surfaceIssues: Issue[];
   projectIssues: Issue[];
   issues: Issue[];
@@ -859,6 +861,7 @@ export function useIssueSurfaceController({
     createDefaults: resolvedCreateDefaults,
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
+    allowCalendar: allowedModes.has("calendar"),
     ...surfaceData,
     workingAgents,
     hasActiveFilters,

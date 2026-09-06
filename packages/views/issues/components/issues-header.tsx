@@ -1144,6 +1144,7 @@ export function IssuesHeader({
   scopedIssues,
   workingAgents,
   allowGantt = false,
+  allowCalendar = false,
   dateFilter = null,
   onDateFilterChange,
   isRefreshing = false,
@@ -1157,6 +1158,8 @@ export function IssuesHeader({
    *  behind the agents-working chip. */
   workingAgents: WorkingAgentSummary[] | undefined;
   allowGantt?: boolean;
+  /** modes 是否含 calendar —— 视图菜单据此决定是否展示日历项。 */
+  allowCalendar?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
   isRefreshing?: boolean;
@@ -1335,6 +1338,7 @@ export function IssuesHeader({
           <IssueDisplayControls
             scopedIssues={scopedIssues}
             allowGantt={allowGantt}
+            allowCalendar={allowCalendar}
             dateFilter={dateFilter}
             onDateFilterChange={onDateFilterChange}
             facetCountsExact={facetCountsExact}
@@ -1816,6 +1820,7 @@ export function IssueDisplayControls({
   scopedIssues,
   hideViewToggle = false,
   allowGantt = false,
+  allowCalendar = false,
   dateFilter = null,
   onDateFilterChange,
   facetCountsExact = true,
@@ -1834,6 +1839,9 @@ export function IssueDisplayControls({
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
+  // 日历提升为一级模块后，任务子视图的 modes 不再含 calendar：视图菜单
+  // 据此隐藏日历项；项目详情等 modes 仍含 calendar 的表面不受影响。
+  allowCalendar?: boolean;
   /**
    * Whether `scopedIssues` covers the surface's full window. Table does not
    * use loaded rows for counts; server-paged List, Board, and Swimlane follow
@@ -2313,9 +2321,10 @@ export function IssueDisplayControls({
           </PopoverContent>
         </Popover>
 
-        {/* View toggle. If a store has `viewMode === "gantt"` persisted but
-            this surface doesn't render Gantt, fall back to "list" so the
-            trigger icon matches what's actually on screen. */}
+        {/* View toggle. If a store has a viewMode persisted that this
+            surface doesn't render (gantt without allowGantt, calendar
+            without allowCalendar), fall back to "list" so the trigger
+            icon matches what's actually on screen. */}
         {!hideViewToggle && (
           <DropdownMenu open={viewMenuOpen} onOpenChange={setViewMenuOpen}>
             <Tooltip>
@@ -2330,7 +2339,7 @@ export function IssueDisplayControls({
                           <Table2 className="size-3.5" />
                         ) : viewMode === "swimlane" ? (
                           <Waves className="size-3.5" />
-                        ) : viewMode === "calendar" ? (
+                        ) : viewMode === "calendar" && allowCalendar ? (
                           <CalendarDays className="size-3.5" />
                         ) : viewMode === "gantt" && allowGantt ? (
                           <ChartGantt className="size-3.5" />
@@ -2344,7 +2353,7 @@ export function IssueDisplayControls({
                             ? t(($) => $.view.table)
                             : viewMode === "swimlane"
                             ? t(($) => $.view.swimlane)
-                            : viewMode === "calendar"
+                            : viewMode === "calendar" && allowCalendar
                             ? t(($) => $.view.calendar)
                             : viewMode === "gantt" && allowGantt
                             ? t(($) => $.view.gantt)
@@ -2362,7 +2371,7 @@ export function IssueDisplayControls({
                   ? t(($) => $.view.tooltip_table)
                   : viewMode === "swimlane"
                   ? t(($) => $.view.tooltip_swimlane)
-                  : viewMode === "calendar"
+                  : viewMode === "calendar" && allowCalendar
                   ? t(($) => $.view.tooltip_calendar)
                   : viewMode === "gantt" && allowGantt
                   ? t(($) => $.view.tooltip_gantt)
@@ -2396,10 +2405,12 @@ export function IssueDisplayControls({
                   <Waves />
                   {t(($) => $.view.swimlane)}
                 </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="calendar">
-                  <CalendarDays />
-                  {t(($) => $.view.calendar)}
-                </DropdownMenuRadioItem>
+                {allowCalendar && (
+                  <DropdownMenuRadioItem value="calendar">
+                    <CalendarDays />
+                    {t(($) => $.view.calendar)}
+                  </DropdownMenuRadioItem>
+                )}
                 {allowGantt && (
                   <DropdownMenuRadioItem value="gantt">
                     <ChartGantt />

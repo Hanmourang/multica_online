@@ -247,6 +247,7 @@ function IssueSurfaceContent({
             scopedIssues={controller.surfaceIssues}
             workingAgents={controller.workingAgents}
             allowGantt={controller.allowGantt}
+            allowCalendar={controller.allowCalendar}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={
               controller.facetCountsExact
