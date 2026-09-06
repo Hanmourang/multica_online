@@ -17,7 +17,7 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import type { Issue } from "@multica/core/types";
-import { renderWithI18n } from "../../test/i18n";
+import { renderWithI18n } from "../test/i18n";
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
@@ -49,14 +49,22 @@ vi.mock("@multica/ui/components/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-vi.mock("../../navigation", () => ({
+vi.mock("../navigation", () => ({
   AppLink: ({
     children,
     href,
+    className,
+    onClick,
   }: {
     children: React.ReactNode;
     href: string;
-  }) => <a href={href}>{children}</a>,
+    className?: string;
+    onClick?: React.MouseEventHandler<HTMLAnchorElement>;
+  }) => (
+    <a href={href} className={className} onClick={onClick}>
+      {children}
+    </a>
+  ),
   useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
   resolveClickIntent: () => "push",
   useIntentNavigate: () => () => {},
@@ -102,12 +110,16 @@ function requirement(overrides: Partial<Issue>): Issue {
   } as unknown as Issue;
 }
 
-function renderCalendar(issues: Issue[], zoom?: "week" | "month") {
+function renderCalendar(
+  issues: Issue[],
+  zoom?: "week" | "month",
+  onOpenRequirement?: (issueId: string) => void,
+) {
   const store = createStore<IssueViewState>()(viewStoreSlice);
   if (zoom) store.getState().setCalendarZoom(zoom);
   return renderWithI18n(
     <ViewStoreProvider store={store}>
-      <CalendarView issues={issues} />
+      <CalendarView issues={issues} onOpenRequirement={onOpenRequirement} />
     </ViewStoreProvider>,
   );
 }
@@ -123,6 +135,31 @@ describe("CalendarView", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+  });
+
+  it("calls onOpenRequirement instead of navigating when provided", () => {
+    const onOpen = vi.fn();
+    renderCalendar(
+      [
+        requirement({
+          start_at: "2026-09-15T09:00:00Z",
+          due_date: "2026-09-16",
+        }),
+      ],
+      undefined,
+      onOpen,
+    );
+
+    const anchor = screen
+      .getByTestId("req-block-req-1-2026-09-15")
+      .closest("a");
+    expect(anchor).not.toBeNull();
+    fireEvent.click(anchor!);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith("req-1");
+    // Intercepted: the anchor keeps its href for open-in-new-tab, but the
+    // default navigation is prevented.
+    expect(anchor!.getAttribute("href")).toBe("/acme/issues/req-1");
   });
 
   it("month view spans a requirement across start_at ~ due_date with status badge and progress", () => {

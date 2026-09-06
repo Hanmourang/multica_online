@@ -31,9 +31,9 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { AppLink } from "../../navigation";
+import { AppLink } from "../navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useLocale, useT } from "../../i18n";
+import { useLocale, useT } from "../i18n";
 
 // ---------------------------------------------------------------------------
 // Date utilities — UTC-day aligned, mirroring gantt-view so a minute-level
@@ -179,7 +179,14 @@ const RESCHEDULE_LOCKED_STATUSES = new Set([
 // View
 // ---------------------------------------------------------------------------
 
-export function CalendarView({ issues }: { issues: Issue[] }) {
+export function CalendarView({
+  issues,
+  onOpenRequirement,
+}: {
+  issues: Issue[];
+  /** 提供时色块点击走回调（抽屉），缺省保持 AppLink 跳详情页。 */
+  onOpenRequirement?: (issueId: string) => void;
+}) {
   const { t } = useT("issues");
   const locale = useLocale();
   const zoom = useViewStore((s) => s.calendarZoom);
@@ -459,6 +466,7 @@ export function CalendarView({ issues }: { issues: Issue[] }) {
                     undefined
                   }
                   href={paths.issueDetail(span.issue.id)}
+                  onOpen={onOpenRequirement}
                 />
               ))}
             </div>
@@ -479,12 +487,15 @@ function RequirementBlock({
   segment,
   color,
   href,
+  onOpen,
 }: {
   span: RequirementSpan;
   day: Date;
   segment: Segment;
   color?: string;
   href: string;
+  /** 提供时拦截点击（preventDefault）走回调；href 保留供右键新标签打开。 */
+  onOpen?: (issueId: string) => void;
 }) {
   const { t } = useT("issues");
   const { issue } = span;
@@ -505,7 +516,21 @@ function RequirementBlock({
     <Tooltip>
       <TooltipTrigger
         render={
-          <AppLink href={href} className="block min-w-0">
+          <AppLink
+            href={href}
+            className="block min-w-0"
+            onClick={
+              onOpen
+                ? (e) => {
+                    // cmd/ctrl/shift 交回 AppLink（新标签/新窗口）；alt 同样
+                    // 放行（AppLink 原地 push，与未提供 onOpen 时一致）。
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    e.preventDefault();
+                    onOpen(issue.id);
+                  }
+                : undefined
+            }
+          >
             <div
               data-testid={`req-block-${issue.id}-${dayKey(day)}`}
               data-segment={segment}
