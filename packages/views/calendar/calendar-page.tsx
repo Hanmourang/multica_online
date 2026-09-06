@@ -5,9 +5,10 @@
  * 页面负责数据/过滤；CalendarView 纯受控渲染。zoom 存于独立 view store
  * 实例（"calendar-page"），不与 /issues 表面的偏好互相污染。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, Plus } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { Issue } from "@multica/core/types";
@@ -56,9 +57,19 @@ export function CalendarPage() {
   // 列表查询提在页面层：过滤后的需求喂 CalendarView，原始列表同时给抽屉
   // 供 statusBadge —— requirement_status 是列表端投影列，GetIssue 不返回
   // （见 RequirementDrawer prop 注释）。
-  const { data: issues = [] } = useQuery(issueListOptions(wsId));
+  const {
+    data: issues = [],
+    isError,
+    refetch,
+  } = useQuery(issueListOptions(wsId));
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [drawerIssueId, setDrawerIssueId] = useState<string | null>(null);
+
+  // spec §5：列表查询失败 → toast + 页面级重试。失败必须与「真空工作区」
+  // 可区分——data=[] 兑底会把查询失败渲染成空日历。
+  useEffect(() => {
+    if (isError) toast.error(t(($) => $.page.load_failed));
+  }, [isError, t]);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -86,6 +97,17 @@ export function CalendarPage() {
           </Button>
         </div>
       </PageHeader>
+      {isError && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 border-b border-surface-border px-4 py-2 text-caption text-destructive"
+        >
+          <span className="flex-1">{t(($) => $.page.load_failed)}</span>
+          <Button size="sm" variant="outline" onClick={() => refetch()}>
+            {t(($) => $.page.retry)}
+          </Button>
+        </div>
+      )}
       <ViewStoreProvider store={store}>
         <CalendarSurface
           issues={issues}

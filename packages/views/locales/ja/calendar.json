@@ -3,10 +3,14 @@
     "title": "カレンダー",
     "new_requirement": "新規要件",
     "project_filter": "プロジェクトで絞り込み",
-    "all_projects": "すべてのプロジェクト"
+    "all_projects": "すべてのプロジェクト",
+    "load_failed": "要件の読み込みに失敗しました",
+    "retry": "再試行"
   },
   "list": {
-    "empty": "このプロジェクトには要件がまだありません"
+    "empty": "このプロジェクトには要件がまだありません",
+    "load_failed": "要件の読み込みに失敗しました",
+    "retry": "再試行"
   },
   "drawer": {
     "loading": "読み込み中…"

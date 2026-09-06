@@ -7,7 +7,8 @@
  * GetIssue 不返回 requirement_status——同 CalendarPage 的接线约定）。
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import type { Issue } from "@multica/core/types";
@@ -50,6 +51,10 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 }));
 vi.mock("../common/actor-avatar", () => ({
   ActorAvatar: () => null,
+}));
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
 }));
 
 function requirement(overrides: Partial<Issue> = {}): Issue {
@@ -215,5 +220,24 @@ describe("RequirementListPanel", () => {
       await screen.findByText("No requirements in this project yet"),
     ).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("shows an error bar with toast and retry when the list query fails (spec §5)", async () => {
+    mockApi.listIssues.mockReset();
+    mockApi.listIssues.mockRejectedValue(new Error("boom"));
+    renderPanel(<RequirementListPanel projectId="proj-1" />);
+
+    // 失败与真空可区分：错误条 + toast，而非静默空态。
+    expect(
+      await screen.findByText("Failed to load requirements"),
+    ).toBeTruthy();
+    expect(toast.error).toHaveBeenCalledWith("Failed to load requirements");
+
+    // 重试重新发起列表查询。
+    const callsBefore = mockApi.listIssues.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(mockApi.listIssues.mock.calls.length).toBeGreaterThan(callsBefore),
+    );
   });
 });

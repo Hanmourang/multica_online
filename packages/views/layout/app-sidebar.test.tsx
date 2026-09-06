@@ -323,6 +323,31 @@ describe("workspace-switcher dropdown per-workspace dot", () => {
   });
 });
 
+// spec §6（日历提升为一级模块）：/calendar 前缀激活断言。useWorkspacePaths
+// mock 委托真实 paths builder，/acme/calendar 由真实契约供给。
+describe("workspace nav — Calendar", () => {
+  beforeEach(() => {
+    navigation.current = { pathname: "/acme/issues" };
+    detail.current = { isPending: false, isError: false, data: null, error: null };
+  });
+
+  it("activates the Calendar nav on /calendar and any sub-route", () => {
+    navigation.current = { pathname: "/acme/calendar" };
+    const { container, rerender } = render(<AppSidebar />);
+    expect(container.querySelector('button[data-href="/acme/calendar"]')).toHaveAttribute("data-active", "true");
+
+    // 前缀匹配覆盖子路由（isNavActive: pathname.startsWith(href + "/")）。
+    navigation.current = { pathname: "/acme/calendar/anything" };
+    rerender(<AppSidebar />);
+    expect(container.querySelector('button[data-href="/acme/calendar"]')).toHaveAttribute("data-active", "true");
+  });
+
+  it("does not activate Calendar on sibling routes", () => {
+    const { container } = render(<AppSidebar />);
+    expect(container.querySelector('button[data-href="/acme/calendar"]')).not.toHaveAttribute("data-active");
+  });
+});
+
 describe("personal nav — Chat", () => {
   beforeEach(() => {
     chatSessions.current = [];

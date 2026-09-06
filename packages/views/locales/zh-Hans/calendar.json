@@ -3,10 +3,14 @@
     "title": "日历",
     "new_requirement": "新建需求",
     "project_filter": "项目过滤",
-    "all_projects": "全部项目"
+    "all_projects": "全部项目",
+    "load_failed": "需求加载失败",
+    "retry": "重试"
   },
   "list": {
-    "empty": "该项目暂无需求"
+    "empty": "该项目暂无需求",
+    "load_failed": "需求加载失败",
+    "retry": "重试"
   },
   "drawer": {
     "loading": "加载中…"

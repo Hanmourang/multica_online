@@ -3,10 +3,14 @@
     "title": "Calendar",
     "new_requirement": "New Requirement",
     "project_filter": "Filter by project",
-    "all_projects": "All projects"
+    "all_projects": "All projects",
+    "load_failed": "Failed to load requirements",
+    "retry": "Retry"
   },
   "list": {
-    "empty": "No requirements in this project yet"
+    "empty": "No requirements in this project yet",
+    "load_failed": "Failed to load requirements",
+    "retry": "Retry"
   },
   "drawer": {
     "loading": "Loading…"

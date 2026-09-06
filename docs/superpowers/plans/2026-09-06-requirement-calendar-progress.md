@@ -99,7 +99,14 @@
 
 **计划偏差记录（均经审查核验）**：① Task 4 列表查询提至页面层供抽屉 statusBadge（CalendarView 无二次请求）；② Task 4 补 `./calendar` exports（契约强制）；③ Task 5 发现视图下拉硬编码五态不消费 modes → 引入 allowCalendar 透传链（controller→surface 默认 header/page 自定义 header→IssuesHeader/IssueDisplayControls 两层→RadioItem）；④ Task 6 面板补 statusBadge 接线（drawer 契约要求宿主传入）+ isPending 防空态闪烁；⑤ spec §4b 卡片的「班底头像/阶段进度」经计划骨架收敛为四要素（有意范围收敛，`Issue.stage_progress` 现成可补）。
 
-**验证**：views 全量 424 文件 4964 测试（新增 11 个：抽屉 3 + 日历页 3 + controller 2 + issues-page 1 + 面板 3，余为既有改造）——唯一失败为既知 flake `issue-limit-upgrade-dialog` Escape 用例（顺序敏感，隔离 14/14 全绿，与本线零交集）；views/core tsc 零错误；core 143 文件 1695 测试全绿；web build 通过。
+**验证**：views 全量 424 文件 4964 测试（新增 12 个：抽屉 3 + 日历页 3 + controller 2 + issues-page 1 + 面板 3，余为既有改造；若计入 calendar-view 随迁的 onOpenRequirement 用例则 13，core 侧 route-icons 另有 +2）——唯一失败为既知 flake `issue-limit-upgrade-dialog` Escape 用例（顺序敏感，隔离 14/14 全绿，与本线零交集）；views/core tsc 零错误；core 143 文件 1695 测试全绿；web build 通过。
+
+**终审修复（终审 CodeReview changes-requested → 已全部处理）**：
+
+- **spec §5 错误处理落地**（终审 Warning 1）：CalendarPage 与 RequirementListPanel 的 `useQuery(issueListOptions)` 失败路径原为静默（`data=[]` 兑底使失败与真空不可区分）——现各补 toast + 页面级/面板级错误条 + `refetch()` 重试按钮，i18n 四语言 `page/list.load_failed` + `retry`，各加 1 个失败路径测试。
+- **侧边栏 /calendar 前缀激活测试**（终审 Minor 1，spec §6 点名项）：`app-sidebar.test.tsx` 新增「workspace nav — Calendar」describe（/calendar 精确命中 + /calendar/* 子路由前缀激活 + 同级路由不激活）。
+- **包出口补齐**（终审 Minor 3）：`calendar/index.ts` 补 `RequirementListPanel` 导出，与同包其余三组件一致。
+- **已知限制（终审 Warning 2，有意保留）**：`issueListOptions` 走 `fetchFirstPages`——每 status_category 仅取首页 50 条（`ISSUE_PAGE_SIZE`），7 分类上限 350；任一类溢出时超出部分在日历与需求列表静默缺失。日历语义是完整集合，后续应镜像 `fetchProjectGanttIssues` 的 `(limit, offset)` 循环 + 封顶守卫做全量翻页。本线记录为已知限制不实现（零后端改动边界内影响面可控，且溢出阈值对当前数据量充裕）。
 
 ---
 

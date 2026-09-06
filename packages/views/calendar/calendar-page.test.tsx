@@ -7,7 +7,8 @@
  * 因 GetIssue 不返回 requirement_status）。
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import type { Issue, Project } from "@multica/core/types";
@@ -273,5 +274,23 @@ describe("CalendarPage", () => {
 
     expect(screen.getByTestId("req-block-req-1-2026-09-15")).toBeTruthy();
     expect(screen.queryByTestId(/^req-block-req-2/)).toBeNull();
+  });
+
+  it("surfaces list query failures with a toast and a page-level retry (spec §5)", async () => {
+    // 7 个 status_category 桶全部拒绝 → 聚合 Promise.all 失败。
+    mockApi.listIssues.mockReset();
+    mockApi.listIssues.mockRejectedValue(new Error("boom"));
+    renderPage(<CalendarPage />);
+
+    // 失败不再与「真空工作区」不可区分：页面级错误条 + toast。
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(toast.error).toHaveBeenCalledWith("Failed to load requirements");
+
+    // 页面级重试：点击后重新发起列表查询。
+    const callsBefore = mockApi.listIssues.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(mockApi.listIssues.mock.calls.length).toBeGreaterThan(callsBefore),
+    );
   });
 });

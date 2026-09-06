@@ -7,8 +7,9 @@
  * 需有排期或派生状态——列表场景的 requirement_status 析取项不是死代码：
  * 无排期但有派生状态的需求在日历上不渲染（无格子可放），在列表里正常成卡。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions } from "@multica/core/issues/queries";
 import { useT } from "../i18n";
@@ -18,8 +19,18 @@ export function RequirementListPanel({ projectId }: { projectId: string }) {
   const wsId = useWorkspaceId();
   const { t } = useT("calendar");
   // isPending 区分「加载中」与「真空」：查询 pending 期间不闪空态文案。
-  const { data: issues = [], isPending } = useQuery(issueListOptions(wsId));
+  // isError 同理区分「失败」与「真空」（spec §5：toast + 重试）。
+  const {
+    data: issues = [],
+    isPending,
+    isError,
+    refetch,
+  } = useQuery(issueListOptions(wsId));
   const [drawerIssueId, setDrawerIssueId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isError) toast.error(t(($) => $.list.load_failed));
+  }, [isError, t]);
 
   const requirements = useMemo(
     () =>
@@ -33,6 +44,21 @@ export function RequirementListPanel({ projectId }: { projectId: string }) {
         .sort((a, b) => (a.start_at ?? "").localeCompare(b.start_at ?? "")),
     [issues, projectId],
   );
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-8 text-caption text-destructive">
+        <p>{t(($) => $.list.load_failed)}</p>
+        <button
+          type="button"
+          className="rounded-md border border-surface-border px-2 py-1 text-foreground hover:bg-muted/50"
+          onClick={() => refetch()}
+        >
+          {t(($) => $.list.retry)}
+        </button>
+      </div>
+    );
+  }
 
   if (requirements.length === 0) {
     if (isPending) return null;

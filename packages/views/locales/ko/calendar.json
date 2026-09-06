@@ -3,10 +3,14 @@
     "title": "캘린더",
     "new_requirement": "새 요구사항",
     "project_filter": "프로젝트 필터",
-    "all_projects": "모든 프로젝트"
+    "all_projects": "모든 프로젝트",
+    "load_failed": "요구사항을 불러오지 못했습니다",
+    "retry": "다시 시도"
   },
   "list": {
-    "empty": "이 프로젝트에는 아직 요구사항이 없습니다"
+    "empty": "이 프로젝트에는 아직 요구사항이 없습니다",
+    "load_failed": "요구사항을 불러오지 못했습니다",
+    "retry": "다시 시도"
   },
   "drawer": {
     "loading": "로딩 중…"
