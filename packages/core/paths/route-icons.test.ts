@@ -41,6 +41,21 @@ describe("workspace page coverage", () => {
   });
 });
 
+describe("calendar workspace page", () => {
+  it("registers calendar with CalendarDays icon and nav key", () => {
+    expect(WORKSPACE_PAGES.calendar).toEqual({
+      segment: "calendar",
+      icon: "CalendarDays",
+      navKey: "calendar",
+    });
+  });
+
+  it("resolves /{slug}/calendar to the CalendarDays icon", () => {
+    expect(resolveRouteIconName("/acme/calendar")).toBe("CalendarDays");
+    expect(pageForSegment("calendar")).toBe("calendar");
+  });
+});
+
 describe("pageForSegment", () => {
   it("maps a known segment to its page key", () => {
     expect(pageForSegment("projects")).toBe("projects");

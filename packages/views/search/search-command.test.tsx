@@ -200,30 +200,17 @@ vi.mock("@multica/core", () => ({
   useWorkspaceId: () => "ws-test",
 }));
 
-vi.mock("@multica/core/paths", async (importOriginal) => ({
+vi.mock("@multica/core/paths", async (importOriginal) => {
   // Spread the real module so pure helpers (resolveRouteIconName, used to
   // derive each nav page's icon from its href) stay intact.
-  ...(await importOriginal<typeof import("@multica/core/paths")>()),
-  useWorkspacePaths: () => ({
-    inbox: () => "/ws-test/inbox",
-    chat: () => "/ws-test/chat",
-    myIssues: () => "/ws-test/my-issues",
-    issues: () => "/ws-test/issues",
-    projects: () => "/ws-test/projects",
-    autopilots: () => "/ws-test/autopilots",
-    agents: () => "/ws-test/agents",
-    squads: () => "/ws-test/squads",
-    usage: () => "/ws-test/usage",
-    runtimes: () => "/ws-test/runtimes",
-    skills: () => "/ws-test/skills",
-    settings: () => "/ws-test/settings",
-    issueDetail: (id: string) => `/ws-test/issues/${id}`,
-    memberDetail: (id: string) => `/ws-test/members/${id}`,
-    agentDetail: (id: string) => `/ws-test/agents/${id}`,
-    squadDetail: (id: string) => `/ws-test/squads/${id}`,
-    projectDetail: (id: string) => `/ws-test/projects/${id}`,
-  }),
-}));
+  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+  return {
+    ...actual,
+    // Delegate to the real builder so a new workspace page (e.g. calendar)
+    // can't drift the mock out from under WORKSPACE_PAGES-derived nav.
+    useWorkspacePaths: () => actual.paths.workspace("ws-test"),
+  };
+});
 
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (_wsId: string, id: string) => ({

@@ -114,30 +114,20 @@ vi.mock("@multica/core/chat", () => ({
     { getState: () => chatStore.current },
   ),
 }));
-vi.mock("@multica/core/paths", async (importOriginal) => ({
+vi.mock("@multica/core/paths", async (importOriginal) => {
   // Spread the real module so pure helpers (resolveRouteIconName, used by the
   // nav to derive each item's icon from its href) stay intact; only the
   // workspace/context hooks below are stubbed to control routes in tests.
-  ...(await importOriginal<typeof import("@multica/core/paths")>()),
-  paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
-  useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
-  useWorkspacePaths: () => ({
-    inbox: () => "/acme/inbox",
-    chat: () => "/acme/chat",
-    myIssues: () => "/acme/my-issues",
-    issues: () => "/acme/issues",
-    projects: () => "/acme/projects",
-    autopilots: () => "/acme/autopilots",
-    agents: () => "/acme/agents",
-    squads: () => "/acme/squads",
-    usage: () => "/acme/usage",
-    runtimes: () => "/acme/runtimes",
-    skills: () => "/acme/skills",
-    settings: () => "/acme/settings",
-    issueDetail: (id: string) => `/acme/issues/${id}`,
-    projectDetail: (id: string) => `/acme/projects/${id}`,
-  }),
-}));
+  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+  return {
+    ...actual,
+    paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
+    useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
+    // Delegate to the real builder so a new nav destination (e.g. calendar)
+    // can't drift the mock out from under workspaceNav.
+    useWorkspacePaths: () => actual.paths.workspace("acme"),
+  };
+});
 vi.mock("@multica/core/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/api")>();
   return {
