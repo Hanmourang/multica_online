@@ -7,7 +7,7 @@
 
 - **仓库**：`ai_workspace_online/ai_agents/multica_online`
 - **分支**：`feat/requirement-calendar`（基线 main = `7dcc53e`）
-- **最近更新**：2026-09-06（archive 差距补齐线：d9aa3a2 三端点 + df5b689 CLI sync 管道，E2E 全链路验证通过）
+- **最近更新**：2026-09-06（日历一级模块提升线 Task 1-6 完成，见 §2A；此前 archive 差距补齐线：d9aa3a2 三端点 + df5b689 CLI sync 管道，E2E 全链路验证通过）
 
 ---
 
@@ -78,6 +78,28 @@
 1. **落地页错误**：`/sirius-6cha` 非 dev 账号工作区（报「工作区不可用」），正确入口 `http://localhost:13147/dev/issues`；且 dev 库无需求数据 → 已造 DEV-1/DEV-2 演示数据（含时间窗/goal/班底，`auto_trigger=false` 防真触发）。
 2. **列表投影缺失**：86047ef 修的 sqlc 静态 `ListIssues` 无调用方（死代码）；真正服务列表/看板的是 handler 手工拼的动态 SQL → 修复 F/G 补齐三条路径并用 `TestListIssues_RequirementFieldsProjection` 锁死。
 3. **前端数据源遗漏**：calendar 不在 `usesServerStatusSurface`/`usesServerGroupSurface` 任何分支 → 修复 H；浏览器终验日历色块 DEV-1（9/6~9/11）/DEV-2（9/8~9/15）正常渲染。
+
+---
+
+## 2A. 日历一级模块提升（2026-09-06，spec：`../specs/2026-09-06-calendar-module-elevation-design.md`）
+
+日历从 /issues 任务页的视图 tab 提升为侧边栏一级模块（/calendar）：工作区级需求日历页 + 需求抽屉五阶段 + 项目页「任务概览」改名与「需求详情」TAB + 任务子视图日历 tab 移除。子 agent 驱动执行（主会话内联 TDD + 每 Task CodeReview 子代理两阶段审查合并派发）。
+
+| 提交 | 内容 | 任务映射 |
+|---|---|---|
+| 0c4893a | 实现计划（7 Task TDD 分解） | 计划 |
+| 80e2edb | 日历一级导航注册（paths/route-icons 三联合契约/侧边栏/i18n 四语言 + 隐藏触点 diagnostic-context/search-command） | Task 1 |
+| b9b99ed | CalendarView 搬家至 views/calendar + onOpenRequirement 回调（AppLink 拦截，修饰键放行） | Task 2 |
+| 2f9f1bd | RequirementDrawer 需求五阶段抽屉（复用 RequirementFlowSection，SheetContent 宽度同 variant 栈覆盖） | Task 3 |
+| 6eb4f35 | CalendarPage 工作区日历页 + /calendar 路由壳 + 抽屉接线 + views exports `./calendar` 子路径 | Task 4 |
+| b49ebfc | 任务子视图移除日历 tab（modes 去 calendar + allowCalendar 透传链门控视图菜单，镜像 allowGantt） | Task 5 |
+| fa7a799 | RequirementListPanel 项目维度需求列表（需求详情 TAB 面板：本项目顶层需求按 start_at 升序成卡，点击开抽屉） | Task 6 |
+
+**交接面（未提交，并行 archive 会话领土，最小 diff 已写入工作树随其提交生效）**：`project-archive-views.tsx` 白名单/views 数组/渲染分支接线；`locales/*/archive.json` `views.overview` 改名「任务概览」+ 新增 `views.requirements`（四语言；类型经 resources-types.ts 的 `typeof archive.json` 自动扩展，无需手改）。
+
+**计划偏差记录（均经审查核验）**：① Task 4 列表查询提至页面层供抽屉 statusBadge（CalendarView 无二次请求）；② Task 4 补 `./calendar` exports（契约强制）；③ Task 5 发现视图下拉硬编码五态不消费 modes → 引入 allowCalendar 透传链（controller→surface 默认 header/page 自定义 header→IssuesHeader/IssueDisplayControls 两层→RadioItem）；④ Task 6 面板补 statusBadge 接线（drawer 契约要求宿主传入）+ isPending 防空态闪烁；⑤ spec §4b 卡片的「班底头像/阶段进度」经计划骨架收敛为四要素（有意范围收敛，`Issue.stage_progress` 现成可补）。
+
+**验证**：views 全量 424 文件 4964 测试（新增 11 个：抽屉 3 + 日历页 3 + controller 2 + issues-page 1 + 面板 3，余为既有改造）——唯一失败为既知 flake `issue-limit-upgrade-dialog` Escape 用例（顺序敏感，隔离 14/14 全绿，与本线零交集）；views/core tsc 零错误；core 143 文件 1695 测试全绿；web build 通过。
 
 ---
 
