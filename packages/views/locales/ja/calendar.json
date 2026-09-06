@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "カレンダー",
+    "new_requirement": "新規要件",
+    "project_filter": "プロジェクトで絞り込み",
+    "all_projects": "すべてのプロジェクト"
+  },
+  "list": {
+    "empty": "このプロジェクトには要件がまだありません"
+  },
+  "drawer": {
+    "loading": "読み込み中…"
+  }
+}

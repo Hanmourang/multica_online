@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "Calendar",
+    "new_requirement": "New Requirement",
+    "project_filter": "Filter by project",
+    "all_projects": "All projects"
+  },
+  "list": {
+    "empty": "No requirements in this project yet"
+  },
+  "drawer": {
+    "loading": "Loading…"
+  }
+}

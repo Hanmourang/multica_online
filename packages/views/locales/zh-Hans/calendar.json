@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "日历",
+    "new_requirement": "新建需求",
+    "project_filter": "项目过滤",
+    "all_projects": "全部项目"
+  },
+  "list": {
+    "empty": "该项目暂无需求"
+  },
+  "drawer": {
+    "loading": "加载中…"
+  }
+}
