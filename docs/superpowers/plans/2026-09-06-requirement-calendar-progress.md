@@ -99,7 +99,7 @@
 
 **计划偏差记录（均经审查核验）**：① Task 4 列表查询提至页面层供抽屉 statusBadge（CalendarView 无二次请求）；② Task 4 补 `./calendar` exports（契约强制）；③ Task 5 发现视图下拉硬编码五态不消费 modes → 引入 allowCalendar 透传链（controller→surface 默认 header/page 自定义 header→IssuesHeader/IssueDisplayControls 两层→RadioItem）；④ Task 6 面板补 statusBadge 接线（drawer 契约要求宿主传入）+ isPending 防空态闪烁；⑤ spec §4b 卡片的「班底头像/阶段进度」经计划骨架收敛为四要素（有意范围收敛，`Issue.stage_progress` 现成可补）。
 
-**验证**：views 全量 424 文件 4964 测试（新增 12 个：抽屉 3 + 日历页 3 + controller 2 + issues-page 1 + 面板 3，余为既有改造；若计入 calendar-view 随迁的 onOpenRequirement 用例则 13，core 侧 route-icons 另有 +2）——唯一失败为既知 flake `issue-limit-upgrade-dialog` Escape 用例（顺序敏感，隔离 14/14 全绿，与本线零交集）；views/core tsc 零错误；core 143 文件 1695 测试全绿；web build 通过。
+**验证**：views 全量 424 文件 4968 测试（新增 16 个：抽屉 3 + 日历页 4 + controller 2 + issues-page 1 + 面板 4 + 侧边栏激活 2，余为既有改造；若计入 calendar-view 随迁的 onOpenRequirement 用例则 17，core 侧 route-icons 另有 +2）——唯一失败为既知 flake `issue-limit-upgrade-dialog` Escape 用例（顺序敏感，隔离 14/14 全绿，与本线零交集）；views/core tsc 零错误；core 143 文件 1695 测试全绿；web build 通过。
 
 **终审修复（终审 CodeReview changes-requested → 已全部处理）**：
 
