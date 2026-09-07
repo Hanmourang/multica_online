@@ -1888,6 +1888,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteIssue)
 					r.Get("/roles", h.ListIssueRoleAssignments)
 					r.Put("/roles", h.ReplaceIssueRoleAssignments)
+					r.Get("/role-playbooks", h.ListIssueRolePlaybooks)
+					r.Put("/role-playbooks", h.ReplaceIssueRolePlaybooks)
 					r.Post("/decompose", h.DecomposeRequirement)
 					r.Get("/decomposition", h.GetDecomposition)
 					r.Post("/decomposition/confirm", h.ConfirmDecomposition)
@@ -2006,6 +2008,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/modules/{moduleId}", h.DeleteProjectModule)
 					r.Get("/role-defaults", h.ListProjectRoleDefaults)
 					r.Put("/role-defaults", h.ReplaceProjectRoleDefaults)
+					r.Get("/role-playbooks", h.ListProjectRolePlaybooks)
+					r.Put("/role-playbooks", h.ReplaceProjectRolePlaybooks)
 					// Project archive (spec 2026-09-05-project-archive-design.md §5):
 					// artifacts / graph snapshots / filing readiness. Static
 					// segments (sync, matrix, unbound, latest, bus-matrix) precede
@@ -2017,9 +2021,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// （§4.9.3 批量绑定候选：标题相似度 + key 后缀 + 时间窗）。
 					r.Get("/artifacts/bind-candidates", h.ListArtifactBindCandidates)
 					r.Get("/artifacts", h.ListProjectArtifacts)
+					r.Post("/artifacts", h.CreateProjectArtifact)
 					r.Get("/artifacts/{artifactId}", h.GetProjectArtifact)
 					r.Get("/artifacts/{artifactId}/content", h.GetArtifactContent)
 					r.Patch("/artifacts/{artifactId}", h.PatchProjectArtifact)
+					r.Delete("/artifacts/{artifactId}", h.DeleteProjectArtifact)
 					r.Post("/artifacts/{artifactId}/archive", h.ArchiveDeliverable)
 					r.Post("/artifacts/{artifactId}/bind", h.BindProjectArtifact)
 					// Archive sync config / diagnostics（migration 461，§4.9.6/4.9.7）：

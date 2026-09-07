@@ -1,5 +1,6 @@
-import type { ProjectStatus, ProjectPriority } from "../types";
+import type { ProjectStatus, ProjectPriority, ProjectTemplate } from "../types";
 import { createDraftStore } from "../drafts/create-draft-store";
+import { DEFAULT_CREATE_PROJECT_TEMPLATE } from "./templates";
 
 interface ProjectDraft {
   title: string;
@@ -12,6 +13,7 @@ interface ProjectDraft {
   // Calendar days ("YYYY-MM-DD"); empty/undefined means unset.
   startDate?: string;
   dueDate?: string;
+  template?: ProjectTemplate;
 }
 
 const EMPTY_DRAFT: ProjectDraft = {
@@ -24,6 +26,7 @@ const EMPTY_DRAFT: ProjectDraft = {
   icon: undefined,
   startDate: undefined,
   dueDate: undefined,
+  template: DEFAULT_CREATE_PROJECT_TEMPLATE,
 };
 
 export const useProjectDraftStore = createDraftStore<ProjectDraft>({

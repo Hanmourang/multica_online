@@ -2,7 +2,12 @@
 import { describe, expect, it } from "vitest";
 import { buildSteps } from "../task-transcript/build-steps";
 import type { TimelineItem } from "../task-transcript/build-timeline";
-import { buildDeliverables, extractReplyFilePaths, previewContent } from "./build-deliverables";
+import {
+  buildDeliverables,
+  extractReplyFilePaths,
+  previewContent,
+  shortenDeliverablePath,
+} from "./build-deliverables";
 
 const T0 = "2026-08-15T10:00:00.000Z";
 let seq = 0;
@@ -93,20 +98,32 @@ describe("buildDeliverables", () => {
     expect(out![0]!.content).toBe("baz\nbar\nbaz\n");
   });
 
-  it("回复声明的路径合并去重，仅回复独有的标 source=reply", () => {
+  it("回复里提到但未写入的路径不是交付物", () => {
     const steps = buildSteps(write("docs/a.md", "x"));
-    const reply = "已新增 `docs/a.md`，归档见 `change_logs/proj/2026.md`。";
+    const reply = "已新增 `docs/a.md`，归档见 `change_logs/proj/2026.md` 和 `src/types.ts`。";
     const out = buildDeliverables(steps, reply);
-    expect(out).toHaveLength(2);
-    const ref = out!.find((d) => d.path === "change_logs/proj/2026.md");
-    expect(ref).toMatchObject({ source: "reply", kind: "added", addedLines: 0 });
-    expect(ref!.content).toBeUndefined();
-    expect(ref!.diff).toBeUndefined();
+    expect(out).toHaveLength(1);
+    expect(out![0]!.path).toBe("docs/a.md");
+    expect(out!.find((d) => d.path === "change_logs/proj/2026.md")).toBeUndefined();
+    expect(out!.find((d) => d.path === "src/types.ts")).toBeUndefined();
+  });
+
+  it("只有回复引用、没有任何写入时不渲染交付物", () => {
+    expect(buildDeliverables([], "见 `docs/only-mentioned.md`")).toBeNull();
   });
 
   it("无产出返回 null", () => {
     expect(buildDeliverables([], null)).toBeNull();
     expect(buildDeliverables([], "没有任何文件路径")).toBeNull();
+  });
+
+  it("缩短过长绝对路径", () => {
+    expect(shortenDeliverablePath("docs/a.md")).toBe("docs/a.md");
+    expect(
+      shortenDeliverablePath(
+        "/Users/eleme/Documents/workspace/ai_workspace_online/docs/data-model.md",
+      ),
+    ).toBe("…/ai_workspace_online/docs/data-model.md");
   });
 
   it("非写/改类调用（如 Bash）不产生交付物", () => {

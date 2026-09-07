@@ -244,4 +244,12 @@ export interface Issue {
   stage_progress?: string | null;
   /** 验收轮次（DEFAULT 0）；每次 verdict=fail +1，>3 判「验收失败」终态。服务端 issue.go:93 恒发。 */
   acceptance_round?: number;
+  /** 子任务依赖（blocked_by 对端 id）；列表端可选投影。 */
+  blocked_by?: string[] | null;
+  /** 功能点 JSON；GetIssue / 子任务详情可选。 */
+  feature_points?: unknown;
+  /** 图谱上下文 JSON。 */
+  graph_context?: unknown;
+  /** 验收规约 JSON。 */
+  acceptance_spec?: unknown;
 }

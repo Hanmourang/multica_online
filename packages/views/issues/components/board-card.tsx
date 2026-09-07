@@ -31,6 +31,7 @@ import { projectModulesOptions } from "@multica/core/modules";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
+import { RequirementHomeLink } from "./requirement-home-link";
 function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
@@ -198,6 +199,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       <p className="mt-1 text-body font-medium leading-snug line-clamp-2">
         {issue.title}
       </p>
+      <RequirementHomeLink issue={issue} />
 
       {showDescription && (() => {
         const preview = descriptionPreview(issue.description!);

@@ -40,6 +40,7 @@ describe("RequirementAcceptancePanel", () => {
         submitAcceptanceVerdict={vi.fn()}
       />,
     );
+    expect(screen.getByTestId("acceptance-report-blocks")).toBeTruthy();
     expect(screen.getByTestId("acceptance-round").textContent).toContain("1");
     expect(screen.getByTestId("acceptance-tester-t1")).toBeTruthy();
     expect(screen.getByTestId("acceptance-repair-r1")).toBeTruthy();

@@ -12,9 +12,11 @@ import {
  *
  * `content` holds the final full text when the run wrote the file outright
  * (a later write of the same path wins); `diff` accumulates the changed lines
- * for edit-only files whose full text the stream never carried. `source` is
- * "reply" when the path was declared in the completion reply but never
- * touched by a tool call — such cards render without a preview.
+ * for edit-only files whose full text the stream never carried.
+ *
+ * Only tool mutations (Write / Edit / patch) become deliverables. Paths that
+ * the completion reply merely mentions are references, not outputs, and stay
+ * off the wall.
  */
 export interface Deliverable {
   path: string;
@@ -66,14 +68,31 @@ function baseName(path: string): string {
   return i === -1 ? path : path.slice(i + 1);
 }
 
+/** Extensions whose content reads as prose — rendered as rich markdown. */
+const MARKDOWN_EXTS = new Set(["md", "markdown"]);
+
+/** Last few path segments so a card never dumps a full `/Users/…` string. */
+export function shortenDeliverablePath(path: string, maxSegments = 3): string {
+  const parts = path.split("/").filter((part) => part.length > 0 && part !== ".");
+  if (parts.length <= maxSegments) return path;
+  return `…/${parts.slice(-maxSegments).join("/")}`;
+}
+
+export function isMarkdownPath(path: string): boolean {
+  const dot = path.lastIndexOf(".");
+  if (dot === -1) return false;
+  return MARKDOWN_EXTS.has(path.slice(dot + 1).toLowerCase());
+}
+
 /**
- * Aggregate a run's final deliverables from its steps, merged with the file
- * paths its completion reply declares. Returns null when the run produced
- * nothing the wall can name — a read-only run must not render an empty row.
+ * Aggregate a run's final deliverables from write/edit/patch steps.
+ * `replyText` is accepted for call-site stability but is not a source of
+ * cards — mentioned-but-untouched files are not deliverables.
+ * Returns null when the run produced nothing the wall can name.
  */
 export function buildDeliverables(
   steps: TraceStep[],
-  replyText: string | null | undefined,
+  _replyText?: string | null,
 ): Deliverable[] | null {
   const byPath = new Map<string, Deliverable>();
   const order: string[] = [];
@@ -159,25 +178,9 @@ export function buildDeliverables(
     if (d.content !== undefined && d.removedLines === 0) d.kind = "added";
   }
 
-  for (const path of replyText ? extractReplyFilePaths(replyText) : []) {
-    if (byPath.has(path)) continue;
-    byPath.set(path, {
-      path,
-      name: baseName(path),
-      kind: "added",
-      source: "reply",
-      addedLines: 0,
-      removedLines: 0,
-    });
-    order.push(path);
-  }
-
   if (order.length === 0) return null;
   return order.map((p) => byPath.get(p)!);
 }
-
-/** Extensions whose content reads as prose — rendered as rich markdown. */
-const MARKDOWN_EXTS = new Set(["md", "markdown"]);
 
 /**
  * Render input for the preview dialog. Markdown files pass through so prose

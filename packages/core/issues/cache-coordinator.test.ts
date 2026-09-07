@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { QueryClient, hashKey } from "@tanstack/react-query";
 import {
   applyIssueChange,
+  invalidateIssueDerivatives,
   invalidateLastActivitySortedIssueLists,
   invalidateUpdatedAtSortedIssueLists,
   rollbackIssueChange,
@@ -214,6 +215,34 @@ describe("applyIssueChange", () => {
       "renamed",
     );
     expect(result.staleKeys).toEqual([]);
+  });
+
+  it("patches start_at / due_date / title on the loaded calendar list and rolls back", () => {
+    const row = issue({
+      start_at: "2026-09-07T01:00:00.000Z",
+      due_date: "2026-09-07",
+      title: "项目分析",
+    });
+    qc.setQueryData<Issue[]>(issueKeys.calendar(WS_ID), [row]);
+
+    const patch = {
+      start_at: "2026-09-08T01:00:00.000Z",
+      due_date: "2026-09-10",
+      title: "项目分析改期",
+    };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, row),
+      baseIssue: row,
+    });
+
+    const next = qc.getQueryData<Issue[]>(issueKeys.calendar(WS_ID));
+    expect(next?.[0]?.start_at).toBe("2026-09-08T01:00:00.000Z");
+    expect(next?.[0]?.due_date).toBe("2026-09-10");
+    expect(next?.[0]?.title).toBe("项目分析改期");
+    expect(result.prevCalendar).toEqual([row]);
+
+    rollbackIssueChange(qc, WS_ID, "issue-1", result);
+    expect(qc.getQueryData<Issue[]>(issueKeys.calendar(WS_ID))).toEqual([row]);
   });
 
   it("patches a loaded flat row without refetching an unrelated position window", () => {
@@ -774,6 +803,24 @@ describe("invalidateLastActivitySortedIssueLists", () => {
     }
     expect(qc.getQueryState(wsUpdatedKey)?.isInvalidated).toBe(false);
     expect(qc.getQueryState(wsKey)?.isInvalidated).toBe(false);
+    qc.clear();
+  });
+});
+
+describe("invalidateIssueDerivatives", () => {
+  it("invalidates the calendar list only when the schedule changed", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const calendarKey = issueKeys.calendar(WS_ID);
+    qc.setQueryData<Issue[]>(calendarKey, [makeIssue(1)]);
+
+    invalidateIssueDerivatives(qc, WS_ID, { statusOrProjectChanged: false });
+    expect(qc.getQueryState(calendarKey)?.isInvalidated).toBe(false);
+
+    invalidateIssueDerivatives(qc, WS_ID, {
+      statusOrProjectChanged: false,
+      scheduleChanged: true,
+    });
+    expect(qc.getQueryState(calendarKey)?.isInvalidated).toBe(true);
     qc.clear();
   });
 });

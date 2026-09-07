@@ -1061,10 +1061,14 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	if err != nil {
 		return db.Issue{}, false
 	}
-	// Case-insensitive: a hand-typed `trs-134` should open `TRS-134`.
-	prefix := h.getIssuePrefix(ctx, wsUUID)
-	if prefix == "" || !strings.EqualFold(parts.prefix, prefix) {
-		return db.Issue{}, false
+	// Kind prefixes (req_ / task_) identify by workspace number only.
+	// Legacy workspace prefixes (MUL-123) still require an exact prefix match
+	// so FOO-134 and TRS-134 stay distinct.
+	if !isKindIssuePrefix(parts.prefix) {
+		prefix := h.getIssuePrefix(ctx, wsUUID)
+		if prefix == "" || !strings.EqualFold(parts.prefix, prefix) {
+			return db.Issue{}, false
+		}
 	}
 	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
 		WorkspaceID: wsUUID,
@@ -1081,18 +1085,75 @@ type identifierParts struct {
 	number int32
 }
 
-func splitIdentifier(id string) *identifierParts {
-	idx := -1
-	for i := len(id) - 1; i >= 0; i-- {
-		if id[i] == '-' {
-			idx = i
-			break
-		}
+const (
+	kindRequirementPrefix = "req"
+	kindTaskPrefix        = "task"
+	// requirementKindSQL 顶层需求：有日历/流水线字段。普通任务和所有子任务都不是。
+	// 不用 goal / decompose_mode：任务创建也会带 goal，且 decompose_mode 库默认是 confirm。
+	requirementKindSQL = `(i.parent_issue_id IS NULL AND (
+	i.start_at IS NOT NULL
+	OR i.decomposition_confirmed_at IS NOT NULL
+	OR i.triggered_at IS NOT NULL
+	OR i.repo_resource_id IS NOT NULL
+))`
+)
+
+func isKindIssuePrefix(prefix string) bool {
+	return strings.EqualFold(prefix, kindRequirementPrefix) ||
+		strings.EqualFold(prefix, kindTaskPrefix)
+}
+
+func issueKindIsRequirement(parentValid bool, startAt, decomp, triggered pgtype.Timestamptz, repo pgtype.UUID) bool {
+	if parentValid {
+		return false
 	}
-	if idx <= 0 || idx >= len(id)-1 {
+	return startAt.Valid || decomp.Valid || triggered.Valid || repo.Valid
+}
+
+// formatKindIdentifier renders req_{n} for top-level requirements and
+// task_{n} for standalone tasks and child issues. Workspace issue_prefix
+// is kept for legacy lookup of PREFIX-N links only.
+func formatKindIdentifier(isRequirement bool, number int32) string {
+	if isRequirement {
+		return kindRequirementPrefix + "_" + strconv.Itoa(int(number))
+	}
+	return kindTaskPrefix + "_" + strconv.Itoa(int(number))
+}
+
+func appendIssueKindFilter(where []string, kind string) ([]string, bool) {
+	switch strings.TrimSpace(kind) {
+	case "", "all":
+		return where, true
+	case "requirement":
+		return append(where, requirementKindSQL), true
+	case "task":
+		return append(where, "NOT "+requirementKindSQL), true
+	default:
+		return where, false
+	}
+}
+
+func splitIdentifier(id string) *identifierParts {
+	id = strings.TrimSpace(id)
+	if id == "" {
 		return nil
 	}
-	numStr := id[idx+1:]
+	if idx := strings.LastIndexByte(id, '_'); idx > 0 {
+		prefix := id[:idx]
+		if isKindIssuePrefix(prefix) {
+			return parseIdentifierNumber(prefix, id[idx+1:])
+		}
+	}
+	if idx := strings.LastIndexByte(id, '-'); idx > 0 {
+		return parseIdentifierNumber(id[:idx], id[idx+1:])
+	}
+	return nil
+}
+
+func parseIdentifierNumber(prefix, numStr string) *identifierParts {
+	if prefix == "" || numStr == "" {
+		return nil
+	}
 	num := 0
 	for _, c := range numStr {
 		if c < '0' || c > '9' {
@@ -1109,7 +1170,7 @@ func splitIdentifier(id string) *identifierParts {
 	if num <= 0 {
 		return nil
 	}
-	return &identifierParts{prefix: id[:idx], number: int32(num)}
+	return &identifierParts{prefix: prefix, number: int32(num)}
 }
 
 // issuePrefixForWorkspace resolves a workspace row's effective issue prefix:

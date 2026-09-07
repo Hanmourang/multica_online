@@ -27,6 +27,7 @@ import type layout from "../locales/en/layout.json";
 import type usage from "../locales/en/usage.json";
 import type squads from "../locales/en/squads.json";
 import type billing from "../locales/en/billing.json";
+import type archive from "../locales/en/archive.json";
 import type calendar from "../locales/en/calendar.json";
 
 // Module augmentation enables i18next v26 selector API across the monorepo:
@@ -69,6 +70,7 @@ declare global {
     usage: typeof usage;
     squads: typeof squads;
     billing: typeof billing;
+    archive: typeof archive;
     calendar: typeof calendar;
   }
 }

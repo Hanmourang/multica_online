@@ -8,6 +8,7 @@ import type {
   ProjectModule,
   RoleAssignment,
   RoleRosterResponse,
+  RolePlaybookBundle,
   DecomposeDraftTask,
   ConfirmDecompositionResponse,
   GetDecompositionResponse,
@@ -121,6 +122,8 @@ import type {
   GetArtifactContentResponse,
   ArchiveDeliverableRequest,
   ArtifactMatrixResponse,
+  CreateProjectArtifactRequest,
+  PatchProjectArtifactRequest,
   GraphSyncPayload,
   GraphSyncResponse,
   RebridgeGraphResponse,
@@ -986,6 +989,10 @@ export class ApiClient {
     if (params?.q?.trim()) search.set("q", params.q.trim());
     if (params?.status) search.set("status", params.status);
     if (params?.statuses?.length) search.set("statuses", params.statuses.join(","));
+    if (params?.status_category) search.set("status_category", params.status_category);
+    if (params?.status_categories?.length) {
+      search.set("status_categories", params.status_categories.join(","));
+    }
     if (params?.priority) search.set("priority", params.priority);
     if (params?.priorities?.length) search.set("priorities", params.priorities.join(","));
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
@@ -1004,6 +1011,7 @@ export class ApiClient {
     if (params?.include_no_project) search.set("include_no_project", "true");
     if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
     if (params?.top_level_only) search.set("top_level_only", "true");
+    if (params?.kind) search.set("kind", params.kind);
     // No `.length` guard on purpose: an empty ids array must still send
     // `ids=` — the server treats a PRESENT-but-empty list as an empty window
     // (nothing running), while an absent param means no restriction.
@@ -1331,7 +1339,7 @@ export class ApiClient {
   async updateProjectModule(
     projectId: string,
     moduleId: string,
-    data: { name?: string; color?: string },
+    data: { name?: string; color?: string; graph_node_id?: string | null },
   ): Promise<ProjectModule> {
     return this.fetch(`/api/projects/${projectId}/modules/${moduleId}`, {
       method: "PATCH",
@@ -1395,6 +1403,34 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/roles`, {
       method: "PUT",
       body: JSON.stringify({ entries }),
+    });
+  }
+
+  async listProjectRolePlaybooks(projectId: string): Promise<RolePlaybookBundle> {
+    return this.fetch(`/api/projects/${projectId}/role-playbooks`);
+  }
+
+  async replaceProjectRolePlaybooks(
+    projectId: string,
+    overrides: RolePlaybookBundle["overrides"],
+  ): Promise<RolePlaybookBundle> {
+    return this.fetch(`/api/projects/${projectId}/role-playbooks`, {
+      method: "PUT",
+      body: JSON.stringify({ overrides }),
+    });
+  }
+
+  async listIssueRolePlaybooks(issueId: string): Promise<RolePlaybookBundle> {
+    return this.fetch(`/api/issues/${issueId}/role-playbooks`);
+  }
+
+  async replaceIssueRolePlaybooks(
+    issueId: string,
+    overrides: RolePlaybookBundle["overrides"],
+  ): Promise<RolePlaybookBundle> {
+    return this.fetch(`/api/issues/${issueId}/role-playbooks`, {
+      method: "PUT",
+      body: JSON.stringify({ overrides }),
     });
   }
 
@@ -3949,7 +3985,7 @@ export class ApiClient {
   async patchProjectArtifact(
     projectId: string,
     artifactId: string,
-    patch: Record<string, unknown>,
+    patch: PatchProjectArtifactRequest,
   ): Promise<ProjectArtifact> {
     return this.fetch(`/api/projects/${projectId}/artifacts/${artifactId}`, {
       method: "PATCH",
@@ -3977,6 +4013,25 @@ export class ApiClient {
         body: JSON.stringify({ issue_id: issueId }),
       },
     );
+  }
+
+  async createProjectArtifact(
+    projectId: string,
+    data: CreateProjectArtifactRequest,
+  ): Promise<ProjectArtifact> {
+    return this.fetch(`/api/projects/${projectId}/artifacts`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProjectArtifact(
+    projectId: string,
+    artifactId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/artifacts/${artifactId}`, {
+      method: "DELETE",
+    });
   }
 
   // Project archive — graph snapshots + ontology + bus matrix (§5.2/§5.3).

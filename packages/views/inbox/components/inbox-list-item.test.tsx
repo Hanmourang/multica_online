@@ -421,3 +421,31 @@ describe("InboxListItem status glyph", () => {
     expect(icon.getAttribute("data-color")).toBe("");
   });
 });
+
+describe("InboxListItem quick confirm", () => {
+  it("offers one-click confirm for in_review", () => {
+    renderRow({ item: item({ issue_status: "in_review" }), view: "inbox" });
+    expect(screen.getByTestId("quick-confirm")).toBeInTheDocument();
+  });
+
+  it("offers one-click confirm for review_requested", () => {
+    renderRow({
+      item: item({ type: "review_requested", issue_status: "todo" }),
+      view: "inbox",
+    });
+    expect(screen.getByTestId("quick-confirm")).toBeInTheDocument();
+  });
+
+  it("offers one-click confirm for a pending completion notice", () => {
+    renderRow({
+      item: item({ type: "task_completed", issue_status: "todo" }),
+      view: "inbox",
+    });
+    expect(screen.getByTestId("quick-confirm")).toBeInTheDocument();
+  });
+
+  it("hides the button for a regular comment", () => {
+    renderRow({ item: item({ type: "new_comment" }), view: "inbox" });
+    expect(screen.queryByTestId("quick-confirm")).toBeNull();
+  });
+});

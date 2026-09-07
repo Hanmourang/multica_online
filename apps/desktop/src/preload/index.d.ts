@@ -103,6 +103,26 @@ interface DesktopAPI {
      *  Drives the worktree execution-mode option in the resource UI. */
     is_git_repo?: boolean;
   }>;
+  listArchiveDocs: (root: string) => Promise<{
+    ok: boolean;
+    files?: string[];
+    reason?: string;
+    error?: string;
+  }>;
+  writeArchiveFile: (
+    root: string,
+    relPath: string,
+    content: string,
+  ) => Promise<{ ok: boolean; reason?: string; error?: string }>;
+  readArchiveFile: (
+    root: string,
+    relPath: string,
+  ) => Promise<{
+    ok: boolean;
+    content?: string;
+    reason?: string;
+    error?: string;
+  }>;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;

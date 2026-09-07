@@ -14,6 +14,18 @@ import { RequirementSchedulePanel } from "./requirement-schedule-panel";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({
+    issueExecLog: (id: string) => `/test/issues/${id}?tab=exec`,
+  }),
+}));
+
+vi.mock("../../navigation", () => ({
+  AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
 function requirement(overrides: Partial<Issue> = {}): Issue {
   return {
     id: "req-1",
@@ -47,6 +59,24 @@ describe("RequirementSchedulePanel", () => {
     expect(screen.getByTestId("schedule-progress").textContent).toContain("1/3");
     expect(screen.getByTestId("schedule-child-c1")).toBeTruthy();
     expect(screen.getByTestId("schedule-child-c2")).toBeTruthy();
+    expect(
+      screen.getByTestId("schedule-child-c1").querySelector("a"),
+    ).toHaveAttribute("href", "/test/issues/c1?tab=exec");
+    expect(screen.getByTestId("schedule-preflight")).toBeTruthy();
+  });
+
+  it("links a failed child to the A3 execution log", () => {
+    renderWithI18n(
+      <RequirementSchedulePanel
+        issue={requirement()}
+        childIssues={[child("c3", "failed")]}
+        triggerRequirement={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "View failure →" })).toHaveAttribute(
+      "href",
+      "/test/issues/c3?tab=exec",
+    );
   });
 
   it("等待模块释放时渲染互斥 banner；无子任务时渲染空态", () => {

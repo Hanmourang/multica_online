@@ -20,22 +20,26 @@ vi.mock("@multica/core/projects/mutations", () => ({
   useCreateProject: () => ({ mutateAsync: vi.fn() }),
 }));
 
-vi.mock("@multica/core/projects", () => ({
-  useProjectDraftStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      draft: {
-        title: "",
-        description: "",
-        status: "planned",
-        priority: "medium",
-        leadType: undefined,
-        leadId: undefined,
-        icon: undefined,
-      },
-      setDraft: vi.fn(),
-      clearDraft: vi.fn(),
-    }),
-}));
+vi.mock("@multica/core/projects", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/projects")>();
+  return {
+    ...actual,
+    useProjectDraftStore: (selector: (state: unknown) => unknown) =>
+      selector({
+        draft: {
+          title: "",
+          description: "",
+          status: "planned",
+          priority: "medium",
+          leadType: undefined,
+          leadId: undefined,
+          icon: undefined,
+        },
+        setDraft: vi.fn(),
+        clearDraft: vi.fn(),
+      }),
+  };
+});
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
@@ -224,5 +228,20 @@ describe("CreateProjectModal", () => {
     await user.type(repoSearchInput, "no-match");
 
     expect(screen.getByText("No repositories match your search.")).toBeInTheDocument();
+  });
+
+  it("offers the three project templates and defaults to R&D", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    const trigger = screen.getByRole("button", { name: "Choose project template" });
+    expect(trigger).toHaveTextContent("R&D");
+
+    await user.click(trigger);
+    expect(screen.getByText("General")).toBeInTheDocument();
+    expect(screen.getByText("Data")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Archive · Product features · Requirements/),
+    ).toBeInTheDocument();
   });
 });

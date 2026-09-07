@@ -1282,14 +1282,26 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round,
        -- 需求派生状态投影（spec: 2026-09-04-requirement-calendar-design.md §6，9 条规则按序命中）。
        -- 不落列，永远与事实一致；子任务终态判定用 issue_effective_status 与 stage barrier 同语义。
+       COALESCE(CASE
+           WHEN i.parent_issue_id IS NOT NULL THEN NULL
+           WHEN i.start_at IS NULL
+                AND i.decomposition_confirmed_at IS NULL
+                AND i.triggered_at IS NULL
+                AND i.repo_resource_id IS NULL THEN NULL
+           ELSE (
        CASE
            WHEN issue_effective_status(i.workspace_id, i.status) = 'done' THEN '已完成'
            WHEN issue_effective_status(i.workspace_id, i.status) = 'cancelled' THEN '已取消'
+           -- 第 10 态（spec §6 增补 / 开放问题 #4）：累计 4 轮打回仍未过 = 验收失败终态。
+           -- 置于阶段态之前：一旦越界即终态，不再被残留的 open 子任务翻回「执行中/验收中」。
            WHEN i.acceptance_round > 3 THEN '验收失败'
            WHEN COALESCE(prog.has_open_stage1, FALSE) THEN '原型待确认'
            WHEN i.decomposition_confirmed_at IS NULL AND COALESCE(prog.has_stage2, FALSE) THEN '拆解待确认'
            WHEN i.decomposition_confirmed_at IS NULL THEN '未拆解'
            WHEN i.triggered_at IS NULL THEN '待触发'
+           -- 规则 6 修正（父状态优先于子计数）：仅当没有任何 stage3 子任务正在推进
+           -- （dispatched/running）且确有子任务在等模块锁时，才判「等待模块释放」；
+           -- 否则只要还有 stage3 在跑就是「执行中」，等锁只是局部阻塞不代表整体停摆。
            WHEN NOT EXISTS (
                SELECT 1 FROM issue rc
                JOIN agent_task_queue rq ON rq.issue_id = rc.id
@@ -1302,7 +1314,9 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
            WHEN COALESCE(prog.has_open_stage3, FALSE) THEN '执行中'
            WHEN COALESCE(prog.has_open_stage4, FALSE) THEN '验收中'
            ELSE '已完成'
-       END AS requirement_status,
+       END
+           )
+       END, '') AS requirement_status,
        -- stage 3 执行进度 N/M（无 stage 3 子任务时为空串，响应层映射为 null）。
        (CASE WHEN COALESCE(prog.stage3_total, 0) > 0
             THEN concat(prog.stage3_done, '/', prog.stage3_total)

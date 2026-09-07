@@ -328,6 +328,14 @@ export function SearchCommand() {
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
 
+  // Cmd-K / 搜索任务 stacked over the create dialog leaves both open. Close
+  // the create shell so the palette is the only overlay.
+  useEffect(() => {
+    if (!open) return;
+    const { modal, close } = useModalStore.getState();
+    if (modal === "create-issue" || modal === "quick-create-issue") close();
+  }, [open]);
+
   // cmdk's onSelect carries no event, so the activating gesture's modifiers
   // are recorded on the capture phase (click on a result, Enter in the input)
   // and consumed by the select handlers below: cmd+click / cmd+Enter opens a

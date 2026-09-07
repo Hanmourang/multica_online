@@ -96,6 +96,7 @@ type issueTableFiltersRequest struct {
 	WorkingOnly       bool                         `json:"working_only,omitempty"`
 	WorkingIssueIDs   []string                     `json:"working_issue_ids,omitempty"`
 	IncludeSubIssues  *bool                        `json:"include_sub_issues,omitempty"`
+	IssueKind         string                       `json:"issue_kind,omitempty"`
 }
 
 type issueTableSortRequest struct {
@@ -659,6 +660,12 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 	}
 	if spec.Filters.IncludeSubIssues != nil && !*spec.Filters.IncludeSubIssues {
 		where = append(where, "i.parent_issue_id IS NULL")
+	}
+	if next, ok := appendIssueKindFilter(where, spec.Filters.IssueKind); !ok {
+		writeError(w, http.StatusBadRequest, "invalid filters.issue_kind, expected requirement|task")
+		return issueTableSQL{}, false
+	} else {
+		where = next
 	}
 	where = appendIssueTableSearchFilter(where, addArg, spec.Search)
 

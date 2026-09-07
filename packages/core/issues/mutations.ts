@@ -95,6 +95,11 @@ function useIssueCreateMutation<TVariables>(
         qc.invalidateQueries({ queryKey: issueKeys.children(wsId, newIssue.parent_issue_id) });
         qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       }
+      qc.setQueryData<Issue[]>(issueKeys.calendar(wsId), (prev) => {
+        if (!Array.isArray(prev)) return prev;
+        if (prev.some((i) => i.id === newIssue.id)) return prev;
+        return [newIssue, ...prev];
+      });
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
@@ -103,6 +108,7 @@ function useIssueCreateMutation<TVariables>(
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.calendar(wsId) });
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
   });
@@ -297,6 +303,10 @@ export function useUpdateIssue() {
         statusOrProjectChanged:
           vars.status !== undefined ||
           Object.prototype.hasOwnProperty.call(vars, "project_id"),
+        scheduleChanged:
+          vars.start_at !== undefined ||
+          vars.due_date !== undefined ||
+          vars.start_date !== undefined,
       });
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
       if (ctx) {
@@ -586,6 +596,10 @@ export function useBatchUpdateIssues() {
         statusOrProjectChanged:
           _vars.updates.status !== undefined ||
           Object.prototype.hasOwnProperty.call(_vars.updates, "project_id"),
+        scheduleChanged:
+          _vars.updates.start_at !== undefined ||
+          _vars.updates.due_date !== undefined ||
+          _vars.updates.start_date !== undefined,
       });
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
       if (ctx) {
@@ -1134,6 +1148,25 @@ export function useUnsubscribeFromIssueSubtree(issueId: string) {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+    },
+  });
+}
+
+/**
+ * C8 一键回炉：复用已有 POST /acceptance/verdict。
+ * fail → acceptance_round+1 并新建 stage3 修复子任务（服务端已有机制）。
+ */
+export function useSubmitAcceptanceVerdict(issueId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (body: { verdict: "pass" | "fail"; evidence: string }) =>
+      api.submitAcceptanceVerdict(issueId, body),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.calendar(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });
 }

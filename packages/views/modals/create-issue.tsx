@@ -62,6 +62,7 @@ import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { firstWorkbenchStage } from "../calendar/calendar-helpers";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
@@ -78,14 +79,17 @@ import {
   useUpdateIssue,
 } from "@multica/core/issues/mutations";
 import { useAttachLabelToIssue } from "@multica/core/labels";
-import { usePutIssueDependenciesForIssue } from "@multica/core/modules";
+import {
+  projectModulesOptions,
+  usePutIssueDependenciesForIssue,
+} from "@multica/core/modules";
 import {
   propertyListOptions,
   useSetIssueProperty,
 } from "@multica/core/properties";
-import { projectRoleDefaultsOptions } from "@multica/core/issues/queries";
+import { projectRoleDefaultsOptions, projectRolePlaybooksOptions } from "@multica/core/issues/queries";
 import { projectResourcesOptions } from "@multica/core/projects";
-import type { RoleAssignment } from "@multica/core/types";
+import type { ProjectResource, RoleAssignment, RolePlaybookBundle } from "@multica/core/types";
 import {
   ApiError,
   DuplicateIssueErrorBodySchema,
@@ -105,9 +109,41 @@ import { IssuePickerModal } from "./issue-picker-modal";
 import { ModulePicker } from "../issues/components/pickers/module-picker";
 import { DependencyPicker } from "../issues/components/pickers/dependency-picker";
 import { RoleStrip } from "../issues/components/role-strip";
+import {
+  rosterHasRequiredAssignees,
+  toRosterPutBody,
+} from "../issues/components/role-roster";
+import { overridesEqual, withOverride } from "../issues/components/role-playbook";
 import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
+
+const REPO_RESOURCE_TYPES = new Set(["github_repo", "local_directory"]);
+const REQUIRED_ROLES = new Set(["pm", "developer"]);
+
+function toDatetimeLocal(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 默认当天 09:00–18:00，不跨天，避免日历月视图被拉成多日色块。 */
+function defaultRequirementTimes() {
+  const start = new Date();
+  start.setHours(9, 0, 0, 0);
+  const due = new Date(start);
+  due.setHours(18, 0, 0, 0);
+  return { start: toDatetimeLocal(start), due: toDatetimeLocal(due) };
+}
+
+function repoOptionLabel(r: ProjectResource): string {
+  if (r.label) return r.label;
+  const ref = r.resource_ref as Record<string, unknown>;
+  if (r.resource_type === "github_repo" && typeof ref.url === "string") return ref.url;
+  if (r.resource_type === "local_directory" && typeof ref.local_path === "string") {
+    return ref.local_path;
+  }
+  return r.id;
+}
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -203,6 +239,63 @@ function CreateRunHint({
           <span className="truncate">{text}</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+type CreateKind = "requirement" | "task";
+
+function resolveCreateKind(
+  data: Record<string, unknown> | null | undefined,
+  parentIssueId: string | undefined,
+): { kind: CreateKind; locked: boolean } {
+  if (data?.source === "calendar") return { kind: "requirement", locked: true };
+  if (parentIssueId || typeof data?.anchor_comment_id === "string") {
+    return { kind: "task", locked: true };
+  }
+  if (data?.create_kind === "requirement" || data?.create_kind === "task") {
+    return { kind: data.create_kind, locked: false };
+  }
+  return { kind: "task", locked: false };
+}
+
+function CreateKindSwitch({
+  value,
+  onChange,
+  requirementLabel,
+  taskLabel,
+  ariaLabel,
+}: {
+  value: CreateKind;
+  onChange: (kind: CreateKind) => void;
+  requirementLabel: string;
+  taskLabel: string;
+  ariaLabel: string;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label={ariaLabel}
+      data-testid="create-kind-switch"
+      className="flex items-center rounded-md border p-0.5"
+    >
+      {(["requirement", "task"] as const).map((kind) => (
+        <button
+          key={kind}
+          type="button"
+          role="tab"
+          aria-selected={value === kind}
+          onClick={() => onChange(kind)}
+          className={cn(
+            "rounded-sm px-2 py-0.5 text-caption transition-colors",
+            value === kind
+              ? "bg-accent font-medium text-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {kind === "requirement" ? requirementLabel : taskLabel}
+        </button>
+      ))}
     </div>
   );
 }
@@ -334,16 +427,42 @@ export function ManualCreatePanel({
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
   const [childPickerOpen, setChildPickerOpen] = useState(false);
 
-  // --- Requirement calendar fields (design §5) ---
-  // Only shown when creating a top-level issue with a project — the fields
-  // configure the pipeline (prototype → decompose → execute → acceptance).
+  // --- Requirement / task templates ---
+  // Calendar always files a requirement (decompose pipeline). Sub-issues and
+  // source-context creates stay tasks. Sidebar / default entry lets the user
+  // switch: requirement keeps decompose + roster; task only needs an executor
+  // and a delivery goal, then the existing assignee-trigger starts the run.
+  const fromCalendar = data?.source === "calendar";
+  const sourceContextLocked = !!anchorCommentId;
+  const [createKind, setCreateKind] = useState<CreateKind>(
+    () => resolveCreateKind(data, parentIssueId).kind,
+  );
+  const kindLocked = fromCalendar || !!parentIssueId || sourceContextLocked;
+  const effectiveKind: CreateKind = kindLocked
+    ? (fromCalendar ? "requirement" : "task")
+    : createKind;
+  const showKindSwitcher = !kindLocked;
   const [goal, setGoal] = useState("");
-  const [startAt, setStartAt] = useState("");
+  const [startAt, setStartAt] = useState(() => {
+    if (typeof data?.start_at === "string") return data.start_at;
+    return defaultRequirementTimes().start;
+  });
+  const [dueAt, setDueAt] = useState(() => {
+    if (typeof data?.due_at === "string") return data.due_at;
+    if (typeof data?.due_date === "string") return `${data.due_date}T18:00`;
+    return defaultRequirementTimes().due;
+  });
   const [decomposeMode, setDecomposeMode] = useState<"auto" | "confirm" | "manual">("confirm");
   const [autoTrigger, setAutoTrigger] = useState(true);
   const [roleEntries, setRoleEntries] = useState<RoleAssignment[]>([]);
   const [repoResourceId, setRepoResourceId] = useState("");
-  const showRequirementFields = !parentIssueId && !!projectId;
+  const showRequirementFields =
+    effectiveKind === "requirement" && !parentIssueId && !!projectId;
+  const showRequirementNeedProject =
+    effectiveKind === "requirement" && !parentIssueId && !projectId;
+  const showTaskTemplate =
+    effectiveKind === "task" && !parentIssueId && !fromCalendar && !sourceContextLocked;
+  const isRequirementCreate = effectiveKind === "requirement" && !parentIssueId;
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
@@ -367,19 +486,54 @@ export function ManualCreatePanel({
     ...projectRoleDefaultsOptions(projectId),
     enabled: showRequirementFields,
   });
+  const { data: projectPlaybookData } = useQuery({
+    ...projectRolePlaybooksOptions(projectId),
+    enabled: showRequirementFields,
+  });
+  const [playbookBundle, setPlaybookBundle] = useState<RolePlaybookBundle | null>(null);
+  useEffect(() => {
+    setPlaybookBundle(null);
+  }, [projectId]);
+  useEffect(() => {
+    if (projectPlaybookData && !playbookBundle) {
+      setPlaybookBundle(projectPlaybookData);
+    }
+  }, [projectPlaybookData, playbookBundle]);
   // git 库选择器数据源：项目资源里过滤出 github_repo（spec §10:378）。
   const { data: projectResources = [] } = useQuery({
     ...projectResourcesOptions(wsId, projectId ?? ""),
     enabled: showRequirementFields,
   });
-  const repoResources = projectResources.filter((r) => r.resource_type === "github_repo");
+  const { data: projectModules = [] } = useQuery({
+    ...projectModulesOptions(wsId, projectId ?? ""),
+    enabled: fromCalendar && !!projectId,
+  });
+  const moduleRequired = fromCalendar && projectModules.length > 0;
+  const startAtPast =
+    fromCalendar && !!startAt && !Number.isNaN(new Date(startAt).getTime())
+      ? new Date(startAt).getTime() < Date.now()
+      : false;
+  const repoResources = projectResources.filter((r) =>
+    REPO_RESOURCE_TYPES.has(r.resource_type),
+  );
+  const onlineRepos = repoResources.filter((r) => r.resource_type === "github_repo");
+  const localRepos = repoResources.filter((r) => r.resource_type === "local_directory");
   // Sync server-fetched role defaults into local state (only when the user
   // hasn't customized yet — entries are empty until the first project load).
+  // Required roles stay enabled even if the project default row is off.
   useEffect(() => {
     if (projectRoleData?.roles && roleEntries.length === 0) {
-      setRoleEntries(projectRoleData.roles);
+      setRoleEntries(
+        projectRoleData.roles.map((e) =>
+          REQUIRED_ROLES.has(e.role) ? { ...e, enabled: true } : e,
+        ),
+      );
     }
   }, [projectRoleData, roleEntries.length]);
+
+  useEffect(() => {
+    if (isRequirementCreate) setIsExpanded(true);
+  }, [isRequirementCreate, setIsExpanded]);
 
   // Set the persisted draft's active mode so a later reopen (and any reader of
   // the unified draft) knows which form the user is editing in.
@@ -440,6 +594,8 @@ export function ManualCreatePanel({
     setModuleId(null);
     setAvoidConflict(false);
     setDependencyIds([]);
+    setRoleEntries([]);
+    setRepoResourceId("");
   };
   const updateStartDate = (v: string | null) => { setStartDate(v); setManual({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setShared({ dueDate: v }); };
@@ -489,7 +645,9 @@ export function ManualCreatePanel({
     setDependencyIds([]);
     setChildIssues([]);
     setGoal("");
-    setStartAt("");
+    const nextTimes = defaultRequirementTimes();
+    setStartAt(nextTimes.start);
+    setDueAt(nextTimes.due);
     setDecomposeMode("confirm");
     setAutoTrigger(true);
     setRoleEntries([]);
@@ -601,12 +759,21 @@ export function ManualCreatePanel({
           // Requirement calendar fields (design §5) — only for top-level
           // requirements (no parent). The server snapshots the project role
           // defaults at creation time; roleEntries are the local preview.
+          // Tasks skip start_at so they don't land on the calendar sweep,
+          // and pin decompose_mode=manual / auto_trigger=false so the
+          // pipeline doesn't fire; an agent assignee still auto-runs.
           ...(showRequirementFields ? {
             goal: goal.trim() || undefined,
             start_at: startAt ? new Date(startAt).toISOString() : undefined,
+            due_date: dueAt ? dueAt.slice(0, 10) : (dueDate || undefined),
             decompose_mode: decomposeMode,
             auto_trigger: autoTrigger,
             repo_resource_id: repoResourceId || undefined,
+          } : {}),
+          ...(showTaskTemplate ? {
+            goal: goal.trim() || undefined,
+            decompose_mode: "manual" as const,
+            auto_trigger: false,
           } : {}),
         });
       }
@@ -630,19 +797,36 @@ export function ManualCreatePanel({
       // Customized role roster — PUT only when the user changed the project
       // defaults (roleEntries diverges from the server snapshot). The server
       // already copied the defaults at creation time; this overrides them.
-      if (showRequirementFields && roleEntries.length > 0) {
+      const rosterBody = showRequirementFields
+        ? toRosterPutBody(roleEntries)
+        : [];
+      if (rosterBody.length > 0) {
         try {
-          await api.replaceIssueRoleAssignments(
-            issue.id,
-            roleEntries.map((e) => ({
-              role: e.role,
-              assignee_type: e.assignee_type,
-              assignee_id: e.assignee_id,
-              enabled: e.enabled,
-            })),
-          );
+          await api.replaceIssueRoleAssignments(issue.id, rosterBody);
         } catch (err) {
           console.error("[create-issue] role roster save failed", err);
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.create_issue.toast_roster_save_failed),
+          );
+        }
+      }
+
+      const playbookDirty =
+        !!playbookBundle &&
+        !!projectPlaybookData &&
+        !overridesEqual(playbookBundle.overrides, projectPlaybookData.overrides);
+      if (playbookDirty && playbookBundle) {
+        try {
+          await api.replaceIssueRolePlaybooks(issue.id, playbookBundle.overrides);
+        } catch (err) {
+          console.error("[create-issue] role playbook save failed", err);
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.create_issue.toast_playbook_save_failed),
+          );
         }
       }
 
@@ -737,6 +921,21 @@ export function ManualCreatePanel({
       // The old post-create "agent paused in Backlog" blocking panel is gone —
       // a passive inline hint now warns before submit (MUL-3375). The draft
       // reset + close/keep-open happens in onAccepted once we report success.
+      if (fromCalendar) {
+        const prototyperOn = roleEntries.some(
+          (row) => row.role === "prototyper" && row.enabled,
+        );
+        // 必须先卸创建弹窗再开工作台：两层 Base UI Dialog 同时 modal
+        // 会把 pointer-events 锁在底层弹窗上，工作台里拆解/关闭都点不到。
+        // replace 走 startTransition，等弹窗本帧卸掉再改 URL，避免同一
+        // commit 里 Dialog 清理和 Sheet 上锁互相覆盖。
+        onClose();
+        const href = p.calendarRequirement(
+          issue.id,
+          firstWorkbenchStage(prototyperOn),
+        );
+        queueMicrotask(() => router.replace(href));
+      }
       {
         toast.custom((toastId) => (
           <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
@@ -756,17 +955,20 @@ export function ManualCreatePanel({
             </div>
             {/* Not an AppLink: sonner renders toast content under <Toaster />,
                 which is mounted outside NavigationProvider, so useNavigation()
-                would throw here. */}
-            <button
-              type="button"
-              className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
-              onClick={() => {
-                router.push(p.issueDetail(issue.id));
-                toast.dismiss(toastId);
-              }}
-            >
-              {t(($) => $.create_issue.view_issue)}
-            </button>
+                would throw here. Calendar create stays on the page and opens
+                the drawer via ?req= instead of jumping to issue detail. */}
+            {!fromCalendar && (
+              <button
+                type="button"
+                className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
+                onClick={() => {
+                  router.push(p.issueDetail(issue.id));
+                  toast.dismiss(toastId);
+                }}
+              >
+                {t(($) => $.create_issue.view_issue)}
+              </button>
+            )}
           </div>
         ), { duration: 5000 });
       }
@@ -865,6 +1067,10 @@ export function ManualCreatePanel({
       const untouched =
         useIssueDraftStore.getState().draft === submittedDraftRef.current;
       if (untouched) clearDraft();
+      if (fromCalendar) {
+        onClose();
+        return;
+      }
       if (!mountedRef.current || !untouched) return;
       if (keepOpen) {
         resetForNextIssue();
@@ -884,6 +1090,9 @@ export function ManualCreatePanel({
       titleEditorRef.current?.focus();
       return;
     }
+    if (moduleRequired && !moduleId) return;
+    if (isRequirementCreate && !projectId) return;
+    if (showRequirementFields && !rosterHasRequiredAssignees(roleEntries)) return;
     void composer.submit();
   };
   const submitting = composer.submitting;
@@ -939,7 +1148,15 @@ export function ManualCreatePanel({
 
   // One state for the button and the keyboard paths, so a rendered affordance
   // can never disagree with what `handleSubmit` will actually do.
-  const submitState: "submitting" | "uploading" | "missing_title" | "source_unavailable" | "ready" =
+  const submitState:
+    | "submitting"
+    | "uploading"
+    | "missing_title"
+    | "missing_module"
+    | "missing_project"
+    | "missing_roster"
+    | "source_unavailable"
+    | "ready" =
     submitting
       ? "submitting"
       : gate.uploading
@@ -948,7 +1165,13 @@ export function ManualCreatePanel({
           ? "source_unavailable"
           : !title.trim()
             ? "missing_title"
-            : "ready";
+            : isRequirementCreate && !projectId
+              ? "missing_project"
+              : moduleRequired && !moduleId
+                ? "missing_module"
+                : showRequirementFields && !rosterHasRequiredAssignees(roleEntries)
+                  ? "missing_roster"
+                  : "ready";
   const submitBusy = submitState === "submitting" || submitState === "uploading";
 
   // Built once and reused by both footer branches: rendering a separate Button
@@ -962,7 +1185,14 @@ export function ManualCreatePanel({
       // keyboard and screen-reader users could never reach the tooltip that
       // explains why nothing happens. `handleSubmit` is the real gate either way.
       disabled={submitBusy}
-      aria-disabled={submitState === "missing_title" || submitState === "source_unavailable" || undefined}
+      aria-disabled={
+        submitState === "missing_title" ||
+        submitState === "missing_module" ||
+        submitState === "missing_project" ||
+        submitState === "missing_roster" ||
+        submitState === "source_unavailable" ||
+        undefined
+      }
       aria-busy={submitBusy || undefined}
       // The Button base only dims/blocks on native `disabled`, so aria-disabled
       // would otherwise stay a fully lit, pressable-looking primary button.
@@ -976,7 +1206,13 @@ export function ManualCreatePanel({
         tEditor(($) => $.upload.in_progress)
       ) : (
         <>
-          {t(($) => $.create_issue.submit)}
+          {isRequirementCreate
+            ? decomposeMode === "auto"
+              ? t(($) => $.create_issue.submit_requirement_auto)
+              : decomposeMode === "manual"
+                ? t(($) => $.create_issue.submit_requirement_manual)
+                : t(($) => $.create_issue.submit_requirement_confirm)
+            : t(($) => $.create_issue.submit_task)}
           {/* Decorative: the accessible name must stay "Create Issue", not
               "Create Issue Command Enter". Absent when `send` is unbound.
               Hidden on phones — no ⌘ key there, and the footer row is at its
@@ -1000,10 +1236,21 @@ export function ManualCreatePanel({
 
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-              <div className="flex items-center gap-1.5 text-caption">
-                <span className="text-muted-foreground">{workspaceName}</span>
-                <ChevronRight className="size-3 text-faint-foreground" />
-                <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
+              <div className="flex items-center gap-2 text-caption">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">{workspaceName}</span>
+                  <ChevronRight className="size-3 text-faint-foreground" />
+                  <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
+                </div>
+                {showKindSwitcher && (
+                  <CreateKindSwitch
+                    value={effectiveKind}
+                    onChange={setCreateKind}
+                    requirementLabel={t(($) => $.create_issue.kind_requirement)}
+                    taskLabel={t(($) => $.create_issue.kind_task)}
+                    ariaLabel={t(($) => $.create_issue.kind_switch_aria)}
+                  />
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <Tooltip>
@@ -1048,7 +1295,11 @@ export function ManualCreatePanel({
                 ref={titleEditorRef}
                 autoFocus
                 defaultValue={draft.manual.title}
-                placeholder={t(($) => $.create_issue.title_placeholder)}
+                placeholder={
+                  isRequirementCreate
+                    ? t(($) => $.create_issue.title_placeholder_requirement)
+                    : t(($) => $.create_issue.title_placeholder)
+                }
                 className="text-title font-semibold"
                 onChange={(v) => updateTitle(v)}
                 // Chord only — plain Enter still just ends title editing (#5532).
@@ -1056,8 +1307,16 @@ export function ManualCreatePanel({
               />
             </div>
 
-            {/* Description — takes remaining space */}
-            <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
+            {/* Description — compact when the requirement form is the main body. */}
+            <div
+              {...descDropZoneProps}
+              className={cn(
+                "relative overflow-y-auto px-5",
+                showRequirementFields || showTaskTemplate
+                  ? "shrink-0 min-h-[4.5rem] max-h-28"
+                  : "flex flex-1 min-h-0",
+              )}
+            >
               <ContentEditor
                 ref={descEditorRef}
                 defaultValue={draft.manual.description}
@@ -1116,8 +1375,8 @@ export function ManualCreatePanel({
                 />
               )}
 
-              {/* Assignee */}
-              {showField.assignee && (
+              {/* Assignee — task template owns a labeled executor field. */}
+              {showField.assignee && !showTaskTemplate && (
                 <AssigneePicker
                   assigneeType={assigneeType ?? null}
                   assigneeId={assigneeId ?? null}
@@ -1529,9 +1788,70 @@ export function ManualCreatePanel({
               }}
             />
 
+            {showRequirementNeedProject && (
+              <div
+                data-testid="create-requirement-need-project"
+                className="min-h-0 flex-1 space-y-2 overflow-y-auto border-t px-4 py-3"
+              >
+                <p className="text-caption text-muted-foreground">
+                  {t(($) => $.create_issue.kind_requirement_hint)}
+                </p>
+                <p className="text-caption text-amber-600">
+                  {t(($) => $.create_issue.pick_project_for_requirement)}
+                </p>
+              </div>
+            )}
+
+            {showTaskTemplate && (
+              <div
+                data-testid="create-task-template"
+                className="min-h-0 flex-1 space-y-3 overflow-y-auto border-t px-4 py-3"
+              >
+                <p className="text-caption text-muted-foreground">
+                  {t(($) => $.create_issue.kind_task_hint)}
+                </p>
+                <div>
+                  <label className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.create_issue.executor_label)}
+                  </label>
+                  <p className="mt-0.5 text-micro text-muted-foreground">
+                    {t(($) => $.create_issue.executor_hint)}
+                  </p>
+                  <div className="mt-1.5" data-testid="create-issue-executor">
+                    <AssigneePicker
+                      assigneeType={assigneeType ?? null}
+                      assigneeId={assigneeId ?? null}
+                      onUpdate={(u) => updateAssignee(
+                        u.assignee_type ?? undefined,
+                        u.assignee_id ?? undefined,
+                      )}
+                      triggerRender={<PillButton />}
+                      align="start"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.create_issue.delivery_goal_label)}
+                  </label>
+                  <textarea
+                    data-testid="create-issue-delivery-goal"
+                    className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-body placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    rows={2}
+                    value={goal}
+                    onChange={(e) => setGoal(e.target.value)}
+                    placeholder={t(($) => $.create_issue.delivery_goal_placeholder)}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Requirement calendar fields — only for top-level issues with a project. */}
             {showRequirementFields && (
-              <div className="border-t px-4 py-3 space-y-3 shrink-0 overflow-y-auto max-h-64">
+              <div
+                data-testid="create-requirement-template"
+                className="min-h-0 flex-1 space-y-3 overflow-y-auto border-t px-4 py-3"
+              >
                 {/* Goal */}
                 <div>
                   <label className="text-caption font-medium text-muted-foreground">
@@ -1546,7 +1866,7 @@ export function ManualCreatePanel({
                   />
                 </div>
 
-                {/* Git repo (project_resource) — spec §10:378, between goal and start time */}
+                {/* Git repo — online (github_repo) and local (local_directory). */}
                 <div>
                   <label className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.create_issue.repo_label)}
@@ -1558,30 +1878,66 @@ export function ManualCreatePanel({
                     onChange={(e) => setRepoResourceId(e.target.value)}
                   >
                     <option value="">{t(($) => $.create_issue.repo_none)}</option>
-                    {repoResources.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.label ?? r.id}
-                      </option>
-                    ))}
+                    {onlineRepos.length > 0 && (
+                      <optgroup label={t(($) => $.create_issue.repo_online)}>
+                        {onlineRepos.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {repoOptionLabel(r)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {localRepos.length > 0 && (
+                      <optgroup label={t(($) => $.create_issue.repo_local)}>
+                        {localRepos.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {repoOptionLabel(r)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
 
-                {/* Start time — minute-precision */}
-                <div>
-                  <label className="text-caption font-medium text-muted-foreground">
-                    {t(($) => $.create_issue.start_at_label)}
-                  </label>
-                  <input
-                    type="datetime-local"
-                    step={60}
-                    className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-body focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={startAt}
-                    onChange={(e) => setStartAt(e.target.value)}
-                  />
-                  <p className="mt-0.5 text-micro text-muted-foreground">
-                    {t(($) => $.create_issue.start_at_hint)}
-                  </p>
+                {/* Start / due — minute precision, side by side (prototype f3). */}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className="text-caption font-medium text-muted-foreground">
+                      {t(($) => $.create_issue.start_at_label)}
+                    </label>
+                    <input
+                      type="datetime-local"
+                      step={60}
+                      className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-body focus:outline-none focus:ring-1 focus:ring-ring"
+                      value={startAt}
+                      onChange={(e) => setStartAt(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-caption font-medium text-muted-foreground">
+                      {t(($) => $.create_issue.due_at_label)}
+                    </label>
+                    <input
+                      type="datetime-local"
+                      step={60}
+                      data-testid="create-issue-due-at"
+                      className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-body focus:outline-none focus:ring-1 focus:ring-ring"
+                      value={dueAt}
+                      onChange={(e) => setDueAt(e.target.value)}
+                    />
+                  </div>
                 </div>
+                <p className="-mt-1 text-micro text-muted-foreground">
+                  {t(($) => $.create_issue.start_at_hint)}
+                </p>
+                {startAtPast && (
+                  <p
+                    data-testid="create-issue-start-past"
+                    className="-mt-1 text-micro text-amber-600"
+                  >
+                    {t(($) => $.create_issue.start_at_past)}
+                  </p>
+                )}
 
                 {/* Role strip */}
                 <div>
@@ -1592,6 +1948,12 @@ export function ManualCreatePanel({
                     entries={roleEntries}
                     onChange={setRoleEntries}
                     className="mt-1"
+                    playbooks={playbookBundle ?? projectPlaybookData}
+                    onPlaybookChange={(role, override) => {
+                      const base = playbookBundle ?? projectPlaybookData;
+                      if (!base) return;
+                      setPlaybookBundle(withOverride(base, role, override));
+                    }}
                   />
                 </div>
 
@@ -1654,6 +2016,7 @@ export function ManualCreatePanel({
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
+              {!isRequirementCreate && (
               <button
                 type="button"
                 onClick={switchToAgent}
@@ -1666,6 +2029,7 @@ export function ManualCreatePanel({
                 <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
                 {t(($) => $.create_issue.switch_to_agent)}
               </button>
+              )}
               <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
                 <Switch
                   size="sm"
@@ -1674,14 +2038,25 @@ export function ManualCreatePanel({
                 />
                 {t(($) => $.create_issue.create_another)}
               </label>
-              {submitState === "missing_title" ? (
+              {submitState === "missing_title" ||
+              submitState === "missing_module" ||
+              submitState === "missing_project" ||
+              submitState === "missing_roster" ? (
                 <TooltipProvider delay={200}>
                   <Tooltip>
                     {/* No `<span>` wrapper needed now: aria-disabled leaves the
                         button focusable and hoverable, so it can anchor its own
                         tooltip. */}
                     <TooltipTrigger render={createButton} />
-                    <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                    <TooltipContent side="top">
+                      {submitState === "missing_module"
+                        ? t(($) => $.create_issue.module_required)
+                        : submitState === "missing_project"
+                          ? t(($) => $.create_issue.pick_project_for_requirement)
+                          : submitState === "missing_roster"
+                            ? t(($) => $.create_issue.roster_required)
+                            : t(($) => $.create_issue.title_required)}
+                    </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               ) : (

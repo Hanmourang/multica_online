@@ -44,23 +44,32 @@ type ProjectResponse struct {
 	// payload to keep parent metadata and child collections separate; clients
 	// that need the list call ListProjectResources directly.
 	ResourceCount int64 `json:"resource_count"`
+	// Template is general | rd | data for new projects, or full for rows
+	// created before templates existed (keeps the eight-tab shell).
+	Template string `json:"template"`
+	// ArchiveResourceID is the project_resource used as the archive root
+	// (migration 455). Null means the project has not been bound yet —
+	// artifact create/sync return 404 until a local_directory is attached.
+	ArchiveResourceID *string `json:"archive_resource_id"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:          uuidToString(p.ID),
-		WorkspaceID: uuidToString(p.WorkspaceID),
-		Title:       p.Title,
-		Description: textToPtr(p.Description),
-		Icon:        textToPtr(p.Icon),
-		Status:      p.Status,
-		Priority:    p.Priority,
-		LeadType:    textToPtr(p.LeadType),
-		LeadID:      uuidToPtr(p.LeadID),
-		StartDate:   dateToPtr(p.StartDate),
-		DueDate:     dateToPtr(p.DueDate),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
+		ID:                uuidToString(p.ID),
+		WorkspaceID:       uuidToString(p.WorkspaceID),
+		Title:             p.Title,
+		Description:       textToPtr(p.Description),
+		Icon:              textToPtr(p.Icon),
+		Status:            p.Status,
+		Priority:          p.Priority,
+		LeadType:          textToPtr(p.LeadType),
+		LeadID:            uuidToPtr(p.LeadID),
+		StartDate:         dateToPtr(p.StartDate),
+		DueDate:           dateToPtr(p.DueDate),
+		CreatedAt:         timestampToString(p.CreatedAt),
+		UpdatedAt:         timestampToString(p.UpdatedAt),
+		Template:          p.Template,
+		ArchiveResourceID: uuidToPtr(p.ArchiveResourceID),
 	}
 }
 
@@ -108,6 +117,7 @@ type CreateProjectRequest struct {
 	LeadID      *string                               `json:"lead_id"`
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
+	Template    string                                `json:"template,omitempty"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 }
 
@@ -122,15 +132,16 @@ type CreateProjectResourceRequestPayload struct {
 }
 
 type UpdateProjectRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
-	StartDate   *string `json:"start_date"`
-	DueDate     *string `json:"due_date"`
+	Title             *string `json:"title"`
+	Description       *string `json:"description"`
+	Icon              *string `json:"icon"`
+	Status            *string `json:"status"`
+	Priority          *string `json:"priority"`
+	LeadType          *string `json:"lead_type"`
+	LeadID            *string `json:"lead_id"`
+	StartDate         *string `json:"start_date"`
+	DueDate           *string `json:"due_date"`
+	ArchiveResourceID *string `json:"archive_resource_id"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -227,6 +238,7 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 // exact mismatch reported in #3925 (`--status active`).
 var validProjectStatuses = []string{"planned", "in_progress", "paused", "completed", "cancelled"}
 var validProjectPriorities = []string{"urgent", "high", "medium", "low", "none"}
+var validCreateProjectTemplates = []string{"general", "rd", "data"}
 
 // validateProjectEnum writes a 400 and returns false when value is not in
 // allowed; the caller returns immediately on false.
@@ -275,6 +287,13 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		status = "planned"
 	}
 	if !validateProjectEnum(w, "status", status, validProjectStatuses) {
+		return
+	}
+	template := req.Template
+	if template == "" {
+		template = "rd"
+	}
+	if !validateProjectEnum(w, "template", template, validCreateProjectTemplates) {
 		return
 	}
 	priority := req.Priority
@@ -378,6 +397,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 		StartDate:   startDate,
 		DueDate:     dueDate,
+		Template:    template,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -466,6 +486,59 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		ProjectResponse: resp,
 		Resources:       resourceResp,
 	})
+}
+
+// applyArchiveResourceUpdate writes project.archive_resource_id when the
+// update body includes that key. The column postdates the sqlc UpdateProject
+// snapshot, so the write is a direct query (same reason loadArchiveResourceID
+// does not go through generated code). An absent key leaves the pointer
+// untouched; null/"" clears it.
+func (h *Handler) applyArchiveResourceUpdate(w http.ResponseWriter, r *http.Request, project db.Project, rawFields map[string]json.RawMessage, req UpdateProjectRequest) bool {
+	raw, present := rawFields["archive_resource_id"]
+	if !present {
+		return true
+	}
+	clear := req.ArchiveResourceID == nil || strings.TrimSpace(*req.ArchiveResourceID) == "" || strings.TrimSpace(string(raw)) == "null"
+	if clear {
+		if err := h.writeArchiveResourceID(r.Context(), project.ID, pgtype.UUID{}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clear project archive resource")
+			return false
+		}
+		return true
+	}
+	resourceUUID, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(*req.ArchiveResourceID), "archive_resource_id")
+	if !ok {
+		return false
+	}
+	resource, err := h.Queries.GetProjectResourceInWorkspace(r.Context(), db.GetProjectResourceInWorkspaceParams{
+		ID: resourceUUID, WorkspaceID: project.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "archive resource not found")
+		return false
+	}
+	if uuidToString(resource.ProjectID) != uuidToString(project.ID) {
+		writeError(w, http.StatusBadRequest, "archive resource does not belong to this project")
+		return false
+	}
+	if err := h.writeArchiveResourceID(r.Context(), project.ID, resourceUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to bind project archive resource")
+		return false
+	}
+	return true
+}
+
+func (h *Handler) writeArchiveResourceID(ctx context.Context, projectID, resourceID pgtype.UUID) error {
+	if resourceID.Valid {
+		_, err := h.DB.Exec(ctx,
+			`UPDATE project SET archive_resource_id = $1, updated_at = now() WHERE id = $2`,
+			resourceID, projectID)
+		return err
+	}
+	_, err := h.DB.Exec(ctx,
+		`UPDATE project SET archive_resource_id = NULL, updated_at = now() WHERE id = $1`,
+		projectID)
+	return err
 }
 
 func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
@@ -584,6 +657,9 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		} else {
 			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
+	}
+	if !h.applyArchiveResourceUpdate(w, r, prevProject, rawFields, req) {
+		return
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {

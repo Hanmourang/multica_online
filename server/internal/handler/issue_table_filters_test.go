@@ -142,6 +142,8 @@ func TestListIssues_TableFacetsAreServerSide(t *testing.T) {
 	assertList("&project_ids="+projectA+"&include_no_project=true", issueA, issueB)
 	assertList("&label_ids="+labelA, issueA, issueC)
 	assertList("&top_level_only=true", issueA, issueB)
+	assertList("&kind=task", issueA, issueB, issueC)
+	assertList("&kind=requirement")
 	assertList("&q="+url.QueryEscape("progress "+token), issueB)
 	assertList("&q="+url.QueryEscape("progress")+"&statuses=in_progress", issueB)
 	var issueBNumber int

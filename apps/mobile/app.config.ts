@@ -93,6 +93,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           ios: {
             buildReactNativeFromSource: true,
           },
+          android: {
+            // Build only arm64-v8a: every target device (physical phones and
+            // Apple Silicon emulator images) is arm64. Dropping armeabi-v7a /
+            // x86 / x86_64 shrinks native C++ build output (node_modules
+            // android/build + .cxx) by roughly 75%.
+            buildArchs: ["arm64-v8a"],
+          },
         },
       ],
     ],

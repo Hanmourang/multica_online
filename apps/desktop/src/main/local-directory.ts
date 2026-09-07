@@ -1,7 +1,7 @@
 import { ipcMain, dialog, BrowserWindow } from "electron";
-import { access, stat } from "fs/promises";
+import { access, mkdir, readFile, readdir, stat, writeFile } from "fs/promises";
 import { constants as fsConstants } from "fs";
-import { basename, dirname, isAbsolute, join } from "path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 
 export interface PickDirectoryResult {
   ok: boolean;
@@ -125,4 +125,115 @@ export function setupLocalDirectory(
     (_event, path: string): Promise<ValidateLocalDirectoryResult> =>
       validateLocalDirectory(path),
   );
+
+  ipcMain.handle(
+    "archive:list-docs",
+    async (_event, root: string) => listArchiveDocs(root),
+  );
+
+  ipcMain.handle(
+    "archive:write-file",
+    async (_event, root: string, relPath: string, content: string) =>
+      writeArchiveFile(root, relPath, content),
+  );
+
+  ipcMain.handle(
+    "archive:read-file",
+    async (_event, root: string, relPath: string) =>
+      readArchiveFile(root, relPath),
+  );
+}
+
+const SKIP_DIRS = new Set([
+  "_attic",
+  "assets",
+  "node_modules",
+  ".git",
+  "__pycache__",
+  "qoder_backup",
+  "db_backups",
+  "wiki_snapshots",
+]);
+const DOC_EXTS = new Set([".md", ".html"]);
+
+async function listArchiveDocs(
+  root: string,
+): Promise<{ ok: boolean; files?: string[]; reason?: string; error?: string }> {
+  if (!root || !isAbsolute(root)) {
+    return { ok: false, reason: "not_found" };
+  }
+  try {
+    const st = await stat(root);
+    if (!st.isDirectory()) return { ok: false, reason: "not_found" };
+    const files: string[] = [];
+    await walkDocs(root, root, files);
+    return { ok: true, files };
+  } catch (err) {
+    return { ok: false, reason: "error", error: errorMessage(err) };
+  }
+}
+
+async function walkDocs(
+  root: string,
+  current: string,
+  out: string[],
+): Promise<void> {
+  const entries = await readdir(current, { withFileTypes: true });
+  for (const entry of entries) {
+    if (SKIP_DIRS.has(entry.name)) continue;
+    const full = join(current, entry.name);
+    if (entry.isDirectory()) {
+      await walkDocs(root, full, out);
+      continue;
+    }
+    const ext = entry.name.includes(".")
+      ? `.${entry.name.split(".").pop()?.toLowerCase()}`
+      : "";
+    if (!DOC_EXTS.has(ext)) continue;
+    out.push(relative(root, full).split(sep).join("/"));
+  }
+}
+
+async function writeArchiveFile(
+  root: string,
+  relPath: string,
+  content: string,
+): Promise<{ ok: boolean; reason?: string; error?: string }> {
+  if (!root || !isAbsolute(root) || !relPath) {
+    return { ok: false, reason: "error", error: "invalid path" };
+  }
+  const target = resolve(root, relPath);
+  const rootResolved = resolve(root);
+  if (!target.startsWith(rootResolved + sep) && target !== rootResolved) {
+    return { ok: false, reason: "error", error: "path escapes archive root" };
+  }
+  try {
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, content, "utf8");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: "error", error: errorMessage(err) };
+  }
+}
+
+async function readArchiveFile(
+  root: string,
+  relPath: string,
+): Promise<{ ok: boolean; content?: string; reason?: string; error?: string }> {
+  if (!root || !isAbsolute(root) || !relPath) {
+    return { ok: false, reason: "error", error: "invalid path" };
+  }
+  const target = resolve(root, relPath);
+  const rootResolved = resolve(root);
+  if (!target.startsWith(rootResolved + sep) && target !== rootResolved) {
+    return { ok: false, reason: "error", error: "path escapes archive root" };
+  }
+  try {
+    const st = await stat(target);
+    if (!st.isFile()) return { ok: false, reason: "not_found" };
+    const content = await readFile(target, "utf8");
+    return { ok: true, content };
+  } catch (err) {
+    return { ok: false, reason: "error", error: errorMessage(err) };
+  }
 }

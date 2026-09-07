@@ -37,7 +37,11 @@ vi.mock("@multica/core/issues/mutations", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
+}));
+
+vi.mock("../common/actor-avatar", () => ({
+  ActorAvatar: () => null,
 }));
 
 // Tooltip content renders inline so the minute-granularity times are
@@ -131,6 +135,7 @@ describe("CalendarView", () => {
     vi.setSystemTime(new Date("2026-09-15T12:00:00Z"));
     mockUpdateMutate.mockClear();
     vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.warning).mockClear();
   });
   afterEach(() => {
     cleanup();
@@ -273,6 +278,7 @@ describe("CalendarView", () => {
     // The reschedule toast names the auto-trigger linkage (spec §7.2).
     expect(toast.success).toHaveBeenCalledWith(
       "Rescheduled — the auto-trigger time moved with it",
+      expect.objectContaining({ duration: 5000 }),
     );
   });
 
@@ -326,5 +332,95 @@ describe("CalendarView", () => {
     expect(block.getAttribute("title")).toBe(
       "Already triggered — cancel the run before rescheduling",
     );
+  });
+
+  it("shows the auto-trigger time on a confirmed-but-not-fired block", () => {
+    renderCalendar([
+      requirement({
+        start_at: "2026-09-15T09:00:00Z",
+        due_date: "2026-09-16",
+        requirement_status: "待触发",
+      }),
+    ]);
+    expect(screen.getByTestId("req-trigger-req-1").textContent).toMatch(/9\/15 09:00/);
+  });
+
+  it("names the occupying requirement in the waiting-lock tooltip", () => {
+    renderCalendar([
+      requirement({
+        id: "req-wait",
+        identifier: "REQ-W",
+        number: 2,
+        title: "等待中",
+        start_at: "2026-09-16T09:00:00Z",
+        due_date: "2026-09-16",
+        requirement_status: "等待模块释放",
+        module_id: "mod-1",
+      }),
+      requirement({
+        id: "req-hold",
+        identifier: "REQ-H",
+        number: 7,
+        title: "占用模块",
+        start_at: "2026-09-15T09:00:00Z",
+        due_date: "2026-09-17",
+        requirement_status: "执行中",
+        module_id: "mod-1",
+      }),
+    ]);
+    expect(screen.getAllByText(/held by requirement #7 占用模块/).length).toBeGreaterThan(0);
+  });
+
+  it("dims the source block and shows a floating date preview while dragging", () => {
+    renderCalendar([
+      requirement({
+        start_at: "2026-09-15T09:30:00Z",
+        due_date: "2026-09-17",
+        requirement_status: "待触发",
+      }),
+    ]);
+    const block = screen.getByTestId("req-block-req-1-2026-09-15");
+    const dataTransfer = {
+      setData: vi.fn(),
+      getData: vi.fn(() => "req-1"),
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    fireEvent.dragStart(block, { dataTransfer });
+    fireEvent.dragOver(screen.getByTestId("cal-cell-2026-09-22"), { dataTransfer });
+    expect(block.className).toContain("opacity-40");
+    expect(screen.getByTestId("calendar-drag-preview").textContent).toBe(
+      "2026-09-15 → 2026-09-22",
+    );
+  });
+
+  it("end-segment grip refuses a module conflict and names a free window", () => {
+    renderCalendar([
+      requirement({
+        start_at: "2026-09-15T09:30:00Z",
+        due_date: "2026-09-16",
+        requirement_status: "待触发",
+        module_id: "mod-1",
+      }),
+      requirement({
+        id: "req-busy",
+        identifier: "REQ-B",
+        number: 9,
+        title: "占窗需求",
+        start_at: "2026-09-18T09:00:00Z",
+        due_date: "2026-09-20",
+        requirement_status: "执行中",
+        module_id: "mod-1",
+      }),
+    ]);
+
+    fireEvent.mouseDown(screen.getByTestId("req-grip-req-1"));
+    fireEvent.mouseUp(screen.getByTestId("cal-cell-2026-09-19"));
+
+    expect(mockUpdateMutate).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("#9"),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

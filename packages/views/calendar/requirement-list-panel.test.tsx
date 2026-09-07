@@ -14,6 +14,7 @@ import type { ReactElement } from "react";
 import type { Issue } from "@multica/core/types";
 import { renderWithI18n } from "../test/i18n";
 import { RequirementListPanel } from "./requirement-list-panel";
+import { resetRequirementWorkbenchSuppress } from "./use-requirement-workbench";
 
 const mockApi = vi.hoisted(() => ({
   listIssues: vi.fn(),
@@ -31,6 +32,7 @@ const mockApi = vi.hoisted(() => ({
   submitAcceptanceVerdict: vi.fn(),
   listProjectModules: vi.fn(),
   listProjectResources: vi.fn(),
+  listProjects: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -53,8 +55,55 @@ vi.mock("../common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));
 
+vi.mock("@multica/core/issues/mutations", () => ({
+  useUpdateIssue: () => ({ mutate: vi.fn() }),
+  useCreateComment: () => ({ mutateAsync: vi.fn() }),
+}));
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+const navState = vi.hoisted(() => ({
+  replace: vi.fn(),
+  back: vi.fn(),
+  canGoBack: () => false,
+  pathname: "/projects/proj-1",
+  searchParams: new URLSearchParams("view=requirements"),
+}));
+
+vi.mock("../navigation", () => ({
+  AppLink: ({
+    children,
+    href,
+  }: {
+    children: React.ReactNode;
+    href: string;
+  }) => <a href={href}>{children}</a>,
+  useNavigation: () => ({
+    push: vi.fn(),
+    replace: navState.replace,
+    back: navState.back,
+    canGoBack: navState.canGoBack,
+    pathname: navState.pathname,
+    // 与 web/desktop adapter 一致：每次 render 都 new 一份。
+    searchParams: new URLSearchParams(navState.searchParams.toString()),
+  }),
+}));
+
+vi.mock("@multica/core/paths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+  return {
+    ...actual,
+    useWorkspaceSlug: () => "acme",
+    useRequiredWorkspaceSlug: () => "acme",
+    useWorkspacePaths: () => actual.paths.workspace("acme"),
+  };
+});
+
+const openModal = vi.hoisted(() => vi.fn());
+vi.mock("@multica/core/modals", () => ({
+  useModalStore: { getState: () => ({ open: openModal }) },
 }));
 
 function requirement(overrides: Partial<Issue> = {}): Issue {
@@ -80,6 +129,7 @@ function requirement(overrides: Partial<Issue> = {}): Issue {
     start_at: "2026-09-15T09:00:00Z",
     due_date: "2026-09-17",
     requirement_status: "原型待确认",
+    stage_progress: "1/4",
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-01T00:00:00Z",
     decomposition_confirmed_at: null,
@@ -87,7 +137,7 @@ function requirement(overrides: Partial<Issue> = {}): Issue {
   } as unknown as Issue;
 }
 
-// issueListOptions 的 fixture 入口：beforeEach 里的 mockImplementation 读它
+// calendarIssuesOptions 的 fixture 入口：beforeEach 里的 mockImplementation 读它
 // （模块级 let，非 hoisted 工厂引用，无 hoisting 风险）。
 let currentIssues: Issue[] = [];
 
@@ -102,17 +152,16 @@ function renderPanel(ui: ReactElement) {
 
 beforeEach(() => {
   currentIssues = [];
-  // issueListOptions 按 7 个 status_category 并发拉取后 flatten；只在首个
-  // 响应里放 fixture，其余空桶，避免同一批 issue 被铺 7 份。
-  let served = false;
-  mockApi.listIssues.mockImplementation(() => {
-    if (served) return Promise.resolve({ issues: [], total: 0 });
-    served = true;
-    return Promise.resolve({
+  navState.searchParams = new URLSearchParams("view=requirements");
+  navState.replace.mockReset();
+  navState.back.mockReset();
+  resetRequirementWorkbenchSuppress();
+  mockApi.listIssues.mockImplementation(() =>
+    Promise.resolve({
       issues: currentIssues,
       total: currentIssues.length,
-    });
-  });
+    }),
+  );
   // getIssue 贴着列表 fixture 返回，抽屉概要头才能对上被点击的卡片。
   mockApi.getIssue.mockImplementation((id: string) =>
     Promise.resolve(
@@ -129,6 +178,7 @@ beforeEach(() => {
   });
   mockApi.listProjectModules.mockResolvedValue([]);
   mockApi.listProjectResources.mockResolvedValue({ resources: [] });
+  mockApi.listProjects.mockResolvedValue({ projects: [], total: 0 });
 });
 
 afterEach(() => {
@@ -148,6 +198,7 @@ describe("RequirementListPanel", () => {
         start_at: "2026-09-20T09:00:00Z",
         due_date: "2026-09-22",
         requirement_status: "执行中",
+        stage_progress: "3/4",
       }),
       requirement({
         id: "req-a",
@@ -157,6 +208,7 @@ describe("RequirementListPanel", () => {
         start_at: "2026-09-10T09:00:00Z",
         due_date: "2026-09-12",
         requirement_status: "待触发",
+        stage_progress: "2/4",
       }),
       requirement({
         id: "child-1",
@@ -181,10 +233,14 @@ describe("RequirementListPanel", () => {
 
     // 仅本项目两条顶层需求，按 start_at 升序：早开始在前。
     const cards = await screen.findAllByRole("button");
-    const texts = cards.map((c) => c.textContent ?? "");
+    const texts = cards
+      .map((c) => c.textContent ?? "")
+      .filter((text) => !/new requirement/i.test(text));
     expect(texts).toHaveLength(2);
     expect(texts[0]).toContain("早开始需求");
+    expect(texts[0]).toContain("2/4");
     expect(texts[1]).toContain("晚开始需求");
+    expect(texts[1]).toContain("3/4");
     expect(screen.queryByText(/子任务不进列表/)).toBeNull();
     expect(screen.queryByText(/他项目需求不进列表/)).toBeNull();
   });
@@ -203,6 +259,31 @@ describe("RequirementListPanel", () => {
     ).toBeTruthy();
     expect(mockApi.getIssue).toHaveBeenCalledWith("req-1");
     expect(screen.getByRole("dialog").textContent).toContain("原型待确认");
+    expect(navState.replace).toHaveBeenCalledWith(
+      "/projects/proj-1?view=requirements&req=req-1&stage=1",
+    );
+  });
+
+  it("keeps the workbench closed after × even when searchParams is a new object", async () => {
+    navState.searchParams = new URLSearchParams(
+      "view=requirements&req=req-1&stage=1",
+    );
+    currentIssues = [requirement()];
+    renderPanel(<RequirementListPanel projectId="proj-1" />);
+
+    expect(
+      await screen.findByTestId("requirement-workbench"),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("workbench-close"));
+
+    expect(screen.queryByTestId("requirement-workbench")).toBeNull();
+    expect(navState.replace).toHaveBeenCalledWith(
+      "/projects/proj-1?view=requirements",
+    );
+
+    fireEvent.click(screen.getByTestId("list-new-requirement"));
+    expect(screen.queryByTestId("requirement-workbench")).toBeNull();
   });
 
   it("renders the empty state when the project has no requirements", async () => {
@@ -219,7 +300,7 @@ describe("RequirementListPanel", () => {
     expect(
       await screen.findByText("No requirements in this project yet"),
     ).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByTestId("list-new-requirement")).toBeTruthy();
   });
 
   it("shows an error bar with toast and retry when the list query fails (spec §5)", async () => {

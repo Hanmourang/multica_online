@@ -41,14 +41,18 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  showOverlay = true,
   ...props
 }: SheetPrimitive.Popup.Props & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
+  /** Near-fullscreen / non-modal sheets should skip the backdrop — it sits
+   *  at z-50 and swallows portaled pickers/dialogs that also use z-50. */
+  showOverlay?: boolean
 }) {
   return (
     <SheetPortal>
-      <SheetOverlay />
+      {showOverlay ? <SheetOverlay /> : null}
       <SheetPrimitive.Popup
         data-slot="sheet-content"
         data-side={side}

@@ -22,6 +22,8 @@ vi.mock("@multica/ui/lib/clipboard", () => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  queryOptions: (options: unknown) => options,
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
     switch (options.queryKey?.[0]) {
       case "project-detail":
@@ -236,6 +238,10 @@ vi.mock("./project-due-date-picker", () => ({
 
 vi.mock("../../issues/surface/issue-surface", () => ({
   IssueSurface: () => null,
+}));
+
+vi.mock("./project-archive-views", () => ({
+  ProjectArchiveViews: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("../../layout/breadcrumb-header", () => ({

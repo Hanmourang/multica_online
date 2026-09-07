@@ -450,6 +450,12 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}); err != nil {
 			return IssueCreateResult{}, fmt.Errorf("copy role roster snapshot: %w", err)
 		}
+		if err := qtx.CopyProjectRolePlaybooksToIssue(ctx, db.CopyProjectRolePlaybooksToIssueParams{
+			IssueID:   issue.ID,
+			ProjectID: projectID,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("copy role playbook snapshot: %w", err)
+		}
 	}
 
 	if p.SourceContext != nil {

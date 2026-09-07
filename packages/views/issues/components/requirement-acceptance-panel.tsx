@@ -11,6 +11,7 @@ import { useState } from "react";
 import type { AcceptanceVerdictResponse, Issue } from "@multica/core/types";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import { readAcceptanceSpec, readGraphContext } from "./requirement-plan";
 
 /** 验收轮次上限（design §9 / WS4 Task 4.4）：round>3 判验收失败终态。 */
 const MAX_ACCEPTANCE_ROUND = 3;
@@ -38,6 +39,8 @@ export function RequirementAcceptancePanel({
   const failed = round > MAX_ACCEPTANCE_ROUND;
   const testers = childIssues.filter((c) => c.stage === 4);
   const repairs = childIssues.filter((c) => c.stage === 3);
+  const spec = readAcceptanceSpec(testers[0]?.acceptance_spec ?? issue.acceptance_spec);
+  const graph = readGraphContext(testers[0]?.graph_context ?? issue.graph_context);
 
   const submit = async (verdict: "pass" | "fail") => {
     setSubmitting(verdict);
@@ -68,6 +71,37 @@ export function RequirementAcceptancePanel({
           {t(($) => $.acceptance_panel.round_label)} {round} / {MAX_ACCEPTANCE_ROUND}
         </span>
       </header>
+
+      <div className="mb-2 grid grid-cols-2 gap-2" data-testid="acceptance-report-blocks">
+        <ArchiveBlock
+          testId="acceptance-block-evidence"
+          title={t(($) => $.acceptance_panel.block_evidence)}
+          items={spec.evidence.length ? spec.evidence : spec.cases}
+          empty={t(($) => $.acceptance_panel.archive_unready)}
+        />
+        <ArchiveBlock
+          testId="acceptance-block-code"
+          title={t(($) => $.acceptance_panel.block_code)}
+          items={[
+            spec.path && `${t(($) => $.acceptance_panel.version)} ${spec.path}`,
+            spec.version && `${t(($) => $.acceptance_panel.version)} ${spec.version}`,
+            ...spec.assertions,
+          ].filter((v): v is string => Boolean(v))}
+          empty={t(($) => $.acceptance_panel.archive_unready)}
+        />
+        <ArchiveBlock
+          testId="acceptance-block-graph"
+          title={t(($) => $.acceptance_panel.block_graph)}
+          items={[...graph.impacts, ...graph.nodes, ...spec.graph]}
+          empty={t(($) => $.acceptance_panel.archive_unready)}
+        />
+        <ArchiveBlock
+          testId="acceptance-block-coverage"
+          title={t(($) => $.acceptance_panel.block_coverage)}
+          items={spec.coverage}
+          empty={t(($) => $.acceptance_panel.archive_unready)}
+        />
+      </div>
 
       {/* 验收失败终态（round>3）：转人工仲裁 banner（§7.5③）。 */}
       {failed && (
@@ -162,5 +196,32 @@ export function RequirementAcceptancePanel({
         </div>
       </div>
     </section>
+  );
+}
+
+function ArchiveBlock({
+  testId,
+  title,
+  items,
+  empty,
+}: {
+  testId: string;
+  title: string;
+  items: string[];
+  empty: string;
+}) {
+  return (
+    <div className="rounded border bg-muted/20 p-2" data-testid={testId}>
+      <h5 className="mb-1 text-2xs text-muted-foreground">{title}</h5>
+      {items.length === 0 ? (
+        <p className="text-2xs text-muted-foreground">{empty}</p>
+      ) : (
+        <ul className="flex flex-col gap-0.5 text-2xs">
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

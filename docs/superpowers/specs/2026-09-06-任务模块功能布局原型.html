@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 原型 · 任务模块功能布局（目标态 · 2026-09-06）</title>
+<style>
+:root {
+  --app-shell: oklch(0.964435 0.001327 286.375);
+  --page-canvas: oklch(0.988087 0 0);
+  --surface: oklch(1 0 0);
+  --surface-hover: oklch(0.967 0.001 286.375);
+  --surface-selected: oklch(0.95 0.002 286.375);
+  --surface-border: oklch(0.92 0.004 286.32);
+  --foreground: oklch(0.141 0.005 285.823);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --faint-foreground: oklch(0.606 0.016 285.938);
+  --primary: oklch(0.21 0.006 285.885);
+  --border: oklch(0.945 0.003 286.32);
+  --brand: oklch(0.55 0.16 255);
+  --success: oklch(0.55 0.16 145);
+  --warning: oklch(0.72 0.15 75);
+  --destructive: oklch(0.577 0.245 27.325);
+  --info: oklch(0.55 0.12 250);
+  --radius: 0.625rem;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: oklch(0.93 0.004 286.32);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+button, select, input { font: inherit; }
+.mono { font-family: var(--mono); }
+
+.proto-nav {
+  position: sticky; top: 0; z-index: 200;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 16px; background: oklch(0.16 0.005 285.823); color: #ececf0;
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 8px; }
+.proto-nav .logo em { color: oklch(0.72 0.14 255); font-style: normal; }
+.proto-nav button.navbtn {
+  color: oklch(0.72 0.015 286); background: none; border: 0;
+  padding: 4px 9px; border-radius: 6px; font-size: 12px; cursor: pointer;
+}
+.proto-nav button.navbtn:hover { background: oklch(1 0 0 / 8%); color: #fff; }
+.proto-nav button.navbtn.on { background: oklch(1 0 0 / 14%); color: #fff; font-weight: 600; }
+.proto-nav .sep { width: 1px; height: 16px; background: oklch(1 0 0 / 16%); margin: 0 4px; }
+.proto-nav .hint { margin-left: auto; font-size: 11.5px; color: oklch(0.7 0.01 286); }
+
+.atlas { max-width: 1280px; margin: 0 auto; padding: 28px 24px 80px; }
+.atlas h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.atlas .lead { color: var(--muted-foreground); margin: 8px 0 22px; line-height: 1.7; max-width: 880px; }
+.atlas h2 { font-size: 15px; margin: 28px 0 10px; }
+.atlas p { line-height: 1.65; color: var(--muted-foreground); }
+.note {
+  background: oklch(0.97 0.02 85); border: 1px solid oklch(0.88 0.06 85);
+  border-radius: 10px; padding: 12px 14px; color: oklch(0.38 0.06 55); line-height: 1.65; font-size: 12.5px;
+  margin: 14px 0;
+}
+.compare {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+}
+.ia-card {
+  background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: 12px; padding: 14px 16px;
+}
+.ia-card h3 { font-size: 13px; margin-bottom: 10px; }
+.ia-card.bad h3 { color: var(--destructive); }
+.ia-card.good h3 { color: oklch(0.42 0.12 145); }
+.stack { display: flex; flex-direction: column; gap: 6px; }
+.blk {
+  border: 1px dashed var(--surface-border); border-radius: 8px; padding: 8px 10px;
+  background: var(--app-shell); font-size: 12px;
+}
+.blk b { display: block; font-size: 12px; margin-bottom: 3px; }
+.blk.dup { border-color: oklch(0.7 0.16 25 / 55%); background: oklch(0.97 0.02 25); }
+.blk.warn { border-color: oklch(0.8 0.12 80 / 55%); background: oklch(0.98 0.02 85); }
+.blk.ok { border-color: oklch(0.7 0.12 145 / 45%); background: oklch(0.97 0.02 145); }
+.blk.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.blk .t {
+  padding: 2px 8px; border-radius: 99px; background: var(--surface);
+  border: 1px solid var(--surface-border); font-size: 11px;
+}
+.blk .t.on { background: var(--primary); color: #fff; border-color: transparent; }
+.mini-row { display: flex; gap: 8px; }
+.mini-main { flex: 1; }
+.mini-side { width: 120px; }
+.table {
+  width: 100%; border-collapse: collapse; background: var(--surface);
+  border: 1px solid var(--surface-border); border-radius: 10px; overflow: hidden; font-size: 12.5px;
+}
+.table th, .table td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.table th { color: var(--muted-foreground); font-weight: 550; background: var(--app-shell); }
+.table tr:last-child td { border-bottom: 0; }
+
+.stage { padding: 18px 18px 48px; display: none; }
+.stage.on { display: block; }
+.frame {
+  max-width: 1440px; margin: 0 auto; background: var(--page-canvas);
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 0.16), 0 4px 16px rgb(15 23 42 / 0.08);
+  border: 1px solid oklch(0.85 0.005 286.32);
+}
+.frame-bar {
+  height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+}
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: oklch(0.7 0.19 27); }
+.frame-bar i:nth-child(2) { background: oklch(0.8 0.16 85); }
+.frame-bar i:nth-child(3) { background: oklch(0.7 0.16 145); }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--faint-foreground); }
+.app { display: flex; height: 860px; }
+.sidebar {
+  width: 200px; flex: none; background: var(--app-shell);
+  border-right: 1px solid var(--surface-border);
+  padding: 10px 8px; font-size: 12.5px;
+}
+.ws { display: flex; align-items: center; gap: 8px; padding: 6px 8px 10px; font-weight: 600; }
+.ws-av { width: 18px; height: 18px; border-radius: 5px; background: var(--primary); color: #fff; display: grid; place-items: center; font-size: 10px; }
+.s-group { margin: 10px 8px 3px; font-size: 11px; color: var(--faint-foreground); }
+.s-item {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px;
+  color: var(--muted-foreground);
+}
+.s-item.active { background: oklch(0.935 0.003 286.375); color: var(--foreground); font-weight: 550; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--page-canvas); }
+.topbar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); flex: none; min-height: 42px;
+}
+.topbar h1 { font-size: 13.5px; font-weight: 600; }
+.topbar .sp { flex: 1; }
+.chip, .btn {
+  height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--surface-border);
+  background: var(--surface); color: var(--foreground); cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+}
+.btn.ghost { background: transparent; }
+.badge {
+  height: 20px; padding: 0 7px; border-radius: 99px; font-size: 11px;
+  display: inline-flex; align-items: center; border: 1px solid var(--surface-border);
+}
+.badge.run { background: oklch(0.55 0.12 250 / 12%); color: var(--info); border-color: oklch(0.55 0.12 250 / 28%); }
+.badge.fail { background: oklch(0.577 0.245 27.325 / 10%); color: var(--destructive); border-color: oklch(0.577 0.245 27.325 / 28%); }
+.badge.ok { background: oklch(0.55 0.16 145 / 12%); color: var(--success); border-color: oklch(0.55 0.16 145 / 28%); }
+.badge.warn { background: oklch(0.72 0.15 75 / 14%); color: oklch(0.48 0.12 55); border-color: oklch(0.72 0.15 75 / 35%); }
+.split { display: flex; flex: 1; min-height: 0; }
+.col { overflow: auto; }
+.col.grow { flex: 1; min-width: 0; background: var(--surface); }
+.col.w280 { width: 280px; flex: none; border-left: 1px solid var(--surface-border); background: var(--page-canvas); }
+.pad { padding: 16px 22px 28px; }
+.faint { color: var(--faint-foreground); }
+.muted { color: var(--muted-foreground); }
+.title { font-size: 18px; font-weight: 650; letter-spacing: -0.02em; }
+.desc { margin: 8px 0 12px; color: var(--muted-foreground); line-height: 1.6; }
+.stagebar { display: flex; gap: 0; margin: 10px 0 14px; }
+.st {
+  flex: 1; height: 30px; border: 1px solid var(--surface-border); background: var(--app-shell);
+  color: var(--muted-foreground); cursor: default;
+}
+.st:first-child { border-radius: 7px 0 0 7px; }
+.st:last-child { border-radius: 0 7px 7px 0; }
+.st.on { background: var(--primary); color: #fff; border-color: transparent; font-weight: 550; }
+.subbox {
+  border: 1px solid var(--surface-border); border-radius: 10px; overflow: hidden; margin-bottom: 14px;
+}
+.subh {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  background: var(--app-shell); font-size: 12px; font-weight: 550;
+}
+.sub {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-top: 1px solid var(--border);
+}
+.sub .id { color: var(--faint-foreground); font-family: var(--mono); font-size: 11px; }
+.livechip {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px;
+  border-radius: 99px; border: 1px solid oklch(0.577 0.245 27.325 / 30%);
+  background: oklch(0.577 0.245 27.325 / 8%); color: var(--destructive); cursor: pointer;
+}
+.livechip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--destructive); }
+.line-tabs {
+  display: flex; gap: 2px; height: 40px; align-items: center;
+  border-bottom: 1px solid var(--surface-border); margin: 4px 0 12px;
+}
+.line-tab {
+  height: 40px; padding: 0 12px; border: 0; background: none; cursor: pointer;
+  color: var(--muted-foreground); border-bottom: 2px solid transparent;
+}
+.line-tab.on { color: var(--foreground); font-weight: 550; border-bottom-color: var(--foreground); }
+.line-tab .n {
+  margin-left: 4px; font-size: 10.5px; color: var(--faint-foreground); font-weight: 400;
+}
+.filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.tog {
+  height: 26px; padding: 0 9px; border-radius: 99px; border: 1px solid var(--surface-border);
+  background: var(--surface); color: var(--muted-foreground); cursor: pointer;
+}
+.tog.on { background: oklch(0.55 0.16 255 / 10%); color: var(--brand); border-color: oklch(0.55 0.16 255 / 28%); }
+.msg {
+  border: 1px solid var(--surface-border); border-radius: 10px; padding: 11px 13px; margin-bottom: 10px;
+}
+.msg-h { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.av { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 9px; font-weight: 700; color: #fff; flex: none; }
+.av.g { background: linear-gradient(135deg, #17301f, #2c5c3c); }
+.av.b { background: linear-gradient(135deg, #1a2a4a, #3a6aa8); }
+.msg p { line-height: 1.6; }
+.msg code { font-family: var(--mono); font-size: 11.5px; background: var(--app-shell); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+.sys {
+  display: flex; align-items: center; gap: 8px; padding: 8px 2px; color: var(--muted-foreground); font-size: 12px;
+}
+.composer {
+  margin-top: 12px; display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--surface-border); border-radius: 10px; padding: 8px 10px; background: var(--page-canvas);
+}
+.composer input { flex: 1; border: 0; background: none; outline: none; }
+.statstrip {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.stat {
+  min-width: 88px; border: 1px solid var(--surface-border); border-radius: 9px; padding: 8px 10px; background: var(--page-canvas);
+}
+.stat .k { font-size: 11px; color: var(--faint-foreground); }
+.stat .v { font-size: 16px; font-weight: 650; margin-top: 2px; }
+.bar { height: 8px; background: var(--app-shell); border-radius: 99px; overflow: hidden; margin: 8px 0 14px; }
+.bar i { display: block; height: 100%; width: 98%; background: var(--success); }
+.task {
+  border: 1px solid var(--surface-border); border-left: 3px solid var(--destructive);
+  border-radius: 9px; padding: 10px 12px; margin-bottom: 8px;
+}
+.task .row { display: flex; align-items: center; gap: 8px; }
+.duo { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.box { border: 1px solid var(--surface-border); border-radius: 9px; padding: 10px 12px; background: var(--page-canvas); }
+.box h4 { font-size: 12px; margin-bottom: 6px; }
+.exec { display: flex; min-height: 420px; border: 1px solid var(--surface-border); border-radius: 10px; overflow: hidden; }
+.runlist { width: 220px; flex: none; border-right: 1px solid var(--surface-border); background: var(--page-canvas); }
+.runlist h4 { padding: 10px 12px 6px; font-size: 12px; }
+.run {
+  display: flex; gap: 8px; padding: 8px 10px; cursor: pointer; border-left: 2px solid transparent;
+}
+.run.on { background: var(--surface-selected); border-left-color: var(--foreground); }
+.run .meta { font-size: 11px; color: var(--faint-foreground); }
+.trace { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.trace-h { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.trace-h .sum { font-size: 12px; color: var(--muted-foreground); margin-top: 4px; }
+.rails { padding: 8px 14px 6px; border-bottom: 1px solid var(--border); }
+.rail { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 11px; color: var(--muted-foreground); }
+.rail .lab { width: 32px; }
+.rail .track { flex: 1; height: 8px; background: var(--app-shell); border-radius: 99px; position: relative; overflow: hidden; }
+.rail .track span { position: absolute; top: 0; height: 100%; border-radius: 99px; }
+.rail.think .track span { background: oklch(0.62 0.14 145); }
+.rail.tool .track span { background: oklch(0.55 0.12 250); }
+.steps { flex: 1; overflow: auto; padding: 6px 0; }
+.step {
+  display: grid; grid-template-columns: 56px 22px 1fr 40px; gap: 8px;
+  align-items: start; padding: 6px 14px; font-size: 12px;
+}
+.step:hover { background: var(--surface-hover); }
+.step .t { font-family: var(--mono); color: var(--faint-foreground); font-size: 11px; }
+.step .ico {
+  width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center;
+  font-size: 10px; background: var(--app-shell);
+}
+.step .dur { color: var(--faint-foreground); text-align: right; font-variant-numeric: tabular-nums; }
+.dlv-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.dlv {
+  border: 1px solid var(--surface-border); border-radius: 9px; padding: 10px 12px; background: var(--page-canvas);
+}
+.dlv .p { font-size: 11px; color: var(--faint-foreground); margin-top: 3px; font-family: var(--mono); }
+.props { padding: 14px 14px 20px; }
+.prop { display: flex; justify-content: space-between; gap: 10px; padding: 6px 2px; font-size: 12.5px; }
+.prop span:first-child { color: var(--muted-foreground); }
+.props h4 { font-size: 12px; margin: 14px 0 6px; }
+.anno {
+  display: inline-flex; align-items: center; height: 16px; padding: 0 5px; margin-left: 6px;
+  border-radius: 4px; background: oklch(0.72 0.14 255 / 14%); color: oklch(0.45 0.12 255);
+  font-size: 10px; font-weight: 650;
+}
+.callout {
+  font-size: 11.5px; color: oklch(0.42 0.08 255); background: oklch(0.96 0.02 255);
+  border: 1px solid oklch(0.82 0.06 255); border-radius: 8px; padding: 8px 10px; margin: 0 0 12px;
+}
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<nav class="proto-nav">
+  <div class="logo">Multica <em>任务布局</em></div>
+  <button class="navbtn on" data-go="brief">对照说明</button>
+  <div class="sep"></div>
+  <button class="navbtn" data-go="collab">目标 · 动态</button>
+  <button class="navbtn" data-go="progress">目标 · 进度</button>
+  <button class="navbtn" data-go="exec">目标 · 执行</button>
+  <button class="navbtn" data-go="deliver">目标 · 交付</button>
+  <span class="hint">浏览器直接打开 · 点 Tab 看四面，不改代码</span>
+</nav>
+
+<section class="stage on" id="brief">
+  <div class="atlas">
+    <h1>任务详情：从「两套动态 + 侧栏日志」收到「页级四面」</h1>
+    <p class="lead">
+      对照实码 <code>issue-detail.tsx</code>：主栏先挂 <code>IssueRequirementDrill</code>（动态 / 进度追踪 / 交付概览），下面再挂一套原生「动态」；
+      执行日志在右侧 <code>ExecutionLogSection</code>。本原型只改挂载与默认过滤，不发明新机制。
+    </p>
+    <div class="note">
+      设计说明见同目录 <b>2026-09-06-任务模块功能布局.md</b>。顶部四个「目标」按钮是同一详情页的四个面，不是四个独立页面。
+    </div>
+
+    <h2>1. 现状 vs 目标</h2>
+    <div class="compare">
+      <div class="ia-card bad">
+        <h3>现状 · 一条长滚动叠两套模块</h3>
+        <div class="mini-row">
+          <div class="stack mini-main">
+            <div class="blk">标题 / 描述 / 四阶段 / 子任务</div>
+            <div class="blk dup">
+              <b>下钻 Tab（第一套动态）</b>
+              <div class="blk tabs" style="margin-top:6px;border:0;padding:0;background:none">
+                <span class="t on">动态</span><span class="t">进度追踪</span><span class="t">交付概览</span>
+              </div>
+              五张汇总卡 + heartbeat / todo_change 流水
+            </div>
+            <div class="blk dup">
+              <b>原生动态（第二套动态）</b>
+              评论 · 取消 · 重试 · 底栏输入
+            </div>
+          </div>
+          <div class="stack mini-side">
+            <div class="blk">属性</div>
+            <div class="blk warn"><b>执行日志</b>260px 列表，轨迹进弹窗</div>
+            <div class="blk">依赖 / PR</div>
+          </div>
+        </div>
+      </div>
+      <div class="ia-card good">
+        <h3>目标 · 常驻区 + 页级四面 + 属性栏变瘦</h3>
+        <div class="mini-row">
+          <div class="stack mini-main">
+            <div class="blk">标题 / 描述 / 四阶段 / 子任务 / 活跃 run chip</div>
+            <div class="blk ok">
+              <b>页级 Tab（只出现一次「动态」）</b>
+              <div class="blk tabs" style="margin-top:6px;border:0;padding:0;background:none">
+                <span class="t on">动态</span><span class="t">进度</span><span class="t">执行</span><span class="t">交付</span>
+              </div>
+              主栏只渲染当前面
+            </div>
+          </div>
+          <div class="stack mini-side">
+            <div class="blk ok"><b>属性</b>状态 / 人 / 项目</div>
+            <div class="blk">依赖 / PR / 详情</div>
+            <div class="blk" style="color:var(--faint-foreground)">执行日志已离开</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2>2. 四面分工</h2>
+    <table class="table">
+      <thead>
+        <tr><th>Tab</th><th>回答</th><th>承接</th><th>默认不展示</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>动态</b></td>
+          <td>人和 Agent 说了什么、状态怎么变</td>
+          <td>原生评论时间线 + 需求动态的对话 / 状态 / 产物</td>
+          <td>heartbeat、步骤轨迹、进度树</td>
+        </tr>
+        <tr>
+          <td><b>进度</b></td>
+          <td>这棵树跑到哪、谁卡死</td>
+          <td>ProgressTracker L1 / L2 / L3</td>
+          <td>评论流、工具步骤</td>
+        </tr>
+        <tr>
+          <td><b>执行</b></td>
+          <td>这一次 run 想了什么、调了什么</td>
+          <td>原右侧运行列表 + task-transcript 主栏化</td>
+          <td>属性编辑、产物墙</td>
+        </tr>
+        <tr>
+          <td><b>交付</b></td>
+          <td>交了什么、门禁过了没</td>
+          <td>DeliverablesOverview + 完成卡片墙</td>
+          <td>协作评论</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>3. 三条硬约束</h2>
+    <p>① 页面上只出现一次「动态」。② 右侧栏不再出现「执行日志」区块。③ 切 Tab 后主栏不残留另一套动态。</p>
+  </div>
+</section>
+
+<section class="stage" id="app">
+  <div class="frame">
+    <div class="frame-bar">
+      <i></i><i></i><i></i>
+      <span>eleme / #128 项目分析页面落地</span>
+    </div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="ws"><span class="ws-av">e</span> eleme</div>
+        <div class="s-group">工作</div>
+        <div class="s-item">收件箱</div>
+        <div class="s-item active">任务</div>
+        <div class="s-item">日历</div>
+        <div class="s-item">项目</div>
+        <div class="s-group">智能体</div>
+        <div class="s-item">智能体</div>
+        <div class="s-item">小队</div>
+      </aside>
+      <div class="main">
+        <div class="topbar">
+          <span class="faint">会员中心</span>
+          <span class="faint">/</span>
+          <h1>#128 项目分析页面落地</h1>
+          <span class="badge run">in_progress</span>
+          <div class="sp"></div>
+          <button class="chip">固定</button>
+          <button class="chip">侧栏</button>
+        </div>
+        <div class="split">
+          <div class="col grow">
+            <div class="pad">
+              <div class="title">执行：项目分析页面落地（补齐缺失原型作为终稿）</div>
+              <p class="desc">补齐日历 / 档案 / 任务详情缺失原型，作为执行阶段终稿。与支付降级预案互斥预检已通过。</p>
+              <div class="stagebar">
+                <button class="st">1 原型</button>
+                <button class="st">2 plan + 拆解</button>
+                <button class="st on">3 执行</button>
+                <button class="st">4 验收</button>
+              </div>
+              <div class="subbox">
+                <div class="subh">子任务 1 <span class="faint" style="font-weight:400">42 / 43 待办</span>
+                  <span style="margin-left:auto"><button class="chip" style="height:22px;font-size:11px">+ 添加子任务</button></span>
+                </div>
+                <div class="sub">
+                  <span class="badge fail">failed</span>
+                  <span class="id">Task 01a07623</span>
+                  <span>Qoder_3.8Max · 项目分析页面落地</span>
+                  <button class="chip" style="margin-left:auto;height:22px;font-size:11px" data-jump="exec">查看此次执行</button>
+                </div>
+              </div>
+              <button class="livechip" data-jump="exec">
+                <span class="dot"></span>
+                Qoder_3.8Max · 失败 · 23m 33s · 打开执行
+              </button>
+
+              <div class="line-tabs">
+                <button class="line-tab on" data-tab="collab">动态</button>
+                <button class="line-tab" data-tab="progress">进度</button>
+                <button class="line-tab" data-tab="exec">执行 <span class="n">1 失败</span></button>
+                <button class="line-tab" data-tab="deliver">交付</button>
+              </div>
+
+              <div class="tabpane" data-pane="collab">
+                <div class="callout">只保留一套动态。默认开评论 / 状态 / 产物，关系统进展（heartbeat、todo_change）。五张汇总卡已挪到进度与交付。</div>
+                <div class="filters">
+                  <button class="tog on">评论</button>
+                  <button class="tog on">状态</button>
+                  <button class="tog on">产物</button>
+                  <button class="tog" id="sysTog">系统进展</button>
+                  <span class="faint" style="margin-left:auto">今天 · 近 7 天 · <b>全部</b></span>
+                </div>
+                <div class="msg">
+                  <div class="msg-h">
+                    <span class="av g">Q</span>
+                    <b>Qoder_3.8Max</b>
+                    <span class="faint">今天 18:04</span>
+                    <span class="badge">评论</span>
+                  </div>
+                  <p>PM 要求：补齐任务详情缺失原型作为终稿。建议把执行轨迹从右侧栏提升到主栏，避免和协作动态抢同一条轴。</p>
+                  <p style="margin-top:6px">完成后用 <code>multica issue status --done</code> 收口，并挂交付物卡片。</p>
+                </div>
+                <div class="sys">
+                  <span class="badge fail">状态</span>
+                  今天 18:12 · 服务器取消了 Task 01a07623
+                  <button class="chip" style="height:22px;font-size:11px" data-jump="exec">重试并打开执行</button>
+                </div>
+                <div class="msg">
+                  <div class="msg-h">
+                    <span class="av b">S</span>
+                    <b>系统</b>
+                    <span class="faint">今天 17:40</span>
+                    <span class="badge ok">产物</span>
+                  </div>
+                  <p>完成节点挂了 2 个文件：<code>docs/superpowers/specs/2026-09-06-任务模块功能布局.md</code> · <code>prototypes/index.html</code></p>
+                </div>
+                <div class="hidden" id="sysNoise">
+                  <div class="sys"><span class="badge warn">进展</span> 18:17:22 · Task 01a07623 · heartbeat</div>
+                  <div class="sys"><span class="badge warn">进展</span> 18:16:51 · Task 01a07623 · todo_change</div>
+                  <div class="sys"><span class="badge warn">进展</span> 18:16:20 · Task 01a07623 · heartbeat</div>
+                </div>
+                <div class="composer">
+                  <input placeholder="留下评论…">
+                  <button class="btn">发送</button>
+                </div>
+              </div>
+
+              <div class="tabpane hidden" data-pane="progress">
+                <div class="callout">进度只回答「树跑到哪」。底部不再复挂动态。任务行可跳到对应 run。</div>
+                <div class="statstrip">
+                  <div class="stat"><div class="k">Tasks</div><div class="v">0 / 1</div></div>
+                  <div class="stat"><div class="k">待办</div><div class="v">42 / 43</div></div>
+                  <div class="stat"><div class="k">Running</div><div class="v">0</div></div>
+                  <div class="stat"><div class="k">Stuck</div><div class="v">0</div></div>
+                </div>
+                <div class="bar"><i></i></div>
+                <div class="task">
+                  <div class="row">
+                    <span class="badge fail">failed</span>
+                    <b>Task 01a07623</b>
+                    <span class="faint mono">cc4e5410</span>
+                    <span class="muted">待办 42 / 43 · 1 次运行</span>
+                    <button class="chip" style="margin-left:auto;height:22px;font-size:11px" data-jump="exec">打开执行轨迹</button>
+                  </div>
+                </div>
+                <div class="duo">
+                  <div class="box">
+                    <h4>卡死原因分布</h4>
+                    <p class="muted">没有卡死的运行。失败来自 server cancel，不是 stall。</p>
+                  </div>
+                  <div class="box">
+                    <h4>血缘与孤儿</h4>
+                    <p class="muted">跨 run 血缘与孤儿检测仍是服务端诚实 TODO，界面不造假数。</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tabpane hidden" data-pane="exec">
+                <div class="callout">执行日志从右侧属性栏升到主栏。左列表 = 原 ExecutionLogSection；右轨迹 = 原弹窗 transcript。窄屏改为上下，不回到侧栏。</div>
+                <div class="exec">
+                  <div class="runlist">
+                    <h4>运行 <span class="faint" style="font-weight:400">1 失败 · $4.92</span></h4>
+                    <div class="run on">
+                      <span class="av g">Q</span>
+                      <div>
+                        <div>Qoder_3.8Max</div>
+                        <div class="meta">失败 · 23m 33s · 2.1M</div>
+                      </div>
+                    </div>
+                    <div class="run">
+                      <span class="av b">Q</span>
+                      <div>
+                        <div>上一轮补原型</div>
+                        <div class="meta">已完成 · 11m · $1.20</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="trace">
+                    <div class="trace-h">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <span class="badge fail">失败</span>
+                        <b>Qoder_3.8Max</b>
+                        <span class="faint">hanmourang · 23m 33s</span>
+                        <button class="chip" style="margin-left:auto;height:22px;font-size:11px">重试</button>
+                      </div>
+                      <div class="sum">2 个文件 +383 −2 · 32 条命令 · 100 个步骤</div>
+                    </div>
+                    <div class="rails">
+                      <div class="rail think"><span class="lab">思考</span><div class="track"><span style="left:4%;width:38%"></span><span style="left:70%;width:12%"></span></div><span>11m 04s</span></div>
+                      <div class="rail tool"><span class="lab">工具</span><div class="track"><span style="left:18%;width:22%"></span><span style="left:48%;width:46%"></span></div><span>12m 29s</span></div>
+                    </div>
+                    <div class="steps">
+                      <div class="step"><span class="t">+00:31</span><span class="ico">思</span><span>先取 issue 详情，确认 SIRI-29 / SIRI-26 的层级</span><span class="dur">26s</span></div>
+                      <div class="step"><span class="t">+00:57</span><span class="ico">令</span><span class="mono">terminal Get issue details</span><span class="dur">4.0s</span></div>
+                      <div class="step"><span class="t">+01:12</span><span class="ico">技</span><span>skill frontend-design</span><span class="dur">14s</span></div>
+                      <div class="step"><span class="t">+01:40</span><span class="ico">读</span><span class="mono">read_file …/prototypes/index.html</span><span class="dur">1.2s</span></div>
+                      <div class="step"><span class="t">+02:08</span><span class="ico">思</span><span>现状是两套动态叠放，执行轨迹应升主栏而不是继续塞侧栏</span><span class="dur">8s</span></div>
+                      <div class="step"><span class="t">+23:10</span><span class="ico">令</span><span class="mono">task cancelled by server</span><span class="dur">—</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tabpane hidden" data-pane="deliver">
+                <div class="callout">交付看整棵需求齐了没。动态里的完成卡片墙只回答「这次完成带了什么」，不替代本面。</div>
+                <div class="statstrip">
+                  <div class="stat"><div class="k">派生状态</div><div class="v" style="font-size:13px">执行中</div></div>
+                  <div class="stat"><div class="k">阶段门</div><div class="v">5 / 7</div></div>
+                  <div class="stat"><div class="k">产物</div><div class="v">2</div></div>
+                  <div class="stat"><div class="k">已归档</div><div class="v">0</div></div>
+                </div>
+                <div class="box" style="margin-bottom:10px">
+                  <h4>阶段流</h4>
+                  <p class="muted">原型 ✅ · 拆解 ✅ · 执行 ◉ · 验收 ○。下一动作：修失败 run 后继续补原型终稿。</p>
+                </div>
+                <div class="dlv-grid">
+                  <div class="dlv">
+                    <b>任务模块功能布局.md</b>
+                    <div class="p">docs/superpowers/specs/ · +120</div>
+                    <span class="badge ok" style="margin-top:6px">新增</span>
+                  </div>
+                  <div class="dlv">
+                    <b>index.html</b>
+                    <div class="p">prototypes/ · +383 −2</div>
+                    <span class="badge" style="margin-top:6px">修改</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <aside class="col w280">
+            <div class="props">
+              <h4 style="margin-top:0">属性 <span class="anno">无执行日志</span></h4>
+              <div class="prop"><span>状态</span><span>In Progress</span></div>
+              <div class="prop"><span>执行人</span><span>Qoder_3.8Max</span></div>
+              <div class="prop"><span>项目</span><span>会员中心</span></div>
+              <div class="prop"><span>模块</span><span>分析页</span></div>
+              <div class="prop"><span>优先级</span><span>高</span></div>
+              <div class="prop"><span>日期</span><span>09-01 ~ 09-12</span></div>
+              <h4>快捷操作</h4>
+              <button class="chip" style="width:100%;justify-content:flex-start">让 Qoder 重跑失败任务</button>
+              <h4>Pull Request</h4>
+              <div class="muted">暂无</div>
+              <h4>依赖</h4>
+              <div class="muted">与 #131 支付模块互斥预检通过</div>
+              <h4>详情</h4>
+              <div class="prop"><span>创建</span><span>林清 · 3 天前</span></div>
+              <div class="callout" style="margin-top:14px">原「执行日志」整段已迁到左侧「执行」Tab。这里最多留一枚失败 chip，不再展开步骤。</div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+const navs = document.querySelectorAll(".proto-nav .navbtn");
+const brief = document.getElementById("brief");
+const app = document.getElementById("app");
+const tabs = document.querySelectorAll(".line-tab");
+const panes = document.querySelectorAll(".tabpane");
+
+function showApp() {
+  brief.classList.remove("on");
+  app.classList.add("on");
+}
+function showBrief() {
+  app.classList.remove("on");
+  brief.classList.add("on");
+}
+function setTab(name) {
+  tabs.forEach((t) => t.classList.toggle("on", t.dataset.tab === name));
+  panes.forEach((p) => p.classList.toggle("hidden", p.dataset.pane !== name));
+  navs.forEach((n) => n.classList.toggle("on", n.dataset.go === name));
+}
+function setNav(go) {
+  navs.forEach((n) => n.classList.toggle("on", n.dataset.go === go));
+  if (go === "brief") {
+    showBrief();
+    return;
+  }
+  showApp();
+  setTab(go);
+}
+
+navs.forEach((btn) => {
+  btn.addEventListener("click", () => setNav(btn.dataset.go));
+});
+tabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    setTab(tab.dataset.tab);
+    navs.forEach((n) => n.classList.toggle("on", n.dataset.go === tab.dataset.tab));
+  });
+});
+document.querySelectorAll("[data-jump]").forEach((el) => {
+  el.addEventListener("click", () => setNav(el.dataset.jump));
+});
+
+const sysTog = document.getElementById("sysTog");
+const sysNoise = document.getElementById("sysNoise");
+sysTog.addEventListener("click", () => {
+  const on = sysTog.classList.toggle("on");
+  sysNoise.classList.toggle("hidden", !on);
+});
+</script>
+</body>
+</html>

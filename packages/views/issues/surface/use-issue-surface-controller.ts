@@ -508,6 +508,8 @@ export function useIssueSurfaceController({
         // window a requirement could have occupied.
         include_sub_issues:
           effectiveViewMode === "calendar" ? false : showSubIssues,
+        issue_kind:
+          effectiveViewMode === "calendar" ? "requirement" : "task",
       },
       ...(debouncedActiveSearch ? { search: debouncedActiveSearch } : {}),
       sort: {

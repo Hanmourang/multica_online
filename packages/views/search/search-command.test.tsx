@@ -78,6 +78,8 @@ const {
   mockAgents,
   mockSquads,
   mockOpenModal,
+  mockCloseModal,
+  mockActiveModal,
   mockToastSuccess,
   mockClipboardWrite,
   mockTimeline,
@@ -122,6 +124,8 @@ const {
     }>,
   },
   mockOpenModal: vi.fn(),
+  mockCloseModal: vi.fn(),
+  mockActiveModal: { current: null as string | null },
   mockToastSuccess: vi.fn(),
   mockClipboardWrite: vi.fn(() => Promise.resolve()),
   mockTimeline: { current: [] as Array<Record<string, unknown>> },
@@ -229,7 +233,11 @@ vi.mock("@multica/core/workspace/queries", () => ({
 
 vi.mock("@multica/core/modals", () => ({
   useModalStore: Object.assign(vi.fn(), {
-    getState: () => ({ open: mockOpenModal }),
+    getState: () => ({
+      open: mockOpenModal,
+      close: mockCloseModal,
+      modal: mockActiveModal.current,
+    }),
   }),
 }));
 
@@ -305,6 +313,8 @@ describe("SearchCommand", () => {
     mockGetShareableUrl.mockReset().mockImplementation((p: string) => `https://app.multica/${p}`);
     mockMembers.current = [];
     mockOpenModal.mockReset();
+    mockCloseModal.mockReset();
+    mockActiveModal.current = null;
     mockToastSuccess.mockReset();
     mockClipboardWrite.mockReset().mockResolvedValue(undefined);
     mockTimeline.current = [];
@@ -319,6 +329,12 @@ describe("SearchCommand", () => {
     act(() => {
       useSearchStore.setState({ open: true });
     });
+  });
+
+  it("closes the create-issue modal when search opens", () => {
+    mockActiveModal.current = "create-issue";
+    renderSearch();
+    expect(mockCloseModal).toHaveBeenCalledTimes(1);
   });
 
   it("closes on a single Escape press from the search input", async () => {

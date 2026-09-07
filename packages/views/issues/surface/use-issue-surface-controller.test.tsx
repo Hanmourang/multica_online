@@ -401,6 +401,7 @@ describe("useIssueSurfaceController", () => {
       expect.objectContaining({ group_key: "status:todo" }),
     );
     expect(result.current.tableQuerySpec.filters.include_sub_issues).toBe(false);
+    expect(result.current.tableQuerySpec.filters.issue_kind).toBe("requirement");
     expect(result.current.issues.map((issue) => issue.id).sort()).toEqual([
       "req-1",
       "req-2",

@@ -88,12 +88,21 @@ func parseArchiveRelPath(rel string) (*archiveParsedFile, error) {
 	case "_shared":
 		p.Scope = "shared"
 		p.ProjectKey = "" // 归「个人档案库」，由调用方按配置解析
+	case "change_logs":
+		if err := parseChangeLogs(p, parts[1:]); err != nil {
+			return nil, err
+		}
 	case "projects":
 		if len(parts) < 3 {
 			return nil, &archiveParseError{"projects/ 下缺项目目录（CONTRACT.md §1 行1）"}
 		}
 		p.ProjectKey = parts[1]
 		rest := parts[2:]
+		if len(rest) == 1 && strings.EqualFold(rest[0], "PROJECT.md") {
+			p.Scope = "project"
+			p.DocType = "project"
+			break
+		}
 		if err := parseProjectScoped(p, rest); err != nil {
 			return nil, err
 		}
@@ -151,10 +160,68 @@ func parseProjectScoped(p *archiveParsedFile, rest []string) error {
 		}
 		p.Scope = "project"
 		p.DocType = "filing-" + cat
+	case "change_logs":
+		return parseChangeLogs(p, rest[1:])
 	default:
 		return &archiveParseError{"projects/" + p.ProjectKey + "/ 下未知目录 " + rest[0] + "（CONTRACT.md §2）"}
 	}
 	return nil
+}
+
+var changeLogSkipDirs = map[string]bool{
+	"qoder_backup":   true,
+	"db_backups":     true,
+	"wiki_snapshots": true,
+}
+
+// parseChangeLogs 解析工作区或项目内的 change_logs 树。
+// 变更日志 / 工作计划不是 S2 阶段门文档：stage 恒为空，doc_type 为 change-log 或 work-plan。
+func parseChangeLogs(p *archiveParsedFile, rest []string) error {
+	for _, part := range rest {
+		if changeLogSkipDirs[part] {
+			return &archiveParseError{"change_logs 备份区硬跳过不索引（CONTRACT.md §1 行8）"}
+		}
+	}
+	if len(rest) == 0 {
+		p.Scope = "project"
+		p.DocType = "change-log"
+		return nil
+	}
+	head := rest[0]
+	switch head {
+	case "0.overview":
+		p.Scope = "shared"
+		p.DocType = "change-log"
+		return nil
+	case "qoder-plans":
+		p.Scope = "project"
+		if p.ProjectKey == "" {
+			p.ProjectKey = "qoder-plans"
+		}
+		p.DocType = "work-plan"
+		return nil
+	case "daily_logs":
+		p.Scope = "project"
+		p.DocType = "change-log"
+		return nil
+	}
+	if p.ProjectKey == "" {
+		p.ProjectKey = head
+	}
+	p.Scope = "project"
+	p.DocType = changeLogDocType(rest)
+	return nil
+}
+
+func changeLogDocType(parts []string) string {
+	joined := strings.ToLower(strings.Join(parts, "/"))
+	if strings.Contains(joined, "qoder-plans") || strings.Contains(joined, "/plans/") {
+		return "work-plan"
+	}
+	if strings.HasSuffix(joined, ".html") {
+		return "prototype"
+	}
+	return "change-log"
 }
 
 // validRequirementKey 校验 REQ-YYYYMMDD-NN。
@@ -187,6 +254,13 @@ func parseStageDir(seg string) (int32, bool) {
 // docTypeFromName 由文件名/阶段推导 doc_type（frontmatter 可覆盖）。
 // 优先级：basename 命中已知类型 > stage 默认 > overview/filing 已定值。
 func docTypeFromName(p *archiveParsedFile) string {
+	rel := strings.ToLower(filepath.ToSlash(p.RelPath))
+	if strings.Contains(rel, "change_logs/") || strings.Contains(rel, "/daily_logs/") {
+		if p.DocType != "" {
+			return p.DocType
+		}
+		return changeLogDocType(strings.Split(rel, "/"))
+	}
 	base := strings.ToLower(filepath.Base(p.RelPath))
 	base = strings.TrimSuffix(base, filepath.Ext(base))
 	// 去版本后缀（v2 / -r2），再匹配。
@@ -287,11 +361,70 @@ func gitBlobSHA(data []byte) string {
 
 // ── 扫描（CONTRACT.md §4 跳过规则）────────────────────────────────────────────
 
-var archiveSkipDirs = map[string]bool{"_attic": true, "assets": true, "node_modules": true, ".git": true}
+var archiveSkipDirs = map[string]bool{
+	"_attic": true, "assets": true, "node_modules": true, ".git": true,
+	"qoder_backup": true, "db_backups": true, "wiki_snapshots": true,
+}
 
 // scanArchiveFiles 递归收集档案文件（跳过 _attic/assets/node_modules/.git/*.zip）。
 // WalkDir 保证返回路径均位于 root 之内（filepath 包契约），rel_path 仅由
 // filepath.Rel(root, abs) 派生，不接受外部输入拼接，无路径逃逸面。
+func siblingChangeLogsRoot(archiveRoot string) string {
+	if filepath.Base(archiveRoot) == "change_logs" {
+		return archiveRoot
+	}
+	return filepath.Clean(filepath.Join(archiveRoot, "..", "change_logs"))
+}
+
+func scanSiblingChangeLogs(archiveRoot, changeLogsRoot string) ([]string, error) {
+	if changeLogsRoot == "" {
+		return nil, nil
+	}
+	absRoot, err := filepath.Abs(archiveRoot)
+	if err != nil {
+		return nil, err
+	}
+	absLogs, err := filepath.Abs(changeLogsRoot)
+	if err != nil {
+		return nil, err
+	}
+	if absRoot == absLogs {
+		return nil, nil
+	}
+	st, err := os.Stat(absLogs)
+	if err != nil || !st.IsDir() {
+		return nil, err
+	}
+	return scanArchiveFiles(absLogs)
+}
+
+func archiveRelPath(archiveRoot, changeLogsRoot, abs string) (string, bool) {
+	if rel, ok := relInside(archiveRoot, abs); ok {
+		if filepath.Base(archiveRoot) == "change_logs" && !strings.HasPrefix(rel, "change_logs/") {
+			return "change_logs/" + rel, true
+		}
+		return rel, true
+	}
+	if rel, ok := relInside(changeLogsRoot, abs); ok {
+		if !strings.HasPrefix(rel, "change_logs/") {
+			return "change_logs/" + rel, true
+		}
+		return rel, true
+	}
+	return "", false
+}
+
+func relInside(root, abs string) (string, bool) {
+	if root == "" {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
+}
+
 func scanArchiveFiles(root string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -430,6 +563,10 @@ func runArchiveSync(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("扫描失败: %w", err)
 	}
+	changeLogsRoot := siblingChangeLogsRoot(archiveRoot)
+	if extra, extraErr := scanSiblingChangeLogs(archiveRoot, changeLogsRoot); extraErr == nil {
+		files = append(files, extra...)
+	}
 	diag := &diagCollector{runID: runID}
 	diag.add("scan", "info", "", fmt.Sprintf("scanned %d files", len(files)), nil)
 
@@ -441,8 +578,8 @@ func runArchiveSync(cmd *cobra.Command, _ []string) error {
 	parsed := make(map[string][]*archiveParsedFile) // projectKey -> files
 	var unclassified []string
 	for _, abs := range files {
-		rel, err := filepath.Rel(archiveRoot, abs)
-		if err != nil {
+		rel, ok := archiveRelPath(archiveRoot, changeLogsRoot, abs)
+		if !ok {
 			continue
 		}
 		p, perr := parseArchiveRelPath(rel)

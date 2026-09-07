@@ -1,11 +1,15 @@
 "use client";
 
-import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink } from "lucide-react";
+import { Archive, ArchiveRestore, Check, CheckCheck, CircleDot, ExternalLink } from "lucide-react";
+import { toast } from "sonner";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import type { RowActionItem } from "../../common/row-actions-menu";
 import { useIntentNavigate } from "../../navigation";
 import { useT } from "../../i18n";
+import { QuickConfirmError, quickConfirmIssue } from "../../issues/components/quick-confirm";
+import { needsQuickConfirm } from "../../projects/components/requirement-drill/requirement-display";
 import type { InboxView } from "./inbox-view";
 
 /** Row-level actions the menus invoke, all keyed by inbox item id. */
@@ -35,6 +39,8 @@ export function useInboxItemActions(
   actions: InboxRowActions | null,
 ): RowActionItem[][] {
   const { t } = useT("inbox");
+  const { t: tArchive } = useT("archive");
+  const { categoryOf } = useIssueStatuses(item.workspace_id);
   // Null-safe slug (not useWorkspacePaths, which throws): keeps the menus
   // renderable outside a workspace route; the item just doesn't show.
   const slug = useWorkspaceSlug();
@@ -59,6 +65,53 @@ export function useInboxItemActions(
         label: t(($) => $.context_menu.open_in_new_tab),
         icon: <ExternalLink className="h-4 w-4" />,
         onSelect: () => intentNavigate(issueHref, "foreground-tab"),
+      },
+    ]);
+  }
+
+  if (
+    !isArchivedView &&
+    item.issue_id &&
+    needsQuickConfirm({
+      status: item.issue_status,
+      statusCategory: item.issue_status
+        ? categoryOf(item.issue_status)
+        : null,
+      inboxType: item.type,
+    })
+  ) {
+    const issueId = item.issue_id;
+    groups.push([
+      {
+        key: "quick-confirm",
+        label: t(($) => $.context_menu.quick_confirm),
+        icon: <CheckCheck className="h-4 w-4" />,
+        onSelect: () => {
+          void (async () => {
+            try {
+              const kind = await quickConfirmIssue(issueId);
+              toast.success(
+                kind === "decompose"
+                  ? tArchive(($) => $.quick_confirm.ok_decompose)
+                  : kind === "prototype"
+                    ? tArchive(($) => $.quick_confirm.ok_prototype)
+                    : tArchive(($) => $.quick_confirm.ok_review),
+              );
+            } catch (error) {
+              if (error instanceof QuickConfirmError && error.code === "incomplete") {
+                toast.error(tArchive(($) => $.quick_confirm.incomplete));
+              } else if (error instanceof QuickConfirmError && error.code === "empty") {
+                toast.error(tArchive(($) => $.quick_confirm.empty));
+              } else {
+                toast.error(
+                  error instanceof Error && error.message
+                    ? error.message
+                    : tArchive(($) => $.quick_confirm.failed),
+                );
+              }
+            }
+          })();
+        },
       },
     ]);
   }

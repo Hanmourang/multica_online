@@ -432,10 +432,11 @@ vi.mock("@multica/core/issues/stores/recent-issues-store", () => ({
   selectRecentIssues: () => () => [],
 }));
 
+const openModal = vi.hoisted(() => vi.fn());
 vi.mock("@multica/core/modals", () => ({
   useModalStore: Object.assign(
-    () => ({ open: vi.fn() }),
-    { getState: () => ({ open: vi.fn() }) },
+    () => ({ open: openModal }),
+    { getState: () => ({ open: openModal }) },
   ),
 }));
 
@@ -795,6 +796,24 @@ describe("IssuesPage (shared)", () => {
 
     await screen.findByText("No issues yet");
     expect(screen.getByText("Create an issue to get started.")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("issues-empty-new-task"));
+    expect(openModal).toHaveBeenCalledWith("create-issue", {
+      create_kind: "task",
+    });
+  });
+
+  it("opens the create-issue dialog as a task from the page header", async () => {
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    renderWithQuery(<IssuesPage />);
+    fireEvent.click(await screen.findByTestId("issues-new-task"));
+    expect(openModal).toHaveBeenCalledWith("create-issue", {
+      create_kind: "task",
+    });
   });
 
   it("shows scope tab buttons", async () => {

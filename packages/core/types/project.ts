@@ -16,15 +16,22 @@ export interface Project {
   // issue.start_date / issue.due_date.
   start_date: string | null;
   due_date: string | null;
+  /** 档案目录的 project_resource ID */
+  archive_resource_id?: string | null;
   created_at: string;
   updated_at: string;
   issue_count: number;
   done_count: number;
   resource_count: number;
+  /** general | rd | data | full（存量项目） */
+  template?: ProjectTemplate | "full";
 }
+
+export type ProjectTemplate = "general" | "rd" | "data";
 
 export interface CreateProjectRequest {
   title: string;
+  template?: ProjectTemplate;
   description?: string;
   icon?: string;
   status?: ProjectStatus;
@@ -49,6 +56,8 @@ export interface UpdateProjectRequest {
   // Omit the key to leave the date untouched; send null (or "") to clear it.
   start_date?: string | null;
   due_date?: string | null;
+  /** 档案目录的 project_resource ID；null 清除绑定。 */
+  archive_resource_id?: string | null;
 }
 
 export interface ListProjectsResponse {

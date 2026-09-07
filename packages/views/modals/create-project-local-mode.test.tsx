@@ -66,26 +66,30 @@ vi.mock("@multica/core/projects/mutations", () => ({
   useCreateProject: () => ({ mutateAsync: createProjectMock }),
 }));
 
-vi.mock("@multica/core/projects", () => ({
-  useProjectDraftStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      draft: {
-        title: "Game Client",
-        description: "",
-        status: "planned",
-        priority: "none",
-        icon: "📁",
-        leadId: null,
-        leadType: null,
-        startDate: null,
-        dueDate: null,
-        repos: [],
-      },
-      setDraft: vi.fn(),
-      clearDraft: vi.fn(),
-      resetDraft: vi.fn(),
-    }),
-}));
+vi.mock("@multica/core/projects", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/projects")>();
+  return {
+    ...actual,
+    useProjectDraftStore: (selector: (state: unknown) => unknown) =>
+      selector({
+        draft: {
+          title: "Game Client",
+          description: "",
+          status: "planned",
+          priority: "none",
+          icon: "📁",
+          leadId: null,
+          leadType: null,
+          startDate: null,
+          dueDate: null,
+          repos: [],
+        },
+        setDraft: vi.fn(),
+        clearDraft: vi.fn(),
+        resetDraft: vi.fn(),
+      }),
+  };
+});
 
 // Whether the connected server validates execution_mode at all. Absent on every
 // release before the worktree save gate.

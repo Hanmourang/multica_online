@@ -123,7 +123,7 @@ func (h *Handler) GeneratePrototype(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	identifier := prefix + "-" + strconv.Itoa(int(issue.Number))
 	outputPath := service.PrototypeOutputPath(identifier, issue.Title)
-	prompt := service.AssemblePrototypePrompt(issue, repoLabel, outputPath, body.PromptAppend, marks)
+	prompt := service.AssemblePrototypePromptWithPlaybook(issue, repoLabel, outputPath, body.PromptAppend, marks, h.resolveIssuePlaybook(r, issue.ID, "prototyper"))
 
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))

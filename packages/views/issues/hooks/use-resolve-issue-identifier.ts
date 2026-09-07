@@ -27,6 +27,7 @@ export function useResolveIssueIdentifier(identifier: string): Issue | null {
   const prefix = workspace?.issue_prefix;
   const prefixMatches =
     !prefix ||
+    /^(req|task)_/i.test(identifier) ||
     identifier.toUpperCase().startsWith(`${prefix.toUpperCase()}-`);
 
   const { data } = useQuery({

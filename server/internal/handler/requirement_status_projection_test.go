@@ -41,10 +41,10 @@ func TestRequirementStatusProjection(t *testing.T) {
 		var id string
 		dbfx.QueryRow(t, `
 			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, project_id,
-			                   decomposition_confirmed_at, triggered_at)
+			                   start_at, decomposition_confirmed_at, triggered_at)
 			VALUES ($1, $2, $3, 'medium', 'member', $4,
 			        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1), $5,
-			        CASE WHEN $6 THEN now() END, CASE WHEN $7 THEN now() END)
+			        now(), CASE WHEN $6 THEN now() END, CASE WHEN $7 THEN now() END)
 			RETURNING id`,
 			testWorkspaceID, "需求-"+status, status, testUserID, projectID, confirmed, triggered).Scan(&id)
 		return id

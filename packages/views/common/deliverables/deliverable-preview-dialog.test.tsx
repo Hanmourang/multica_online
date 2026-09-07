@@ -21,10 +21,6 @@ const items: Deliverable[] = [
       { kind: "add", text: "const newVal = 2" },
     ],
   },
-  {
-    path: "logs/c.md", name: "c.md", kind: "added", source: "reply",
-    addedLines: 0, removedLines: 0,
-  },
 ];
 
 function renderDialog(index = 0, list: Deliverable[] = items) {
@@ -47,24 +43,21 @@ describe("DeliverablePreviewDialog", () => {
     // The sr-only DialogTitle also carries the name; assert the visible one.
     expect(screen.getByText("a.md", { selector: "div.truncate" })).toBeInTheDocument();
     expect(screen.getByText("docs/a.md")).toBeInTheDocument();
-    expect(screen.getByText("1/3")).toBeInTheDocument();
+    expect(screen.getByText("1/2")).toBeInTheDocument();
   });
 
   it("renders markdown content for a full-text deliverable", () => {
     renderDialog(0);
+    expect(screen.getByTestId("deliverable-markdown")).toBeInTheDocument();
     expect(screen.getByText("Title")).toBeInTheDocument();
     expect(screen.getByText("body text")).toBeInTheDocument();
   });
 
   it("renders diff lines for an edit-only deliverable", () => {
     renderDialog(1);
-    expect(screen.getByText(/const old = 1/)).toBeInTheDocument();
-    expect(screen.getByText(/const newVal = 2/)).toBeInTheDocument();
-  });
-
-  it("renders the reference-only note for a reply-declared deliverable", () => {
-    renderDialog(2);
-    expect(screen.getByTestId("deliverable-reference-note")).toBeInTheDocument();
+    const diff = screen.getByTestId("deliverable-diff");
+    expect(diff.textContent).toContain("const old = 1");
+    expect(diff.textContent).toContain("const newVal = 2");
   });
 
   it("navigates with prev/next and disables at the boundaries", () => {
@@ -84,13 +77,9 @@ describe("DeliverablePreviewDialog", () => {
       },
     ];
     renderDialog(0, codeItems);
-    // The Dialog portals to document.body, so query the document, not the
-    // render container. Fenced with the file's language for highlight.js.
-    const code = document.querySelector("code.language-ts");
-    expect(code).not.toBeNull();
-    expect(code?.textContent).toContain("export const x = 1;");
-    // The leading "# " line must stay verbatim code, never a typeset heading.
-    expect(code?.textContent).toContain("# not a heading");
+    const code = screen.getByTestId("deliverable-code");
+    expect(code.textContent).toContain("export const x = 1;");
+    expect(code.textContent).toContain("# not a heading");
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 

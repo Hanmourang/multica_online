@@ -25,7 +25,8 @@
     "mark_unread": "未読にする",
     "archive": "アーカイブ",
     "unarchive": "アーカイブ解除",
-    "open_in_new_tab": "新しいタブで開く"
+    "open_in_new_tab": "新しいタブで開く",
+    "quick_confirm": "ワンクリック確認"
   },
   "list": {
     "empty": "通知はありません",

@@ -1,6 +1,8 @@
 "use client";
 
-import { ListTodo } from "lucide-react";
+import { ListTodo, Plus } from "lucide-react";
+import { useModalStore } from "@multica/core/modals";
+import { Button } from "@multica/ui/components/ui/button";
 import type {
   Issue,
   IssueTableFacetSpec,
@@ -13,6 +15,13 @@ import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { IssueSurface } from "../surface/issue-surface";
 import { IssuesHeader } from "./issues-header";
+import type { IssueCreateDefaults } from "../surface/types";
+
+const TASK_CREATE_DEFAULTS: IssueCreateDefaults = { create_kind: "task" };
+
+function openNewTask() {
+  useModalStore.getState().open("create-issue", TASK_CREATE_DEFAULTS);
+}
 
 function IssuesSurfaceHeader({
   issues,
@@ -58,10 +67,19 @@ export function IssuesPage() {
       <PageHeader>
         <ListTodo className="h-4 w-4 text-muted-foreground" />
         <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb_title)}</h1>
+        <Button
+          size="sm"
+          className="ml-auto"
+          data-testid="issues-new-task"
+          onClick={openNewTask}
+        >
+          <Plus className="h-3.5 w-3.5" /> {t(($) => $.page.new_issue)}
+        </Button>
       </PageHeader>
 
       <IssueSurface
         scope={{ type: "workspace", actorKind: scope }}
+        createDefaults={TASK_CREATE_DEFAULTS}
         // 日历已提升为一级模块（侧边栏 /calendar），任务子视图不再提供日历 tab。
         modes={["board", "list", "table", "swimlane"]}
         batchToolbar="list"
@@ -81,6 +99,16 @@ export function IssuesPage() {
             <ListTodo className="h-10 w-10 text-faint-foreground" />
             <p className="text-body">{t(($) => $.page.empty_title)}</p>
             <p className="text-caption">{t(($) => $.page.empty_hint)}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1"
+              data-testid="issues-empty-new-task"
+              onClick={openNewTask}
+            >
+              <Plus className="size-3.5 mr-1.5" />
+              {t(($) => $.page.new_issue)}
+            </Button>
           </div>
         )}
       />

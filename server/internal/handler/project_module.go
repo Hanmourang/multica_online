@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -23,6 +24,9 @@ type ProjectModuleResponse struct {
 	Name        string `json:"name"`
 	Color       string `json:"color"`
 	CreatedAt   string `json:"created_at"`
+	// 图谱桥接（migration 455）：绑定到的 Community 节点 ID，null = 未绑定。
+	// 写入路径有两条——graph/sync 的同名自动匹配，以及本 CRUD 的显式指定。
+	GraphNodeID *string `json:"graph_node_id"`
 	// 任务数仅在列表查询中填充（模块管理表格）；create/update 响应为 0，
 	// 前端以 invalidate 后的列表为准。
 	TaskCount int32 `json:"task_count"`
@@ -36,6 +40,7 @@ func projectModuleToResponse(m db.ProjectModule) ProjectModuleResponse {
 		Name:        m.Name,
 		Color:       m.Color,
 		CreatedAt:   timestampToString(m.CreatedAt),
+		GraphNodeID: textToPtr(m.GraphNodeID),
 	}
 }
 
@@ -43,6 +48,8 @@ func projectModuleToResponse(m db.ProjectModule) ProjectModuleResponse {
 type CreateProjectModuleRequest struct {
 	Name  string `json:"name"`
 	Color string `json:"color"`
+	// 可选：创建时直接绑定图谱节点（f10 模块 TAB 依赖该列）。
+	GraphNodeID *string `json:"graph_node_id"`
 }
 
 // UpdateProjectModuleRequest is the body for PATCH /api/projects/{id}/modules/{moduleId}.
@@ -50,6 +57,30 @@ type CreateProjectModuleRequest struct {
 type UpdateProjectModuleRequest struct {
 	Name  *string `json:"name"`
 	Color *string `json:"color"`
+	// 可选：显式改绑；传空串解绑（置 NULL），省略则保持原值。
+	GraphNodeID *string `json:"graph_node_id"`
+}
+
+// setModuleGraphNodeID writes the graph bridge column with a raw statement:
+// module.sql's INSERT/UPDATE predate the column (migration 455) and the sqlc
+// snapshot is regenerated separately, so the bridge is patched right after the
+// sqlc write within the same request. Returns the stored value so the response
+// reflects the DB rather than the request. Empty / whitespace-only input unbinds
+// (NULL) — the f10 module tabs then report the honest "unbridged" state.
+func (h *Handler) setModuleGraphNodeID(r *http.Request, moduleID pgtype.UUID, requested *string) (pgtype.Text, error) {
+	var value pgtype.Text
+	if requested != nil {
+		if trimmed := strings.TrimSpace(*requested); trimmed != "" {
+			value = pgtype.Text{String: trimmed, Valid: true}
+		}
+	}
+	var stored pgtype.Text
+	err := h.DB.QueryRow(r.Context(), `
+		UPDATE project_module SET graph_node_id = $2 WHERE id = $1
+		RETURNING graph_node_id`,
+		moduleID, value,
+	).Scan(&stored)
+	return stored, err
 }
 
 // ListProjectModules returns the modules defined on a project.
@@ -74,6 +105,7 @@ func (h *Handler) ListProjectModules(w http.ResponseWriter, r *http.Request) {
 			Name:        m.Name,
 			Color:       m.Color,
 			CreatedAt:   timestampToString(m.CreatedAt),
+			GraphNodeID: textToPtr(m.GraphNodeID),
 			TaskCount:   m.TaskCount,
 		}
 	}
@@ -118,6 +150,16 @@ func (h *Handler) CreateProjectModule(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create project module")
 		return
+	}
+	// 图谱桥接为可选追加写：失败不回滚已创建的模块（模块本身可用），
+	// 以 500 暴露给调用方重试 PATCH。
+	if req.GraphNodeID != nil {
+		stored, err := h.setModuleGraphNodeID(r, module.ID, req.GraphNodeID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to bind module graph node")
+			return
+		}
+		module.GraphNodeID = stored
 	}
 	resp := projectModuleToResponse(module)
 	h.publish(
@@ -183,6 +225,15 @@ func (h *Handler) UpdateProjectModule(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update project module")
 		return
+	}
+	// 显式改绑 / 解绑；省略 graph_node_id 时保持 sqlc 写回的原值。
+	if req.GraphNodeID != nil {
+		stored, err := h.setModuleGraphNodeID(r, moduleUUID, req.GraphNodeID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to bind module graph node")
+			return
+		}
+		module.GraphNodeID = stored
 	}
 	resp := projectModuleToResponse(module)
 	h.publish(

@@ -58,6 +58,11 @@ func TestMain(m *testing.M) {
 		pool.Close()
 		os.Exit(0)
 	}
+	if err := ensureProjectTemplateColumn(ctx, pool); err != nil {
+		fmt.Printf("Failed to apply project template schema: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
 
 	queries := db.New(pool)
 	hub := realtime.NewHub()
@@ -99,6 +104,38 @@ func TestMain(m *testing.M) {
 	}
 	pool.Close()
 	os.Exit(code)
+}
+
+// Local handler tests often run against a developer database that has not
+// picked up the newest migration yet. CreateProject now writes `template`,
+// so apply 463 here when the column is missing (same pattern as 462).
+func ensureProjectTemplateColumn(ctx context.Context, pool *pgxpool.Pool) error {
+	var exists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'project'
+			  AND column_name = 'template'
+		)
+	`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	sqlBytes, err := os.ReadFile("../migrations/463_project_template.up.sql")
+	if err != nil {
+		sqlBytes, err = os.ReadFile("../../migrations/463_project_template.up.sql")
+	}
+	if err != nil {
+		return fmt.Errorf("project template migration not found: %w", err)
+	}
+	if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+		return fmt.Errorf("apply project template schema: %w", err)
+	}
+	return nil
 }
 
 func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, string, error) {

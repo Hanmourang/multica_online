@@ -43,6 +43,48 @@ SELECT @issue_id, d.workspace_id, d.role, d.assignee_type, d.assignee_id, d.enab
 FROM project_role_default d
 WHERE d.project_id = @project_id;
 
+-- name: ListProjectRolePlaybooks :many
+SELECT * FROM project_role_playbook
+WHERE project_id = $1
+ORDER BY role ASC;
+
+-- name: DeleteProjectRolePlaybooks :exec
+DELETE FROM project_role_playbook WHERE project_id = $1;
+
+-- name: InsertProjectRolePlaybooks :exec
+-- entries 为 JSONB 数组：[{role, background, standards, process, init_mode, init_content}, ...]
+INSERT INTO project_role_playbook (
+    project_id, workspace_id, role, background, standards, process, init_mode, init_content
+)
+SELECT @project_id, @workspace_id, r.role, r.background, r.standards, r.process, r.init_mode, r.init_content
+FROM jsonb_to_recordset(@entries::jsonb)
+    AS r(role text, background text, standards text, process text, init_mode text, init_content text);
+
+-- name: ListIssueRolePlaybooks :many
+SELECT * FROM issue_role_playbook
+WHERE issue_id = $1
+ORDER BY role ASC;
+
+-- name: DeleteIssueRolePlaybooks :exec
+DELETE FROM issue_role_playbook WHERE issue_id = $1;
+
+-- name: InsertIssueRolePlaybooks :exec
+INSERT INTO issue_role_playbook (
+    issue_id, workspace_id, role, background, standards, process, init_mode, init_content
+)
+SELECT @issue_id, @workspace_id, r.role, r.background, r.standards, r.process, r.init_mode, r.init_content
+FROM jsonb_to_recordset(@entries::jsonb)
+    AS r(role text, background text, standards text, process text, init_mode text, init_content text);
+
+-- name: CopyProjectRolePlaybooksToIssue :exec
+-- 创建需求时把项目角色标准拷贝为需求快照；项目默认的后续变更不影响已建需求。
+INSERT INTO issue_role_playbook (
+    issue_id, workspace_id, role, background, standards, process, init_mode, init_content
+)
+SELECT @issue_id, d.workspace_id, d.role, d.background, d.standards, d.process, d.init_mode, d.init_content
+FROM project_role_playbook d
+WHERE d.project_id = @project_id;
+
 -- name: CreatePrototypeVersion :one
 -- version = COALESCE(MAX(version),0)+1；旧 pending 版本置 superseded 由调用方同事务做
 -- （SupersedePendingPrototypeVersions）。

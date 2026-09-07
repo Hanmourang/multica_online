@@ -15,7 +15,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import type { Issue, PrototypeVersion, RoleAssignment, DecomposeDraftTask } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import {
@@ -36,6 +36,8 @@ const mockApi = vi.hoisted(() => ({
   submitAcceptanceVerdict: vi.fn(),
   listProjectModules: vi.fn(),
   listProjectResources: vi.fn(),
+  listIssues: vi.fn(),
+  createComment: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -52,6 +54,32 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 }));
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => null,
+}));
+
+vi.mock("@multica/core/issues/mutations", () => ({
+  useCreateComment: () => ({ mutateAsync: vi.fn().mockResolvedValue({ id: "c-1" }) }),
+}));
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "workspace-1",
+}));
+
+vi.mock("@multica/core/paths", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/paths")>(
+    "@multica/core/paths",
+  );
+  return {
+    ...actual,
+    useWorkspacePaths: () => actual.paths.workspace("test"),
+  };
+});
+
+vi.mock("../../navigation", () => ({
+  AppLink: ({ children, href, ...props }: { children: ReactNode; href: string }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 function requirement(overrides: Partial<Issue> = {}): Issue {
@@ -78,6 +106,7 @@ function requirement(overrides: Partial<Issue> = {}): Issue {
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-01T00:00:00Z",
     goal: "把积分规则引擎化",
+    start_at: "2026-09-07T01:00:00.000Z",
     decomposition_confirmed_at: null,
     ...overrides,
   } as unknown as Issue;
@@ -134,6 +163,8 @@ beforeEach(() => {
   mockApi.submitAcceptanceVerdict.mockResolvedValue({ verdict: "pass", acceptance_round: 0, terminal: true });
   mockApi.listProjectModules.mockResolvedValue([]);
   mockApi.listProjectResources.mockResolvedValue({ resources: [] });
+  mockApi.listIssues.mockResolvedValue({ issues: [], total: 0 });
+  mockApi.createComment.mockResolvedValue({ id: "c-1" });
 });
 
 afterEach(() => {
@@ -232,6 +263,10 @@ describe("RequirementFlowSection", () => {
     ).not.toBeNull();
     // 原型面板挂载（一键生成按钮可见）
     expect(await screen.findByTestId("proto-generate")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Stage details in the workbench/ })).toHaveAttribute(
+      "href",
+      "/test/calendar?req=req-1&stage=1&from=issue",
+    );
   });
 
   it("无原型师 → 原型节点跳过态，当前 = 拆解，展示「发起拆解」", async () => {
@@ -266,7 +301,15 @@ describe("RequirementFlowSection", () => {
     renderSection(
       <RequirementFlowSection
         issue={requirement()}
-        childIssues={[{ stage: 2, status: "todo" } as unknown as Issue]}
+        childIssues={[
+          {
+            id: "child-2",
+            identifier: "TASK-3",
+            title: "PM plan + 拆解：积分体系重构",
+            stage: 2,
+            status: "todo",
+          } as unknown as Issue,
+        ]}
       />,
     );
     await screen.findByTestId("requirement-flow");
@@ -274,6 +317,10 @@ describe("RequirementFlowSection", () => {
       expect(screen.queryByTestId("decompose-start")).toBeNull();
       expect(screen.getByTestId("decompose-running")).toBeTruthy();
     });
+    expect(screen.getByTestId("decompose-running-view")).toHaveAttribute(
+      "href",
+      "/test/issues/child-2?tab=exec",
+    );
   });
 
   it("原型已确认 → 当前阶段推进到 2", async () => {
@@ -344,6 +391,93 @@ describe("RequirementFlowSection", () => {
     expect(drafts[0]?.assignee_id).toBe("agent-dev-1");
   });
 
+  it("仅有 plan 没有草稿时也渲染确认面板", async () => {
+    mockApi.listIssueRoleAssignments.mockResolvedValue({
+      roles: [rosterRow({ role: "pm" })],
+      total: 1,
+    });
+    mockApi.getDecomposition.mockResolvedValue({
+      plan: "## 目标分解\n梳理数据模型\n\n## 阶段\n分析\n\n## 风险\n无",
+      drafts: [],
+      source_comment_id: "c-plan",
+    });
+    renderSection(
+      <RequirementFlowSection
+        issue={requirement()}
+        childIssues={[
+          {
+            id: "child-2",
+            identifier: "TASK-3",
+            title: "PM plan + 拆解：数据模型分析",
+            stage: 2,
+            status: "todo",
+          } as unknown as Issue,
+        ]}
+      />,
+    );
+    await screen.findByTestId("decompose-panel");
+    expect(screen.queryByTestId("decompose-running")).toBeNull();
+    expect(screen.getByTestId("decompose-confirm")).toBeTruthy();
+  });
+
+  it("PM 子任务已结束但无草稿 → 仍渲染确认面板，便于补齐后确认", async () => {
+    mockApi.listIssueRoleAssignments.mockResolvedValue({
+      roles: [rosterRow({ role: "pm" })],
+      total: 1,
+    });
+    renderSection(
+      <RequirementFlowSection
+        issue={requirement()}
+        childIssues={[
+          {
+            id: "child-2",
+            identifier: "TASK-3",
+            title: "PM plan + 拆解：数据模型分析",
+            stage: 2,
+            status: "in_review",
+            status_category: "in_review",
+          } as unknown as Issue,
+        ]}
+      />,
+    );
+    await screen.findByTestId("decompose-panel");
+    expect(screen.queryByTestId("decompose-running")).toBeNull();
+    expect(screen.getByTestId("decompose-fallback-hint")).toBeTruthy();
+    expect(screen.getByText(/Fallback sub-tasks|decomposition list|兜底/i)).toBeTruthy();
+  });
+
+  it("decompose_mode=auto 且 PM 结束后无草稿 → 兜底拆解并自动确认", async () => {
+    mockApi.listIssueRoleAssignments.mockResolvedValue({
+      roles: [
+        rosterRow({ id: "ra-pm", role: "pm", assignee_id: "agent-pm" }),
+        rosterRow({ id: "ra-dev", role: "developer", assignee_id: "agent-dev" }),
+      ],
+      total: 2,
+    });
+    mockApi.confirmDecomposition.mockResolvedValue({ issues: [] });
+    renderSection(
+      <RequirementFlowSection
+        issue={requirement({ decompose_mode: "auto" })}
+        childIssues={[
+          {
+            id: "child-2",
+            identifier: "TASK-3",
+            title: "PM plan + 拆解：数据模型分析",
+            stage: 2,
+            status: "in_review",
+            status_category: "in_review",
+          } as unknown as Issue,
+        ]}
+      />,
+    );
+    await waitFor(() => {
+      expect(mockApi.confirmDecomposition).toHaveBeenCalled();
+    });
+    const payload = mockApi.confirmDecomposition.mock.calls[0]?.[1] as DecomposeDraftTask[];
+    expect(payload.some((d) => d.stage === 3 && d.assignee_id === "agent-dev")).toBe(true);
+    expect(payload.some((d) => d.stage === 4)).toBe(true);
+  });
+
   it("无 PM 子任务但草稿已产出（manual 模式） → 直接渲染确认面板", async () => {
     mockApi.listIssueRoleAssignments.mockResolvedValue({
       roles: [rosterRow({ role: "pm" })],
@@ -390,5 +524,61 @@ describe("RequirementFlowSection", () => {
       />,
     );
     expect(await screen.findByTestId("acceptance-panel")).toBeTruthy();
+  });
+
+  it("无日历字段的顶层任务不挂四阶段条", async () => {
+    renderSection(
+      <RequirementFlowSection
+        issue={requirement({
+          goal: null,
+          start_at: null,
+          repo_resource_id: null,
+          decomposition_confirmed_at: null,
+          triggered_at: null,
+        })}
+        childIssues={[]}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.queryByTestId("requirement-flow")).toBeNull();
+    });
+    expect(mockApi.listIssueRoleAssignments).not.toHaveBeenCalled();
+  });
+
+  it("点击未来阶段节点可预览面板且动作置灰", async () => {
+    mockApi.listIssueRoleAssignments.mockResolvedValue({
+      roles: [rosterRow()],
+      total: 1,
+    });
+    mockApi.listPrototypeVersions.mockResolvedValue({
+      versions: [protoVersion()],
+    });
+    renderSection(
+      <RequirementFlowSection issue={requirement()} childIssues={[]} />,
+    );
+    await screen.findByTestId("proto-generate");
+    fireEvent.click(screen.getByTestId("requirement-flow").querySelector('[data-stage-node="3"]')!);
+    expect(await screen.findByTestId("schedule-panel")).toBeTruthy();
+    expect(screen.getByTestId("stage-future-lock")).toBeTruthy();
+    expect(screen.queryByTestId("proto-generate")).toBeNull();
+    fireEvent.click(screen.getByTestId("stage-return-current"));
+    expect(await screen.findByTestId("proto-generate")).toBeTruthy();
+    expect(screen.queryByTestId("stage-future-lock")).toBeNull();
+  });
+
+  it("decompose_mode=auto 进入拆解阶段后自动发起拆解", async () => {
+    mockApi.listIssueRoleAssignments.mockResolvedValue({
+      roles: [rosterRow({ role: "pm", enabled: true })],
+      total: 1,
+    });
+    renderSection(
+      <RequirementFlowSection
+        issue={requirement({ decompose_mode: "auto" })}
+        childIssues={[]}
+      />,
+    );
+    await waitFor(() => {
+      expect(mockApi.decomposeRequirement).toHaveBeenCalledWith("req-1");
+    });
   });
 });

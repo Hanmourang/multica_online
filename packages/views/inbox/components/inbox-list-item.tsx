@@ -21,6 +21,8 @@ import { handleRowActivationKey } from "../../common/row-actions-menu";
 import { useT } from "../../i18n";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { resolveClickIntent, useIntentNavigate } from "../../navigation";
+import { QuickConfirmButton } from "../../issues/components/quick-confirm-button";
+import { needsQuickConfirm } from "../../projects/components/requirement-drill/requirement-display";
 
 // Hook returning a localized relative-time formatter — the i18n equivalent
 // of the previous static `timeAgo` function. Returning a function (rather
@@ -150,6 +152,15 @@ export function InboxListItem({
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {!isArchivedView &&
+              item.issue_id &&
+              needsQuickConfirm({
+                status: item.issue_status,
+                statusCategory: item.issue_status
+                  ? statusCategoryOf(item.issue_status)
+                  : null,
+                inboxType: item.type,
+              }) && <QuickConfirmButton issueId={item.issue_id} />}
             {/* Pointer-only affordance: revealed on hover, and on keyboard
                 focus anywhere in the row so it is reachable by Tab. Touch has
                 neither, so it stays hidden on a pointer that cannot hover and

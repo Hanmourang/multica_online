@@ -103,6 +103,26 @@ export interface RoleRosterResponse {
   total: number;
 }
 
+/** 角色执行标准：背景 / 交付标准 / 流程 / 初始化。空字段回落内置。 */
+export type RolePlaybookInitMode = "brief" | "checklist";
+
+export interface RolePlaybook {
+  role: RoleAssignment["role"];
+  background: string;
+  standards: string;
+  process: string;
+  init_mode: RolePlaybookInitMode;
+  init_content: string;
+  source?: "builtin" | "custom";
+}
+
+/** GET/PUT role-playbooks 响应：解析结果 + 原始覆盖 + 内置。 */
+export interface RolePlaybookBundle {
+  playbooks: Partial<Record<RoleAssignment["role"], RolePlaybook>>;
+  overrides: Partial<Record<RoleAssignment["role"], RolePlaybook>>;
+  builtins: Partial<Record<RoleAssignment["role"], RolePlaybook>>;
+}
+
 // --- Requirement decomposition (requirement-calendar spec §8/§9) ---
 
 /** 拆解草稿的功能点明细。kind 必填（new=新增 / modify=改造）；"" = 未标注（待确认前补标）。 */
@@ -110,6 +130,31 @@ export interface DecomposeFeaturePoint {
   title: string;
   kind: "new" | "modify" | "";
   code_objects?: string[];
+  /** 实现细节；确认时原样写入 issue.feature_points JSONB。 */
+  detail?: string;
+}
+
+/** 拆解草稿 graph_context 的展示形状（缺字段按档案未就绪）。 */
+export interface GraphContextView {
+  nodes?: Array<string | { id?: string; label?: string }>;
+  code_objects?: string[];
+  dependencies?: string[];
+  impacts?: string[];
+  queried_at?: string;
+  source_commit?: string;
+}
+
+/** 验收规约展示形状（缺字段按档案未就绪）。 */
+export interface AcceptanceSpecView {
+  path?: string;
+  version?: string;
+  base_version?: string;
+  assertions?: string[];
+  cases?: Array<string | { name?: string }>;
+  note?: string;
+  evidence?: string[];
+  coverage?: string[];
+  graph?: string[];
 }
 
 /** 拆解确认请求体里的子任务草稿。depends_on 元素为同批草稿 temp_id 或已有 issue id。 */
@@ -216,6 +261,14 @@ export interface UpdateIssueRequest {
   due_date?: string | null;
   /** 需求开始时间（分钟粒度 RFC3339）；null 显式清空。已触发需求改期服务端 409。 */
   start_at?: string | null;
+  /** 需求/任务目标；null 或空串清空。 */
+  goal?: string | null;
+  /** 绑定的项目 git 资源；null 清空。 */
+  repo_resource_id?: string | null;
+  /** 拆解模式。 */
+  decompose_mode?: "auto" | "confirm" | "manual";
+  /** 到点是否自动触发执行。 */
+  auto_trigger?: boolean;
   parent_issue_id?: string | null;
   project_id?: string | null;
   /** 所属模块；null 显式清空。异项目模块服务端 409；未显式给出时随
@@ -316,6 +369,12 @@ export interface ListIssuesParams {
   label_ids?: string[];
   /** Restrict the window to root issues instead of filtering loaded pages. */
   top_level_only?: boolean;
+  /**
+   * Separate requirements from tasks. `requirement` = top-level issues with
+   * calendar/pipeline fields (`start_at` / confirm / trigger / repo).
+   * `task` = everything else (standalone tasks and child issues).
+   */
+  kind?: "requirement" | "task";
   /**
    * Hard restriction of the window to the given issue ids (the table's
    * agents-working facet sends the live running-issue set). An EMPTY array is
@@ -464,6 +523,8 @@ export interface IssueTableFilters {
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];
   include_sub_issues?: boolean;
+  /** Same contract as `ListIssuesParams.kind`. */
+  issue_kind?: "requirement" | "task";
 }
 
 export type IssueTableSortField =

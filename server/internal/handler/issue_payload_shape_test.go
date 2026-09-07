@@ -167,6 +167,9 @@ func TestIssueResponse_RequirementFields(t *testing.T) {
 	issue := fullyPopulatedIssue(t)
 
 	resp := issueToResponse(issue, "MUL")
+	if resp.Identifier != "task_42" {
+		t.Errorf("identifier = %q, want task_42 for a child issue", resp.Identifier)
+	}
 	if resp.Goal == nil || *resp.Goal != "P99 30min → 5min" {
 		t.Errorf("goal = %v, want P99 30min → 5min", resp.Goal)
 	}

@@ -25,7 +25,16 @@ type PrototypeMark struct {
 // 的同一份文本，随版本行落库）。extra 为请求体可携带的 prompt 追加段，
 // 非空时原样附在最后。
 func AssemblePrototypePrompt(issue db.Issue, repoLabel, outputPath, extra string, marks []PrototypeMark) string {
+	return AssemblePrototypePromptWithPlaybook(issue, repoLabel, outputPath, extra, marks, RolePlaybook{})
+}
+
+// AssemblePrototypePromptWithPlaybook 在固定五段前注入原型师执行标准。
+func AssemblePrototypePromptWithPlaybook(issue db.Issue, repoLabel, outputPath, extra string, marks []PrototypeMark, playbook RolePlaybook) string {
 	var b strings.Builder
+	if block := FormatRolePlaybookBlock(ResolveRolePlaybook("prototyper", playbook)); block != "" {
+		b.WriteString(block)
+		b.WriteString("\n")
+	}
 
 	b.WriteString("〔需求〕")
 	b.WriteString(issue.Title)

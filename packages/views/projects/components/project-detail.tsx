@@ -27,9 +27,12 @@ import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor"
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectModulesSection } from "./project-modules-section";
+import { ProjectRolePlaybooksSection } from "./project-role-playbooks-section";
+import { ProjectRoleDefaultsSection } from "./project-role-defaults-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { IssueSurface } from "../../issues/surface/issue-surface";
+import { ProjectArchiveViews } from "./project-archive-views";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
@@ -227,7 +230,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   if (isLoading) {
     return (
-      <div className="mx-auto w-full max-w-4xl px-8 py-10 space-y-4">
+      <div className="w-full px-8 py-10 space-y-4">
         <Skeleton className="h-5 w-32" />
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-4 w-96" />
@@ -474,6 +477,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       
             {/* Modules */}
             <ProjectModulesSection projectId={projectId} />
+
+            <ProjectRoleDefaultsSection projectId={projectId} />
+            <ProjectRolePlaybooksSection projectId={projectId} />
     </div>
   );
 
@@ -552,10 +558,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             }
           />
 
-          <IssueSurface
-            scope={issueScope}
-            modes={["board", "list", "table", "swimlane", "gantt", "calendar"]}
-          />
+          {/* Project-archive prototype views (f4/f10/f11/f12) — segmented
+              control above the default surface; 概览 keeps the original
+              IssueSurface layout untouched (URL-driven via ?view=…). */}
+          <ProjectArchiveViews projectId={projectId} template={project.template}>
+            <IssueSurface
+              scope={issueScope}
+              modes={["board", "list", "table", "swimlane", "gantt", "calendar"]}
+            />
+          </ProjectArchiveViews>
           </div>
         </ResizablePanel>
         {!isMobile && <ResizableHandle />}

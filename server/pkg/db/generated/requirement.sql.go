@@ -43,6 +43,26 @@ func (q *Queries) CopyProjectRoleDefaultsToIssue(ctx context.Context, arg CopyPr
 	return err
 }
 
+const copyProjectRolePlaybooksToIssue = `-- name: CopyProjectRolePlaybooksToIssue :exec
+INSERT INTO issue_role_playbook (
+    issue_id, workspace_id, role, background, standards, process, init_mode, init_content
+)
+SELECT $1, d.workspace_id, d.role, d.background, d.standards, d.process, d.init_mode, d.init_content
+FROM project_role_playbook d
+WHERE d.project_id = $2
+`
+
+type CopyProjectRolePlaybooksToIssueParams struct {
+	IssueID   pgtype.UUID `json:"issue_id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+}
+
+// 创建需求时把项目角色标准拷贝为需求快照；项目默认的后续变更不影响已建需求。
+func (q *Queries) CopyProjectRolePlaybooksToIssue(ctx context.Context, arg CopyProjectRolePlaybooksToIssueParams) error {
+	_, err := q.db.Exec(ctx, copyProjectRolePlaybooksToIssue, arg.IssueID, arg.ProjectID)
+	return err
+}
+
 const createPrototypeVersion = `-- name: CreatePrototypeVersion :one
 INSERT INTO issue_prototype_version (issue_id, workspace_id, version, html_path, prompt, created_by_type, created_by_id)
 VALUES (
@@ -101,6 +121,15 @@ func (q *Queries) DeleteIssueRoleAssignments(ctx context.Context, issueID pgtype
 	return err
 }
 
+const deleteIssueRolePlaybooks = `-- name: DeleteIssueRolePlaybooks :exec
+DELETE FROM issue_role_playbook WHERE issue_id = $1
+`
+
+func (q *Queries) DeleteIssueRolePlaybooks(ctx context.Context, issueID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteIssueRolePlaybooks, issueID)
+	return err
+}
+
 const deleteProjectRoleDefaults = `-- name: DeleteProjectRoleDefaults :exec
 DELETE FROM project_role_default WHERE project_id = $1
 `
@@ -111,6 +140,15 @@ DELETE FROM project_role_default WHERE project_id = $1
 //	同语句 DELETE 的效果，重写已有行会触唯一约束冲突。）
 func (q *Queries) DeleteProjectRoleDefaults(ctx context.Context, projectID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteProjectRoleDefaults, projectID)
+	return err
+}
+
+const deleteProjectRolePlaybooks = `-- name: DeleteProjectRolePlaybooks :exec
+DELETE FROM project_role_playbook WHERE project_id = $1
+`
+
+func (q *Queries) DeleteProjectRolePlaybooks(ctx context.Context, projectID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteProjectRolePlaybooks, projectID)
 	return err
 }
 
@@ -170,6 +208,23 @@ func (q *Queries) GetPrototypeVersion(ctx context.Context, arg GetPrototypeVersi
 	return i, err
 }
 
+const hasAcceptanceSpecMissingNotice = `-- name: HasAcceptanceSpecMissingNotice :one
+SELECT EXISTS (
+    SELECT 1 FROM comment
+    WHERE issue_id = $1 AND author_type = 'system'
+      AND content LIKE '[acceptance_spec_missing]%'
+) AS noticed
+`
+
+// H-3 可见信号去重护栏：sweep 每 30s 重扫被 acceptance_spec_missing 阻断的需求，
+// 为避免评论刷屏，发系统评论前先查是否已有带固定标记前缀的系统评论。
+func (q *Queries) HasAcceptanceSpecMissingNotice(ctx context.Context, issueID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasAcceptanceSpecMissingNotice, issueID)
+	var noticed bool
+	err := row.Scan(&noticed)
+	return noticed, err
+}
+
 const hasWaitingModuleLockDescendant = `-- name: HasWaitingModuleLockDescendant :one
 SELECT EXISTS (
     SELECT 1
@@ -186,6 +241,44 @@ func (q *Queries) HasWaitingModuleLockDescendant(ctx context.Context, issueID pg
 	var waiting bool
 	err := row.Scan(&waiting)
 	return waiting, err
+}
+
+const incrementAcceptanceRound = `-- name: IncrementAcceptanceRound :one
+UPDATE issue
+SET acceptance_round = acceptance_round + 1, updated_at = now()
+WHERE id = $1
+RETURNING acceptance_round
+`
+
+// 验收打回：acceptance_round + 1 并返回新值（DEFAULT 0，见 migration 452:15）。
+// 调用方据返回值判「> 3 = 验收失败终态」。updated_at 同步刷新以驱动列表重排。
+func (q *Queries) IncrementAcceptanceRound(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementAcceptanceRound, id)
+	var acceptance_round int32
+	err := row.Scan(&acceptance_round)
+	return acceptance_round, err
+}
+
+const incrementAcceptanceRoundIfExpected = `-- name: IncrementAcceptanceRoundIfExpected :one
+UPDATE issue
+SET acceptance_round = acceptance_round + 1, updated_at = now()
+WHERE id = $1 AND acceptance_round = $2
+RETURNING acceptance_round
+`
+
+type IncrementAcceptanceRoundIfExpectedParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Expected int32       `json:"expected"`
+}
+
+// M-1 幂等守卫：仅当 acceptance_round 仍等于调用方读到的期望值时才 +1 并返回新值。
+// 并发验收裁决下只有一个能命中（另一个 0 行 → pgx.ErrNoRows → 409），杜绝 round
+// 重复自增与重复修复子任务。与修复子任务创建同事务（见 requirement_acceptance.go）。
+func (q *Queries) IncrementAcceptanceRoundIfExpected(ctx context.Context, arg IncrementAcceptanceRoundIfExpectedParams) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementAcceptanceRoundIfExpected, arg.ID, arg.Expected)
+	var acceptance_round int32
+	err := row.Scan(&acceptance_round)
+	return acceptance_round, err
 }
 
 const insertIssueRoleAssignments = `-- name: InsertIssueRoleAssignments :exec
@@ -207,6 +300,26 @@ func (q *Queries) InsertIssueRoleAssignments(ctx context.Context, arg InsertIssu
 	return err
 }
 
+const insertIssueRolePlaybooks = `-- name: InsertIssueRolePlaybooks :exec
+INSERT INTO issue_role_playbook (
+    issue_id, workspace_id, role, background, standards, process, init_mode, init_content
+)
+SELECT $1, $2, r.role, r.background, r.standards, r.process, r.init_mode, r.init_content
+FROM jsonb_to_recordset($3::jsonb)
+    AS r(role text, background text, standards text, process text, init_mode text, init_content text)
+`
+
+type InsertIssueRolePlaybooksParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Entries     []byte      `json:"entries"`
+}
+
+func (q *Queries) InsertIssueRolePlaybooks(ctx context.Context, arg InsertIssueRolePlaybooksParams) error {
+	_, err := q.db.Exec(ctx, insertIssueRolePlaybooks, arg.IssueID, arg.WorkspaceID, arg.Entries)
+	return err
+}
+
 const insertProjectRoleDefaults = `-- name: InsertProjectRoleDefaults :exec
 INSERT INTO project_role_default (project_id, workspace_id, role, assignee_type, assignee_id, enabled, ordinal)
 SELECT $1, $2, r.role, r.assignee_type, r.assignee_id, r.enabled, r.ordinal
@@ -223,6 +336,27 @@ type InsertProjectRoleDefaultsParams struct {
 // entries 为 JSONB 数组：[{role, assignee_type, assignee_id, enabled, ordinal}, ...]
 func (q *Queries) InsertProjectRoleDefaults(ctx context.Context, arg InsertProjectRoleDefaultsParams) error {
 	_, err := q.db.Exec(ctx, insertProjectRoleDefaults, arg.ProjectID, arg.WorkspaceID, arg.Entries)
+	return err
+}
+
+const insertProjectRolePlaybooks = `-- name: InsertProjectRolePlaybooks :exec
+INSERT INTO project_role_playbook (
+    project_id, workspace_id, role, background, standards, process, init_mode, init_content
+)
+SELECT $1, $2, r.role, r.background, r.standards, r.process, r.init_mode, r.init_content
+FROM jsonb_to_recordset($3::jsonb)
+    AS r(role text, background text, standards text, process text, init_mode text, init_content text)
+`
+
+type InsertProjectRolePlaybooksParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Entries     []byte      `json:"entries"`
+}
+
+// entries 为 JSONB 数组：[{role, background, standards, process, init_mode, init_content}, ...]
+func (q *Queries) InsertProjectRolePlaybooks(ctx context.Context, arg InsertProjectRolePlaybooksParams) error {
+	_, err := q.db.Exec(ctx, insertProjectRolePlaybooks, arg.ProjectID, arg.WorkspaceID, arg.Entries)
 	return err
 }
 
@@ -263,6 +397,44 @@ func (q *Queries) ListIssueRoleAssignments(ctx context.Context, issueID pgtype.U
 	return items, nil
 }
 
+const listIssueRolePlaybooks = `-- name: ListIssueRolePlaybooks :many
+SELECT id, issue_id, workspace_id, role, background, standards, process, init_mode, init_content, created_at, updated_at FROM issue_role_playbook
+WHERE issue_id = $1
+ORDER BY role ASC
+`
+
+func (q *Queries) ListIssueRolePlaybooks(ctx context.Context, issueID pgtype.UUID) ([]IssueRolePlaybook, error) {
+	rows, err := q.db.Query(ctx, listIssueRolePlaybooks, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueRolePlaybook{}
+	for rows.Next() {
+		var i IssueRolePlaybook
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.WorkspaceID,
+			&i.Role,
+			&i.Background,
+			&i.Standards,
+			&i.Process,
+			&i.InitMode,
+			&i.InitContent,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjectRoleDefaults = `-- name: ListProjectRoleDefaults :many
 
 SELECT id, project_id, workspace_id, role, assignee_type, assignee_id, enabled, ordinal, created_at, updated_at FROM project_role_default
@@ -290,6 +462,44 @@ func (q *Queries) ListProjectRoleDefaults(ctx context.Context, projectID pgtype.
 			&i.AssigneeID,
 			&i.Enabled,
 			&i.Ordinal,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectRolePlaybooks = `-- name: ListProjectRolePlaybooks :many
+SELECT id, project_id, workspace_id, role, background, standards, process, init_mode, init_content, created_at, updated_at FROM project_role_playbook
+WHERE project_id = $1
+ORDER BY role ASC
+`
+
+func (q *Queries) ListProjectRolePlaybooks(ctx context.Context, projectID pgtype.UUID) ([]ProjectRolePlaybook, error) {
+	rows, err := q.db.Query(ctx, listProjectRolePlaybooks, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectRolePlaybook{}
+	for rows.Next() {
+		var i ProjectRolePlaybook
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.WorkspaceID,
+			&i.Role,
+			&i.Background,
+			&i.Standards,
+			&i.Process,
+			&i.InitMode,
+			&i.InitContent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -502,13 +712,54 @@ func (q *Queries) MarkRequirementTriggered(ctx context.Context, id pgtype.UUID) 
 	return result.RowsAffected(), nil
 }
 
+const moduleBusyForOtherRoot = `-- name: ModuleBusyForOtherRoot :one
+SELECT EXISTS (
+    SELECT 1
+    FROM agent_task_queue q
+    JOIN issue ti ON ti.id = q.issue_id
+    WHERE ti.module_id = $1
+      AND ti.root_requirement_id IS NOT NULL
+      AND ti.root_requirement_id <> $2
+      AND q.status IN ('dispatched', 'running', 'waiting_local_directory', 'waiting_module_lock')
+) AS busy
+`
+
+type ModuleBusyForOtherRootParams struct {
+	ModuleID          pgtype.UUID `json:"module_id"`
+	RootRequirementID pgtype.UUID `json:"root_requirement_id"`
+}
+
+// 触发窗口预检（plan 2026-09-06-requirement-calendar-phase1-completion §WS2 Task 2.3，
+// 开放问题 #10）：检测同 module_id 上是否存在「其它 root 需求组」的活动任务。
+//
+// 与 WS3 ModuleLocker v2 的组级互斥语义严格对齐（daemon/module_locker.go
+// blockerLocked）：同模块跨组无条件互斥；同组内部并行不阻。本查询只看
+// 「其他组」，本组自己的活动任务不算 busy（否则同组多个 stage3 子任务
+// 会互相卡住触发）。
+//
+// 活动任务状态 = CountRunningTasks 同口径（agent.sql:1749）：dispatched / running /
+// waiting_local_directory / waiting_module_lock —— waiting_* 也算占用（daemon
+// 已在等锁，触发新组只会加剧排队）；queued 不算（尚未占用互斥窗口）。
+//
+// NULL 处理：
+//   - module_id 为 NULL（无模块需求）→ 调用方直接跳过本查询（无模块不互斥）；
+//   - root_requirement_id 为 NULL（回填前的存量行）→ 调用方跳过（WS3 语义：
+//     任一方 rootID 为空则同模块维度退化为 451，不互斥）；
+//   - SQL 层面 IS NOT NULL + <> 双重保护：避免 NULL <> x 返回 UNKNOWN 而漏检。
+func (q *Queries) ModuleBusyForOtherRoot(ctx context.Context, arg ModuleBusyForOtherRootParams) (bool, error) {
+	row := q.db.QueryRow(ctx, moduleBusyForOtherRoot, arg.ModuleID, arg.RootRequirementID)
+	var busy bool
+	err := row.Scan(&busy)
+	return busy, err
+}
+
 const resetRequirementTrigger = `-- name: ResetRequirementTrigger :execrows
 UPDATE issue SET triggered_at = NULL
 WHERE id = $1 AND triggered_at IS NOT NULL
 `
 
 // 触发已 CAS 但 stage3 入队全部失败时回退 triggered_at，让下轮 sweep 重扫重试
-//（否则需求永久卡「已触发/零任务」，sweep/手动/重试三通道全关闭）。仅回退已触发
+// （否则需求永久卡「已触发/零任务」，sweep/手动/重试三通道全关闭）。仅回退已触发
 // 行；影响 0 行 = 该行未被本进程触发（或已被并发重置），无副作用。
 func (q *Queries) ResetRequirementTrigger(ctx context.Context, id pgtype.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, resetRequirementTrigger, id)
@@ -516,23 +767,6 @@ func (q *Queries) ResetRequirementTrigger(ctx context.Context, id pgtype.UUID) (
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const hasAcceptanceSpecMissingNotice = `-- name: HasAcceptanceSpecMissingNotice :one
-SELECT EXISTS (
-    SELECT 1 FROM comment
-    WHERE issue_id = $1 AND author_type = 'system'
-      AND content LIKE '[acceptance_spec_missing]%'
-) AS noticed
-`
-
-// H-3 可见信号去重护栏：sweep 每 30s 重扫被 acceptance_spec_missing 阻断的需求，
-// 为避免评论刷屏，发系统评论前先查是否已有带固定标记前缀的系统评论。
-func (q *Queries) HasAcceptanceSpecMissingNotice(ctx context.Context, issueID pgtype.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, hasAcceptanceSpecMissingNotice, issueID)
-	var noticed bool
-	err := row.Scan(&noticed)
-	return noticed, err
 }
 
 const setPrototypeStatus = `-- name: SetPrototypeStatus :exec
@@ -593,83 +827,4 @@ func (q *Queries) UpdatePrototypeMarks(ctx context.Context, arg UpdatePrototypeM
 		&i.CreatedAt,
 	)
 	return i, err
-}
-
-const incrementAcceptanceRound = `-- name: IncrementAcceptanceRound :one
-UPDATE issue
-SET acceptance_round = acceptance_round + 1, updated_at = now()
-WHERE id = $1
-RETURNING acceptance_round
-`
-
-// 验收打回：acceptance_round + 1 并返回新值（DEFAULT 0，见 migration 452:15）。
-// 调用方据返回值判「> 3 = 验收失败终态」。updated_at 同步刷新以驱动列表重排。
-func (q *Queries) IncrementAcceptanceRound(ctx context.Context, id pgtype.UUID) (int32, error) {
-	row := q.db.QueryRow(ctx, incrementAcceptanceRound, id)
-	var acceptanceRound int32
-	err := row.Scan(&acceptanceRound)
-	return acceptanceRound, err
-}
-
-const incrementAcceptanceRoundIfExpected = `-- name: IncrementAcceptanceRoundIfExpected :one
-UPDATE issue
-SET acceptance_round = acceptance_round + 1, updated_at = now()
-WHERE id = $1 AND acceptance_round = $2
-RETURNING acceptance_round
-`
-
-type IncrementAcceptanceRoundIfExpectedParams struct {
-	ID       pgtype.UUID `json:"id"`
-	Expected int32       `json:"expected"`
-}
-
-// M-1 幂等守卫：仅当 acceptance_round 仍等于调用方读到的期望值时才 +1 并返回新值。
-// 并发验收裁决下只有一个能命中（另一个 0 行 → pgx.ErrNoRows → 409），杜绝 round
-// 重复自增与重复修复子任务。与修复子任务创建同事务（见 requirement_acceptance.go）。
-func (q *Queries) IncrementAcceptanceRoundIfExpected(ctx context.Context, arg IncrementAcceptanceRoundIfExpectedParams) (int32, error) {
-	row := q.db.QueryRow(ctx, incrementAcceptanceRoundIfExpected, arg.ID, arg.Expected)
-	var acceptanceRound int32
-	err := row.Scan(&acceptanceRound)
-	return acceptanceRound, err
-}
-
-const moduleBusyForOtherRoot = `-- name: ModuleBusyForOtherRoot :one
-SELECT EXISTS (
-    SELECT 1
-    FROM agent_task_queue q
-    JOIN issue ti ON ti.id = q.issue_id
-    WHERE ti.module_id = $1
-      AND ti.root_requirement_id IS NOT NULL
-      AND ti.root_requirement_id <> $2
-      AND q.status IN ('dispatched', 'running', 'waiting_local_directory', 'waiting_module_lock')
-) AS busy
-`
-
-type ModuleBusyForOtherRootParams struct {
-	ModuleID          pgtype.UUID `json:"module_id"`
-	RootRequirementID pgtype.UUID `json:"root_requirement_id"`
-}
-
-// 触发窗口预检（plan 2026-09-06-requirement-calendar-phase1-completion §WS2 Task 2.3，
-// 开放问题 #10）：检测同 module_id 上是否存在「其它 root 需求组」的活动任务。
-//
-// 与 WS3 ModuleLocker v2 的组级互斥语义严格对齐（daemon/module_locker.go
-// blockerLocked）：同模块跨组无条件互斥；同组内部并行不阻。本查询只看
-// 「其他组」，本组自己的活动任务不算 busy（否则同组多个 stage3 子任务
-// 会互相卡住触发）。
-//
-// 活动任务状态 = CountRunningTasks 同口径（agent.sql:1749）：dispatched / running /
-// waiting_local_directory / waiting_module_lock —— waiting_* 也算占用（daemon
-// 已在等锁，触发新组只会加剧排队）；queued 不算（尚未占用互斥窗口）。
-//
-// NULL 处理：
-// - module_id 为 NULL（无模块需求）→ 调用方直接跳过本查询（无模块不互斥）；
-// - root_requirement_id 为 NULL（回填前的存量行）→ 调用方跳过（WS3 语义：
-//   任一方 rootID 为空则同模块维度退化为 451，不互斥）；
-// - SQL 层面 IS NOT NULL + <> 双重保护：避免 NULL <> x 返回 UNKNOWN 而漏检。
-func (q *Queries) ModuleBusyForOtherRoot(ctx context.Context, arg ModuleBusyForOtherRootParams) (bool, error) {
-	row := q.db.QueryRow(ctx, moduleBusyForOtherRoot, arg.ModuleID, arg.RootRequirementID)
-	var busy bool
-	err := row.Scan(&busy)
-	return busy, err
 }

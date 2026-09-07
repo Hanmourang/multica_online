@@ -29,6 +29,12 @@ const mockApi = vi.hoisted(() => ({
   submitAcceptanceVerdict: vi.fn(),
   listProjectModules: vi.fn(),
   listProjectResources: vi.fn(),
+  listIssues: vi.fn(),
+  listProjects: vi.fn(),
+  replaceIssueRoleAssignments: vi.fn(),
+  listIssueRolePlaybooks: vi.fn(),
+  replaceIssueRolePlaybooks: vi.fn(),
+  updateIssue: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -47,8 +53,48 @@ vi.mock("@multica/core/workspace/hooks", () => ({
     getActorName: (_type: string, id: string) => `actor-${id}`,
   }),
 }));
+
+vi.mock("@multica/core/workspace/queries", () => ({
+  memberListOptions: () => ({
+    queryKey: ["members"],
+    queryFn: () => Promise.resolve([]),
+  }),
+  agentListOptions: () => ({
+    queryKey: ["agents"],
+    queryFn: () => Promise.resolve([]),
+  }),
+}));
 vi.mock("../common/actor-avatar", () => ({
   ActorAvatar: () => null,
+}));
+
+vi.mock("../navigation", () => ({
+  AppLink: ({
+    children,
+    href,
+  }: {
+    children: React.ReactNode;
+    href: string;
+  }) => <a href={href}>{children}</a>,
+}));
+
+vi.mock("@multica/core/paths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+  return {
+    ...actual,
+    useWorkspaceSlug: () => "acme",
+    useRequiredWorkspaceSlug: () => "acme",
+    useWorkspacePaths: () => actual.paths.workspace("acme"),
+  };
+});
+
+vi.mock("@multica/core/issues/mutations", () => ({
+  useUpdateIssue: () => ({ mutate: vi.fn() }),
+  useCreateComment: () => ({ mutateAsync: vi.fn() }),
+}));
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "workspace-1",
 }));
 
 function requirement(overrides: Partial<Issue> = {}): Issue {
@@ -101,6 +147,11 @@ beforeEach(() => {
   mockApi.getIssue.mockResolvedValue(requirement());
   mockApi.listChildIssues.mockResolvedValue({ issues: [] });
   mockApi.listIssueRoleAssignments.mockResolvedValue({ roles: [], total: 0 });
+  mockApi.listIssueRolePlaybooks.mockResolvedValue({
+    playbooks: {},
+    overrides: {},
+    builtins: {},
+  });
   mockApi.listPrototypeVersions.mockResolvedValue({ versions: [] });
   mockApi.getDecomposition.mockResolvedValue({
     plan: null,
@@ -109,6 +160,9 @@ beforeEach(() => {
   });
   mockApi.listProjectModules.mockResolvedValue([]);
   mockApi.listProjectResources.mockResolvedValue({ resources: [] });
+  mockApi.listIssues.mockResolvedValue({ issues: [], total: 0 });
+  mockApi.listProjects.mockResolvedValue({ projects: [], total: 0 });
+  mockApi.updateIssue.mockResolvedValue(requirement());
 });
 
 afterEach(() => {
@@ -136,9 +190,50 @@ describe("RequirementDrawer", () => {
     // 五阶段面板复用（RequirementFlowSection 的阶段条标记；班底/版本/拆解
     // 三个查询 resolve 前 FlowSection 不渲染，用 findBy 等待）
     expect(await screen.findByTestId("requirement-flow")).toBeTruthy();
+    expect(screen.getByTestId("requirement-workbench")).toBeTruthy();
+    expect(screen.getByTestId("workbench-aside")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /Back to requirement/ }),
+    ).toHaveAttribute("href", "/acme/issues/req-1");
+    expect(screen.getByTestId("role-strip")).toBeTruthy();
 
     expect(mockApi.getIssue).toHaveBeenCalledWith("req-1");
     expect(mockApi.listChildIssues).toHaveBeenCalledWith("req-1");
+  });
+
+  it("renders enabled roster avatars in the drawer header", async () => {
+    mockApi.listIssueRoleAssignments.mockResolvedValue({
+      roles: [
+        {
+          id: "role-pm",
+          role: "pm",
+          assignee_type: "member",
+          assignee_id: "user-pm",
+          enabled: true,
+          ordinal: 0,
+        },
+        {
+          id: "role-dev",
+          role: "developer",
+          assignee_type: "agent",
+          assignee_id: "agent-dev",
+          enabled: false,
+          ordinal: 1,
+        },
+      ],
+      total: 2,
+    });
+    renderDrawer(
+      <RequirementDrawer
+        issueId="req-1"
+        statusBadge="原型待确认"
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByTestId("roster-pm")).toBeTruthy();
+    expect(screen.queryByTestId("roster-developer")).toBeNull();
+    expect(await screen.findByTestId("role-strip")).toBeTruthy();
   });
 
   it("bubbles close via onOpenChange(false) when the close button is clicked", async () => {
@@ -149,8 +244,20 @@ describe("RequirementDrawer", () => {
     );
     await screen.findByTestId("requirement-flow");
 
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByTestId("workbench-close"));
     expect(onOpenChange.mock.calls[0]?.[0]).toBe(false);
+  });
+
+  it("closes from the header back button", async () => {
+    const onOpenChange = vi.fn();
+    renderDrawer(
+      <RequirementDrawer issueId="req-1" onOpenChange={onOpenChange} />,
+      onOpenChange,
+    );
+    await screen.findByTestId("requirement-flow");
+
+    fireEvent.click(screen.getByTestId("workbench-back"));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("renders nothing and skips fetching when issueId is null", () => {

@@ -15,6 +15,13 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round,
        -- 需求派生状态投影（spec: 2026-09-04-requirement-calendar-design.md §6，9 条规则按序命中）。
        -- 不落列，永远与事实一致；子任务终态判定用 issue_effective_status 与 stage barrier 同语义。
+       COALESCE(CASE
+           WHEN i.parent_issue_id IS NOT NULL THEN NULL
+           WHEN i.start_at IS NULL
+                AND i.decomposition_confirmed_at IS NULL
+                AND i.triggered_at IS NULL
+                AND i.repo_resource_id IS NULL THEN NULL
+           ELSE (
        CASE
            WHEN issue_effective_status(i.workspace_id, i.status) = 'done' THEN '已完成'
            WHEN issue_effective_status(i.workspace_id, i.status) = 'cancelled' THEN '已取消'
@@ -40,7 +47,9 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
            WHEN COALESCE(prog.has_open_stage3, FALSE) THEN '执行中'
            WHEN COALESCE(prog.has_open_stage4, FALSE) THEN '验收中'
            ELSE '已完成'
-       END AS requirement_status,
+       END
+           )
+       END, '') AS requirement_status,
        -- stage 3 执行进度 N/M（无 stage 3 子任务时为空串，响应层映射为 null）。
        (CASE WHEN COALESCE(prog.stage3_total, 0) > 0
             THEN concat(prog.stage3_done, '/', prog.stage3_total)

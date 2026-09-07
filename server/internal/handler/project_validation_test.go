@@ -26,6 +26,65 @@ func TestCreateProjectInvalidStatusReturns400(t *testing.T) {
 	}
 }
 
+func TestCreateProjectInvalidTemplateReturns400(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    "invalid template project",
+		"template": "full",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid template, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateProjectTemplateDefaultsToRd(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "default template project",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	t.Cleanup(func() {
+		req := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		req = withURLParam(req, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), req)
+	})
+	if project.Template != "rd" {
+		t.Errorf("expected default template rd, got %q", project.Template)
+	}
+}
+
+func TestCreateProjectPersistsGeneralTemplate(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    "general template project",
+		"template": "general",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	t.Cleanup(func() {
+		req := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		req = withURLParam(req, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), req)
+	})
+	if project.Template != "general" {
+		t.Errorf("expected template general, got %q", project.Template)
+	}
+}
+
 func TestCreateProjectInvalidPriorityReturns400(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{

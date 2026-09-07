@@ -170,6 +170,18 @@
     "search_placeholder": "Search projects...",
     "clear_aria": "Clear project"
   },
+  "role_defaults": {
+    "section_header": "Default roster",
+    "hint": "Copied onto new requirements. Override later on the workbench.",
+    "save_failed": "Failed to save default roster"
+  },
+  "role_playbooks": {
+    "section_header": "Role execution standards",
+    "hint": "After a requirement is bound to this project, each stage agent follows the role standard instead of personal habits. Override the built-in standard per role.",
+    "builtin": "Built-in",
+    "customized": "Customized",
+    "save_failed": "Failed to save role standards"
+  },
   "chip": {
     "fallback_label": "Project"
   },

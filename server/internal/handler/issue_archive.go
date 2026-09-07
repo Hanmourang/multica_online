@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -75,7 +76,7 @@ func (h *Handler) GetIssueDynamics(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	// ── 1. Tasks for this issue ────────────────────────────────────────────
+	// ── 1. Tasks for this issue + decomposed children ──────────────────────
 	type taskMeta struct {
 		id      string
 		title   string
@@ -85,11 +86,17 @@ func (h *Handler) GetIssueDynamics(w http.ResponseWriter, r *http.Request) {
 	taskMap := map[string]taskMeta{}
 	var taskTotal, taskDispatched int64
 	rows, err := h.DB.Query(ctx, `
-		SELECT id, agent_id, status,
-		       LEFT(COALESCE(NULLIF(trigger_summary, ''), 'Task ' || LEFT(id::text, 8)), 80)
-		FROM agent_task_queue
-		WHERE issue_id = $1
-		ORDER BY created_at ASC
+		SELECT q.id, q.agent_id, q.status,
+		       LEFT(COALESCE(
+		         NULLIF(BTRIM(i.title), ''),
+		         NULLIF(BTRIM(q.trigger_summary), ''),
+		         BTRIM(i.title)
+		       ), 80)
+		FROM agent_task_queue q
+		JOIN issue i ON i.id = q.issue_id
+		WHERE q.issue_id = $1
+		   OR q.issue_id IN (SELECT id FROM issue WHERE parent_issue_id = $1)
+		ORDER BY q.created_at ASC
 		LIMIT 200`,
 		issue.ID)
 	if err != nil {
@@ -130,7 +137,7 @@ func (h *Handler) GetIssueDynamics(w http.ResponseWriter, r *http.Request) {
 		msgRows, err := h.DB.Query(ctx, `
 			SELECT tm.id, tm.task_id, tm.type, tm.tool, tm.content, tm.output, tm.created_at
 			FROM task_message tm
-			WHERE tm.task_id = ANY($1)
+			WHERE tm.task_id = ANY($1::uuid[])
 			ORDER BY tm.created_at DESC
 			LIMIT 500`,
 			taskIDs)
@@ -151,19 +158,19 @@ func (h *Handler) GetIssueDynamics(w http.ResponseWriter, r *http.Request) {
 			tid := uuidToString(taskID)
 			tm := taskMap[tid]
 
+			// 需求级动态不进工具调用细节（read/shell）——那些留在 A3 执行日志。
+			if msgType == "tool_use" || msgType == "tool_result" || msgType == "thinking" {
+				continue
+			}
+
 			// Classify actor from message type.
 			actor := "agent"
 			actorName := tm.agentID
-			if msgType == "text" && content.Valid && len(content.String) > 0 {
-				// Heuristic: first message in a task is often the user dispatch.
-				// task_message.type is written by the agent framework, so text = agent reply.
+			if msgType == "error" {
 				actor = "agent"
 			}
-			if msgType == "tool_use" || msgType == "tool_result" {
-				actor = "tool"
-				if tool.Valid {
-					actorName = tool.String
-				}
+			if msgType == "text" && content.Valid && len(content.String) > 0 {
+				actor = "agent"
 			}
 
 			// Build display content.
@@ -184,10 +191,14 @@ func (h *Handler) GetIssueDynamics(w http.ResponseWriter, r *http.Request) {
 			}
 			var taskIDPtr *string
 			taskIDPtr = &tid
+			evType := "conversation"
+			if msgType == "error" {
+				evType = "status"
+			}
 
 			allEvents = append(allEvents, dynamicsEvent{
 				ID:        uuidToString(id),
-				Type:      "conversation",
+				Type:      evType,
 				TaskID:    taskIDPtr,
 				Actor:     actor,
 				ActorName: actorName,
@@ -195,7 +206,9 @@ func (h *Handler) GetIssueDynamics(w http.ResponseWriter, r *http.Request) {
 				ToolName:  toolName,
 				Ts:        timestampToString(createdAt),
 			})
-			messageCount++
+			if evType == "conversation" {
+				messageCount++
+			}
 		}
 		msgRows.Close()
 		if err := msgRows.Err(); err != nil {
@@ -308,6 +321,43 @@ func (h *Handler) GetIssueDynamics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ── 4b. Comments on this requirement and its children (A2 / C6-1 同源) ─
+	if commentEvents, err := h.loadDynamicsComments(ctx, issue.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load issue comments")
+		return
+	} else {
+		for _, ev := range commentEvents {
+			allEvents = append(allEvents, ev)
+			messageCount++
+		}
+	}
+
+	// ── 4c. Run status snapshots so a live queue is visible even before comments
+	if runStatus, err := h.loadDynamicsRunStatus(ctx, issue.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load run status")
+		return
+	} else {
+		allEvents = append(allEvents, runStatus...)
+	}
+
+	// ── 4d. Child issues as filter facets (拆解任务，即使还没有 queue) ─────
+	if childFacets, err := h.loadDynamicsChildFacets(ctx, issue.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load child issues")
+		return
+	} else {
+		for _, facet := range childFacets {
+			if _, exists := taskMap[facet.ID]; !exists {
+				taskMap[facet.ID] = taskMeta{
+					id: facet.ID, title: facet.Title, agentID: facet.Agent, status: facet.Status,
+				}
+				taskTotal++
+				if facet.Status != "todo" && facet.Status != "backlog" {
+					taskDispatched++
+				}
+			}
+		}
+	}
+
 	// ── 5. Sort all events by timestamp descending ─────────────────────────
 	sortDynamicsEvents(allEvents)
 
@@ -351,6 +401,204 @@ func (h *Handler) GetIssueDynamics(w http.ResponseWriter, r *http.Request) {
 			Types:  []string{"conversation", "progress", "status", "artifact"},
 		},
 	})
+}
+
+// loadDynamicsComments merges requirement + child-issue comments into the
+// dynamics stream. Comments are the human side of A2 / C6-1; they live in
+// `comment` and were previously omitted, which left the tab empty after
+// create-and-discuss even when progress had live runs.
+func (h *Handler) loadDynamicsComments(ctx context.Context, issueID pgtype.UUID) ([]dynamicsEvent, error) {
+	rows, err := h.DB.Query(ctx, `
+		SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.created_at
+		FROM comment c
+		WHERE (c.issue_id = $1 OR c.issue_id IN (SELECT id FROM issue WHERE parent_issue_id = $1))
+		  AND c.author_type IN ('member', 'agent')
+		  AND c.type NOT IN ('quick_action')
+		ORDER BY c.created_at DESC
+		LIMIT 200`,
+		issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type rawComment struct {
+		id, issueID, authorID pgtype.UUID
+		authorType, content   string
+		createdAt             pgtype.Timestamptz
+	}
+	raws := []rawComment{}
+	agentIDs := []pgtype.UUID{}
+	userIDs := []pgtype.UUID{}
+	for rows.Next() {
+		var row rawComment
+		if err := rows.Scan(&row.id, &row.issueID, &row.authorType, &row.authorID, &row.content, &row.createdAt); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(row.content) == "" {
+			continue
+		}
+		raws = append(raws, row)
+		if row.authorType == "agent" {
+			agentIDs = append(agentIDs, row.authorID)
+		} else {
+			userIDs = append(userIDs, row.authorID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(raws) == 0 {
+		return nil, nil
+	}
+
+	names := map[string]string{}
+	nameRows, err := h.DB.Query(ctx, `
+		SELECT id, name FROM agent WHERE id = ANY($1::uuid[])
+		UNION ALL
+		SELECT id, name FROM "user" WHERE id = ANY($2::uuid[])`,
+		agentIDs, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	func() {
+		defer nameRows.Close()
+		for nameRows.Next() {
+			var id pgtype.UUID
+			var name string
+			if err := nameRows.Scan(&id, &name); err != nil {
+				return
+			}
+			names[uuidToString(id)] = name
+		}
+	}()
+	if err := nameRows.Err(); err != nil {
+		return nil, err
+	}
+
+	parent := uuidToString(issueID)
+	out := make([]dynamicsEvent, 0, len(raws))
+	for _, row := range raws {
+		content := row.content
+		if len(content) > 300 {
+			content = content[:300] + "…"
+		}
+		actor := "user"
+		if row.authorType == "agent" {
+			actor = "agent"
+		}
+		authorID := uuidToString(row.authorID)
+		name := names[authorID]
+		if name == "" {
+			name = authorID
+		}
+		var taskIDPtr *string
+		childID := uuidToString(row.issueID)
+		if childID != parent {
+			taskIDPtr = &childID
+		}
+		out = append(out, dynamicsEvent{
+			ID:        uuidToString(row.id),
+			Type:      "conversation",
+			TaskID:    taskIDPtr,
+			Actor:     actor,
+			ActorName: name,
+			Content:   content,
+			Ts:        timestampToString(row.createdAt),
+		})
+	}
+	return out, nil
+}
+
+// loadDynamicsRunStatus projects each agent_run's current status into the
+// stream (honest row, one event per run). Fills the tab when the only
+// activity so far is a live execution with tool traces (those stay in A3).
+func (h *Handler) loadDynamicsRunStatus(ctx context.Context, issueID pgtype.UUID) ([]dynamicsEvent, error) {
+	rows, err := h.DB.Query(ctx, `
+		SELECT ar.id, ar.task_queue_id, ar.agent_id, ar.status, ar.stall_reason,
+		       COALESCE(ar.updated_at, ar.created_at)
+		FROM agent_run ar
+		WHERE ar.issue_id = $1 OR ar.root_issue_id = $1
+		ORDER BY COALESCE(ar.updated_at, ar.created_at) DESC
+		LIMIT 80`,
+		issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []dynamicsEvent{}
+	for rows.Next() {
+		var id, taskQueueID pgtype.UUID
+		var agentID, status string
+		var stall pgtype.Text
+		var ts pgtype.Timestamptz
+		if err := rows.Scan(&id, &taskQueueID, &agentID, &status, &stall, &ts); err != nil {
+			return nil, err
+		}
+		content := status
+		if stall.Valid && stall.String != "" {
+			content = status + " · " + stall.String
+		}
+		var tidPtr *string
+		if taskQueueID.Valid {
+			s := uuidToString(taskQueueID)
+			tidPtr = &s
+		}
+		rid := uuidToString(id)
+		out = append(out, dynamicsEvent{
+			ID:        "run-status-" + rid,
+			Type:      "status",
+			TaskID:    tidPtr,
+			RunID:     &rid,
+			Actor:     "agent",
+			ActorName: agentID,
+			Content:   content,
+			Ts:        timestampToString(ts),
+		})
+	}
+	return out, rows.Err()
+}
+
+// loadDynamicsChildFacets exposes decomposed child issues as filter chips so
+// the C6 sidebar is not empty when work lives on children rather than the
+// parent queue.
+func (h *Handler) loadDynamicsChildFacets(ctx context.Context, issueID pgtype.UUID) ([]dynamicsTaskFacet, error) {
+	rows, err := h.DB.Query(ctx, `
+		SELECT id, number, title, status, COALESCE(assignee_id::text, '')
+		FROM issue
+		WHERE parent_issue_id = $1
+		ORDER BY created_at ASC
+		LIMIT 80`,
+		issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []dynamicsTaskFacet{}
+	for rows.Next() {
+		var id pgtype.UUID
+		var number int32
+		var title, status, agent string
+		if err := rows.Scan(&id, &number, &title, &status, &agent); err != nil {
+			return nil, err
+		}
+		label := title
+		if number > 0 {
+			label = "#" + strconv.Itoa(int(number)) + " " + title
+		}
+		if len(label) > 80 {
+			label = label[:80]
+		}
+		out = append(out, dynamicsTaskFacet{
+			ID:     uuidToString(id),
+			Title:  label,
+			Agent:  agent,
+			Status: status,
+		})
+	}
+	return out, rows.Err()
 }
 
 // sortDynamicsEvents sorts events by timestamp descending (newest first).
@@ -628,6 +876,13 @@ func (h *Handler) loadDeliverablesProjection(ctx context.Context, issueID pgtype
 	)
 	err := h.DB.QueryRow(ctx, `
 		SELECT
+		    COALESCE(CASE
+		        WHEN i.parent_issue_id IS NOT NULL THEN NULL
+		        WHEN i.start_at IS NULL
+		             AND i.decomposition_confirmed_at IS NULL
+		             AND i.triggered_at IS NULL
+		             AND i.repo_resource_id IS NULL THEN NULL
+		        ELSE (
 		    CASE
 		        WHEN issue_effective_status(i.workspace_id, i.status) = 'done' THEN '已完成'
 		        WHEN issue_effective_status(i.workspace_id, i.status) = 'cancelled' THEN '已取消'
@@ -653,7 +908,9 @@ func (h *Handler) loadDeliverablesProjection(ctx context.Context, issueID pgtype
 		        WHEN COALESCE(prog.has_open_stage3, FALSE) THEN '执行中'
 		        WHEN COALESCE(prog.has_open_stage4, FALSE) THEN '验收中'
 		        ELSE '已完成'
-		    END AS requirement_status,
+		    END
+		        )
+		    END, '') AS requirement_status,
 		    COALESCE(prog.stage1_total, 0)::int, COALESCE(prog.stage1_done, 0)::int,
 		    COALESCE(prog.stage2_total, 0)::int, COALESCE(prog.stage2_done, 0)::int,
 		    COALESCE(prog.stage3_total, 0)::int, COALESCE(prog.stage3_done, 0)::int,
@@ -1305,9 +1562,9 @@ func (h *Handler) GetIssueProgress(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// ── Layer 2: tasks ──────────────────────────────────────────────────
-	// agent_task_queue has no title column; trigger_summary (migration 061)
-	// snapshots the originating comment/autopilot text, so it is the honest
-	// display title. Fall back to a stable "Task <id8>" label when absent.
+	// Prefer the owning issue title (需求/子任务中文名). trigger_summary is
+	// often empty or the opaque "Task <id8>" fallback — never show that when
+	// the issue already has a real title.
 	type taskRow struct {
 		id        pgtype.UUID
 		agentID   pgtype.UUID
@@ -1317,11 +1574,17 @@ func (h *Handler) GetIssueProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	taskRows := []taskRow{}
 	rows, err := h.DB.Query(ctx, `
-		SELECT id, agent_id, status, created_at,
-		       LEFT(COALESCE(NULLIF(trigger_summary, ''), 'Task ' || LEFT(id::text, 8)), 140) AS title
-		FROM agent_task_queue
-		WHERE issue_id = $1
-		ORDER BY created_at DESC
+		SELECT q.id, q.agent_id, q.status, q.created_at,
+		       LEFT(COALESCE(
+		         NULLIF(BTRIM(i.title), ''),
+		         NULLIF(BTRIM(q.trigger_summary), ''),
+		         BTRIM(i.title)
+		       ), 140) AS title
+		FROM agent_task_queue q
+		JOIN issue i ON i.id = q.issue_id
+		WHERE q.issue_id = $1
+		   OR q.issue_id IN (SELECT id FROM issue WHERE parent_issue_id = $1)
+		ORDER BY q.created_at DESC
 		LIMIT 100`,
 		issue.ID)
 	if err != nil {

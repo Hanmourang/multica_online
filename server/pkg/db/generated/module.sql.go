@@ -14,7 +14,7 @@ import (
 const createProjectModule = `-- name: CreateProjectModule :one
 INSERT INTO project_module (project_id, workspace_id, name, color)
 VALUES ($1, $2, $3, $4)
-RETURNING id, project_id, workspace_id, name, color, created_at
+RETURNING id, project_id, workspace_id, name, color, created_at, graph_node_id
 `
 
 type CreateProjectModuleParams struct {
@@ -39,6 +39,7 @@ func (q *Queries) CreateProjectModule(ctx context.Context, arg CreateProjectModu
 		&i.Name,
 		&i.Color,
 		&i.CreatedAt,
+		&i.GraphNodeID,
 	)
 	return i, err
 }
@@ -86,7 +87,13 @@ type GetIssueModuleInfoRow struct {
 func (q *Queries) GetIssueModuleInfo(ctx context.Context, id pgtype.UUID) (GetIssueModuleInfoRow, error) {
 	row := q.db.QueryRow(ctx, getIssueModuleInfo, id)
 	var i GetIssueModuleInfoRow
-	err := row.Scan(&i.ModuleID, &i.AvoidConflict, &i.RootRequirementID, &i.ModuleName, &i.RootRequirementTitle)
+	err := row.Scan(
+		&i.ModuleID,
+		&i.AvoidConflict,
+		&i.RootRequirementID,
+		&i.ModuleName,
+		&i.RootRequirementTitle,
+	)
 	return i, err
 }
 
@@ -121,7 +128,7 @@ func (q *Queries) GetIssuesModuleIDs(ctx context.Context, issueIds []pgtype.UUID
 }
 
 const getProjectModule = `-- name: GetProjectModule :one
-SELECT id, project_id, workspace_id, name, color, created_at FROM project_module WHERE id = $1
+SELECT id, project_id, workspace_id, name, color, created_at, graph_node_id FROM project_module WHERE id = $1
 `
 
 func (q *Queries) GetProjectModule(ctx context.Context, id pgtype.UUID) (ProjectModule, error) {
@@ -134,6 +141,7 @@ func (q *Queries) GetProjectModule(ctx context.Context, id pgtype.UUID) (Project
 		&i.Name,
 		&i.Color,
 		&i.CreatedAt,
+		&i.GraphNodeID,
 	)
 	return i, err
 }
@@ -229,7 +237,7 @@ func (q *Queries) ListIssueDependencies(ctx context.Context, issueID pgtype.UUID
 
 const listProjectModules = `-- name: ListProjectModules :many
 
-SELECT m.id, m.project_id, m.workspace_id, m.name, m.color, m.created_at, COUNT(i.id)::int AS task_count
+SELECT m.id, m.project_id, m.workspace_id, m.name, m.color, m.created_at, m.graph_node_id, COUNT(i.id)::int AS task_count
 FROM project_module m
 LEFT JOIN issue i ON i.module_id = m.id
 WHERE m.project_id = $1
@@ -244,6 +252,7 @@ type ListProjectModulesRow struct {
 	Name        string             `json:"name"`
 	Color       string             `json:"color"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	GraphNodeID pgtype.Text        `json:"graph_node_id"`
 	TaskCount   int32              `json:"task_count"`
 }
 
@@ -266,6 +275,7 @@ func (q *Queries) ListProjectModules(ctx context.Context, projectID pgtype.UUID)
 			&i.Name,
 			&i.Color,
 			&i.CreatedAt,
+			&i.GraphNodeID,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -279,7 +289,7 @@ func (q *Queries) ListProjectModules(ctx context.Context, projectID pgtype.UUID)
 }
 
 const updateProjectModule = `-- name: UpdateProjectModule :one
-UPDATE project_module SET name = $1, color = $2 WHERE id = $3 RETURNING id, project_id, workspace_id, name, color, created_at
+UPDATE project_module SET name = $1, color = $2 WHERE id = $3 RETURNING id, project_id, workspace_id, name, color, created_at, graph_node_id
 `
 
 type UpdateProjectModuleParams struct {
@@ -299,6 +309,7 @@ func (q *Queries) UpdateProjectModule(ctx context.Context, arg UpdateProjectModu
 		&i.Name,
 		&i.Color,
 		&i.CreatedAt,
+		&i.GraphNodeID,
 	)
 	return i, err
 }

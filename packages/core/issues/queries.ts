@@ -115,6 +115,8 @@ export const issueKeys = {
       projectId,
       assigneeTypes ?? null,
     ] as const,
+  /** Workspace-wide top-level requirements for the calendar / 需求详情 TAB. */
+  calendar: (wsId: string) => [...issueKeys.all(wsId), "calendar"] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
@@ -185,6 +187,12 @@ export const issueKeys = {
   /** 需求班底快照。 */
   issueRoles: (issueId: string) =>
     ["issue-roles", issueId] as const,
+  /** 项目角色执行标准。 */
+  projectRolePlaybooks: (projectId: string) =>
+    ["project-role-playbooks", projectId] as const,
+  /** 需求角色执行标准快照。 */
+  issueRolePlaybooks: (issueId: string) =>
+    ["issue-role-playbooks", issueId] as const,
   /** 原型版本历史（requirement-calendar §5.3）。 */
   prototypeVersions: (issueId: string) =>
     ["prototype-versions", issueId] as const,
@@ -207,6 +215,24 @@ export function issueRolesOptions(issueId: string | undefined) {
   return queryOptions({
     queryKey: issueKeys.issueRoles(issueId ?? ""),
     queryFn: () => api.listIssueRoleAssignments(issueId!),
+    enabled: !!issueId,
+  });
+}
+
+/** 项目角色执行标准。 */
+export function projectRolePlaybooksOptions(projectId: string | undefined) {
+  return queryOptions({
+    queryKey: issueKeys.projectRolePlaybooks(projectId ?? ""),
+    queryFn: () => api.listProjectRolePlaybooks(projectId!),
+    enabled: !!projectId,
+  });
+}
+
+/** 需求角色执行标准快照。 */
+export function issueRolePlaybooksOptions(issueId: string | undefined) {
+  return queryOptions({
+    queryKey: issueKeys.issueRolePlaybooks(issueId ?? ""),
+    queryFn: () => api.listIssueRolePlaybooks(issueId!),
     enabled: !!issueId,
   });
 }
@@ -296,9 +322,18 @@ export const PAGINATED_CATEGORIES: readonly IssueStatusCategory[] = ALL_STATUSES
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
   const out = [];
+  const seen = new Set<string>();
   for (const status of PAGINATED_CATEGORIES) {
     const bucket = data.byStatus[status];
-    if (bucket) out.push(...bucket.issues);
+    if (!bucket) continue;
+    // listIssues historically dropped status_category on the wire, so all 7
+    // category fetches returned the same first page. Calendar flattens those
+    // buckets — without this guard a single requirement renders 7 times.
+    for (const issue of bucket.issues) {
+      if (seen.has(issue.id)) continue;
+      seen.add(issue.id);
+      out.push(issue);
+    }
   }
   return out;
 }
@@ -306,7 +341,7 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
 async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const responses = await Promise.all(
     PAGINATED_CATEGORIES.map((category) =>
-      api.listIssues({ status_category: category, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
+      api.listIssues({ status_category: category, limit: ISSUE_PAGE_SIZE, offset: 0, kind: "task", ...sort, ...filter }),
     ),
   );
   const byStatus: ListIssuesCache["byStatus"] = {};
@@ -468,6 +503,40 @@ export function projectGanttIssuesOptions(
   return queryOptions({
     queryKey: issueKeys.projectGantt(wsId, projectId, assigneeTypes),
     queryFn: () => fetchProjectGanttIssues(projectId, assigneeTypes),
+  });
+}
+
+/**
+ * Workspace-wide top-level requirements. Walks `top_level_only=true` and
+ * `kind=requirement` pages (same 500/10_000 cap as Gantt) so the calendar
+ * is not silently truncated by the board's 50-per-category first page and
+ * standalone tasks never mix into the requirement surfaces. Does NOT send
+ * `scheduled=true` — unscheduled rows with a derived `requirement_status`
+ * still belong on the project 需求详情 list and the pending-confirm chip.
+ */
+async function fetchCalendarIssues() {
+  const issues = [];
+  let offset = 0;
+  while (offset < PROJECT_GANTT_MAX_ISSUES) {
+    const res = await api.listIssues({
+      top_level_only: true,
+      kind: "requirement",
+      limit: PROJECT_GANTT_PAGE_LIMIT,
+      offset,
+    });
+    issues.push(...res.issues);
+    if (res.issues.length < PROJECT_GANTT_PAGE_LIMIT) break;
+    if (issues.length >= res.total) break;
+    offset += PROJECT_GANTT_PAGE_LIMIT;
+  }
+  return issues;
+}
+
+export function calendarIssuesOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueKeys.calendar(wsId),
+    queryFn: fetchCalendarIssues,
+    placeholderData: keepPreviousData,
   });
 }
 

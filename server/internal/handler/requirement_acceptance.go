@@ -206,6 +206,9 @@ func (h *Handler) createAcceptanceRepairTask(ctx context.Context, tx pgx.Tx, qtx
 		rootID = req.ID
 	}
 	description := "## 验收打回（第 " + strconv.Itoa(int(round)) + " 轮）\n\n" + evidence
+	playbookRows, _ := qtx.ListIssueRolePlaybooks(ctx, req.ID)
+	repairPlaybook := service.ResolveRolePlaybook("developer", service.PlaybookMapFromIssueRows(playbookRows)["developer"])
+	description = service.PrependRolePlaybook(repairPlaybook, description)
 	// H-2：NextTopPosition 走 tx（queryRower 接口），AllocateIssueNumber/CreateIssue 走 qtx，
 	// 满足 AllocateIssueNumber 的显式事务契约（配额拒绝时计数器随 tx 回滚不泄漏，
 	// 并发配额检查在 tx 内串行化，中途失败不留脏状态）。镜像 requirement_decompose.go。
@@ -219,14 +222,14 @@ func (h *Handler) createAcceptanceRepairTask(ctx context.Context, tx pgx.Tx, qtx
 		return db.Issue{}, fmt.Errorf("allocate issue number: %w", err)
 	}
 	return qtx.CreateIssue(ctx, db.CreateIssueParams{
-		ID:                dbid.NewV7(),
-		WorkspaceID:       req.WorkspaceID,
-		Title:             "验收修复（第 " + strconv.Itoa(int(round)) + " 轮）：" + req.Title,
-		Description:       pgtype.Text{String: description, Valid: true},
-		Status:            "todo",
-		Priority:          req.Priority,
-		AssigneeType:      pgtype.Text{String: assigneeType, Valid: assigneeType != ""},
-		AssigneeID:        assigneeID,
+		ID:           dbid.NewV7(),
+		WorkspaceID:  req.WorkspaceID,
+		Title:        "验收修复（第 " + strconv.Itoa(int(round)) + " 轮）：" + req.Title,
+		Description:  pgtype.Text{String: description, Valid: true},
+		Status:       "todo",
+		Priority:     req.Priority,
+		AssigneeType: pgtype.Text{String: assigneeType, Valid: assigneeType != ""},
+		AssigneeID:   assigneeID,
 		// L-5：plan §WS4 写 CreatorType="system"，但 001_init 的 issue.creator_type CHECK
 		// 只允许 member/agent，"system" 会被拒；故取 member + 零 UUID 作为「非真人发起」的
 		// 既有妥协约定（与 postAcceptanceFailedComment 的 system 评论 author_id 零 UUID 同源）。

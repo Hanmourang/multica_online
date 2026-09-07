@@ -88,6 +88,7 @@ export interface IssueCacheChangeResult {
   prevFlatLists: [QueryKey, IssueFlatCache][];
   prevTableRows: [QueryKey, IssueTableRowCache][];
   prevDetail: Issue | undefined;
+  prevCalendar: Issue[] | undefined;
   prevInboxList: InboxItem[] | undefined;
   prevArchivedInboxList: InboxItem[] | undefined;
   /** Loaded list keys whose server result may have drifted (membership
@@ -530,6 +531,22 @@ export function applyIssueChange(
     if (!prevIssue) prevIssue = prevDetail;
   }
 
+  // Calendar is a flat requirement array, not a bucketed list — patch the
+  // loaded row so start_at / due_date edits move the block immediately.
+  let prevCalendar: Issue[] | undefined;
+  const calendar = qc.getQueryData<Issue[]>(issueKeys.calendar(wsId));
+  if (calendar) {
+    const found = calendar.find((item) => item.id === id);
+    if (found && acceptCurrent(found)) {
+      prevCalendar = calendar;
+      qc.setQueryData<Issue[]>(
+        issueKeys.calendar(wsId),
+        calendar.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+      );
+      if (!prevIssue) prevIssue = found;
+    }
+  }
+
   // Inbox rows carry issue status/priority snapshots used by presentation and
   // filtering. The issue is the real state, so both projections follow every
   // write immediately.
@@ -551,6 +568,7 @@ export function applyIssueChange(
     prevFlatLists,
     prevTableRows,
     prevDetail,
+    prevCalendar,
     prevInboxList,
     prevArchivedInboxList,
     staleKeys,
@@ -570,6 +588,7 @@ export function rollbackIssueChange(
     | "prevFlatLists"
     | "prevTableRows"
     | "prevDetail"
+    | "prevCalendar"
     | "prevInboxList"
     | "prevArchivedInboxList"
   >,
@@ -585,6 +604,9 @@ export function rollbackIssueChange(
   }
   if (result.prevDetail !== undefined) {
     qc.setQueryData(issueKeys.detail(wsId, id), result.prevDetail);
+  }
+  if (result.prevCalendar !== undefined) {
+    qc.setQueryData(issueKeys.calendar(wsId), result.prevCalendar);
   }
   if (result.prevInboxList !== undefined) {
     qc.setQueryData(inboxKeys.list(wsId), result.prevInboxList);
@@ -606,11 +628,14 @@ export function rollbackIssueChange(
 export function invalidateIssueDerivatives(
   qc: QueryClient,
   wsId: string,
-  opts: { statusOrProjectChanged: boolean },
+  opts: { statusOrProjectChanged: boolean; scheduleChanged?: boolean },
 ) {
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+  if (opts.scheduleChanged) {
+    qc.invalidateQueries({ queryKey: issueKeys.calendar(wsId) });
+  }
   if (opts.statusOrProjectChanged) {
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
   }

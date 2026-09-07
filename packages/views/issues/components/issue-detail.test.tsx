@@ -109,6 +109,11 @@ vi.mock("@multica/core/paths", async () => {
   };
 });
 
+const mockNav = vi.hoisted(() => ({
+  search: "",
+  replace: vi.fn(),
+}));
+
 // Mock navigation
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, href, ...props }: any) => (
@@ -118,7 +123,10 @@ vi.mock("../../navigation", () => ({
   ),
   useNavigation: () => ({
     push: vi.fn(),
+    replace: mockNav.replace,
     pathname: "/issues/issue-1",
+    searchParams: new URLSearchParams(mockNav.search),
+    hash: "",
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   }),
   useBackOrReplace: () => vi.fn(),
@@ -303,6 +311,19 @@ const mockApiObj = vi.hoisted(() => ({
   listTasksByIssue: vi.fn().mockResolvedValue([]),
   rerunIssue: vi.fn(),
   listTaskMessages: vi.fn().mockResolvedValue([]),
+  getIssueDynamics: vi.fn().mockResolvedValue({
+    issue: { id: "issue-1", title: "Implement authentication", status: "in_progress" },
+    days: [],
+    summary: {
+      task_total: 0,
+      task_dispatched: 0,
+      message_count: 0,
+      progress_event_count: 0,
+      artifact_count: 0,
+      artifact_archived_count: 0,
+    },
+    filters: { tasks: [], agents: [], types: [] },
+  }),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
   getChildIssueProgress: vi.fn().mockResolvedValue({ progress: [] }),
   getAgentTaskSnapshot: vi.fn().mockResolvedValue([]),
@@ -321,6 +342,7 @@ const mockApiObj = vi.hoisted(() => ({
   listAgents: vi.fn().mockResolvedValue([]),
   getProject: vi.fn(),
   listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+  listProjectResources: vi.fn().mockResolvedValue({ resources: [] }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -688,6 +710,7 @@ function hasHighlightedCommentBackground(root: ParentNode | null): boolean {
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNav.search = "";
     contentEditorMounts.count = 0;
     mockViewport.isMobile = false;
     // Default: issue loads successfully
@@ -789,7 +812,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.getIssue.mockReturnValue(new Promise(() => {}));
     const loadingRender = renderIssueDetail();
     const skeletonGutters = horizontalGutters(
-      loadingRender.container.querySelector(".max-w-4xl"),
+      loadingRender.container.querySelector("[data-testid='issue-detail-column']"),
     );
     loadingRender.unmount();
 
@@ -802,7 +825,7 @@ describe("IssueDetail (shared)", () => {
     // Non-empty guard: without it a renamed column class passes vacuously.
     expect(skeletonGutters.length).toBeGreaterThan(0);
     expect(skeletonGutters).toEqual(
-      horizontalGutters(container.querySelector(".max-w-4xl")),
+      horizontalGutters(container.querySelector("[data-testid='issue-detail-column']")),
     );
   });
 
@@ -1024,7 +1047,9 @@ describe("IssueDetail (shared)", () => {
     });
 
     // Core rows — always rendered regardless of whether the issue has a value.
-    expect(screen.getByText("Status")).toBeInTheDocument();
+    // "Status" also labels the A2 activity filter chip; pin the sidebar row.
+    expect(screen.getByText("Properties").closest("div")?.textContent).toContain("Status");
+    expect(screen.getAllByText("Status").length).toBeGreaterThan(0);
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     // "Project" appears twice (row label + picker stub), so disambiguate by id.
     expect(screen.getByTestId("project-picker")).toBeInTheDocument();
@@ -1199,36 +1224,64 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByRole("button", { name: /^Metadata\b/ })).not.toBeInTheDocument();
   });
 
-  // Details is creator + immutable timestamps, so it ranks below the
-  // execution log, which is what people actually open the sidebar for.
-  it("orders the Details section after the execution log", async () => {
-    mockApiObj.listTasksByIssue.mockResolvedValue([
-      {
-        id: "task-past",
-        agent_id: "agent-1",
-        runtime_id: "runtime-1",
-        issue_id: "issue-1",
-        status: "completed",
-        priority: 0,
-        dispatched_at: null,
-        started_at: "2026-06-08T08:00:00Z",
-        completed_at: "2026-06-08T08:05:00Z",
-        result: null,
-        error: null,
-        created_at: "2026-06-08T08:00:00Z",
-        trigger_summary: "Started from comment",
-      },
-    ]);
+  it("keeps Details in the sidebar after the requirement card, not an execution log", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Details")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("issue-tab-exec")).toBeInTheDocument();
+    expect(screen.queryByTestId("requirement-property-card")).toBeNull();
+    expect(screen.queryByTestId("execution-log-panel")).toBeNull();
+  });
+
+  it("switches the main column from activity to the execution log tab", async () => {
+    renderIssueDetail();
+
+    const execTab = await screen.findByTestId("issue-tab-exec");
+    expect(screen.getByTestId("activity-stream-filters")).toBeInTheDocument();
+    fireEvent.click(execTab);
+    expect(mockNav.replace).toHaveBeenCalledWith(
+      expect.stringMatching(/\/issues\/issue-1\?tab=exec/),
+    );
+  });
+
+  it("opens the execution panel from ?tab=exec and hides the composer", async () => {
+    mockNav.search = "tab=exec";
 
     renderIssueDetail();
 
-    const executionLog = await screen.findByText("Execution log");
-    const details = screen.getByText("Details");
+    expect(await screen.findByTestId("execution-log-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("activity-stream-filters")).toBeNull();
+    expect(screen.getByTestId("issue-tab-exec")).toHaveAttribute("aria-selected", "true");
+  });
 
-    // DOCUMENT_POSITION_FOLLOWING: Details comes after the execution log.
-    expect(
-      executionLog.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+  it("defaults activity filters to comments, status, and artifacts", async () => {
+    renderIssueDetail();
+
+    const filters = await screen.findByTestId("activity-stream-filters");
+    expect(filters.querySelector('[data-filter="comment"]')).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(filters.querySelector('[data-filter="status"]')).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(filters.querySelector('[data-filter="artifact"]')).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(filters.querySelector('[data-filter="system"]')).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("hides the workbench header action on ordinary issues", async () => {
+    renderIssueDetail();
+    await screen.findByText("Implement authentication");
+    expect(screen.queryByTestId("open-requirement-workbench")).toBeNull();
   });
 
   it("shows 'not found' message when issue does not exist", async () => {
@@ -2622,16 +2675,14 @@ describe("IssueDetail (shared)", () => {
       mockApiObj.listTaskMessages.mockResolvedValue([]);
     });
 
-    it("mounts the deliverables wall on the completion entry, merging trace and reply paths", async () => {
+    it("mounts the deliverables wall on the completion entry from written files only", async () => {
       mockApiObj.listTimeline.mockResolvedValue([agentReplyEntry, completedEntry]);
       mockApiObj.listTaskMessages.mockResolvedValue(writeMessages);
       renderIssueDetail();
-      // Trace-derived card.
       await screen.findByText("a.md");
       expect(screen.getByTestId("deliverables-section")).toBeInTheDocument();
       expect(mockApiObj.listTaskMessages).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222");
-      // Reply-declared card — proves the completion reply reached the wall.
-      expect(screen.getByText("b.md")).toBeInTheDocument();
+      expect(screen.queryByText("b.md")).toBeNull();
     });
 
     it("falls back to the issue's task list for historical completions without task_id", async () => {

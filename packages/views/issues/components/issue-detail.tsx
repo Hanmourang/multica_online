@@ -12,7 +12,7 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { AppLink, useBackOrReplace } from "../../navigation";
+import { AppLink, useBackOrReplace, useNavigation } from "../../navigation";
 import {
   Archive,
   Calendar,
@@ -94,11 +94,29 @@ import { ThreadMinimap } from "./thread-minimap";
 import { ThreadNavPanel, mentionsUser, type ThreadNavThread } from "./thread-nav-panel";
 import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
-import { ExecutionLogSection } from "./execution-log-section";
 import { IssueDependenciesSection } from "./issue-dependencies-section";
 import { ModuleBadge } from "./module-badge";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
+import { RequirementPropertyCard } from "./requirement-property-card";
+import { RequirementConfigEditor } from "./requirement-config-editor";
+import { ActivityStreamFilters } from "./activity-stream-filters";
+import { ExecutionLogPanel } from "./execution-log-panel";
+import { SystemProgressFeed } from "./system-progress-feed";
+import { useIssueExecutionTasks } from "./use-issue-execution-tasks";
+import {
+  classifyActivityAction,
+  DEFAULT_ACTIVITY_FILTERS,
+  failedRunCount,
+  isWithinTimeWindow,
+  latestFailedTask,
+  parseIssueDetailRunId,
+  parseIssueDetailTab,
+  type ActivityFilterKey,
+  type ActivityTimeWindow,
+  type IssueDetailTab,
+} from "./issue-detail-tab";
+import { isRequirementWorkbench } from "./requirement-flow-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
@@ -146,6 +164,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
 
 import { ProgressRing } from "./progress-ring";
+import { stageForRequirementStatus } from "../../calendar/calendar-helpers";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
@@ -545,6 +564,7 @@ function ActivityBlock({
   t,
   timeAgo,
   locale,
+  onOpenFailedRun,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
@@ -563,6 +583,7 @@ function ActivityBlock({
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
   locale: string;
+  onOpenFailedRun?: (taskId: string) => void;
 }) {
   if (!expanded) {
     const count = entries.length;
@@ -667,6 +688,23 @@ function ActivityBlock({
                     {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
                   </span>
                 )}
+              {(entry.action === "task_failed" || entry.action === "task_cancelled") &&
+                onOpenFailedRun &&
+                typeof (entry.details as { task_id?: string } | undefined)?.task_id ===
+                  "string" && (
+                  <button
+                    type="button"
+                    data-testid={`retry-open-exec-${entry.id}`}
+                    onClick={() =>
+                      onOpenFailedRun(
+                        (entry.details as { task_id: string }).task_id,
+                      )
+                    }
+                    className="shrink-0 text-micro text-primary hover:underline"
+                  >
+                    {t(($) => $.detail.retry_and_open_exec)}
+                  </button>
+                )}
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -696,6 +734,7 @@ function SubIssueRow({
   childProgress,
   rowProps,
   customProperties,
+  onViewRun,
 }: {
   child: Issue;
   /** The sub-issue's OWN children progress (it can itself be a parent). */
@@ -704,6 +743,8 @@ function SubIssueRow({
   rowProps: SubIssueRowProperties;
   /** Workspace custom properties the user opted into showing on rows. */
   customProperties: IssueProperty[];
+  /** A2：失败子任务跳到本页执行日志并定位对应 run。 */
+  onViewRun?: () => void;
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -873,6 +914,16 @@ function SubIssueRow({
               </span>
             }
           />
+        )}
+        {onViewRun && (
+          <button
+            type="button"
+            data-testid={`view-child-run-${child.id}`}
+            onClick={onViewRun}
+            className="shrink-0 text-micro text-primary hover:underline"
+          >
+            {t(($) => $.detail.view_this_run)}
+          </button>
         )}
         {rowProps.assignee && (
           <AssigneePicker
@@ -1098,7 +1149,10 @@ export function IssueDetailSkeleton({ leading }: { leading?: ReactNode } = {}) {
         <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
           {/* Gutters match the loaded column exactly (see its comment), so the
               skeleton doesn't reflow sideways when real content mounts. */}
-          <div className="mx-auto w-full max-w-4xl px-3 py-6 space-y-6 md:px-8 md:py-8">
+          <div
+            data-testid="issue-detail-column"
+            className="w-full px-3 py-6 space-y-6 md:px-8 md:py-8"
+          >
             <Skeleton className="h-8 w-3/4" />
             <div className="space-y-2">
               <Skeleton className="h-4 w-full" />
@@ -1149,7 +1203,58 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const id = issueId;
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
+  const navigation = useNavigation();
+  const searchParams = navigation.searchParams ?? new URLSearchParams();
+  const detailTab = parseIssueDetailTab(searchParams);
+  const preferredRunId = parseIssueDetailRunId(searchParams);
+  const [activityFilters, setActivityFilters] = useState<Set<ActivityFilterKey>>(
+    () => new Set(DEFAULT_ACTIVITY_FILTERS),
+  );
+  const [activityTimeWindow, setActivityTimeWindow] =
+    useState<ActivityTimeWindow>("all");
   const openModal = useModalStore((state) => state.open);
+
+  const setDetailTab = useCallback(
+    (tab: IssueDetailTab, runId?: string | null) => {
+      const params = new URLSearchParams(navigation.searchParams ?? "");
+      if (tab === "activity") {
+        params.delete("tab");
+        params.delete("run");
+      } else {
+        params.set("tab", "exec");
+        if (runId) params.set("run", runId);
+        else params.delete("run");
+      }
+      const query = params.toString();
+      navigation.replace(
+        `${paths.issueDetail(id)}${query ? `?${query}` : ""}${navigation.hash ?? ""}`,
+      );
+    },
+    [id, navigation, paths],
+  );
+  const retryAndOpenExec = useCallback(
+    async (taskId: string) => {
+      try {
+        await api.rerunIssue(id, taskId);
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t(($) => $.execution_log.retry_failed),
+        );
+      }
+      setDetailTab("exec", taskId);
+    },
+    [id, setDetailTab, t],
+  );
+  const toggleActivityFilter = useCallback((key: ActivityFilterKey) => {
+    setActivityFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();
@@ -1554,6 +1659,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [timelineView.groups, expandedResolved],
   );
 
+  const visibleItems = useMemo<TimelineItem[]>(() => {
+    const next: TimelineItem[] = [];
+    for (const item of items) {
+      if (item.kind === "comment" || item.kind === "resolved-bar") {
+        if (
+          activityFilters.has("comment") &&
+          isWithinTimeWindow(item.entry.created_at, activityTimeWindow)
+        ) {
+          next.push(item);
+        }
+        continue;
+      }
+      const entries = item.entries.filter((entry) => {
+        const kind = classifyActivityAction(entry.action);
+        return (
+          kind !== null &&
+          activityFilters.has(kind) &&
+          isWithinTimeWindow(entry.created_at, activityTimeWindow)
+        );
+      });
+      if (entries.length > 0) next.push({ ...item, entries });
+    }
+    return next;
+  }, [items, activityFilters, activityTimeWindow]);
+
   // Completion reply per task_completed entry: the latest top-level agent
   // comment before the completion, whose backtick paths the deliverables
   // wall merges with trace-derived files. Coalescing keeps the newest
@@ -1855,6 +1985,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     ...childIssuesOptions(wsId, id),
     enabled: !!issue,
   });
+  const childTaskSources = useMemo(
+    () => childIssues.map((child) => ({ id: child.id, title: child.title })),
+    [childIssues],
+  );
+  const { tasks: labeledExecTasks, agentTasks: execAgentTasks } =
+    useIssueExecutionTasks(id, childTaskSources);
+  const failedTaskByChildId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of labeledExecTasks) {
+      if (
+        item.sourceIssueId !== id &&
+        item.task.status === "failed" &&
+        !map.has(item.sourceIssueId)
+      ) {
+        map.set(item.sourceIssueId, item.task.id);
+      }
+    }
+    return map;
+  }, [labeledExecTasks, id]);
+  const execFailedCount = failedRunCount(execAgentTasks);
   // Whether this issue has sub-issues, as opposed to "we have not looked yet".
   // childIssuesOptions sets refetchOnMount: "always", so a cached snapshot is
   // re-fetched on every mount and isSuccess alone still describes the previous
@@ -2677,16 +2827,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>
       )}
 
-      {/* Execution log — active runs + collapsed past runs, each carrying its
-          own token spend, with the issue total on the section header.
-          Self-contained; owns its own collapse state and WS subscriptions.
-          Hides itself when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} identifier={issue.identifier} />
+      {/* A2 属性栏「需求」卡：仅需求型或其子任务显示。执行日志已迁入主栏 Tab。 */}
+      <RequirementPropertyCard issue={issue} childIssues={childIssues} />
+      {(isRequirementWorkbench(issue) || Boolean(issue.goal)) && (
+        <div>
+          <div className="mb-2 px-2 py-1 text-caption font-medium">
+            {t(($) => $.requirement_config.section)}
+          </div>
+          <div className="px-2">
+            <RequirementConfigEditor issue={issue} />
+          </div>
+        </div>
+      )}
 
-      {/* Details — creator and timestamps. Sits below the execution log
-          because it is the least-read block in the sidebar: the values
-          never change once the issue exists, while the log above it is
-          what people actually come here to check. */}
+      {/* Details — creator and timestamps. Sits below the requirement card
+          because it is the least-read block in the sidebar. */}
       <div>
         <button
           type="button"
@@ -2824,11 +2979,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           t={t}
           timeAgo={timeAgo}
           locale={locale}
+          onOpenFailedRun={(taskId) => void retryAndOpenExec(taskId)}
         />
         {completedEntry && completedTaskId && (
           <DeliverablesSection
             taskId={completedTaskId}
             replyText={completionReplyByEntryId.get(completedEntry.id) ?? null}
+            projectId={issue.project_id}
           />
         )}
       </>
@@ -2899,6 +3056,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
+            {isRequirementWorkbench(issue) && (
+              <AppLink
+                href={paths.calendarRequirement(
+                  issue.id,
+                  stageForRequirementStatus(issue.requirement_status),
+                  "issue",
+                )}
+                data-testid="open-requirement-workbench"
+                className="inline-flex h-8 items-center rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                {t(($) => $.detail.open_workbench)}
+              </AppLink>
+            )}
             {/* Thread navigator. Leftmost of the action buttons because it
                 navigates the document, while everything to its right acts on
                 the issue. Hidden on mobile with the rail: the panel would work
@@ -3006,13 +3176,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           data-tab-scroll-root={scrollContainerKey}
           className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
-        {/* Gutters: 32px is a comfortable reading margin on a desktop column
-            but eats 16% of a 393px phone, so below `md` they drop to 12px.
+        {/* Gutters: 32px on desktop / 12px below `md`. Width follows the
+            panel between the sidebars — do not re-introduce a max-width cap.
             `max-md:pb-chat-launcher` reserves the launcher's corner at the end
             of the scroll: below `md` the composer is not pinned (see
             `useStickyComposer`), so it lands here — right where the launcher
             floats — once the reader scrolls to the bottom. */}
-        <div className="mx-auto w-full max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8">
+        <div
+          data-testid="issue-detail-column"
+          className="w-full px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8"
+        >
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
@@ -3353,6 +3526,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                               childProgress={subIssueProgress?.get(child.id)}
                               rowProps={subIssueRowProps}
                               customProperties={subIssueCustomProps}
+                              onViewRun={
+                                failedTaskByChildId.get(child.id)
+                                  ? () =>
+                                      setDetailTab(
+                                        "exec",
+                                        failedTaskByChildId.get(child.id),
+                                      )
+                                  : undefined
+                              }
                             />
                           ))}
                         </Fragment>
@@ -3367,11 +3549,59 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
           <div className="my-8 border-t" />
 
-          {/* Activity / Comments */}
+          {/* A2/A3：主栏只保留「动态 | 执行日志」一套 Tab。 */}
           <div>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <h2 className="text-title-sm font-semibold">{t(($) => $.detail.activity_section)}</h2>
+              <div
+                role="tablist"
+                aria-label={t(($) => $.detail.activity_section)}
+                className="flex items-center gap-1"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={detailTab === "activity"}
+                  data-testid="issue-tab-activity"
+                  onClick={() => setDetailTab("activity")}
+                  className={cn(
+                    "h-9 border-b-2 px-3 text-title-sm",
+                    detailTab === "activity"
+                      ? "border-foreground font-semibold text-foreground"
+                      : "border-transparent font-medium text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t(($) => $.detail.activity_section)}
+                  {visibleItems.length > 0 && (
+                    <span className="ml-1 text-caption font-normal text-muted-foreground">
+                      {visibleItems.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={detailTab === "exec"}
+                  data-testid="issue-tab-exec"
+                  onClick={() =>
+                    setDetailTab(
+                      "exec",
+                      preferredRunId ?? latestFailedTask(execAgentTasks)?.id,
+                    )
+                  }
+                  className={cn(
+                    "h-9 border-b-2 px-3 text-title-sm",
+                    detailTab === "exec"
+                      ? "border-foreground font-semibold text-foreground"
+                      : "border-transparent font-medium text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t(($) => $.detail.tab_execution)}
+                  {execFailedCount > 0 && (
+                    <span className="ml-1 text-caption font-normal text-destructive">
+                      {t(($) => $.detail.tab_execution_failed, { count: execFailedCount })}
+                    </span>
+                  )}
+                </button>
               </div>
               <div className="flex items-center gap-2">
                 {/* A delegated subscription is one the user never opted into
@@ -3491,11 +3721,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             <LocalDirectoryHint projectId={issue?.project_id} />
 
-            {/* The "agent is working" live signal now lives in the header
-                (IssueAgentHeaderChip) so it stays in one fixed place and
-                doesn't compete with sticky banners in this content column.
-                The per-task timeline + past runs live in the right panel
-                via ExecutionLogSection. */}
+            {detailTab === "exec" ? (
+              <div className="mt-4">
+                <ExecutionLogPanel
+                  issueId={id}
+                  labeledTasks={labeledExecTasks}
+                  preferredRunId={preferredRunId}
+                  onSelectRun={(runId) => setDetailTab("exec", runId)}
+                />
+              </div>
+            ) : (
+              <>
+            <ActivityStreamFilters
+              selected={activityFilters}
+              onToggle={toggleActivityFilter}
+              timeWindow={activityTimeWindow}
+              onTimeWindow={setActivityTimeWindow}
+            />
+            <SystemProgressFeed
+              issueId={id}
+              enabled={activityFilters.has("system")}
+              timeWindow={activityTimeWindow}
+            />
 
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment
@@ -3541,7 +3788,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       key={`${wsId}:${id}`}
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
-                      data={items}
+                      data={visibleItems}
                       initialScrollTop={restoredScrollTop}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
@@ -3556,13 +3803,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 )
               ) : (
                 <div className="mt-4">
-                  {items.map((item, i) => (
+                  {visibleItems.map((item, i) => (
                     <Fragment key={`${item.kind}:${item.id}`}>
                       {renderItem(i, item)}
                     </Fragment>
                   ))}
                 </div>
               )
+            )}
+              </>
             )}
 
           </div>
@@ -3580,6 +3829,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               page background and is invisible), and pb-4 so the card floats
               off the viewport edge — with -mb-4 giving the padding back to
               the column's py-8 so the at-rest layout doesn't shift. */}
+          {detailTab === "activity" && (
           <div
             ref={composerRef}
             className={cn(
@@ -3600,6 +3850,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               onAccepted={scrollToTimelineBottom}
             />
           </div>
+          )}
         </div>
         </div>
 

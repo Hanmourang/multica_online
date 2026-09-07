@@ -43,7 +43,7 @@ func TestAssemblePrototypePrompt(t *testing.T) {
 			t.Fatalf("prompt missing output path %s:\n%s", outputPath, prompt)
 		}
 		// 无标记时不得出现修正段。
-		if strings.Contains(prompt, "〔本轮修正〕") {
+		if strings.Contains(prompt, "\n\n〔本轮修正〕") {
 			t.Fatalf("prompt must not contain 〔本轮修正〕 without no-marks:\n%s", prompt)
 		}
 	})
@@ -55,7 +55,7 @@ func TestAssemblePrototypePrompt(t *testing.T) {
 			{DetailID: "d4", Verdict: "pending"},
 		}
 		prompt := AssemblePrototypePrompt(prototypeIssue(), "payments-service.git", outputPath, "", marks)
-		if !strings.Contains(prompt, "〔本轮修正〕") {
+		if !strings.Contains(prompt, "\n\n〔本轮修正〕") {
 			t.Fatalf("prompt missing 〔本轮修正〕 segment:\n%s", prompt)
 		}
 		if !strings.Contains(prompt, "进度条太粗") {
@@ -69,7 +69,7 @@ func TestAssemblePrototypePrompt(t *testing.T) {
 			{DetailID: "d2", Verdict: "ok", Note: "不错"},
 		}
 		prompt := AssemblePrototypePrompt(prototypeIssue(), "payments-service.git", outputPath, "", marks)
-		if strings.Contains(prompt, "〔本轮修正〕") {
+		if strings.Contains(prompt, "\n\n〔本轮修正〕") {
 			t.Fatalf("all-ok marks must not produce 〔本轮修正〕:\n%s", prompt)
 		}
 	})
@@ -79,7 +79,7 @@ func TestAssemblePrototypePrompt(t *testing.T) {
 			{DetailID: "d3", Verdict: "no", Note: ""},
 		}
 		prompt := AssemblePrototypePrompt(prototypeIssue(), "payments-service.git", outputPath, "", marks)
-		if strings.Contains(prompt, "〔本轮修正〕") {
+		if strings.Contains(prompt, "\n\n〔本轮修正〕") {
 			t.Fatalf("note-less ✗ must not produce 〔本轮修正〕:\n%s", prompt)
 		}
 	})

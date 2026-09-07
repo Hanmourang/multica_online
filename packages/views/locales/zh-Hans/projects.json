@@ -169,6 +169,18 @@
     "search_placeholder": "搜索项目...",
     "clear_aria": "清除项目"
   },
+  "role_defaults": {
+    "section_header": "默认班底",
+    "hint": "新建需求时自动带入。可在需求工作台再覆盖。",
+    "save_failed": "默认班底保存失败"
+  },
+  "role_playbooks": {
+    "section_header": "角色执行标准",
+    "hint": "绑定项目后，各阶段 agent 按角色标准执行，不按个人习惯自由发挥。可按角色覆盖内置标准。",
+    "builtin": "内置",
+    "customized": "已覆盖",
+    "save_failed": "角色标准保存失败"
+  },
   "chip": {
     "fallback_label": "项目"
   },

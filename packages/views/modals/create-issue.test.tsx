@@ -31,6 +31,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 }
 
 const mockPush = vi.hoisted(() => vi.fn());
+const mockReplace = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
@@ -51,6 +52,20 @@ const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a plain server Attachment row.
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
+const mockReplaceIssueRoleAssignments = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ roles: [], total: 0 }),
+);
+const mockProjectRoleDefaults = vi.hoisted(() => ({
+  roles: [] as Array<{
+    id: string;
+    role: string;
+    assignee_type: string;
+    assignee_id: string;
+    enabled: boolean;
+    ordinal: number;
+  }>,
+  total: 0,
+}));
 
 const sourceContextPanelData = () => ({
   anchor_comment_id: "comment-source",
@@ -189,7 +204,12 @@ let mockUploadIdSeq = 0;
 // Mocked at the context module rather than the barrel so <AppLink> stays the
 // real component and its click contract is what the test exercises.
 vi.mock("../navigation/context", () => ({
-  useNavigation: () => ({ push: mockPush }),
+  useNavigation: () => ({
+    push: mockPush,
+    replace: mockReplace,
+    pathname: "/ws-test/calendar",
+    searchParams: new URLSearchParams(),
+  }),
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -197,6 +217,10 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
     settings: () => "/ws-test/settings",
+    calendarRequirement: (id: string, stage?: 1 | 2 | 3 | 4) =>
+      stage
+        ? `/ws-test/calendar?req=${id}&stage=${stage}`
+        : `/ws-test/calendar?req=${id}`,
   }),
 }));
 
@@ -218,18 +242,30 @@ vi.mock("@multica/core/issues/queries", () => ({
     queryFn: () => Promise.resolve([]),
   }),
   // Requirement-calendar role strip: the create panel preloads the project's
-  // role defaults to seed its local roster preview. This suite never picks a
-  // roster, so an empty roster keeps the strip inert (no roster PUT on
-  // create).
+  // role defaults to seed its local roster preview. Tests that create from
+  // the calendar seed `mockProjectRoleDefaults` so the submit gate can pass.
   projectRoleDefaultsOptions: (projectId: string | undefined) => ({
     queryKey: ["project-role-defaults", projectId],
-    queryFn: () => Promise.resolve({ roles: [], total: 0 }),
+    queryFn: () =>
+      Promise.resolve({
+        roles: mockProjectRoleDefaults.roles,
+        total: mockProjectRoleDefaults.total,
+      }),
+  }),
+  projectRolePlaybooksOptions: (projectId: string | undefined) => ({
+    queryKey: ["project-role-playbooks", projectId],
+    queryFn: () =>
+      Promise.resolve({
+        playbooks: {},
+        overrides: {},
+        builtins: {},
+      }),
   }),
 }));
 
 vi.mock("@multica/core/projects", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/projects")>()),
-  // git 库选择器的数据源：一个 github_repo + 一个 local_directory，验证只列前者。
+  // git 库选择器的数据源：线上 github_repo + 本地 local_directory 都要列出。
   projectResourcesOptions: (wsId: string, projectId: string) => ({
     queryKey: ["project-resources", wsId, projectId],
     queryFn: () =>
@@ -253,6 +289,11 @@ vi.mock("../issues/hooks/use-issue-trigger-preview", () => ({
 
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Agent" }),
+}));
+
+vi.mock("@multica/core/workspace/queries", () => ({
+  memberListOptions: () => ({ queryKey: ["members"], queryFn: () => Promise.resolve([]) }),
+  agentListOptions: () => ({ queryKey: ["agents"], queryFn: () => Promise.resolve([]) }),
 }));
 
 // CreateRunHint now renders an ActorAvatar for agent/squad assignees. This
@@ -353,7 +394,9 @@ vi.mock("@multica/core/api", async () => {
       // project-role-defaults stub above resolves to an empty roster, so the
       // create flow skips the call — the stub exists only to fail loudly (not
       // with a TypeError) if that ever changes.
-      replaceIssueRoleAssignments: vi.fn().mockResolvedValue({ roles: [], total: 0 }),
+      replaceIssueRoleAssignments: mockReplaceIssueRoleAssignments,
+      replaceIssueRolePlaybooks: vi.fn().mockResolvedValue({ playbooks: {}, overrides: {}, builtins: {} }),
+      listProjectModules: vi.fn().mockResolvedValue([]),
     },
     ApiError,
     parseWithFallback,
@@ -469,7 +512,19 @@ vi.mock("../issues/components", () => ({
   StatusPicker: () => <div data-testid="status-picker" />,
   PriorityPicker: () => <div data-testid="priority-picker" />,
   StagePicker: () => <div data-testid="stage-picker" />,
-  AssigneePicker: () => <div data-testid="assignee-picker" />,
+  AssigneePicker: ({ assigneeId, onUpdate }: {
+    assigneeId?: string | null;
+    onUpdate?: (u: { assignee_type?: string | null; assignee_id?: string | null }) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="assignee-picker"
+      data-assignee-id={assigneeId ?? "none"}
+      onClick={() => onUpdate?.({ assignee_type: "agent", assignee_id: "agent-1" })}
+    >
+      Assignee {assigneeId ?? "none"}
+    </button>
+  ),
   // Surface open/onOpenChange so tests can assert progressive-disclosure
   // behavior (mounted only when the user has opted in or has a value).
   StartDatePicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
@@ -510,6 +565,10 @@ vi.mock("../issues/components/pickers/custom-property-picker", () => ({
     </button>
   ),
   CustomPropertyValueDisplay: ({ value }: any) => <span>{String(value)}</span>,
+}));
+
+vi.mock("../issues/components/role-playbook-dialog", () => ({
+  RolePlaybookDialog: () => null,
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
@@ -651,6 +710,8 @@ function renderModal(element: React.ReactElement) {
 describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockProjectRoleDefaults.roles = [];
+    mockProjectRoleDefaults.total = 0;
     mockQuickCreateStore.keepOpen = false;
     mockCreateSettingsStore.manualCreateFields = DEFAULT_MANUAL_FIELDS;
     mockSetKeepOpen.mockImplementation((v: boolean) => {
@@ -764,6 +825,9 @@ describe("CreateIssueModal", () => {
         attachment_ids: undefined,
         parent_issue_id: undefined,
         project_id: undefined,
+        goal: undefined,
+        decompose_mode: "manual",
+        auto_trigger: false,
       });
     });
 
@@ -785,6 +849,234 @@ describe("CreateIssueModal", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
+  });
+
+  it("blocks calendar create until PM and developer have assignees", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.shared.projectId = "proj-1";
+
+    renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{ project_id: "proj-1", source: "calendar" }}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Requirement title"), {
+      target: { value: "Calendar requirement" },
+    });
+    await user.click(
+      screen.getByRole("button", { name: "Create and wait for confirm" }),
+    );
+
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Create and wait for confirm" }),
+    ).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("stays on the calendar page and writes ?req= after creating from calendar", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mockDraftStore.draft.shared.projectId = "proj-1";
+    mockProjectRoleDefaults.roles = [
+      {
+        id: "r-pm",
+        role: "pm",
+        assignee_type: "agent",
+        assignee_id: "aaaaaaaa-1111-2222-3333-444444444444",
+        enabled: true,
+        ordinal: 0,
+      },
+      {
+        id: "r-dev",
+        role: "developer",
+        assignee_type: "agent",
+        assignee_id: "bbbbbbbb-1111-2222-3333-444444444444",
+        enabled: true,
+        ordinal: 1,
+      },
+    ];
+    mockProjectRoleDefaults.total = 2;
+
+    renderModal(
+      <CreateIssueModal
+        onClose={onClose}
+        data={{ project_id: "proj-1", source: "calendar" }}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Requirement title"), {
+      target: { value: "Calendar requirement" },
+    });
+    await screen.findByTestId(
+      "role-remove-pm-aaaaaaaa-1111-2222-3333-444444444444",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Create and wait for confirm" }),
+    );
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalled();
+    });
+    expect(mockCreateIssue.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        title: "Calendar requirement",
+        project_id: "proj-1",
+        start_at: expect.any(String),
+      }),
+    );
+    expect(mockCreateIssue.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        due_date: expect.any(String),
+      }),
+    );
+    {
+      const payload = mockCreateIssue.mock.calls[0]?.[0] as {
+        start_at: string;
+        due_date: string;
+      };
+      const startLocal = new Date(payload.start_at);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const startDay = `${startLocal.getFullYear()}-${pad(startLocal.getMonth() + 1)}-${pad(startLocal.getDate())}`;
+      expect(payload.due_date).toBe(startDay);
+      const today = new Date();
+      const todayDay = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+      expect(payload.due_date).toBe(todayDay);
+    }
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith(
+        "/ws-test/calendar?req=issue-123&stage=2",
+      );
+    });
+    expect(onClose).toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockReplaceIssueRoleAssignments).toHaveBeenCalledWith(
+      "issue-123",
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "pm",
+          assignee_id: "aaaaaaaa-1111-2222-3333-444444444444",
+          enabled: true,
+        }),
+        expect.objectContaining({
+          role: "developer",
+          assignee_id: "bbbbbbbb-1111-2222-3333-444444444444",
+          enabled: true,
+        }),
+      ]),
+    );
+
+    const renderToast = mockToastCustom.mock.calls[0]?.[0];
+    expect(typeof renderToast).toBe("function");
+    render(renderToast("toast-1"));
+    expect(screen.queryByRole("button", { name: "View issue" })).toBeNull();
+    expect(screen.queryByTestId("create-kind-switch")).toBeNull();
+  });
+
+  it("defaults to the task template and swaps to the requirement template", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.shared.projectId = "proj-1";
+    mockProjectRoleDefaults.roles = [
+      {
+        id: "r-pm",
+        role: "pm",
+        assignee_type: "agent",
+        assignee_id: "aaaaaaaa-1111-2222-3333-444444444444",
+        enabled: true,
+        ordinal: 0,
+      },
+      {
+        id: "r-dev",
+        role: "developer",
+        assignee_type: "agent",
+        assignee_id: "bbbbbbbb-1111-2222-3333-444444444444",
+        enabled: true,
+        ordinal: 1,
+      },
+    ];
+    mockProjectRoleDefaults.total = 2;
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByTestId("create-kind-switch")).toBeInTheDocument();
+    expect(screen.getByTestId("create-task-template")).toBeInTheDocument();
+    expect(screen.getByTestId("create-issue-delivery-goal")).toBeInTheDocument();
+    expect(screen.queryByTestId("create-requirement-template")).toBeNull();
+    expect(screen.queryByText("Decompose Mode")).toBeNull();
+
+    await user.click(screen.getByRole("tab", { name: "Requirement" }));
+
+    expect(await screen.findByTestId("create-requirement-template")).toBeInTheDocument();
+    expect(screen.getByText("Decompose Mode")).toBeInTheDocument();
+    expect(screen.queryByTestId("create-task-template")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Switch to Agent/i })).toBeNull();
+  });
+
+  it("asks for a project before showing the requirement decompose form", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.click(screen.getByRole("tab", { name: "Requirement" }));
+
+    expect(screen.getByTestId("create-requirement-need-project")).toBeInTheDocument();
+    expect(screen.queryByTestId("create-requirement-template")).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("Requirement title"), {
+      target: { value: "Need a project" },
+    });
+    expect(
+      screen.getByRole("button", { name: "Create and wait for confirm" }),
+    ).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("task create sends delivery goal and skips start_at / decompose confirm", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Ship login" },
+    });
+    fireEvent.change(screen.getByTestId("create-issue-delivery-goal"), {
+      target: { value: "登录页可上线" },
+    });
+    await user.click(screen.getByTestId("assignee-picker"));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Ship login",
+          goal: "登录页可上线",
+          assignee_type: "agent",
+          assignee_id: "agent-1",
+          decompose_mode: "manual",
+          auto_trigger: false,
+        }),
+      );
+    });
+    expect(mockCreateIssue.mock.calls[0]?.[0]).not.toHaveProperty("start_at");
+  });
+
+  it("hides the kind switcher for calendar and sub-issue entry points", () => {
+    const calendar = renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{ project_id: "proj-1", source: "calendar" }}
+      />,
+    );
+    expect(screen.queryByTestId("create-kind-switch")).toBeNull();
+    expect(screen.getByTestId("create-requirement-template")).toBeInTheDocument();
+    calendar.unmount();
+
+    renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{ parent_issue_id: "parent-uuid-1" }}
+      />,
+    );
+    expect(screen.queryByTestId("create-kind-switch")).toBeNull();
+    expect(screen.queryByTestId("create-task-template")).toBeNull();
+    expect(screen.queryByTestId("create-requirement-template")).toBeNull();
   });
 
   it("forwards selected labels in the create payload so they attach in the same transaction", async () => {
@@ -876,6 +1168,9 @@ describe("CreateIssueModal", () => {
         attachment_ids: undefined,
         parent_issue_id: undefined,
         project_id: undefined,
+        goal: undefined,
+        decompose_mode: "manual",
+        auto_trigger: false,
       });
     });
 
@@ -1268,29 +1563,53 @@ describe("CreateIssueModal", () => {
     expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "proj-1");
   });
 
-  it("顶层需求选项目后渲染 git 库选择器（仅 github_repo），创建带 repo_resource_id", async () => {
+  it("顶层需求选项目后渲染 git 库选择器（线上 + 本地），创建带 repo_resource_id", async () => {
     const user = userEvent.setup();
     mockDraftStore.draft.shared.projectId = "proj-1";
+    mockProjectRoleDefaults.roles = [
+      {
+        id: "r-pm",
+        role: "pm",
+        assignee_type: "agent",
+        assignee_id: "aaaaaaaa-1111-2222-3333-444444444444",
+        enabled: true,
+        ordinal: 0,
+      },
+      {
+        id: "r-dev",
+        role: "developer",
+        assignee_type: "agent",
+        assignee_id: "bbbbbbbb-1111-2222-3333-444444444444",
+        enabled: true,
+        ordinal: 1,
+      },
+    ];
+    mockProjectRoleDefaults.total = 2;
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.click(screen.getByRole("tab", { name: "Requirement" }));
 
-    // 选择器出现，只列 github_repo（multica/app），不列 local_directory（local-dir）。
     const repo = (await screen.findByTestId("create-issue-repo")) as HTMLSelectElement;
     await waitFor(() => expect(repo.textContent).toContain("multica/app"));
-    expect(repo.textContent).not.toContain("local-dir");
+    expect(repo.textContent).toContain("local-dir");
+    const groups = [...repo.querySelectorAll("optgroup")].map((g) => g.label);
+    expect(groups).toEqual(expect.arrayContaining(["Online", "Local"]));
 
-    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+    fireEvent.change(screen.getByPlaceholderText("Requirement title"), {
       target: { value: "Refactor auth" },
     });
-    fireEvent.change(repo, { target: { value: "res-1" } });
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    fireEvent.change(repo, { target: { value: "res-2" } });
+    await screen.findByTestId(
+      "role-remove-pm-aaaaaaaa-1111-2222-3333-444444444444",
+    );
+    await user.click(screen.getByRole("button", { name: "Create and wait for confirm" }));
 
     await waitFor(() => {
       expect(mockCreateIssue).toHaveBeenCalledWith(
         expect.objectContaining({
           title: "Refactor auth",
           project_id: "proj-1",
-          repo_resource_id: "res-1",
+          repo_resource_id: "res-2",
         }),
       );
     });

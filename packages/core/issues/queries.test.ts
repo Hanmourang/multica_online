@@ -18,8 +18,10 @@ import {
   childIssuesOptions,
   issueIdentifierOptions,
   issueKeys,
+  flattenIssueBuckets,
   issueTableRowPageOptions,
   projectGanttIssuesOptions,
+  calendarIssuesOptions,
   sourceContextPreviewOptions,
 } from "./queries";
 
@@ -432,6 +434,77 @@ describe("projectGanttIssuesOptions", () => {
   });
 });
 
+describe("calendarIssuesOptions", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("keys the query under issueKeys.calendar so list invalidators refresh it", () => {
+    expect(calendarIssuesOptions(WS_ID).queryKey).toEqual(
+      issueKeys.calendar(WS_ID),
+    );
+    expect(issueKeys.calendar(WS_ID)).toEqual(["issues", WS_ID, "calendar"]);
+  });
+
+  it("fetches top-level issues without scheduled=true and without status buckets", async () => {
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockResolvedValue({
+        issues: [makeIssue(1), makeIssue(2)],
+        total: 2,
+      });
+    installFakeApi(listIssues);
+
+    const data = await qc.fetchQuery(calendarIssuesOptions(WS_ID));
+
+    expect(listIssues).toHaveBeenCalledTimes(1);
+    expect(listIssues).toHaveBeenCalledWith({
+      top_level_only: true,
+      kind: "requirement",
+      limit: PROJECT_GANTT_PAGE_LIMIT,
+      offset: 0,
+    });
+    expect(listIssues.mock.calls[0]![0]).not.toHaveProperty("scheduled");
+    expect(listIssues.mock.calls[0]![0]).not.toHaveProperty("status_category");
+    expect(data).toHaveLength(2);
+  });
+
+  it("walks pages until total is satisfied so the calendar is not truncated at 50", async () => {
+    const total = PROJECT_GANTT_PAGE_LIMIT + 7;
+    const firstPage = Array.from({ length: PROJECT_GANTT_PAGE_LIMIT }, (_, i) =>
+      makeIssue(i),
+    );
+    const secondPage = Array.from({ length: 7 }, (_, i) =>
+      makeIssue(PROJECT_GANTT_PAGE_LIMIT + i),
+    );
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        if (!params) throw new Error("expected params");
+        const offset = params.offset ?? 0;
+        if (offset === 0) return { issues: firstPage, total };
+        if (offset === PROJECT_GANTT_PAGE_LIMIT)
+          return { issues: secondPage, total };
+        throw new Error(`unexpected offset ${offset}`);
+      });
+    installFakeApi(listIssues);
+
+    const data = await qc.fetchQuery(calendarIssuesOptions(WS_ID));
+
+    expect(listIssues).toHaveBeenCalledTimes(2);
+    expect(data).toHaveLength(total);
+  });
+});
+
 describe("childrenByParentsOptions chunking", () => {
   let qc: QueryClient;
 
@@ -573,5 +646,21 @@ describe("issueIdentifierOptions", () => {
       "identifier",
       "MUL-7",
     ]);
+  });
+});
+
+describe("flattenIssueBuckets", () => {
+  it("dedupes the same issue copied into every status category bucket", () => {
+    const issue = makeIssue(26, { identifier: "SIRI-26" });
+    const buckets = {
+      backlog: { issues: [issue], total: 1 },
+      todo: { issues: [issue], total: 1 },
+      in_progress: { issues: [issue], total: 1 },
+      in_review: { issues: [issue], total: 1 },
+      done: { issues: [issue], total: 1 },
+      blocked: { issues: [issue], total: 1 },
+      cancelled: { issues: [issue], total: 1 },
+    };
+    expect(flattenIssueBuckets({ byStatus: buckets })).toEqual([issue]);
   });
 });

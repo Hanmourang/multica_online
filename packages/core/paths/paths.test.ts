@@ -8,6 +8,26 @@ describe("paths.workspace(slug)", () => {
     expect(ws.usage()).toBe("/acme/usage");
     expect(ws.issues()).toBe("/acme/issues");
     expect(ws.issueDetail("abc-123")).toBe("/acme/issues/abc-123");
+    expect(ws.issueExecLog("abc-123")).toBe("/acme/issues/abc-123?tab=exec");
+    expect(ws.issueExecLog("abc-123", "run-9")).toBe(
+      "/acme/issues/abc-123?tab=exec&run=run-9",
+    );
+    expect(ws.calendarRequirement("req-1")).toBe("/acme/calendar?req=req-1");
+    expect(ws.calendarRequirement("req-1", 2)).toBe(
+      "/acme/calendar?req=req-1&stage=2",
+    );
+    expect(ws.calendarRequirement("req-1", 4, "issue")).toBe(
+      "/acme/calendar?req=req-1&stage=4&from=issue",
+    );
+    expect(ws.projectRequirement("p1", "req-1")).toBe(
+      "/acme/projects/p1?view=requirements&req=req-1",
+    );
+    expect(ws.projectRequirement("p1", "req-1", "progress")).toBe(
+      "/acme/projects/p1?view=requirements&req=req-1&drill=progress",
+    );
+    expect(ws.projectView("p1", "deliverables")).toBe(
+      "/acme/projects/p1?view=deliverables",
+    );
     expect(ws.projects()).toBe("/acme/projects");
     expect(ws.projectDetail("p1")).toBe("/acme/projects/p1");
     expect(ws.autopilots()).toBe("/acme/autopilots");

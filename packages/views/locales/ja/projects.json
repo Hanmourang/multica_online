@@ -169,6 +169,18 @@
     "search_placeholder": "プロジェクトを検索...",
     "clear_aria": "プロジェクトをクリア"
   },
+  "role_defaults": {
+    "section_header": "デフォルト班",
+    "hint": "新規要件に自動でコピーされます。ワークベンチで上書きできます。",
+    "save_failed": "デフォルト班の保存に失敗しました"
+  },
+  "role_playbooks": {
+    "section_header": "役割の実行基準",
+    "hint": "プロジェクトに紐づいた要件では、各段階のエージェントが個人の習慣ではなく役割基準に従います。役割ごとに内蔵基準を上書きできます。",
+    "builtin": "内蔵",
+    "customized": "上書き済み",
+    "save_failed": "役割基準の保存に失敗しました"
+  },
   "chip": {
     "fallback_label": "プロジェクト"
   },

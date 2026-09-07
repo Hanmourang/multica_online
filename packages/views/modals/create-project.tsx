@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, GitBranch, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
+import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, GitBranch, LayoutTemplate, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
  * GitHub mark — lucide-react v1 dropped brand icons, so we inline the
@@ -23,7 +23,11 @@ function GithubIcon({ className }: { className?: string }) {
 }
 import { useQuery } from "@tanstack/react-query";
 import { useCreateProject } from "@multica/core/projects/mutations";
-import { useProjectDraftStore } from "@multica/core/projects";
+import {
+  DEFAULT_CREATE_PROJECT_TEMPLATE,
+  PROJECT_TEMPLATES,
+  useProjectDraftStore,
+} from "@multica/core/projects";
 import {
   PROJECT_STATUS_CONFIG,
   PROJECT_STATUS_ORDER,
@@ -33,7 +37,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { ProjectStatus, ProjectPriority, ProjectTemplate } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -155,6 +159,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
   const [startDate, setStartDate] = useState<string>(draft.startDate ?? "");
   const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
+  const [template, setTemplate] = useState<ProjectTemplate>(
+    draft.template ?? DEFAULT_CREATE_PROJECT_TEMPLATE,
+  );
   // Dates are collapsed into the ⋯ overflow by default (progressive
   // disclosure, mirroring create-issue); these flip a pill inline + open.
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
@@ -303,6 +310,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const updateIcon = (v: string | undefined) => { setIcon(v); setDraft({ icon: v }); };
   const updateStartDate = (v: string) => { setStartDate(v); setDraft({ startDate: v || undefined }); };
   const updateDueDate = (v: string) => { setDueDate(v); setDraft({ dueDate: v || undefined }); };
+  const updateTemplate = (v: ProjectTemplate) => { setTemplate(v); setDraft({ template: v }); };
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
@@ -360,6 +368,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_id: leadId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
+        template,
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -533,6 +542,47 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 <DropdownMenuItem key={pr} onClick={() => updatePriority(pr)}>
                   <PriorityIcon priority={pr} />
                   <span>{projectPriorityLabels[pr]}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <PillButton aria-label={t(($) => $.create_project.template_aria)}>
+                  <LayoutTemplate className="size-3.5" />
+                  <span>
+                    {template === "general"
+                      ? t(($) => $.create_project.template_general)
+                      : template === "data"
+                        ? t(($) => $.create_project.template_data)
+                        : t(($) => $.create_project.template_rd)}
+                  </span>
+                </PillButton>
+              }
+            />
+            <DropdownMenuContent align="start" className="w-72">
+              {PROJECT_TEMPLATES.map((value) => (
+                <DropdownMenuItem
+                  key={value}
+                  onClick={() => updateTemplate(value)}
+                  className="flex-col items-start gap-0.5 py-2"
+                >
+                  <span className="font-medium">
+                    {value === "general"
+                      ? t(($) => $.create_project.template_general)
+                      : value === "data"
+                        ? t(($) => $.create_project.template_data)
+                        : t(($) => $.create_project.template_rd)}
+                  </span>
+                  <span className="text-caption text-muted-foreground whitespace-normal">
+                    {value === "general"
+                      ? t(($) => $.create_project.template_general_desc)
+                      : value === "data"
+                        ? t(($) => $.create_project.template_data_desc)
+                        : t(($) => $.create_project.template_rd_desc)}
+                  </span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>

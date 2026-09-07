@@ -488,7 +488,23 @@ listener_belongs_to_component() {
   [ -n "$launcher" ] && [ -n "$listener" ] || return 1
   recorded="$(cat "$(listener_pid_file "$component")" 2>/dev/null || true)"
   [ -n "$recorded" ] && [ "$listener" = "$recorded" ] && return 0
-  [ "$(process_group_id "$listener")" = "$launcher" ]
+  [ "$(process_group_id "$listener")" = "$launcher" ] && return 0
+  # turbo 会为任务子进程新建进程组（setpgid），pgid 判定对
+  # make → pnpm → turbo → next 链天然失败；沿 ppid 祖先链找回 launcher。
+  pid_has_ancestor "$listener" "$launcher"
+}
+
+# pid_has_ancestor PID TARGET：TARGET 是否出现在 PID 的 ppid 祖先链上。
+# 安全性：外部进程不可能把本环境记录的 launcher pid 变成自己的祖先，
+# 因此该判定不会把他人进程误归给本环境（与 pgid 判定等价的所有权语义）。
+pid_has_ancestor() {
+  local pid=$1 target=$2 depth=0
+  while [ -n "$pid" ] && [ "$pid" != "1" ] && [ "$depth" -lt 16 ]; do
+    [ "$pid" = "$target" ] && return 0
+    pid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')"
+    depth=$((depth + 1))
+  done
+  return 1
 }
 
 health_belongs_to_api() {
@@ -840,7 +856,8 @@ stop_component() {
     listener="$(port_listener_pid "$port")"
     if [ -n "$listener" ]; then
       if { [ -n "$recorded_listener" ] && [ "$listener" = "$recorded_listener" ]; } \
-        || { [ -n "$launcher" ] && [ "$(process_group_id "$listener")" = "$launcher" ]; }; then
+        || { [ -n "$launcher" ] && [ "$(process_group_id "$listener")" = "$launcher" ]; } \
+        || { [ -n "$launcher" ] && pid_has_ancestor "$listener" "$launcher"; }; then
         kill -TERM "$listener" 2>/dev/null || true
         sleep 1
         if kill -0 "$listener" 2>/dev/null; then

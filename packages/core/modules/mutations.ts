@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
+import { graphKeys } from "../graph/queries";
 import { issueKeys } from "../issues/queries";
 import { dependencyKeys, moduleKeys } from "./queries";
 
@@ -32,14 +33,18 @@ export function useUpdateProjectModule(projectId: string) {
     mutationFn: ({
       moduleId,
       ...data
-    }: { moduleId: string; name?: string; color?: string }) =>
-      api.updateProjectModule(projectId, moduleId, data),
+    }: {
+      moduleId: string;
+      name?: string;
+      color?: string;
+      /** Empty string unbinds the Community node (server stores NULL). */
+      graph_node_id?: string | null;
+    }) => api.updateProjectModule(projectId, moduleId, data),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: moduleKeys.byProject(wsId, projectId) });
-      // Cards render the module name/color resolved from this list, so the
-      // list refetch is enough for the palette; but a deleted/renamed module
-      // also changes nothing on the issue rows themselves — no issue
-      // invalidation needed here.
+      // Bind / unbind changes the f10 module-bridge list (graphKeys.modules
+      // nests under graphKeys.project).
+      qc.invalidateQueries({ queryKey: graphKeys.project(wsId, projectId) });
     },
   });
 }

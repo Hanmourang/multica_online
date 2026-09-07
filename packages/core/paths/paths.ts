@@ -30,6 +30,35 @@ function workspaceScoped(slug: string) {
     issues: () => `${ws}/issues`,
     calendar: () => `${ws}/calendar`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    /** A3 深链：任务详情「执行日志」Tab，可选定位到某次 run。 */
+    issueExecLog: (id: string, runId?: string) => {
+      const q = new URLSearchParams({ tab: "exec" });
+      if (runId) q.set("run", runId);
+      return `${ws}/issues/${encode(id)}?${q}`;
+    },
+    /**
+     * B4 需求工作台：日历页打开对应需求，可选定位四阶段。
+     * `from` 标记从需求详情 / 项目页推进来的，关闭时回到来源而不是空日历。
+     */
+    calendarRequirement: (
+      id: string,
+      stage?: 1 | 2 | 3 | 4,
+      from?: "issue" | "project",
+    ) => {
+      const q = new URLSearchParams({ req: id });
+      if (stage) q.set("stage", String(stage));
+      if (from) q.set("from", from);
+      return `${ws}/calendar?${q}`;
+    },
+    /** C6 项目侧需求详情，可选定位动态 / 进度 / 交付 TAB。 */
+    projectRequirement: (projectId: string, reqId: string, drill?: string) => {
+      const q = new URLSearchParams({ view: "requirements", req: reqId });
+      if (drill) q.set("drill", drill);
+      return `${ws}/projects/${encode(projectId)}?${q}`;
+    },
+    /** 项目详情指定 TAB（C2 档案 / C7 任务 / C8 验收 / C9 交付物 / C10 申报）。 */
+    projectView: (projectId: string, view: string) =>
+      `${ws}/projects/${encode(projectId)}?view=${encode(view)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,

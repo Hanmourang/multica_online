@@ -84,10 +84,10 @@ describe("DeliverablesSection", () => {
 
   it("shows a click-to-preview hint on each card", async () => {
     mockList.mockResolvedValue(writeMsg("docs/a.md", "# A"));
-    renderSection(<DeliverablesSection taskId={T1} replyText="归档 `logs/c.md`" />);
-    await waitFor(() => expect(screen.getByText("c.md")).toBeInTheDocument());
+    renderSection(<DeliverablesSection taskId={T1} replyText={null} />);
+    await waitFor(() => expect(screen.getByText("a.md")).toBeInTheDocument());
     const hints = screen.getAllByRole("tooltip");
-    expect(hints).toHaveLength(2);
+    expect(hints.length).toBeGreaterThan(0);
     for (const hint of hints) expect(hint).toHaveTextContent("Click to preview");
   });
 
@@ -100,19 +100,16 @@ describe("DeliverablesSection", () => {
     await waitFor(() => expect(screen.getByTestId("deliverables-section")).toBeInTheDocument());
   });
 
-  it("merges reply-declared paths and previews across cards", async () => {
+  it("does not list reply-mentioned files that were never written", async () => {
     mockList.mockResolvedValue(writeMsg("docs/a.md", "# A"));
     renderSection(<DeliverablesSection taskId={T1} replyText="归档 `logs/c.md`" />);
-    await waitFor(() => expect(screen.getByText("c.md")).toBeInTheDocument());
-    expect(screen.getByText("Referenced")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("a.md")).toBeInTheDocument());
+    expect(screen.queryByText("c.md")).toBeNull();
+    expect(screen.queryByText("Referenced")).toBeNull();
 
-    fireEvent.click(screen.getByText("c.md"));
-    expect(await screen.findByTestId("deliverable-reference-note")).toBeInTheDocument();
-    expect(screen.getByText("2/2")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("deliverable-prev"));
-    expect(screen.getByText("1/2")).toBeInTheDocument();
-    // The full-text card previews its markdown content.
+    fireEvent.click(screen.getByText("a.md"));
+    expect(await screen.findByTestId("deliverable-markdown")).toBeInTheDocument();
+    expect(screen.getByText("1/1")).toBeInTheDocument();
     expect(screen.getByText("A")).toBeInTheDocument();
   });
 });

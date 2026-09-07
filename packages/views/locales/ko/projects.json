@@ -169,6 +169,18 @@
     "search_placeholder": "프로젝트 검색...",
     "clear_aria": "프로젝트 지우기"
   },
+  "role_defaults": {
+    "section_header": "기본 로스터",
+    "hint": "새 요구에 자동으로 복사됩니다. 워크벤치에서 덮어쓸 수 있습니다.",
+    "save_failed": "기본 로스터 저장에 실패했습니다"
+  },
+  "role_playbooks": {
+    "section_header": "역할 실행 기준",
+    "hint": "프로젝트에 묶인 요구사항은 각 단계 에이전트가 개인 습관이 아니라 역할 기준을 따릅니다. 역할별로 내장 기준을 덮어쓸 수 있습니다.",
+    "builtin": "내장",
+    "customized": "덮어씀",
+    "save_failed": "역할 기준 저장에 실패했습니다"
+  },
   "chip": {
     "fallback_label": "프로젝트"
   },

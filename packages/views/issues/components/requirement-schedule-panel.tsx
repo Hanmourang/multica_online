@@ -10,7 +10,10 @@
 import { useState } from "react";
 import type { Issue, TriggerRequirementResponse } from "@multica/core/types";
 import { toast } from "sonner";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useT } from "../../i18n";
+import { AppLink } from "../../navigation";
+import { findModuleHolder } from "../../calendar/calendar-helpers";
 
 /** Minute-granularity UTC timestamp（与 decompose-panel / calendar 同一约定）。 */
 function formatMinuteUTC(iso: string | null | undefined): string | null {
@@ -25,34 +28,89 @@ interface RequirementSchedulePanelProps {
   issue: Issue;
   /** 挂载点已查询的子任务列表；面板只取 stage3 展示执行进度。 */
   childIssues: Issue[];
+  /** 同工作区顶层需求，用于互斥窗口 / held-by（与色块同一函数）。 */
+  peerIssues?: Issue[];
   /** Calls POST /issues/{id}/trigger. Injected so tests can capture the call. */
   triggerRequirement: (issueId: string) => Promise<TriggerRequirementResponse>;
+}
+
+function specPresent(child: Issue): boolean {
+  const spec = child.acceptance_spec;
+  if (!spec) return false;
+  if (typeof spec === "string") return spec.trim().length > 2 && spec.trim() !== "{}";
+  if (typeof spec === "object") return Object.keys(spec as object).length > 0;
+  return false;
+}
+
+function hasBlockedByCycle(children: Issue[]): boolean {
+  const ids = new Set(children.map((c) => c.id));
+  const edges = new Map<string, string[]>();
+  for (const child of children) {
+    edges.set(
+      child.id,
+      (child.blocked_by ?? []).filter((id) => ids.has(id)),
+    );
+  }
+  const seen = new Set<string>();
+  const stack = new Set<string>();
+  const visit = (id: string): boolean => {
+    if (stack.has(id)) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    stack.add(id);
+    for (const next of edges.get(id) ?? []) {
+      if (visit(next)) return true;
+    }
+    stack.delete(id);
+    return false;
+  };
+  return [...ids].some(visit);
 }
 
 export function RequirementSchedulePanel({
   issue,
   childIssues,
+  peerIssues = [],
   triggerRequirement,
 }: RequirementSchedulePanelProps) {
   const { t } = useT("issues");
+  const paths = useWorkspacePaths();
   const [triggering, setTriggering] = useState(false);
+  const [failReason, setFailReason] = useState<string | null>(null);
   const triggered = issue.triggered_at != null;
   const waitingLock = issue.requirement_status === "等待模块释放";
   const stage3 = childIssues.filter((c) => c.stage === 3);
+  const holder = findModuleHolder(peerIssues, issue);
+  const checks = {
+    confirmed: issue.decomposition_confirmed_at != null,
+    acyclic: !hasBlockedByCycle(childIssues),
+    acceptance: stage3.some(specPresent),
+    mutex: !holder,
+  };
 
   const onTrigger = async () => {
     setTriggering(true);
     try {
       await triggerRequirement(issue.id);
+      setFailReason(null);
       toast.success(t(($) => $.schedule_panel.trigger_ok));
     } catch (e) {
       // 服务端 409 带 reason（decomposition_not_confirmed / dependency_cycle /
       // acceptance_spec_missing / module_window_busy）；this.fetch 抛 ApiError(message=reason)。
-      toast.error(e instanceof Error ? e.message : t(($) => $.schedule_panel.trigger_failed));
+      const message = e instanceof Error ? e.message : t(($) => $.schedule_panel.trigger_failed);
+      setFailReason(message);
+      toast.error(message);
     } finally {
       setTriggering(false);
     }
   };
+
+  const rowTone = (ok: boolean, reason: string) =>
+    failReason?.includes(reason)
+      ? "text-destructive"
+      : ok
+        ? "text-emerald-600"
+        : "text-muted-foreground";
 
   return (
     <section className="rounded-md border bg-card p-3" data-testid="schedule-panel">
@@ -87,6 +145,21 @@ export function RequirementSchedulePanel({
           : `${t(($) => $.schedule_panel.countdown_label)} ${formatMinuteUTC(issue.start_at) ?? "—"}`}
       </div>
 
+      <ul className="mb-2 flex flex-col gap-0.5 text-xs" data-testid="schedule-preflight">
+        <li className={rowTone(checks.confirmed, "decomposition_not_confirmed")} data-testid="preflight-confirmed">
+          {t(($) => $.schedule_panel.preflight_confirmed)} · {checks.confirmed ? t(($) => $.schedule_panel.preflight_ok) : t(($) => $.schedule_panel.preflight_fail)}
+        </li>
+        <li className={rowTone(checks.acyclic, "dependency_cycle")} data-testid="preflight-acyclic">
+          {t(($) => $.schedule_panel.preflight_acyclic)} · {checks.acyclic ? t(($) => $.schedule_panel.preflight_ok) : t(($) => $.schedule_panel.preflight_fail)}
+        </li>
+        <li className={rowTone(checks.acceptance, "acceptance_spec_missing")} data-testid="preflight-acceptance">
+          {t(($) => $.schedule_panel.preflight_acceptance)} · {checks.acceptance ? t(($) => $.schedule_panel.preflight_ok) : t(($) => $.schedule_panel.preflight_fail)}
+        </li>
+        <li className={rowTone(checks.mutex, "module_window_busy")} data-testid="preflight-mutex">
+          {t(($) => $.schedule_panel.preflight_mutex)} · {checks.mutex ? t(($) => $.schedule_panel.preflight_ok) : t(($) => $.schedule_panel.preflight_fail)}
+        </li>
+      </ul>
+
       {/* 互斥等待：WS3 组锁未释放时派生态为「等待模块释放」。 */}
       {waitingLock && (
         <p
@@ -94,8 +167,28 @@ export function RequirementSchedulePanel({
           data-testid="schedule-waiting-lock"
         >
           {t(($) => $.schedule_panel.waiting_lock)}
+          {holder
+            ? ` · ${t(($) => $.schedule_panel.held_by, { n: holder.number, title: holder.title })}`
+            : ""}
         </p>
       )}
+
+      <div className="mb-2" data-testid="schedule-deps">
+        <h5 className="text-2xs text-muted-foreground">{t(($) => $.schedule_panel.deps_title)}</h5>
+        {childIssues.every((c) => !c.blocked_by?.length) ? (
+          <p className="text-xs text-muted-foreground">{t(($) => $.schedule_panel.deps_empty)}</p>
+        ) : (
+          <ul className="mt-1 flex flex-col gap-0.5 text-xs">
+            {childIssues.flatMap((c) =>
+              (c.blocked_by ?? []).map((dep) => (
+                <li key={`${c.id}-${dep}`}>
+                  {c.identifier ?? c.id} ← {dep}
+                </li>
+              )),
+            )}
+          </ul>
+        )}
+      </div>
 
       {/* 进度：stage_progress 是 server 投影的 "N/M"（issue.sql §6）。 */}
       <div data-testid="schedule-progress">
@@ -107,17 +200,30 @@ export function RequirementSchedulePanel({
           <p className="text-xs text-muted-foreground">{t(($) => $.schedule_panel.no_children)}</p>
         ) : (
           <ul className="mt-1 flex flex-col gap-0.5">
-            {stage3.map((c) => (
+            {stage3.map((c) => {
+              const failed = c.status === "failed";
+              return (
               <li
                 key={c.id}
                 className="flex items-center gap-1.5 text-xs"
                 data-testid={`schedule-child-${c.id}`}
               >
                 <span>{c.identifier}</span>
-                <span className="text-muted-foreground">{c.title}</span>
-                <span className="ml-auto rounded bg-muted px-1 text-2xs">{c.status}</span>
+                <span className="min-w-0 truncate text-muted-foreground">{c.title}</span>
+                <span className="rounded bg-muted px-1 text-2xs">{c.status}</span>
+                <AppLink
+                  href={paths.issueExecLog(c.id)}
+                  className={`ml-auto shrink-0 text-2xs hover:underline ${
+                    failed ? "text-destructive" : "text-muted-foreground"
+                  }`}
+                >
+                  {failed
+                    ? t(($) => $.schedule_panel.exec_log_failed)
+                    : t(($) => $.schedule_panel.exec_log)}
+                </AppLink>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>

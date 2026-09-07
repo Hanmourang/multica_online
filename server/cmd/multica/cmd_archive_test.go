@@ -18,10 +18,14 @@ func TestParseArchiveRelPath_ContractRules(t *testing.T) {
 		wantErr  bool
 	}{
 		{"projects/dsh_desktop/overview/research/x.md", "project", 0, "", "dsh_desktop", false},
+		{"projects/dsh_desktop/PROJECT.md", "project", 0, "", "dsh_desktop", false},
 		{"projects/dsh_desktop/requirements/REQ-20260811-02/s2-plan/plan.md", "requirement", 2, "REQ-20260811-02", "dsh_desktop", false},
 		{"projects/dsh_desktop/requirements/REQ-20260811-02/s4-acceptance/report-r2.md", "requirement", 4, "REQ-20260811-02", "dsh_desktop", false},
 		{"projects/multica/filing/software-copyright/材料.pdf", "project", 0, "", "multica", false},
 		{"_shared/sop/SOP.md", "shared", 0, "", "", false},
+		{"change_logs/multica/daily_logs/20260907-x.md", "project", 0, "", "multica", false},
+		{"projects/multica/change_logs/daily_logs/20260907-x.md", "project", 0, "", "multica", false},
+		{"change_logs/qoder_backup/plans/old.md", "", 0, "", "", true},
 		// 违规：stage 越界（原型画面 2 ④：s5 拒绝入库）
 		{"projects/p/requirements/REQ-20260811-02/s5-review/x.md", "", 0, "", "", true},
 		// 违规：非法 requirement_key
@@ -69,6 +73,8 @@ func TestDocTypeFromName(t *testing.T) {
 		{"projects/p/requirements/REQ-20260811-02/s1-prototype/prototype-v3.html", "prototype"},
 		{"projects/p/overview/architecture/系统架构.md", "architecture"},
 		{"projects/p/filing/patent/交底书.pdf", "filing-patent"},
+		{"change_logs/multica/daily_logs/20260907-master-plan交付.md", "change-log"},
+		{"change_logs/qoder-plans/团队模块系统性优化.md", "work-plan"},
 	}
 	for _, c := range cases {
 		p, err := parseArchiveRelPath(c.rel)
@@ -133,6 +139,19 @@ func TestScanArchiveFiles_SkipsContractExclusions(t *testing.T) {
 	}
 	if len(files) != 1 || filepath.Base(files[0]) != "x.md" {
 		t.Fatalf("want only x.md, got %v", files)
+	}
+}
+
+func TestArchiveRelPath_PrefixesSiblingChangeLogs(t *testing.T) {
+	archiveRoot := "/tmp/projects_mgmt"
+	logsRoot := "/tmp/change_logs"
+	rel, ok := archiveRelPath(archiveRoot, logsRoot, "/tmp/change_logs/multica/daily_logs/x.md")
+	if !ok || rel != "change_logs/multica/daily_logs/x.md" {
+		t.Fatalf("sibling rel: ok=%v rel=%q", ok, rel)
+	}
+	rel, ok = archiveRelPath("/tmp/change_logs", "/tmp/change_logs", "/tmp/change_logs/multica/daily_logs/x.md")
+	if !ok || rel != "change_logs/multica/daily_logs/x.md" {
+		t.Fatalf("root-is-logs rel: ok=%v rel=%q", ok, rel)
 	}
 }
 

@@ -6,6 +6,7 @@ import type { InboxItem } from "@multica/core/types";
 import { NavigationProvider } from "../../navigation";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enInbox from "../../locales/en/inbox.json";
+import enArchive from "../../locales/en/archive.json";
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   // The catalog is server state; these suites render leaves without a
@@ -37,7 +38,7 @@ import { InboxContextMenuProvider } from "./inbox-context-menu";
 import type { InboxRowActions } from "./inbox-item-actions";
 import { InboxListItem } from "./inbox-list-item";
 
-const TEST_RESOURCES = { en: { inbox: enInbox } };
+const TEST_RESOURCES = { en: { inbox: enInbox, archive: enArchive } };
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -194,6 +195,27 @@ describe("inbox row context menu", () => {
     await screen.findByText("Archive");
 
     expect(screen.queryByText("Open in new tab")).toBeNull();
+  });
+
+  it("offers one-click confirm on a review row", async () => {
+    const { row } = renderRow({
+      entry: item({ type: "review_requested", issue_id: "issue-9" }),
+    });
+
+    fireEvent.contextMenu(row);
+
+    expect(
+      await screen.findByRole("menuitem", { name: "Confirm now" }),
+    ).toBeInTheDocument();
+  });
+
+  it("omits one-click confirm on a regular comment", async () => {
+    const { row } = renderRow();
+
+    fireEvent.contextMenu(row);
+    await screen.findByText("Archive");
+
+    expect(screen.queryByText("Confirm now")).toBeNull();
   });
 });
 

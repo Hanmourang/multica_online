@@ -109,25 +109,73 @@ func projectArtifactToResponse(row projectArtifactRow) ProjectArtifactResponse {
 	}
 }
 
-// loadArchiveResourceID resolves the project's archive directory resource
-// pointer (project.archive_resource_id, migration 455). The column postdates
-// the sqlc snapshot, so it is read with a direct query. Returns ok=false
-// (with the HTTP response already written) when no archive resource is
-// attached yet.
-func (h *Handler) loadArchiveResourceID(w http.ResponseWriter, r *http.Request, project db.Project) (pgtype.UUID, bool) {
+// lookupArchiveResourceID reads project.archive_resource_id. The column
+// postdates the sqlc snapshot, so this is a direct query.
+func (h *Handler) lookupArchiveResourceID(ctx context.Context, projectID pgtype.UUID) (pgtype.UUID, error) {
 	var archiveResourceID pgtype.UUID
-	err := h.DB.QueryRow(r.Context(),
-		`SELECT archive_resource_id FROM project WHERE id = $1`, project.ID,
+	err := h.DB.QueryRow(ctx,
+		`SELECT archive_resource_id FROM project WHERE id = $1`, projectID,
 	).Scan(&archiveResourceID)
+	return archiveResourceID, err
+}
+
+// loadArchiveResourceID is the read-path resolver. Returns ok=false
+// (with the HTTP response already written) when no archive resource is
+// attached yet — sync/graph/filing must not invent a bind.
+func (h *Handler) loadArchiveResourceID(w http.ResponseWriter, r *http.Request, project db.Project) (pgtype.UUID, bool) {
+	archiveResourceID, err := h.lookupArchiveResourceID(r.Context(), project.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load project archive resource")
 		return pgtype.UUID{}, false
 	}
 	if !archiveResourceID.Valid {
-		writeError(w, http.StatusNotFound, "project has no archive resource configured")
+		writeErrorCode(w, http.StatusNotFound, "archive_resource_missing", "project has no archive resource configured")
 		return pgtype.UUID{}, false
 	}
 	return archiveResourceID, true
+}
+
+// loadOrBindArchiveResourceID is the write-path resolver for manual artifact
+// create. If the project already has archive_resource_id, it is used as-is.
+// If it is empty, the first local_directory resource is bound and persisted
+// — scanning a folder into this project is an explicit bind intent. Sync
+// still uses loadArchiveResourceID so an unbound project cannot fake success.
+func (h *Handler) loadOrBindArchiveResourceID(w http.ResponseWriter, r *http.Request, project db.Project) (pgtype.UUID, bool) {
+	archiveResourceID, err := h.lookupArchiveResourceID(r.Context(), project.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project archive resource")
+		return pgtype.UUID{}, false
+	}
+	if archiveResourceID.Valid {
+		return archiveResourceID, true
+	}
+	bound, found, bindErr := h.bindFirstLocalDirectoryArchive(r.Context(), project.ID)
+	if bindErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to bind project archive resource")
+		return pgtype.UUID{}, false
+	}
+	if !found {
+		writeErrorCode(w, http.StatusNotFound, "archive_resource_missing", "project has no archive resource configured")
+		return pgtype.UUID{}, false
+	}
+	return bound, true
+}
+
+func (h *Handler) bindFirstLocalDirectoryArchive(ctx context.Context, projectID pgtype.UUID) (pgtype.UUID, bool, error) {
+	rows, err := h.Queries.ListProjectResources(ctx, projectID)
+	if err != nil {
+		return pgtype.UUID{}, false, err
+	}
+	for _, row := range rows {
+		if row.ResourceType != "local_directory" {
+			continue
+		}
+		if err := h.writeArchiveResourceID(ctx, projectID, row.ID); err != nil {
+			return pgtype.UUID{}, false, err
+		}
+		return row.ID, true, nil
+	}
+	return pgtype.UUID{}, false, nil
 }
 
 // ArtifactSyncItemRequest mirrors the TS `ArtifactSyncItem` (snake_case).
@@ -871,10 +919,13 @@ func (h *Handler) issueBelongsToProject(ctx context.Context, issueID, projectID 
 // PatchProjectArtifactRequest is the body for PATCH .../artifacts/{artifactId}.
 // Only non-nil fields are written; source is always forced to 'manual'.
 type PatchProjectArtifactRequest struct {
-	Scope   *string `json:"scope"`
-	Stage   *int32  `json:"stage"`
-	IssueID *string `json:"issue_id"`
-	DocType *string `json:"doc_type"`
+	Scope          *string `json:"scope"`
+	Stage          *int32  `json:"stage"`
+	IssueID        *string `json:"issue_id"`
+	DocType        *string `json:"doc_type"`
+	RelPath        *string `json:"rel_path"`
+	RequirementKey *string `json:"requirement_key"`
+	Content        *string `json:"content"`
 }
 
 // PatchProjectArtifact implements PATCH /api/projects/{id}/artifacts/{artifactId}:
@@ -927,6 +978,31 @@ func (h *Handler) PatchProjectArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 		args = append(args, docType)
 		setClauses = append(setClauses, "doc_type = $"+strconv.Itoa(len(args)))
+	}
+	if req.RelPath != nil {
+		relPath := strings.TrimSpace(*req.RelPath)
+		if relPath == "" {
+			writeError(w, http.StatusBadRequest, "rel_path must not be empty")
+			return
+		}
+		args = append(args, relPath)
+		setClauses = append(setClauses, "rel_path = $"+strconv.Itoa(len(args)))
+	}
+	if req.RequirementKey != nil {
+		key := strings.TrimSpace(*req.RequirementKey)
+		if key == "" {
+			setClauses = append(setClauses, "requirement_key = NULL")
+		} else {
+			args = append(args, key)
+			setClauses = append(setClauses, "requirement_key = $"+strconv.Itoa(len(args)))
+		}
+	}
+	if req.Content != nil {
+		content := []byte(*req.Content)
+		args = append(args, gitBlobSHA(content))
+		setClauses = append(setClauses, "blob_sha = $"+strconv.Itoa(len(args)))
+		args = append(args, int64(len(content)))
+		setClauses = append(setClauses, "size_bytes = $"+strconv.Itoa(len(args)))
 	}
 	if req.IssueID != nil {
 		issueIDStr := strings.TrimSpace(*req.IssueID)
@@ -1202,4 +1278,150 @@ func projectPrototypeVersionsInTx(ctx context.Context, tx pgx.Tx, project db.Pro
 		paths = append(paths, relPath)
 	}
 	return paths, created, nil
+}
+
+// CreateProjectArtifactRequest is the body for POST /artifacts (source=manual).
+type CreateProjectArtifactRequest struct {
+	Scope          string  `json:"scope"`
+	Stage          *int32  `json:"stage"`
+	DocType        string  `json:"doc_type"`
+	RelPath        string  `json:"rel_path"`
+	RequirementKey *string `json:"requirement_key"`
+	IssueID        *string `json:"issue_id"`
+	Content        string  `json:"content"`
+	AttachmentID   *string `json:"attachment_id"`
+	Version        int32   `json:"version"`
+}
+
+// CreateProjectArtifact inserts a source=manual artifact so the archive tab
+// can add / fill documents without waiting for CLI sync. Soft-delete on the
+// next empty-manifest sync will not remove it (manual exemption).
+func (h *Handler) CreateProjectArtifact(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadProjectForResource(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	archiveResourceID, ok := h.loadOrBindArchiveResourceID(w, r, project)
+	if !ok {
+		return
+	}
+	var req CreateProjectArtifactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Scope = strings.TrimSpace(req.Scope)
+	req.DocType = strings.TrimSpace(req.DocType)
+	req.RelPath = strings.TrimSpace(req.RelPath)
+	if req.Scope == "" || req.DocType == "" || req.RelPath == "" {
+		writeError(w, http.StatusBadRequest, "scope, doc_type and rel_path are required")
+		return
+	}
+	if !isValidArtifactScope(req.Scope) {
+		writeError(w, http.StatusBadRequest, "scope must be one of shared/project/requirement")
+		return
+	}
+	if req.Stage != nil && (*req.Stage < 1 || *req.Stage > 4) {
+		writeError(w, http.StatusBadRequest, "stage must be within 1..4")
+		return
+	}
+	if req.Version < 1 {
+		req.Version = 1
+	}
+	var issueID pgtype.UUID
+	if req.IssueID != nil && strings.TrimSpace(*req.IssueID) != "" {
+		parsed, err := util.ParseUUID(strings.TrimSpace(*req.IssueID))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "issue_id is not a valid UUID")
+			return
+		}
+		belongs, err := h.issueBelongsToProject(r.Context(), parsed, project.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate issue")
+			return
+		}
+		if !belongs {
+			writeError(w, http.StatusBadRequest, "issue does not belong to this project")
+			return
+		}
+		issueID = parsed
+	}
+	var attachmentID pgtype.UUID
+	if req.AttachmentID != nil && strings.TrimSpace(*req.AttachmentID) != "" {
+		parsed, err := util.ParseUUID(strings.TrimSpace(*req.AttachmentID))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "attachment_id is not a valid UUID")
+			return
+		}
+		attachmentID = parsed
+	}
+	content := []byte(req.Content)
+	blobSha := gitBlobSHA(content)
+	var requirementKey pgtype.Text
+	if req.RequirementKey != nil && strings.TrimSpace(*req.RequirementKey) != "" {
+		requirementKey = util.PtrToText(req.RequirementKey)
+	}
+	row, err := scanProjectArtifactRow(func(dest ...any) error {
+		return h.DB.QueryRow(r.Context(), `
+			INSERT INTO project_artifact (
+				workspace_id, project_id, resource_id, issue_id, scope, stage, doc_type,
+				version, rel_path, requirement_key, blob_sha, attachment_id, size_bytes,
+				source, synced_at
+			) VALUES (
+				$1, $2, $3, $4, $5, $6, $7,
+				$8, $9, $10, $11, $12, $13,
+				'manual', now()
+			)
+			ON CONFLICT (resource_id, rel_path, version) DO UPDATE SET
+				scope = EXCLUDED.scope,
+				stage = EXCLUDED.stage,
+				doc_type = EXCLUDED.doc_type,
+				issue_id = EXCLUDED.issue_id,
+				requirement_key = EXCLUDED.requirement_key,
+				blob_sha = EXCLUDED.blob_sha,
+				attachment_id = COALESCE(EXCLUDED.attachment_id, project_artifact.attachment_id),
+				size_bytes = EXCLUDED.size_bytes,
+				source = 'manual',
+				synced_at = now(),
+				updated_at = now(),
+				deleted_at = NULL
+			RETURNING `+projectArtifactColumns,
+			project.WorkspaceID, project.ID, archiveResourceID, issueID, req.Scope,
+			util.PtrToInt4(req.Stage), req.DocType, req.Version, req.RelPath,
+			requirementKey, blobSha, attachmentID, int64(len(content)),
+		).Scan(dest...)
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create project artifact")
+		return
+	}
+	writeJSON(w, http.StatusCreated, projectArtifactToResponse(row))
+}
+
+// DeleteProjectArtifact soft-deletes one artifact (does not remove the git file).
+func (h *Handler) DeleteProjectArtifact(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadProjectForResource(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	row, ok := h.loadProjectArtifact(w, r, project)
+	if !ok {
+		return
+	}
+	_, err := h.DB.Exec(r.Context(), `
+		UPDATE project_artifact
+		SET deleted_at = now(), updated_at = now(), source = 'manual'
+		WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+		row.ID, project.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project artifact")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

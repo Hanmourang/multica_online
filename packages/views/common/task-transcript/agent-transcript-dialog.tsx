@@ -123,6 +123,11 @@ interface AgentTranscriptDialogProps {
    * The dialog stays generic — slot content is the caller's concern.
    */
   headerSlot?: React.ReactNode;
+  /**
+   * Render the run surface inline (A3 主栏) instead of a modal. Close control
+   * is omitted — the host owns navigation away from this run.
+   */
+  embedded?: boolean;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -305,6 +310,7 @@ export function AgentTranscriptDialog({
   agentName,
   isLive = false,
   headerSlot,
+  embedded = false,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const locale = useLocale();
@@ -844,13 +850,11 @@ export function AgentTranscriptDialog({
     !!completedLabel ||
     !!usage;
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="!max-w-5xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
-        showCloseButton={false}
-      >
-        <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
+  const shell = (
+    <>
+        {!embedded && (
+          <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
+        )}
 
         {/* ── Header: outcome, identity, spend ─────────────────────────
             Everything a viewer needs BEFORE reading: how it ended, who ran
@@ -1053,15 +1057,17 @@ export function AgentTranscriptDialog({
                   </PopoverContent>
                 </Popover>
               )}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => onOpenChange(false)}
-                aria-label={t(($) => $.transcript.close)}
-                className="text-muted-foreground"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              {!embedded && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => onOpenChange(false)}
+                  aria-label={t(($) => $.transcript.close)}
+                  className="text-muted-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -1195,10 +1201,10 @@ export function AgentTranscriptDialog({
         </div>
 
         {/* ── Steps, and the inspector when one is selected ───────────── */}
-        <div className="flex min-h-0 flex-1">
+        <div className={embedded ? "flex" : "flex min-h-0 flex-1"}>
           <div className="flex min-w-0 flex-1 flex-col">
             {displayRows.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-body text-muted-foreground">
+              <div className="flex items-center justify-center py-10 text-body text-muted-foreground">
                 {isAntigravityLiveEmpty ? (
                   <div className="flex max-w-md items-center gap-2 px-4 text-center">
                     <Clock className="h-4 w-4 shrink-0" />
@@ -1216,8 +1222,25 @@ export function AgentTranscriptDialog({
                 )}
               </div>
             ) : (
-              // Virtualized so a multi-thousand-step run mounts a bounded
-              // number of DOM rows (#5733).
+              // Dialog: virtualize so a multi-thousand-step run mounts a
+              // bounded number of DOM rows (#5733). Embedded (A3): grow with
+              // the page scroller — Virtuoso needs a fixed parent height.
+              embedded ? (
+                <div>
+                  {displayRows.map((row) => (
+                    <TranscriptRow
+                      key={row.seq}
+                      row={row}
+                      runStartMs={runStartMs}
+                      isLive={isLive}
+                      selectedSeq={selectedSeq}
+                      expanded={row.kind === "group" && expandedGroups.has(row.seq)}
+                      onToggleGroup={handleToggleGroup}
+                      onSelect={setSelectedSeq}
+                    />
+                  ))}
+                </div>
+              ) : (
               <Virtuoso
                 key={listEpoch}
                 ref={virtuosoRef}
@@ -1253,6 +1276,7 @@ export function AgentTranscriptDialog({
                   />
                 )}
               />
+              )
             )}
           </div>
           {selectedStep && (
@@ -1263,6 +1287,27 @@ export function AgentTranscriptDialog({
             />
           )}
         </div>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div
+        data-testid="agent-transcript-embedded"
+        className="flex flex-col bg-background"
+      >
+        {shell}
+      </div>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="!max-w-5xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
+        showCloseButton={false}
+      >
+        {shell}
       </DialogContent>
     </Dialog>
   );

@@ -14,6 +14,7 @@ import type { ReactElement } from "react";
 import type { Issue, Project } from "@multica/core/types";
 import { renderWithI18n } from "../test/i18n";
 import { CalendarPage } from "./calendar-page";
+import { resetRequirementWorkbenchSuppress } from "./use-requirement-workbench";
 
 const mockApi = vi.hoisted(() => ({
   listIssues: vi.fn(),
@@ -49,6 +50,21 @@ vi.mock("../common/actor-avatar", () => ({
 // 真实 mutation hook 的依赖面（同 calendar-view.test.tsx 约定）。
 vi.mock("@multica/core/issues/mutations", () => ({
   useUpdateIssue: () => ({ mutate: vi.fn() }),
+  useCreateComment: () => ({ mutateAsync: vi.fn() }),
+}));
+
+const openModal = vi.hoisted(() => vi.fn());
+const navState = vi.hoisted(() => ({
+  replace: vi.fn(),
+  back: vi.fn(),
+  canGoBack: (() => false) as () => boolean,
+  pathname: "/calendar",
+  searchParams: new URLSearchParams(),
+}));
+vi.mock("@multica/core/modals", () => ({
+  useModalStore: {
+    getState: () => ({ open: openModal }),
+  },
 }));
 
 vi.mock("sonner", () => ({
@@ -78,7 +94,15 @@ vi.mock("../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/calendar" }),
+  useNavigation: () => ({
+    push: vi.fn(),
+    replace: navState.replace,
+    back: navState.back,
+    canGoBack: navState.canGoBack,
+    pathname: navState.pathname,
+    // 与 web/desktop adapter 一致：每次 render 都 new 一份。回归用。
+    searchParams: new URLSearchParams(navState.searchParams.toString()),
+  }),
   resolveClickIntent: () => "push",
   useIntentNavigate: () => () => {},
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -155,7 +179,7 @@ function renderPage(ui: ReactElement) {
   );
 }
 
-// issueListOptions 的 fixture 入口：beforeEach 里的 mockImplementation 读它
+// calendarIssuesOptions 的 fixture 入口：beforeEach 里的 mockImplementation 读它
 // （模块级 let，非 hoisted 工厂引用，无 hoisting 风险）。
 let currentIssues: Issue[] = [];
 
@@ -164,15 +188,16 @@ beforeEach(() => {
   // 时间走（Date 保持冻结），否则 TanStack Query / waitFor 的轮询永不前进。
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-09-15T12:00:00Z"));
+  navState.searchParams = new URLSearchParams();
+  navState.replace.mockReset();
+  navState.back.mockReset();
+  navState.canGoBack = () => false;
+  resetRequirementWorkbenchSuppress();
 
-  // issueListOptions 按 7 个 status_category 并发拉取后 flatten；只在首个
-  // 响应里放 fixture，其余空桶，避免同一批 issue 被铺 7 份。
-  let served = false;
-  mockApi.listIssues.mockImplementation(() => {
-    if (served) return Promise.resolve({ issues: [], total: 0 });
-    served = true;
-    return Promise.resolve({ issues: currentIssues, total: currentIssues.length });
-  });
+  // 日历独立查询：top_level_only 翻页，不再按 7 个 status_category 铺桶。
+  mockApi.listIssues.mockImplementation(() =>
+    Promise.resolve({ issues: currentIssues, total: currentIssues.length }),
+  );
   mockApi.listProjects.mockResolvedValue({
     projects: [project(), project({ id: "proj-2", title: "项目B" })],
     total: 2,
@@ -193,6 +218,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  openModal.mockClear();
   vi.useRealTimers();
 });
 
@@ -231,6 +257,35 @@ describe("CalendarPage", () => {
     expect(screen.queryByTestId(/^req-block-plain-1/)).toBeNull();
   });
 
+  it("filters requirements by the module toolbar chip", async () => {
+    mockApi.listProjectModules.mockResolvedValue([
+      { id: "mod-pay", name: "支付", color: "#f00", project_id: "proj-1", workspace_id: "workspace-1", created_at: "2026-09-01T00:00:00Z" },
+      { id: "mod-home", name: "首页", color: "#0f0", project_id: "proj-1", workspace_id: "workspace-1", created_at: "2026-09-01T00:00:00Z" },
+    ]);
+    currentIssues = [
+      requirement({ module_id: "mod-pay" }),
+      requirement({
+        id: "req-2",
+        identifier: "REQ-201",
+        number: 201,
+        title: "首页改版",
+        start_at: "2026-09-16T09:00:00Z",
+        due_date: "2026-09-16",
+        module_id: "mod-home",
+      }),
+    ];
+    renderPage(<CalendarPage />);
+    expect(await screen.findByTestId("req-block-req-1-2026-09-15")).toBeTruthy();
+    expect(screen.getByTestId("req-block-req-2-2026-09-16")).toBeTruthy();
+
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Filter by module" }),
+      { target: { value: "mod-pay" } },
+    );
+    expect(screen.getByTestId("req-block-req-1-2026-09-15")).toBeTruthy();
+    expect(screen.queryByTestId(/^req-block-req-2/)).toBeNull();
+  });
+
   it("opens the requirement drawer with the list-projected status badge when a block is clicked", async () => {
     currentIssues = [requirement()];
     renderPage(<CalendarPage />);
@@ -245,6 +300,7 @@ describe("CalendarPage", () => {
     expect(mockApi.getIssue).toHaveBeenCalledWith("req-1");
     const dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("原型待确认");
+    expect(navState.replace).toHaveBeenCalledWith("/calendar?req=req-1&stage=1");
   });
 
   it("filters requirements by the project toolbar chip", async () => {
@@ -276,8 +332,137 @@ describe("CalendarPage", () => {
     expect(screen.queryByTestId(/^req-block-req-2/)).toBeNull();
   });
 
+  it("opens the manual requirement form instead of agent quick-create", async () => {
+    currentIssues = [];
+    renderPage(<CalendarPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /new requirement/i }),
+    );
+    expect(openModal).toHaveBeenCalledWith("create-issue", {
+      project_id: null,
+      source: "calendar",
+    });
+  });
+
+  it("filters by PM, derived status, and the pending-confirm chip", async () => {
+    currentIssues = [
+      requirement({
+        assignee_id: "pm-a",
+        assignee_type: "member",
+      }),
+      requirement({
+        id: "req-2",
+        identifier: "REQ-201",
+        number: 201,
+        title: "拆解待确认需求",
+        start_at: "2026-09-16T09:00:00Z",
+        due_date: "2026-09-16",
+        requirement_status: "拆解待确认",
+        assignee_id: "pm-b",
+        assignee_type: "member",
+      }),
+      requirement({
+        id: "req-3",
+        identifier: "REQ-301",
+        number: 301,
+        title: "执行中需求",
+        start_at: "2026-09-17T09:00:00Z",
+        due_date: "2026-09-17",
+        requirement_status: "执行中",
+        assignee_id: "pm-a",
+        assignee_type: "member",
+      }),
+    ];
+    renderPage(<CalendarPage />);
+
+    expect(
+      await screen.findByTestId("req-block-req-1-2026-09-15"),
+    ).toBeTruthy();
+    expect(screen.getByTestId("req-block-req-2-2026-09-16")).toBeTruthy();
+    expect(screen.getByTestId("req-block-req-3-2026-09-17")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Pending confirm · 2" }),
+    ).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by PM" }), {
+      target: { value: "pm-b" },
+    });
+    expect(screen.queryByTestId(/^req-block-req-1/)).toBeNull();
+    expect(screen.getByTestId("req-block-req-2-2026-09-16")).toBeTruthy();
+    expect(screen.queryByTestId(/^req-block-req-3/)).toBeNull();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by PM" }), {
+      target: { value: "" },
+    });
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Filter by status" }),
+      { target: { value: "执行中" } },
+    );
+    expect(screen.queryByTestId(/^req-block-req-1/)).toBeNull();
+    expect(screen.queryByTestId(/^req-block-req-2/)).toBeNull();
+    expect(screen.getByTestId("req-block-req-3-2026-09-17")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Pending confirm · 2" }),
+    );
+    expect(screen.getByTestId("req-block-req-1-2026-09-15")).toBeTruthy();
+    expect(screen.getByTestId("req-block-req-2-2026-09-16")).toBeTruthy();
+    expect(screen.queryByTestId(/^req-block-req-3/)).toBeNull();
+    expect(navState.replace).toHaveBeenCalledWith("/calendar?req=req-1&stage=1");
+  });
+
+  it("keeps the workbench closed after × even when searchParams is a new object", async () => {
+    navState.searchParams = new URLSearchParams("req=req-1");
+    currentIssues = [requirement()];
+    renderPage(<CalendarPage />);
+
+    expect(
+      await screen.findByTestId("requirement-workbench"),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("workbench-close"));
+
+    expect(screen.queryByTestId("requirement-workbench")).toBeNull();
+    expect(navState.replace).toHaveBeenCalledWith("/calendar");
+
+    // 换过滤条件会再 render；旧实现依赖 searchParams 对象，会把抽屉从
+    // 尚未 commit 的 ?req= 拉回来。
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Filter by status" }),
+      { target: { value: "原型待确认" } },
+    );
+    expect(screen.queryByTestId("requirement-workbench")).toBeNull();
+  });
+
+  it("steps back to the source issue when the workbench was opened with from=issue", async () => {
+    navState.searchParams = new URLSearchParams("req=req-1&stage=4&from=issue");
+    navState.canGoBack = () => true;
+    currentIssues = [requirement()];
+    renderPage(<CalendarPage />);
+
+    expect(
+      await screen.findByTestId("requirement-workbench"),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("workbench-close"));
+
+    expect(screen.queryByTestId("requirement-workbench")).toBeNull();
+    expect(navState.replace).toHaveBeenCalledWith("/calendar");
+    expect(navState.back).toHaveBeenCalled();
+  });
+
+  it("reopens the drawer from ?req= on first paint", async () => {
+    navState.searchParams = new URLSearchParams("req=req-1");
+    currentIssues = [requirement()];
+    renderPage(<CalendarPage />);
+
+    expect(
+      await screen.findByRole("heading", { name: /积分体系重构/ }),
+    ).toBeTruthy();
+    expect(mockApi.getIssue).toHaveBeenCalledWith("req-1");
+  });
+
   it("surfaces list query failures with a toast and a page-level retry (spec §5)", async () => {
-    // 7 个 status_category 桶全部拒绝 → 聚合 Promise.all 失败。
     mockApi.listIssues.mockReset();
     mockApi.listIssues.mockRejectedValue(new Error("boom"));
     renderPage(<CalendarPage />);

@@ -34,6 +34,17 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { AppLink } from "../navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useLocale, useT } from "../i18n";
+import { ActorAvatar } from "../common/actor-avatar";
+import {
+  findModuleHolder,
+  findRescheduleConflict,
+  formatTriggerLabel,
+  parseStageProgress,
+  PIPELINE_STATUS_LEGEND,
+  showsTriggerLabel,
+  suggestFreeWindow,
+} from "./calendar-helpers";
+import { ProgressRing } from "../issues/components/progress-ring";
 
 // ---------------------------------------------------------------------------
 // Date utilities — UTC-day aligned, mirroring gantt-view so a minute-level
@@ -188,6 +199,7 @@ export function CalendarView({
   onOpenRequirement?: (issueId: string) => void;
 }) {
   const { t } = useT("issues");
+  const { t: tc } = useT("calendar");
   const locale = useLocale();
   const zoom = useViewStore((s) => s.calendarZoom);
   const act = useViewStoreApi().getState();
@@ -198,6 +210,8 @@ export function CalendarView({
   const today = useMemo(() => startOfDayUTC(new Date()), []);
   const [anchor, setAnchor] = useState(today);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [resizeId, setResizeId] = useState<string | null>(null);
 
   const days = useMemo(
     () => (zoom === "month" ? monthGridDays(anchor) : weekGridDays(anchor)),
@@ -319,7 +333,13 @@ export function CalendarView({
   const handleDrop = (day: Date, e: React.DragEvent) => {
     e.preventDefault();
     setDragOverKey(null);
-    const id = e.dataTransfer.getData("text/plain");
+    const raw = e.dataTransfer.getData("text/plain");
+    const resizing = raw.startsWith("resize:");
+    const id = resizing ? raw.slice("resize:".length) : raw;
+    if (resizing) {
+      handleResizeDue(day, id);
+      return;
+    }
     const span = spans.find((s) => s.issue.id === id);
     if (!span) return;
     const offset = Math.round(
@@ -348,9 +368,102 @@ export function CalendarView({
       const d = dateOnlyToUTCDate(issue.due_date);
       if (d) payload.due_date = dayKey(addDays(d, offset));
     }
+    const nextStart = addDays(span.start, offset);
+    const nextEnd = addDays(span.end, offset);
+    const conflict = findRescheduleConflict(issues, issue, nextStart, nextEnd);
+    if (conflict) {
+      const spanDays = Math.round(
+        (span.end.getTime() - span.start.getTime()) / MS_PER_DAY,
+      );
+      const free = suggestFreeWindow(issues, issue, spanDays);
+      toast.error(
+        t(($) => $.calendar.reschedule_rejected, {
+          n: conflict.number,
+          title: conflict.title,
+          start: free ? dayKey(free.start) : "—",
+          end: free ? dayKey(free.end) : "—",
+        }),
+      );
+      setDraggingId(null);
+      return;
+    }
+    const previous = {
+      id,
+      start_at: issue.start_at ?? undefined,
+      start_date: issue.start_date ?? undefined,
+      due_date: issue.due_date ?? undefined,
+    };
     updateIssue.mutate(payload);
-    toast.success(t(($) => $.calendar.rescheduled));
+    toast.success(t(($) => $.calendar.rescheduled), {
+      duration: 5000,
+      action: {
+        label: t(($) => $.calendar.reschedule_undo),
+        onClick: () => updateIssue.mutate(previous),
+      },
+    });
+    setDraggingId(null);
   };
+
+  const handleResizeDue = (day: Date, id: string) => {
+    setResizeId(null);
+    const span = spans.find((s) => s.issue.id === id);
+    if (!span) return;
+    const issue = span.issue;
+    if (RESCHEDULE_LOCKED_STATUSES.has(issue.requirement_status ?? "")) return;
+    const nextDue = startOfDayUTC(day);
+    if (nextDue.getTime() < span.start.getTime()) return;
+    if (issue.due_date && dayKey(nextDue) === issue.due_date) return;
+    const conflict = findRescheduleConflict(issues, issue, span.start, nextDue);
+    if (conflict) {
+      const spanDays = Math.round(
+        (span.end.getTime() - span.start.getTime()) / MS_PER_DAY,
+      );
+      const free = suggestFreeWindow(issues, issue, spanDays);
+      toast.error(
+        t(($) => $.calendar.reschedule_rejected, {
+          n: conflict.number,
+          title: conflict.title,
+          start: free ? dayKey(free.start) : "—",
+          end: free ? dayKey(free.end) : "—",
+        }),
+      );
+      return;
+    }
+    const previousDue = issue.due_date ?? undefined;
+    updateIssue.mutate({ id, due_date: dayKey(nextDue) });
+    toast.success(t(($) => $.calendar.rescheduled), {
+      duration: 5000,
+      action: {
+        label: t(($) => $.calendar.reschedule_undo),
+        onClick: () => updateIssue.mutate({ id, due_date: previousDue }),
+      },
+    });
+  };
+
+  const dragPreview = useMemo(() => {
+    if (!draggingId || !dragOverKey) return null;
+    const span = spans.find((s) => s.issue.id === draggingId);
+    if (!span) return null;
+    return `${dayKey(span.start)} → ${dragOverKey}`;
+  }, [draggingId, dragOverKey, spans]);
+
+  const dropConflict = useMemo(() => {
+    if (!draggingId || !dragOverKey) return null;
+    const span = spans.find((s) => s.issue.id === draggingId);
+    if (!span) return null;
+    const [y, m, d] = dragOverKey.split("-").map(Number);
+    if (!y || !m || !d) return null;
+    const day = new Date(Date.UTC(y, m - 1, d));
+    const offset = Math.round(
+      (startOfDayUTC(day).getTime() - span.start.getTime()) / MS_PER_DAY,
+    );
+    return findRescheduleConflict(
+      issues,
+      span.issue,
+      addDays(span.start, offset),
+      addDays(span.end, offset),
+    );
+  }, [draggingId, dragOverKey, spans, issues]);
 
   return (
     <div className="flex h-full flex-col" data-testid="calendar-view">
@@ -376,6 +489,14 @@ export function CalendarView({
           {t(($) => $.calendar.today)}
         </Button>
         <h2 className="ml-1 text-body font-medium">{title}</h2>
+        {dragPreview && (
+          <span
+            data-testid="calendar-drag-preview"
+            className="ml-2 rounded bg-popover px-1.5 py-0.5 text-caption text-muted-foreground shadow-sm"
+          >
+            {dragPreview}
+          </span>
+        )}
         <div className="ml-auto flex items-center rounded-md border border-border p-0.5">
           {(["week", "month"] as const).map((mode) => (
             <button
@@ -425,7 +546,10 @@ export function CalendarView({
               data-weekend={isWeekendUTC(day) ? "true" : "false"}
               data-out={outOfMonth ? "true" : "false"}
               data-today={sameDayUTC(day, today) ? "true" : "false"}
-              data-drag-over={dragOverKey === key ? "true" : "false"}
+                  data-drag-over={dragOverKey === key ? "true" : "false"}
+                  data-drag-conflict={
+                    dragOverKey === key && dropConflict ? "true" : "false"
+                  }
               onDragOver={(e) => {
                 e.preventDefault();
                 if (dragOverKey !== key) setDragOverKey(key);
@@ -434,12 +558,18 @@ export function CalendarView({
                 setDragOverKey((current) => (current === key ? null : current))
               }
               onDrop={(e) => handleDrop(day, e)}
+              onMouseUp={() => {
+                if (resizeId) handleResizeDue(day, resizeId);
+              }}
               className={cn(
                 "relative flex min-h-[72px] flex-col gap-0.5 border-b border-r border-border/60 px-1 pb-1 pt-0.5",
                 isWeekendUTC(day) && "bg-muted/40",
                 outOfMonth && "bg-muted/20",
                 sameDayUTC(day, today) && "bg-primary/5",
-                dragOverKey === key && "ring-2 ring-inset ring-primary/50",
+                dragOverKey === key &&
+                  (dropConflict
+                    ? "ring-2 ring-inset ring-destructive"
+                    : "ring-2 ring-inset ring-primary/50"),
               )}
             >
               <span
@@ -462,16 +592,40 @@ export function CalendarView({
                   segment={segment}
                   color={
                     (span.issue.module_id &&
-                      moduleColorById.get(span.issue.module_id)) ||
+                      moduleColorById?.get?.(span.issue.module_id)) ||
                     undefined
                   }
                   href={paths.issueDetail(span.issue.id)}
                   onOpen={onOpenRequirement}
+                  holder={findModuleHolder(issues, span.issue)}
+                  week={zoom === "week"}
+                  dimmed={
+                    draggingId === span.issue.id ||
+                    span.issue.requirement_status === "等待模块释放"
+                  }
+                  onDragBegin={() => setDraggingId(span.issue.id)}
+                  onDragEnd={() => {
+                    setDraggingId(null);
+                    setDragOverKey(null);
+                  }}
+                  onResizeStart={() => setResizeId(span.issue.id)}
                 />
               ))}
             </div>
           );
         })}
+      </div>
+      <div
+        data-testid="calendar-legend"
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border px-3 py-1.5 text-[10.5px] text-muted-foreground"
+      >
+        <span>{tc(($) => $.page.legend_label)}</span>
+        {PIPELINE_STATUS_LEGEND.map((status) => (
+          <span key={status}>
+            {STATUS_ICON[status] ?? "·"} {status}
+          </span>
+        ))}
+        <span className="ml-auto">{tc(($) => $.page.click_hint)}</span>
       </div>
     </div>
   );
@@ -488,6 +642,12 @@ function RequirementBlock({
   color,
   href,
   onOpen,
+  holder,
+  week,
+  dimmed,
+  onDragBegin,
+  onDragEnd,
+  onResizeStart,
 }: {
   span: RequirementSpan;
   day: Date;
@@ -496,6 +656,12 @@ function RequirementBlock({
   href: string;
   /** 提供时拦截点击（preventDefault）走回调；href 保留供右键新标签打开。 */
   onOpen?: (issueId: string) => void;
+  holder: Issue | null;
+  week: boolean;
+  dimmed: boolean;
+  onDragBegin: () => void;
+  onDragEnd: () => void;
+  onResizeStart: () => void;
 }) {
   const { t } = useT("issues");
   const { issue } = span;
@@ -503,7 +669,16 @@ function RequirementBlock({
   const icon = STATUS_ICON[status] ?? "";
   const tone = STATUS_TONE[status] ?? "";
   const progress = issue.stage_progress || "";
+  const parsedProgress = parseStageProgress(progress);
   const rescheduleLocked = RESCHEDULE_LOCKED_STATUSES.has(status);
+  const triggerLabel =
+    segment === "start" && showsTriggerLabel(issue)
+      ? formatTriggerLabel(issue.start_at)
+      : "";
+  const heldBy =
+    status === "等待模块释放" && holder
+      ? t(($) => $.calendar.held_by, { n: holder.number, title: holder.title })
+      : "";
 
   const startMinute = formatMinuteUTC(issue.start_at ?? issue.start_date);
   const endMinute = formatMinuteUTC(issue.due_date);
@@ -546,13 +721,19 @@ function RequirementBlock({
                   : (e) => {
                       e.dataTransfer.setData("text/plain", issue.id);
                       e.dataTransfer.effectAllowed = "move";
+                      onDragBegin();
                     }
               }
+              onDragEnd={onDragEnd}
               className={cn(
-                "flex h-5 min-w-0 items-center gap-1 border-l-2 px-1 text-2xs",
+                "relative flex min-w-0 gap-1 border-l-2 px-1 text-2xs",
+                week && segment === "start"
+                  ? "h-auto min-h-10 flex-col items-stretch py-1"
+                  : "h-5 items-center",
                 segment === "start" && "rounded-l-sm",
                 segment === "end" && "rounded-r-sm",
                 segment === "mid" && "border-l-0",
+                dimmed && "opacity-40",
                 color ? "" : "border-primary/45 bg-primary/10",
               )}
               style={
@@ -562,23 +743,96 @@ function RequirementBlock({
               }
             >
               {segment === "start" ? (
+                week ? (
+                  <>
+                    <div className="flex min-w-0 items-center gap-1">
+                      <span className={cn("shrink-0", tone)}>{icon}</span>
+                      <span className="min-w-0 truncate font-medium">
+                        {issue.identifier} {issue.title}
+                      </span>
+                      {issue.assignee_id && issue.assignee_type && (
+                        <span data-testid={`req-role-${issue.id}`} className="ml-auto shrink-0">
+                          <ActorAvatar
+                            actorType={issue.assignee_type}
+                            actorId={issue.assignee_id}
+                            size="xs"
+                          />
+                        </span>
+                      )}
+                    </div>
+                    <div className={cn("flex items-center gap-1 text-muted-foreground", tone)}>
+                      <span>
+                        {status}
+                      </span>
+                      {triggerLabel ? (
+                        <span data-testid={`req-trigger-${issue.id}`}>{triggerLabel}</span>
+                      ) : null}
+                      {parsedProgress && (
+                        <span className="ml-auto">{progress}</span>
+                      )}
+                    </div>
+                    {parsedProgress && (
+                      <div className="h-1 overflow-hidden rounded-full bg-black/10">
+                        <div
+                          className="h-full bg-current opacity-60"
+                          style={{
+                            width: `${Math.round((parsedProgress.done / parsedProgress.total) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </>
+                ) : (
                 <>
+                  {issue.assignee_id && issue.assignee_type && (
+                    <span data-testid={`req-role-${issue.id}`} className="shrink-0">
+                      <ActorAvatar
+                        actorType={issue.assignee_type}
+                        actorId={issue.assignee_id}
+                        size="xs"
+                      />
+                    </span>
+                  )}
                   <span className={cn("shrink-0", tone)}>{icon}</span>
                   <span className="min-w-0 truncate font-medium">
                     {issue.identifier} {issue.title}
                   </span>
                   <span
                     className={cn(
-                      "ml-auto shrink-0 text-muted-foreground",
+                      "ml-auto flex shrink-0 items-center gap-0.5 text-muted-foreground",
                       tone,
                     )}
                   >
+                    {parsedProgress && (
+                      <ProgressRing
+                        done={parsedProgress.done}
+                        total={parsedProgress.total}
+                      />
+                    )}
                     {status}
                     {progress ? ` ${progress}` : ""}
+                    {triggerLabel ? (
+                      <span data-testid={`req-trigger-${issue.id}`}> {triggerLabel}</span>
+                    ) : null}
                   </span>
                 </>
+                )
               ) : (
                 <span className={cn("shrink-0", tone)}>{icon}</span>
+              )}
+              {segment === "end" && !rescheduleLocked && (
+                <span
+                  data-testid={`req-grip-${issue.id}`}
+                  role="separator"
+                  aria-orientation="vertical"
+                  className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onResizeStart();
+                  }}
+                  onClick={(e) => e.preventDefault()}
+                />
               )}
             </div>
           </AppLink>
@@ -586,6 +840,7 @@ function RequirementBlock({
       />
       <TooltipContent>
         {issue.identifier} · {tooltipRange}
+        {heldBy ? ` · ${heldBy}` : ""}
       </TooltipContent>
     </Tooltip>
   );

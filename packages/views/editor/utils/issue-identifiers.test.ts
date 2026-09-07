@@ -14,6 +14,9 @@ describe("preprocessIssueIdentifiers", () => {
     expect(preprocessIssueIdentifiers("Related to MUL-1745")).toBe(
       "Related to [MUL-1745](mention://issue/MUL-1745)",
     );
+    expect(preprocessIssueIdentifiers("See req_12 and task_3")).toBe(
+      "See [req_12](mention://issue/req_12) and [task_3](mention://issue/task_3)",
+    );
   });
 
   it("rewrites multiple identifiers in one string", () => {
@@ -94,6 +97,8 @@ describe("isIssueIdentifier", () => {
   it("accepts a bare identifier", () => {
     expect(isIssueIdentifier("MUL-1745")).toBe(true);
     expect(isIssueIdentifier("TES-1")).toBe(true);
+    expect(isIssueIdentifier("req_12")).toBe(true);
+    expect(isIssueIdentifier("task_3")).toBe(true);
   });
 
   it("rejects a UUID (so real mentions are not treated as identifiers)", () => {

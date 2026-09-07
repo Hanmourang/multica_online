@@ -122,6 +122,15 @@ func TestDecomposeRequirement(t *testing.T) {
 		if !strings.Contains(description, "multica/app") {
 			t.Fatalf("expected repo label in the brief, got: %s", description)
 		}
+		if !strings.Contains(description, "禁止开工") {
+			t.Fatalf("expected PM no-implementation contract in the brief, got: %s", description)
+		}
+		if !strings.Contains(description, issueID) {
+			t.Fatalf("expected parent issue id in the brief so the PM comments on the requirement, got: %s", description)
+		}
+		if !strings.Contains(description, "## 目标分解") {
+			t.Fatalf("expected structured plan headings in the brief, got: %s", description)
+		}
 	})
 
 	t.Run("no enabled pm in the roster is a 409", func(t *testing.T) {
@@ -400,6 +409,66 @@ func TestSplitDecompositionComment(t *testing.T) {
 			t.Fatal("expected ok=false for null payload")
 		}
 	})
+
+	t.Run("language suffix on the fence is accepted", func(t *testing.T) {
+		content := "## 目标分解\n拆两步\n\n```decomposition-drafts json\n" +
+			`[{"temp_id":"t1","title":"账户模型","stage":3}]` + "\n```"
+		plan, drafts, ok := splitDecompositionComment(content)
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if !strings.Contains(plan, "目标分解") {
+			t.Fatalf("plan = %q", plan)
+		}
+		if !hasDraftItems(drafts) {
+			t.Fatalf("drafts = %s", drafts)
+		}
+	})
+}
+
+func TestParseDecompositionPayload(t *testing.T) {
+	t.Run("recovers drafts from a generic json fence", func(t *testing.T) {
+		content := "## 阶段\n先拆后做\n\n```json\n" +
+			`[{"temp_id":"t1","title":"梳理模型","stage":3}]` + "\n```"
+		plan, drafts, ok := parseDecompositionPayload(content)
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if !strings.Contains(plan, "阶段") {
+			t.Fatalf("plan = %q", plan)
+		}
+		if !hasDraftItems(drafts) {
+			t.Fatalf("drafts = %s", drafts)
+		}
+	})
+
+	t.Run("recovers an embedded drafts array", func(t *testing.T) {
+		content := "如下草稿：\n" + `[{"temp_id":"t9","title":"验收","stage":4}]` + "\n请确认"
+		plan, drafts, ok := parseDecompositionPayload(content)
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if !strings.Contains(plan, "如下草稿") || !strings.Contains(plan, "请确认") {
+			t.Fatalf("plan = %q", plan)
+		}
+		if !hasDraftItems(drafts) {
+			t.Fatalf("drafts = %s", drafts)
+		}
+	})
+
+	t.Run("plan headings without a fence still count as output", func(t *testing.T) {
+		content := "## 目标分解\n完成数据模型梳理并输出文档\n\n## 阶段\n分析 → 文档\n\n## 风险\n档案未就绪"
+		plan, drafts, ok := parseDecompositionPayload(content)
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if plan != content {
+			t.Fatalf("plan = %q", plan)
+		}
+		if hasDraftItems(drafts) {
+			t.Fatalf("drafts should be empty, got %s", drafts)
+		}
+	})
 }
 
 // TestGetDecomposition covers GET /api/issues/{id}/decomposition (spec §9)：
@@ -428,7 +497,11 @@ func TestGetDecomposition(t *testing.T) {
 			t.Fatalf("insert requirement: %v", err)
 		}
 		t.Cleanup(func() {
-			testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, id)
+			testPool.Exec(context.Background(), `
+                                DELETE FROM comment
+                                WHERE issue_id = $1
+                                   OR issue_id IN (SELECT id FROM issue WHERE parent_issue_id = $1)`, id)
+			testPool.Exec(context.Background(), `DELETE FROM issue WHERE parent_issue_id = $1`, id)
 			testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id)
 		})
 		return id
@@ -530,6 +603,143 @@ func TestGetDecomposition(t *testing.T) {
 		}
 		if len(resp.Drafts) != 1 || resp.Drafts[0]["temp_id"] != "ok" {
 			t.Fatalf("drafts = %v, want fallback to the older valid block", resp.Drafts)
+		}
+	})
+
+	t.Run("reads a valid block posted on the stage-2 PM child", func(t *testing.T) {
+		issueID := insertRequirement(t)
+		var childNumber int
+		if err := testPool.QueryRow(ctx, `
+                        UPDATE workspace
+                        SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+                        WHERE id = $1 RETURNING issue_counter
+                `, testWorkspaceID).Scan(&childNumber); err != nil {
+			t.Fatalf("next child number: %v", err)
+		}
+		var childID string
+		if err := testPool.QueryRow(ctx, `
+                        INSERT INTO issue (
+                                workspace_id, title, status, priority, creator_type, creator_id,
+                                number, position, parent_issue_id, stage
+                        )
+                        VALUES (
+                                $1, $2, 'todo', 'none', 'member', $3,
+                                $4, 200, $5, 2
+                        )
+                        RETURNING id
+                `, testWorkspaceID, "PM plan + 拆解 "+suffix, testUserID, childNumber, issueID).Scan(&childID); err != nil {
+			t.Fatalf("insert stage-2 child: %v", err)
+		}
+		latestID := insertComment(t, childID, "子任务上的 plan\n```decomposition-drafts\n"+
+			`[{"temp_id":"child","title":"从子任务回收","stage":3}]`+"\n```", time.Now())
+
+		w := get(t, issueID)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Plan            *string          `json:"plan"`
+			Drafts          []map[string]any `json:"drafts"`
+			SourceCommentID *string          `json:"source_comment_id"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Plan == nil || *resp.Plan != "子任务上的 plan" {
+			t.Fatalf("plan = %v", resp.Plan)
+		}
+		if len(resp.Drafts) != 1 || resp.Drafts[0]["temp_id"] != "child" {
+			t.Fatalf("drafts = %v", resp.Drafts)
+		}
+		if resp.SourceCommentID == nil || *resp.SourceCommentID != latestID {
+			t.Fatalf("source_comment_id = %v, want %s", resp.SourceCommentID, latestID)
+		}
+	})
+
+	t.Run("reads a plan-only markdown comment on the PM child", func(t *testing.T) {
+		issueID := insertRequirement(t)
+		var childNumber int
+		if err := testPool.QueryRow(ctx, `
+                        UPDATE workspace
+                        SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+                        WHERE id = $1 RETURNING issue_counter
+                `, testWorkspaceID).Scan(&childNumber); err != nil {
+			t.Fatalf("next child number: %v", err)
+		}
+		var childID string
+		if err := testPool.QueryRow(ctx, `
+                        INSERT INTO issue (
+                                workspace_id, title, status, priority, creator_type, creator_id,
+                                number, position, parent_issue_id, stage
+                        )
+                        VALUES (
+                                $1, $2, 'in_review', 'none', 'member', $3,
+                                $4, 200, $5, 2
+                        )
+                        RETURNING id
+                `, testWorkspaceID, "PM plan "+suffix, testUserID, childNumber, issueID).Scan(&childID); err != nil {
+			t.Fatalf("insert stage-2 child: %v", err)
+		}
+		insertComment(t, childID, "## 目标分解\n完成数据模型梳理并输出文档\n\n## 阶段\n分析\n\n## 风险\n无", time.Now())
+
+		w := get(t, issueID)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Plan   *string          `json:"plan"`
+			Drafts []map[string]any `json:"drafts"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Plan == nil || !strings.Contains(*resp.Plan, "目标分解") {
+			t.Fatalf("plan = %v", resp.Plan)
+		}
+		if resp.Drafts == nil {
+			t.Fatal("drafts should be []")
+		}
+	})
+
+	t.Run("reads drafts from the PM child description", func(t *testing.T) {
+		issueID := insertRequirement(t)
+		var childNumber int
+		if err := testPool.QueryRow(ctx, `
+                        UPDATE workspace
+                        SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+                        WHERE id = $1 RETURNING issue_counter
+                `, testWorkspaceID).Scan(&childNumber); err != nil {
+			t.Fatalf("next child number: %v", err)
+		}
+		var childID string
+		if err := testPool.QueryRow(ctx, `
+                        INSERT INTO issue (
+                                workspace_id, title, status, priority, creator_type, creator_id,
+                                number, position, parent_issue_id, stage, description
+                        )
+                        VALUES (
+                                $1, $2, 'in_review', 'none', 'member', $3,
+                                $4, 200, $5, 2, $6
+                        )
+                        RETURNING id
+                `, testWorkspaceID, "PM plan desc "+suffix, testUserID, childNumber, issueID,
+			"## 阶段\n分析\n\n```json\n"+`[{"temp_id":"d1","title":"从描述回收","stage":3}]`+"\n```").Scan(&childID); err != nil {
+			t.Fatalf("insert stage-2 child: %v", err)
+		}
+
+		w := get(t, issueID)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Plan   *string          `json:"plan"`
+			Drafts []map[string]any `json:"drafts"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Drafts) != 1 || resp.Drafts[0]["temp_id"] != "d1" {
+			t.Fatalf("drafts = %v", resp.Drafts)
 		}
 	})
 }

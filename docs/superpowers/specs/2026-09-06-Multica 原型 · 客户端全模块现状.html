@@ -1,0 +1,1360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 原型 · 客户端全模块现状（As-Is · 2026-09-06）</title>
+<style>
+:root {
+  --app-shell: oklch(0.964435 0.001327 286.375);
+  --page-canvas: oklch(0.988087 0 0);
+  --surface: oklch(1 0 0);
+  --surface-hover: oklch(0.967 0.001 286.375);
+  --surface-selected: oklch(0.95 0.002 286.375);
+  --surface-border: oklch(0.92 0.004 286.32);
+  --foreground: oklch(0.141 0.005 285.823);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --faint-foreground: oklch(0.606 0.016 285.938);
+  --primary: oklch(0.21 0.006 285.885);
+  --border: oklch(0.945 0.003 286.32);
+  --destructive: oklch(0.577 0.245 27.325);
+  --brand: oklch(0.55 0.16 255);
+  --success: oklch(0.55 0.16 145);
+  --warning: oklch(0.72 0.15 75);
+  --radius: 0.625rem;
+  --sidebar-accent: oklch(0.935 0.003 286.375);
+  --mod-member: oklch(0.62 0.17 15);
+  --mod-pay: oklch(0.58 0.15 250);
+  --mod-home: oklch(0.6 0.15 300);
+  --mod-order: oklch(0.62 0.14 55);
+  --mod-search: oklch(0.58 0.13 190);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: oklch(0.93 0.004 286.32);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+button, select { font: inherit; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+/* ── 原型导航 ── */
+.proto-nav {
+  position: sticky; top: 0; z-index: 200;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 16px; background: oklch(0.16 0.005 285.823); color: #ececf0;
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 8px; }
+.proto-nav .logo em { color: oklch(0.72 0.14 255); font-style: normal; }
+.proto-nav a, .proto-nav button.navbtn {
+  color: oklch(0.72 0.015 286); text-decoration: none; background: none; border: 0;
+  padding: 4px 9px; border-radius: 6px; font-size: 12px; cursor: pointer;
+}
+.proto-nav a:hover, .proto-nav button.navbtn:hover { background: oklch(1 0 0 / 8%); color: #fff; }
+.proto-nav a.on, .proto-nav button.navbtn.on { background: oklch(1 0 0 / 14%); color: #fff; font-weight: 600; }
+.proto-nav .sep { width: 1px; height: 16px; background: oklch(1 0 0 / 16%); margin: 0 4px; }
+.proto-nav .tog { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: oklch(0.7 0.01 286); }
+.proto-nav .tog label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+
+/* ── 总览画板 ── */
+.atlas { max-width: 1280px; margin: 0 auto; padding: 28px 24px 80px; }
+.atlas h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.atlas .lead { color: var(--muted-foreground); margin: 8px 0 22px; line-height: 1.7; max-width: 880px; }
+.atlas h2 { font-size: 15px; margin: 28px 0 10px; }
+.ia {
+  display: grid; grid-template-columns: 220px 1fr 220px; gap: 12px;
+  background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: 12px; padding: 16px; box-shadow: 0 8px 28px rgb(15 23 42 / 0.06);
+}
+.ia-col { background: var(--app-shell); border-radius: 10px; padding: 12px; }
+.ia-col h3 { font-size: 11px; color: var(--faint-foreground); margin-bottom: 8px; letter-spacing: .04em; }
+.ia-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px;
+  background: var(--surface); margin-bottom: 4px; cursor: pointer; border: 1px solid transparent;
+}
+.ia-item:hover { border-color: oklch(0.55 0.16 255 / 35%); }
+.ia-item small { margin-left: auto; color: var(--faint-foreground); font-size: 10.5px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.card {
+  background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px;
+  padding: 12px 14px; cursor: pointer; text-align: left; width: 100%;
+}
+.card:hover { border-color: oklch(0.55 0.16 255 / 40%); box-shadow: 0 4px 16px rgb(15 23 42 / 0.06); }
+.card b { display: block; font-size: 13px; margin-bottom: 4px; }
+.card p { color: var(--muted-foreground); font-size: 12px; line-height: 1.55; }
+.card .meta { margin-top: 8px; font-size: 11px; color: var(--faint-foreground); }
+.note {
+  background: oklch(0.97 0.02 85); border: 1px solid oklch(0.88 0.06 85);
+  border-radius: 10px; padding: 12px 14px; color: oklch(0.38 0.06 55); line-height: 1.65; font-size: 12.5px;
+}
+.note a { color: oklch(0.45 0.12 255); }
+
+/* ── 应用外壳 ── */
+.stage { padding: 18px 18px 48px; }
+.frame {
+  max-width: 1440px; margin: 0 auto; background: var(--page-canvas);
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 0.16), 0 4px 16px rgb(15 23 42 / 0.08);
+  border: 1px solid oklch(0.85 0.005 286.32);
+}
+.frame-bar {
+  height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+}
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: oklch(0.7 0.19 27); }
+.frame-bar i:nth-child(2) { background: oklch(0.8 0.16 85); }
+.frame-bar i:nth-child(3) { background: oklch(0.7 0.16 145); }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--faint-foreground); }
+.app { display: flex; height: 820px; }
+.sidebar {
+  width: 216px; flex: none; background: var(--app-shell);
+  border-right: 1px solid var(--surface-border);
+  padding: 10px 8px; display: flex; flex-direction: column; font-size: 12.5px;
+}
+.ws { display: flex; align-items: center; gap: 8px; padding: 6px 8px 10px; font-weight: 600; }
+.ws-av { width: 18px; height: 18px; border-radius: 5px; background: var(--primary); color: #fff; display: grid; place-items: center; font-size: 10px; }
+.s-group { margin: 10px 8px 3px; font-size: 11px; color: var(--faint-foreground); }
+.s-item {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px;
+  color: var(--muted-foreground); cursor: pointer; border: 0; background: none; width: 100%; text-align: left;
+}
+.s-item:hover { background: oklch(0.95 0.002 286); }
+.s-item.active { background: var(--sidebar-accent); color: var(--foreground); font-weight: 550; }
+.s-item .n { margin-left: auto; font-size: 10.5px; background: var(--surface-selected); border-radius: 8px; padding: 0 6px; line-height: 16px; }
+.s-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); margin-left: auto; }
+.s-foot { margin-top: auto; padding: 8px; }
+.s-new {
+  width: 100%; height: 30px; border-radius: 7px; border: 1px solid var(--surface-border);
+  background: var(--surface); cursor: pointer;
+}
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--page-canvas); }
+.screen { display: none; flex: 1; min-height: 0; flex-direction: column; }
+.screen.on { display: flex; }
+
+.topbar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); flex: none; min-height: 42px;
+}
+.topbar h1 { font-size: 13.5px; font-weight: 600; }
+.topbar .sp { flex: 1; }
+.chip, .btn, .sel {
+  height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--surface-border);
+  background: var(--surface); color: var(--foreground); cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+}
+.btn.pri { background: var(--primary); color: #fff; border-color: transparent; }
+.btn.ghost { background: transparent; }
+.chip.on { border-color: oklch(0.72 0.15 75 / 50%); background: oklch(0.72 0.15 75 / 12%); color: oklch(0.45 0.12 55); }
+.tabs { display: flex; gap: 2px; }
+.tab {
+  height: 26px; padding: 0 10px; border: 0; background: none; border-radius: 6px;
+  color: var(--muted-foreground); cursor: pointer;
+}
+.tab.on { background: var(--surface-selected); color: var(--foreground); font-weight: 550; }
+.line-tabs { display: flex; gap: 2px; height: 40px; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--surface-border); }
+.line-tab {
+  height: 40px; padding: 0 12px; border: 0; background: none; cursor: pointer;
+  color: var(--muted-foreground); border-bottom: 2px solid transparent;
+}
+.line-tab.on { color: var(--foreground); font-weight: 550; border-bottom-color: var(--foreground); }
+
+.pane { flex: 1; min-height: 0; overflow: auto; }
+.split { display: flex; flex: 1; min-height: 0; }
+.col { border-right: 1px solid var(--surface-border); overflow: auto; background: var(--surface); }
+.col.w320 { width: 320px; flex: none; }
+.col.grow { flex: 1; min-width: 0; }
+.col.w280 { width: 280px; flex: none; border-right: 0; border-left: 1px solid var(--surface-border); }
+
+.row {
+  display: flex; gap: 8px; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid transparent;
+}
+.row:hover { background: var(--surface-hover); }
+.row.on { background: var(--surface-selected); }
+.av { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 9px; font-weight: 700; color: #fff; flex: none; }
+.av.g { background: linear-gradient(135deg, #17301f, #2c5c3c); }
+.av.p { background: linear-gradient(135deg, #2a2150, #5b4aa8); }
+.av.b { background: linear-gradient(135deg, #1a2a4a, #3a6aa8); }
+.av.o { background: linear-gradient(135deg, #4a2a10, #c27820); }
+.av.sq { border-radius: 5px; }
+.t1 { font-weight: 550; line-height: 1.35; }
+.t2 { font-size: 11.5px; color: var(--faint-foreground); margin-top: 2px; }
+.unread { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); flex: none; margin-top: 6px; }
+
+.board { display: flex; gap: 10px; padding: 12px; height: 100%; overflow: auto; }
+.lane { width: 240px; flex: none; background: oklch(0.975 0.002 286); border-radius: 10px; padding: 8px; }
+.lane h3 { font-size: 12px; color: var(--muted-foreground); padding: 4px 6px 8px; display: flex; justify-content: space-between; }
+.icard {
+  background: var(--surface); border: 1px solid var(--surface-border); border-radius: 8px;
+  padding: 8px 10px; margin-bottom: 6px; cursor: pointer; box-shadow: 0 1px 1px rgb(15 23 42 / 0.03);
+}
+.icard:hover { border-color: oklch(0.55 0.16 255 / 35%); }
+.icard .id { font-size: 11px; color: var(--faint-foreground); }
+.pills { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.pill { font-size: 10.5px; padding: 1px 6px; border-radius: 99px; background: var(--app-shell); color: var(--muted-foreground); }
+
+table.grid { width: 100%; border-collapse: collapse; }
+table.grid th, table.grid td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+table.grid th { font-size: 11.5px; color: var(--faint-foreground); font-weight: 500; background: var(--page-canvas); position: sticky; top: 0; }
+table.grid tr { cursor: pointer; }
+table.grid tr:hover td { background: var(--surface-hover); }
+
+.kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 14px 16px; }
+.kpi .box { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; padding: 12px; }
+.kpi .box .k { font-size: 11.5px; color: var(--muted-foreground); }
+.kpi .box .v { font-size: 20px; font-weight: 650; margin-top: 4px; letter-spacing: -0.03em; }
+.kpi .box .h { font-size: 11px; color: var(--faint-foreground); margin-top: 4px; }
+
+.chart {
+  height: 160px; margin: 0 16px 16px; border: 1px solid var(--surface-border); border-radius: 10px;
+  background: linear-gradient(180deg, var(--surface), var(--app-shell));
+  position: relative; overflow: hidden;
+}
+.chart svg { width: 100%; height: 100%; }
+
+.cal-bar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); flex: 1; min-height: 0; }
+.cal .hd { padding: 6px 8px; font-size: 11px; color: var(--faint-foreground); border-bottom: 1px solid var(--border); }
+.cell { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 4px; min-height: 92px; }
+.cell.mute { background: oklch(0.975 0.001 286); color: var(--faint-foreground); }
+.cell.wk { background: oklch(0.982 0.002 286); }
+.cell.today .d { background: var(--brand); color: #fff; }
+.cell .d { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; }
+.blk {
+  font-size: 11px; border-radius: 5px; padding: 2px 5px; margin-top: 3px; cursor: pointer;
+  color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.blk.member { background: var(--mod-member); }
+.blk.pay { background: var(--mod-pay); }
+.blk.home { background: var(--mod-home); }
+.blk.search { background: var(--mod-search); }
+
+.drawer {
+  position: absolute; top: 34px; right: 0; bottom: 0; width: 55%; min-width: 420px; max-width: 760px;
+  background: var(--surface); border-left: 1px solid var(--surface-border);
+  box-shadow: -16px 0 40px rgb(15 23 42 / 0.08); z-index: 20; display: none; flex-direction: column;
+}
+.drawer.on { display: flex; }
+.drawer-h { padding: 16px 18px 10px; border-bottom: 1px solid var(--border); }
+.drawer-h .ttl { font-size: 15px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.badge { font-size: 11px; padding: 1px 8px; border-radius: 99px; background: var(--app-shell); font-weight: 500; }
+.badge.warn { background: oklch(0.72 0.15 75 / 16%); color: oklch(0.45 0.12 55); }
+.badge.ok { background: oklch(0.55 0.16 145 / 14%); color: oklch(0.4 0.12 145); }
+.badge.run { background: oklch(0.55 0.16 255 / 14%); color: oklch(0.42 0.14 255); }
+.stagebar { display: flex; gap: 0; padding: 12px 16px 0; }
+.st {
+  flex: 1; text-align: center; padding: 7px 4px; font-size: 12px; color: var(--muted-foreground);
+  border-bottom: 2px solid var(--surface-border); cursor: pointer; background: none; border-top: 0; border-left: 0; border-right: 0;
+}
+.st.on { color: var(--foreground); font-weight: 600; border-bottom-color: var(--brand); }
+.panel { padding: 14px 16px 24px; overflow: auto; }
+.box { border: 1px solid var(--surface-border); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.box h4 { font-size: 12.5px; margin-bottom: 6px; }
+.box p { color: var(--muted-foreground); line-height: 1.6; }
+
+.anno {
+  display: none; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  background: var(--brand); color: #fff; font-size: 10px; font-weight: 700;
+}
+body.show-anno .anno { display: inline-flex; }
+.hint {
+  display: none; font-size: 11px; color: oklch(0.42 0.12 255); background: oklch(0.55 0.16 255 / 8%);
+  border: 1px dashed oklch(0.55 0.16 255 / 40%); border-radius: 7px; padding: 6px 8px; margin: 8px 16px; line-height: 1.5;
+}
+body.show-anno .hint { display: block; }
+
+.modal {
+  position: absolute; inset: 34px 0 0; background: rgb(15 23 42 / 0.28);
+  display: none; align-items: flex-start; justify-content: center; padding-top: 48px; z-index: 30;
+}
+.modal.on { display: flex; }
+.dialog {
+  width: 720px; background: var(--surface); border-radius: 12px;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 0.22); border: 1px solid var(--surface-border);
+}
+.dialog-h { padding: 14px 16px 8px; display: flex; align-items: center; gap: 8px; }
+.dialog-b { padding: 8px 16px 16px; }
+.field { width: 100%; border: 0; outline: none; font: inherit; }
+.field.title { font-size: 16px; font-weight: 600; padding: 6px 0 10px; }
+.field.desc { min-height: 72px; color: var(--muted-foreground); resize: vertical; }
+.attr { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0 12px; }
+.dialog-f { display: flex; justify-content: flex-end; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+
+.empty { padding: 48px 20px; text-align: center; color: var(--muted-foreground); }
+.empty b { display: block; color: var(--foreground); margin-bottom: 6px; }
+.muted { color: var(--muted-foreground); }
+.faint { color: var(--faint-foreground); }
+.pad { padding: 14px 16px; }
+.flex { display: flex; align-items: center; gap: 8px; }
+.between { display: flex; align-items: center; justify-content: space-between; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.grow { flex: 1; min-width: 0; }
+.rel { position: relative; }
+.hidden { display: none !important; }
+.progress { height: 6px; background: var(--app-shell); border-radius: 99px; overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--brand); }
+.av-stack { display: flex; }
+.av-stack .av { margin-left: -6px; box-shadow: 0 0 0 1.5px #fff; }
+.av-stack .av:first-child { margin-left: 0; }
+.msg { padding: 10px 16px; }
+.msg .bubble { background: var(--app-shell); border-radius: 10px; padding: 8px 10px; max-width: 72%; line-height: 1.55; }
+.msg.me { display: flex; justify-content: flex-end; }
+.msg.me .bubble { background: oklch(0.55 0.16 255 / 12%); }
+.composer { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; gap: 8px; }
+.composer input { flex: 1; height: 34px; border: 1px solid var(--surface-border); border-radius: 8px; padding: 0 10px; background: var(--surface); }
+.props { padding: 12px; }
+.prop { display: flex; justify-content: space-between; padding: 7px 0; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+.prop span:first-child { color: var(--muted-foreground); }
+.sub { font-size: 12px; padding: 6px 8px; border: 1px solid var(--surface-border); border-radius: 7px; margin-bottom: 4px; }
+.matrix { display: grid; grid-template-columns: 120px repeat(6, 1fr); gap: 1px; background: var(--surface-border); border: 1px solid var(--surface-border); border-radius: 8px; overflow: hidden; }
+.matrix div { background: var(--surface); padding: 7px 6px; font-size: 11px; }
+.matrix .h { background: var(--app-shell); color: var(--muted-foreground); }
+.cell-hit { background: oklch(0.55 0.16 255 / 14%) !important; }
+.cell-miss { background: oklch(0.72 0.15 75 / 14%) !important; }
+.check { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.ok { color: oklch(0.4 0.12 145); }
+.bad { color: var(--destructive); }
+</style>
+</head>
+<body>
+<nav class="proto-nav">
+  <div class="logo">Multica <em>As-Is</em></div>
+  <button class="navbtn on" data-go="atlas">总览</button>
+  <span class="sep"></span>
+  <button class="navbtn" data-go="inbox">收件箱</button>
+  <button class="navbtn" data-go="chat">聊天</button>
+  <button class="navbtn" data-go="my-issues">我的任务</button>
+  <button class="navbtn" data-go="issues">任务</button>
+  <button class="navbtn" data-go="issue-detail">任务详情</button>
+  <button class="navbtn" data-go="calendar">日历</button>
+  <button class="navbtn" data-go="projects">项目</button>
+  <button class="navbtn" data-go="project">项目详情</button>
+  <button class="navbtn" data-go="autopilots">自动化</button>
+  <button class="navbtn" data-go="agents">智能体</button>
+  <button class="navbtn" data-go="squads">小队</button>
+  <button class="navbtn" data-go="usage">统计</button>
+  <button class="navbtn" data-go="runtimes">运行时</button>
+  <button class="navbtn" data-go="skills">Skills</button>
+  <button class="navbtn" data-go="settings">设置</button>
+  <div class="tog">
+    <span>对照 2026-09-06 实码 · 非目标态</span>
+    <label><input type="checkbox" id="annoTog"> 显示改进标注</label>
+  </div>
+</nav>
+
+<!-- ════ 总览 ════ -->
+<section id="atlas" class="atlas">
+  <h1>Multica 客户端 · 当前产品全模块原型</h1>
+  <p class="lead">
+    按 <code>packages/views/</code> + 桌面/Web 路由还原「现在用户实际看到的界面」，不是愿景稿。
+    侧栏、TAB、文案均对齐 <code>zh-Hans</code>。点下方卡片或顶部导航进入对应模块；打开「显示改进标注」可对照已知缺口。
+  </p>
+  <div class="note">
+    本文件是<strong>全模块现状壳</strong>。日历四阶段工作台的深稿见
+    <a href="./2026-09-04-rMultica 原型 · 需求日历 + 角色化流水线.html">需求日历 7 画面</a>；
+    档案/图谱/申报深稿见
+    <a href="./2026-09-05-Multica 原型 · 项目档案库（Artifact Archive）.html">项目档案库 12 画面</a>；
+    任务交付物深稿见
+    <a href="./2026-09-04-task-deliverables-prototype.html">交付物原型</a>。
+    改进时请先以本文件确认「现在长什么样」，再对照深稿看该补哪一层。
+  </div>
+
+  <h2>信息架构（侧栏实码 · layout.json）</h2>
+  <div class="ia">
+    <div class="ia-col">
+      <h3>PERSONAL</h3>
+      <div class="ia-item" data-go="inbox">收件箱 <small>Inbox</small></div>
+      <div class="ia-item" data-go="chat">聊天 <small>Chat</small></div>
+      <div class="ia-item" data-go="my-issues">我的任务 <small>My Issues</small></div>
+    </div>
+    <div class="ia-col">
+      <h3>工作区</h3>
+      <div class="ia-item" data-go="issues">任务 <small>Issues · 看板/列表/表格/泳道</small></div>
+      <div class="ia-item" data-go="calendar">日历 <small>一级模块 · 月/周</small></div>
+      <div class="ia-item" data-go="projects">项目 <small>6 TAB 详情</small></div>
+      <div class="ia-item" data-go="autopilots">自动化 <small>Autopilot</small></div>
+      <div class="ia-item" data-go="agents">智能体 <small>Agents</small></div>
+      <div class="ia-item" data-go="squads">小队 <small>Squads</small></div>
+      <div class="ia-item" data-go="usage">统计 <small>Usage / Errors</small></div>
+    </div>
+    <div class="ia-col">
+      <h3>配置</h3>
+      <div class="ia-item" data-go="runtimes">运行时 <small>Machines</small></div>
+      <div class="ia-item" data-go="skills">Skills</div>
+      <div class="ia-item" data-go="settings">设置 <small>Account + Workspace</small></div>
+    </div>
+  </div>
+
+  <h2>可点画面</h2>
+  <div class="cards">
+    <button class="card" data-go="inbox"><b>收件箱</b><p>左右分栏。未读点、筛选、批量归档；点开复用任务详情。</p><div class="meta">inbox-page · 320px 列表</div></button>
+    <button class="card" data-go="chat"><b>聊天</b><p>线程列表 + 会话。+ 新建、排队、项目上下文、运行时条幅。</p><div class="meta">chat-page</div></button>
+    <button class="card" data-go="my-issues"><b>我的任务</b><p>Scope：全部 / 已分配 / 我创建的 / 智能体和小队。无日历 TAB。</p><div class="meta">my-issues-page</div></button>
+    <button class="card" data-go="issues"><b>任务</b><p>工作区 Scope：全部 / 成员 / 智能体。看板默认；可切列表/表格/泳道。</p><div class="meta">issues-page · 无 Calendar tab</div></button>
+    <button class="card" data-go="issue-detail"><b>任务详情 · 需求工作台</b><p>四阶段条 + 右栏属性。仅顶层且带日历字段的 issue 挂流水线。</p><div class="meta">issue-detail + requirement-flow-section</div></button>
+    <button class="card" data-go="calendar"><b>日历</b><p>项目/PM/拆解状态/待确认 + 月周色块。点色块开 55% 抽屉。</p><div class="meta">calendar-page · 一级入口</div></button>
+    <button class="card" data-go="projects"><b>项目列表</b><p>表格/卡片。名称、状态、优先级、进度环、负责人、任务数。</p><div class="meta">projects-page</div></button>
+    <button class="card" data-go="project"><b>项目详情 6 TAB</b><p>任务概览 / 档案 / 产品功能 / 数据模型 / 申报就绪度 / 需求详情。</p><div class="meta">project-archive-views</div></button>
+    <button class="card" data-go="autopilots"><b>自动化</b><p>名称、执行者、触发器、上次/下次运行、模式。</p><div class="meta">autopilots-page</div></button>
+    <button class="card" data-go="agents"><b>智能体</b><p>列表 + 空白/AI 创建 + 详情 Overview/Work/Capabilities/Settings。</p><div class="meta">agents-page</div></button>
+    <button class="card" data-go="squads"><b>小队</b><p>队长、成员头像栈、详情页加人/归档。</p><div class="meta">squads-page</div></button>
+    <button class="card" data-go="usage"><b>统计</b><p>用量 / 错误。费用、Token、时长、task；7D/30D/90D。</p><div class="meta">dashboard-page · /usage</div></button>
+    <button class="card" data-go="runtimes"><b>运行时</b><p>本机/远端机器卡、健康点、添加电脑。</p><div class="meta">runtimes-page</div></button>
+    <button class="card" data-go="skills"><b>Skills</b><p>工作区指令包。使用中/未使用/我创建的。</p><div class="meta">skills-page</div></button>
+    <button class="card" data-go="settings"><b>设置</b><p>左栏 Account 7 TAB + Workspace 13 TAB（含账单/Plugins 门控）。</p><div class="meta">settings-page</div></button>
+    <button class="card" data-go="create-issue"><b>新建任务弹窗</b><p>手动 / 智能体两种模式。日历入口预填项目 + 班底 RoleStrip。</p><div class="meta">create-issue.tsx</div></button>
+  </div>
+</section>
+
+<!-- ════ 产品窗 ════ -->
+<div class="stage" id="productStage" hidden>
+<div class="frame rel" id="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span id="frameTitle">eleme / 任务</span></div>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-av">e</span> eleme</div>
+      <div class="s-group">固定</div>
+      <button class="s-item" data-go="issue-detail"><span class="av sq" style="background:var(--mod-member);width:14px;height:14px;font-size:8px">会</span> 会员权益改版</button>
+      <div class="s-group"></div>
+      <button class="s-item" data-nav="inbox" data-go="inbox">收件箱 <span class="n">3</span></button>
+      <button class="s-item" data-nav="chat" data-go="chat">聊天</button>
+      <button class="s-item" data-nav="my-issues" data-go="my-issues">我的任务</button>
+      <div class="s-group">工作区</div>
+      <button class="s-item" data-nav="issues" data-go="issues">任务</button>
+      <button class="s-item" data-nav="calendar" data-go="calendar">日历</button>
+      <button class="s-item" data-nav="projects" data-go="projects">项目</button>
+      <button class="s-item" data-nav="autopilots" data-go="autopilots">自动化</button>
+      <button class="s-item" data-nav="agents" data-go="agents">智能体</button>
+      <button class="s-item" data-nav="squads" data-go="squads">小队</button>
+      <button class="s-item" data-nav="usage" data-go="usage">统计</button>
+      <div class="s-group">配置</div>
+      <button class="s-item" data-nav="runtimes" data-go="runtimes">运行时</button>
+      <button class="s-item" data-nav="skills" data-go="skills">Skills</button>
+      <button class="s-item" data-nav="settings" data-go="settings">设置</button>
+      <div class="s-foot"><button class="s-new" data-go="create-issue">＋ 新建任务</button></div>
+    </aside>
+    <div class="main rel">
+
+      <!-- 收件箱 -->
+      <section class="screen" id="inbox">
+        <div class="topbar">
+          <h1>收件箱</h1><span class="faint">3 条通知</span>
+          <div class="sp"></div>
+          <button class="chip">筛选</button>
+          <button class="chip">⋯</button>
+        </div>
+        <p class="hint">现状：桌面左右分栏（列表 ~320px）；归档走 ?view=archived。有 issue 的通知右侧直接复用 IssueDetail，无独立通知详情设计。</p>
+        <div class="split">
+          <div class="col w320">
+            <div class="row on"><span class="unread"></span><span class="av g">B</span><div class="grow"><div class="t1">会员权益改版</div><div class="t2">Bohan 把状态设为 In Progress · 5 分钟</div></div></div>
+            <div class="row"><span class="unread"></span><span class="av p">P</span><div class="grow"><div class="t1">支付降级预案</div><div class="t2">原型师提交了 v2 待确认 · 2 小时</div></div></div>
+            <div class="row"><span class="av b">T</span><div class="grow"><div class="t1">首页改版</div><div class="t2">验收已通过 · 1 天</div></div></div>
+          </div>
+          <div class="col grow">
+            <div class="pad">
+              <div class="between"><div class="t1" style="font-size:16px">会员权益改版</div><button class="btn pri">Mark done</button></div>
+              <div class="t2" style="margin:8px 0 14px">#128 · 会员中心 · In Progress · 高</div>
+              <p class="muted">Q3 会员等级权益包重做。目标：新用户 7 日留存 +3pt，权益配置可运营自助。</p>
+              <div class="box" style="margin-top:14px"><h4>Activity</h4><p>Bohan 开始执行拆解后的 3 个子任务。</p></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 聊天 -->
+      <section class="screen" id="chat">
+        <div class="topbar"><h1>聊天</h1><div class="sp"></div><button class="btn">＋</button></div>
+        <p class="hint">现状：无选中会话时桌面右侧是「选择一个对话，或点 + 新建」。无 agent / 无 runtime 会出 Banner，不让发。</p>
+        <div class="split">
+          <div class="col w320">
+            <div class="row on"><span class="av g">B</span><div class="grow"><div class="t1">Bohan</div><div class="t2">已把支付模块锁住，等你确认拆解… · 刚刚</div></div></div>
+            <div class="row"><span class="av p">P</span><div class="grow"><div class="t1">Prototyper</div><div class="t2">v2 原型已上传 · 2 小时</div></div></div>
+            <div class="row"><span class="av o">S</span><div class="grow"><div class="t1">Scout</div><div class="t2">日报已推到频道 · 昨天</div></div></div>
+          </div>
+          <div class="col grow" style="display:flex;flex-direction:column">
+            <div class="topbar"><span class="av g">B</span><b>Bohan</b><span class="pill">Online</span><div class="sp"></div><button class="chip">归档</button></div>
+            <div class="pane">
+              <div class="msg"><div class="flex" style="gap:8px"><span class="av g">B</span><div class="bubble">支付模块已被 ModuleLocker 锁在 REQ-131。拆解确认前我不会开写。</div></div></div>
+              <div class="msg me"><div class="bubble">先出一版降级预案的原型，今晚确认。</div></div>
+            </div>
+            <div class="composer"><input placeholder="给 Bohan 发消息…"><button class="btn pri">发送</button></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 我的任务 -->
+      <section class="screen" id="my-issues">
+        <div class="topbar">
+          <h1>我的任务</h1>
+          <div class="tabs">
+            <button class="tab on">全部</button>
+            <button class="tab">已分配</button>
+            <button class="tab">我创建的</button>
+            <button class="tab">我的智能体和小队</button>
+          </div>
+          <div class="sp"></div>
+          <button class="chip">筛选</button>
+          <button class="chip">显示</button>
+          <button class="chip">看板 ▾</button>
+        </div>
+        <p class="hint">现状：视图只有看板 / 列表 / 表格 / 泳道，<b>没有日历 TAB</b>（日历已提升为一级模块）。空态：「没有分配给你的任务」。</p>
+        <div class="board">
+          <div class="lane"><h3>Todo <span>2</span></h3>
+            <div class="icard" data-go="issue-detail"><div class="id">#142</div><div class="t1">搜索排序实验</div><div class="pills"><span class="pill">中</span><span class="pill">搜索</span></div></div>
+            <div class="icard"><div class="id">#155</div><div class="t1">评测集补 20 条</div><div class="pills"><span class="pill">低</span></div></div>
+          </div>
+          <div class="lane"><h3>In Progress <span>1</span></h3>
+            <div class="icard" data-go="issue-detail"><div class="id">#128</div><div class="t1">会员权益改版</div><div class="pills"><span class="pill">高</span><span class="av g" style="width:16px;height:16px">B</span></div></div>
+          </div>
+          <div class="lane"><h3>In Review <span>1</span></h3>
+            <div class="icard"><div class="id">#131</div><div class="t1">支付降级预案</div><div class="pills"><span class="pill">紧急</span><span class="badge warn">原型待确认</span></div></div>
+          </div>
+          <div class="lane"><h3>Done <span>1</span></h3>
+            <div class="icard"><div class="id">#119</div><div class="t1">首页改版</div><div class="pills"><span class="pill">已完成</span></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 任务 -->
+      <section class="screen" id="issues">
+        <div class="topbar">
+          <h1>任务</h1>
+          <div class="tabs" id="issueScope">
+            <button class="tab on">全部</button>
+            <button class="tab">成员</button>
+            <button class="tab">智能体</button>
+          </div>
+          <div class="sp"></div>
+          <button class="chip">筛选</button>
+          <button class="chip">显示</button>
+          <div class="tabs" id="issueView">
+            <button class="tab on" data-view="board">看板</button>
+            <button class="tab" data-view="list">列表</button>
+            <button class="tab" data-view="table">表格</button>
+            <button class="tab" data-view="swim">泳道</button>
+          </div>
+        </div>
+        <p class="hint">现状：工作区任务页 <b>已去掉 Calendar tab</b>。甘特只出现在项目「任务概览」。筛选含状态/优先级/负责人/创建者/项目/标签/自定义属性/日期/模块。</p>
+        <div class="pane" id="issuesBoard">
+          <div class="board">
+            <div class="lane"><h3>Backlog <span>1</span></h3><div class="icard"><div class="id">#160</div><div class="t1">积分过期提醒</div></div></div>
+            <div class="lane"><h3>Todo <span>2</span></h3>
+              <div class="icard" data-go="issue-detail"><div class="id">#142</div><div class="t1">搜索排序实验</div><div class="pills"><span class="pill">搜索</span></div></div>
+              <div class="icard"><div class="id">#155</div><div class="t1">评测集补 20 条</div></div>
+            </div>
+            <div class="lane"><h3>In Progress <span>2</span></h3>
+              <div class="icard" data-go="issue-detail"><div class="id">#128</div><div class="t1">会员权益改版</div><div class="pills"><span class="av g" style="width:16px;height:16px">B</span></div></div>
+              <div class="icard" data-go="calendar"><div class="id">#131</div><div class="t1">支付降级预案</div><div class="pills"><span class="badge warn">原型待确认</span></div></div>
+            </div>
+            <div class="lane"><h3>Done <span>1</span></h3><div class="icard"><div class="id">#119</div><div class="t1">首页改版</div></div></div>
+          </div>
+        </div>
+        <div class="pane hidden" id="issuesList">
+          <table class="grid">
+            <thead><tr><th></th><th>标题</th><th>状态</th><th>优先级</th><th>负责人</th><th>项目</th></tr></thead>
+            <tbody>
+              <tr data-go="issue-detail"><td>#128</td><td>会员权益改版</td><td>In Progress</td><td>高</td><td>Bohan</td><td>会员中心</td></tr>
+              <tr><td>#131</td><td>支付降级预案</td><td>In Review</td><td>紧急</td><td>Prototyper</td><td>会员中心</td></tr>
+              <tr><td>#142</td><td>搜索排序实验</td><td>Todo</td><td>中</td><td>—</td><td>会员中心</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pane hidden" id="issuesTable">
+          <table class="grid">
+            <thead><tr><th>ID</th><th>标题</th><th>状态</th><th>阶段</th><th>模块</th><th>开始</th><th>截止</th><th>更新</th></tr></thead>
+            <tbody>
+              <tr data-go="issue-detail"><td>#128</td><td>会员权益改版</td><td>In Progress</td><td>执行</td><td>会员</td><td>09-01</td><td>09-12</td><td>今天</td></tr>
+              <tr><td>#131</td><td>支付降级预案</td><td>In Review</td><td>原型</td><td>支付</td><td>09-08</td><td>09-19</td><td>2h</td></tr>
+              <tr><td>#142</td><td>搜索排序实验</td><td>Todo</td><td>—</td><td>搜索</td><td>09-15</td><td>09-26</td><td>昨天</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pane hidden" id="issuesSwim">
+          <div class="board">
+            <div class="lane" style="width:280px"><h3>Bohan</h3><div class="icard"><div class="id">#128</div><div class="t1">会员权益改版</div></div></div>
+            <div class="lane" style="width:280px"><h3>Prototyper</h3><div class="icard"><div class="id">#131</div><div class="t1">支付降级预案</div></div></div>
+            <div class="lane" style="width:280px"><h3>未分配</h3><div class="icard"><div class="id">#142</div><div class="t1">搜索排序实验</div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 任务详情 -->
+      <section class="screen" id="issue-detail">
+        <div class="topbar">
+          <span class="faint">会员中心</span><span class="faint">/</span>
+          <h1>#128 会员权益改版</h1>
+          <span class="badge run">执行中</span>
+          <div class="sp"></div>
+          <button class="btn">Mark done</button>
+          <button class="chip">固定</button>
+          <button class="chip">侧栏</button>
+        </div>
+        <p class="hint">现状：四阶段条只挂在「顶层 + 带 goal/start_at/repo/拆解等日历字段」的需求上。子任务不渲染。右侧可折叠。下方还有 Requirement drill（动态 / 进度追踪 / 交付概览）和 Activity。</p>
+        <div class="split">
+          <div class="col grow pane">
+            <div class="pad">
+              <div class="t1" style="font-size:18px">会员权益改版</div>
+              <div class="pills" style="margin:8px 0 12px">
+                <span class="pill">In Progress</span><span class="pill">高</span><span class="pill">Bohan</span>
+                <span class="pill">09-01 ~ 09-12</span><span class="pill">会员</span>
+              </div>
+              <p class="muted">新用户 7 日留存 +3pt；权益包可运营配置；与支付降级预案互斥预检。</p>
+              <div class="stagebar" id="flowBar">
+                <button class="st">1 原型</button>
+                <button class="st">2 plan + 拆解</button>
+                <button class="st on">3 执行</button>
+                <button class="st">4 验收</button>
+              </div>
+              <div class="panel" id="flowPanel">
+                <div class="between"><h4>Execution schedule</h4><button class="btn">Trigger now</button></div>
+                <div class="box" style="margin-top:10px">
+                  <h4>Preflight</h4>
+                  <div class="check"><span>拆解已确认</span><span class="ok">通过</span></div>
+                  <div class="check"><span>模块锁 (member, REQ-128)</span><span class="ok">已持有</span></div>
+                  <div class="check"><span>与 REQ-131 支付模块互斥</span><span class="ok">不冲突</span></div>
+                </div>
+                <div class="box">
+                  <h4>子任务 · stage 3</h4>
+                  <div class="sub">#128.1 权益配置表 · Bohan · In Progress</div>
+                  <div class="sub">#128.2 结算对齐 · Data · Todo</div>
+                  <div class="sub">#128.3 回归用例 · Tester · Todo</div>
+                </div>
+              </div>
+              <div class="line-tabs" style="padding:0">
+                <button class="line-tab on">动态</button>
+                <button class="line-tab">进度追踪</button>
+                <button class="line-tab">交付概览</button>
+              </div>
+              <div class="box" style="margin-top:10px"><h4>Activity</h4><p>今天 16:20 Bohan 开始 #128.1。昨天 21:04 拆解确认门通过。</p></div>
+            </div>
+          </div>
+          <div class="col w280">
+            <div class="props">
+              <div class="t1" style="margin-bottom:8px">Properties</div>
+              <div class="prop"><span>Status</span><span>In Progress</span></div>
+              <div class="prop"><span>Priority</span><span>高</span></div>
+              <div class="prop"><span>Stage</span><span>3 执行</span></div>
+              <div class="prop"><span>Assignee</span><span>Bohan</span></div>
+              <div class="prop"><span>Dates</span><span>09-01 ~ 09-12</span></div>
+              <div class="prop"><span>Project</span><span>会员中心</span></div>
+              <div class="prop"><span>Module</span><span>会员</span></div>
+              <div class="t1" style="margin:14px 0 8px">Quick Actions</div>
+              <button class="chip" style="width:100%;justify-content:flex-start">让 Bohan 补测试</button>
+              <div class="t1" style="margin:14px 0 8px">Deliverables</div>
+              <div class="sub">docs/s3/权益配置.md</div>
+              <div class="t1" style="margin:14px 0 8px">Dependencies</div>
+              <div class="sub">被 #131 支付降级预案 阻塞风险</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 日历 -->
+      <section class="screen" id="calendar">
+        <div class="topbar">
+          <h1>日历</h1>
+          <select class="sel"><option>全部项目</option><option>会员中心</option><option>交易中台</option></select>
+          <select class="sel"><option>全部 PM</option><option>林清</option></select>
+          <select class="sel"><option>全部状态</option><option>原型待确认</option><option>拆解待确认</option><option>待触发</option><option>执行中</option></select>
+          <button class="chip on">待确认 2</button>
+          <div class="sp"></div>
+          <button class="btn pri" data-go="create-issue">＋ 新建需求</button>
+        </div>
+        <div class="cal-bar">
+          <button class="chip">◀</button><button class="chip">今天</button><button class="chip">▶</button>
+          <b>2026 年 9 月</b>
+          <div class="sp"></div>
+          <div class="tabs"><button class="tab">周</button><button class="tab on">月</button></div>
+        </div>
+        <p class="hint">现状：色块要求有 start_at/due_date 才进格子；无排期的待确认需求只进工具栏计数。点色块开页内抽屉（?req=），⌘ 可进详情。已触发后拖拽改期 409。周一为首列。</p>
+        <div class="pane rel">
+          <div class="cal">
+            <div class="hd">一</div><div class="hd">二</div><div class="hd">三</div><div class="hd">四</div><div class="hd">五</div><div class="hd">六</div><div class="hd">日</div>
+            <div class="cell mute"><div class="d">31</div></div>
+            <div class="cell"><div class="d">1</div><div class="blk member" data-open-drawer>○ 会员权益改版</div></div>
+            <div class="cell"><div class="d">2</div><div class="blk member">▶ 会员权益改版</div></div>
+            <div class="cell"><div class="d">3</div><div class="blk member">▶ 会员权益改版</div></div>
+            <div class="cell"><div class="d">4</div><div class="blk member">▶ 会员权益改版</div></div>
+            <div class="cell wk"><div class="d">5</div><div class="blk home">✅ 首页改版</div></div>
+            <div class="cell wk today"><div class="d">6</div><div class="blk member">▶ 会员权益改版</div></div>
+            <div class="cell"><div class="d">7</div></div>
+            <div class="cell"><div class="d">8</div><div class="blk pay" data-open-drawer>🎨 支付降级预案</div></div>
+            <div class="cell"><div class="d">9</div><div class="blk pay">🎨 支付降级预案</div></div>
+            <div class="cell"><div class="d">10</div></div>
+            <div class="cell"><div class="d">11</div></div>
+            <div class="cell wk"><div class="d">12</div><div class="blk member">▶ 会员权益改版</div></div>
+            <div class="cell wk"><div class="d">13</div></div>
+            <div class="cell"><div class="d">14</div></div>
+            <div class="cell"><div class="d">15</div><div class="blk search">○ 搜索排序实验</div></div>
+            <div class="cell"><div class="d">16</div><div class="blk search">○ 搜索排序实验</div></div>
+            <div class="cell"><div class="d">17</div></div>
+            <div class="cell"><div class="d">18</div></div>
+            <div class="cell wk"><div class="d">19</div><div class="blk pay">🎨 支付降级预案</div></div>
+            <div class="cell wk"><div class="d">20</div></div>
+            <div class="cell"><div class="d">21</div></div>
+            <div class="cell"><div class="d">22</div></div>
+            <div class="cell"><div class="d">23</div></div>
+            <div class="cell"><div class="d">24</div></div>
+            <div class="cell"><div class="d">25</div></div>
+            <div class="cell wk"><div class="d">26</div><div class="blk search">○ 搜索排序实验</div></div>
+            <div class="cell wk"><div class="d">27</div></div>
+            <div class="cell"><div class="d">28</div></div>
+            <div class="cell"><div class="d">29</div></div>
+            <div class="cell"><div class="d">30</div></div>
+            <div class="cell mute"><div class="d">1</div></div>
+            <div class="cell mute wk"><div class="d">2</div></div>
+            <div class="cell mute wk"><div class="d">3</div></div>
+          </div>
+          <aside class="drawer" id="calDrawer">
+            <div class="drawer-h">
+              <div class="ttl"><span class="faint">#131</span> 支付降级预案 <span class="badge warn">原型待确认</span>
+                <span class="av-stack"><span class="av p">P</span><span class="av g">B</span><span class="av b">T</span></span>
+                <button class="chip" style="margin-left:auto" id="closeDrawer">关闭</button>
+              </div>
+              <div class="t2">2026-09-08 09:00 ~ 2026-09-19</div>
+            </div>
+            <div class="stagebar">
+              <button class="st on">1 原型</button>
+              <button class="st">2 plan + 拆解</button>
+              <button class="st">3 执行</button>
+              <button class="st">4 验收</button>
+            </div>
+            <div class="panel">
+              <div class="box">
+                <h4>原型确认 <span class="anno">1</span></h4>
+                <p>v2 · Prototyper · 今天 16:02 提交。标记 3 处待拍板。确认门：通过后才能进拆解。</p>
+                <div class="flex" style="margin-top:8px"><button class="btn pri">确认此版本</button><button class="chip">打开预览</button></div>
+              </div>
+              <div class="hint" style="margin:0">抽屉复用 RequirementFlowSection；深稿标注（逐点确认、✗ 门、三栏对照）见日历 7 画面原型，当前产品是「能走通」不是「按标注做满」。</div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- 项目列表 -->
+      <section class="screen" id="projects">
+        <div class="topbar">
+          <h1>项目</h1><span class="faint">4</span>
+          <div class="sp"></div>
+          <input class="sel" style="width:180px" placeholder="搜索项目...">
+          <button class="chip">筛选</button>
+          <button class="chip">显示</button>
+          <div class="tabs" id="projView"><button class="tab on" data-pv="table">表格</button><button class="tab" data-pv="cards">卡片</button></div>
+          <button class="btn pri">新建项目</button>
+        </div>
+        <p class="hint">现状：表格列 = 名称 / 状态 / 优先级 / 进度环 / 负责人 / 任务数 / 创建时间。卡片同字段。空态「还没有项目」。</p>
+        <div class="pane" id="projTable">
+          <table class="grid">
+            <thead><tr><th>名称</th><th>状态</th><th>优先级</th><th>进度</th><th>负责人</th><th>任务数</th><th>创建时间</th></tr></thead>
+            <tbody>
+              <tr data-go="project"><td>会员中心</td><td>进行中</td><td>高</td><td><div class="progress" style="width:72px"><i style="width:62%"></i></div></td><td>林清</td><td>18</td><td>3 个月前</td></tr>
+              <tr><td>交易中台</td><td>进行中</td><td>紧急</td><td><div class="progress" style="width:72px"><i style="width:41%"></i></div></td><td>Bohan</td><td>11</td><td>2 个月前</td></tr>
+              <tr><td>增长实验</td><td>计划中</td><td>中</td><td><div class="progress" style="width:72px"><i style="width:8%"></i></div></td><td>—</td><td>3</td><td>12 天前</td></tr>
+              <tr><td>评测基建</td><td>已暂停</td><td>低</td><td><div class="progress" style="width:72px"><i style="width:20%"></i></div></td><td>林清</td><td>5</td><td>1 个月前</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pane hidden pad" id="projCards" style="display:none">
+          <div class="cards">
+            <div class="card" data-go="project"><b>会员中心</b><p>进行中 · 高 · 林清</p><div class="progress" style="margin-top:8px"><i style="width:62%"></i></div></div>
+            <div class="card"><b>交易中台</b><p>进行中 · 紧急 · Bohan</p><div class="progress" style="margin-top:8px"><i style="width:41%"></i></div></div>
+            <div class="card"><b>增长实验</b><p>计划中 · 中 · 无负责人</p><div class="progress" style="margin-top:8px"><i style="width:8%"></i></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 项目详情 -->
+      <section class="screen" id="project">
+        <div class="topbar">
+          <span class="faint">项目</span><span class="faint">/</span>
+          <h1>会员中心</h1>
+          <span class="badge run">进行中</span>
+          <div class="sp"></div>
+          <button class="chip">固定</button>
+        </div>
+        <div class="line-tabs" id="projTabs">
+          <button class="line-tab on" data-pt="overview">任务概览</button>
+          <button class="line-tab" data-pt="archive">档案</button>
+          <button class="line-tab" data-pt="features">产品功能</button>
+          <button class="line-tab" data-pt="data">数据模型</button>
+          <button class="line-tab" data-pt="filing">申报就绪度</button>
+          <button class="line-tab" data-pt="reqs">需求详情</button>
+        </div>
+        <p class="hint">现状：TAB 文案来自 archive.views。概览是原 IssueSurface（含甘特/日历子视图）。档案同步控制台后端齐、前端部分未接。图谱/本体未抽取时保持诚实空态。</p>
+        <div class="split grow" style="min-height:0">
+          <div class="col grow pane">
+            <div id="pt-overview">
+              <div class="topbar"><div class="tabs"><button class="tab on">看板</button><button class="tab">列表</button><button class="tab">甘特图</button><button class="tab">日历</button></div></div>
+              <div class="board">
+                <div class="lane"><h3>Todo</h3><div class="icard" data-go="issue-detail"><div class="id">#142</div><div class="t1">搜索排序实验</div></div></div>
+                <div class="lane"><h3>In Progress</h3><div class="icard" data-go="issue-detail"><div class="id">#128</div><div class="t1">会员权益改版</div></div></div>
+                <div class="lane"><h3>In Review</h3><div class="icard"><div class="id">#131</div><div class="t1">支付降级预案</div></div></div>
+              </div>
+            </div>
+            <div id="pt-archive" class="hidden pad">
+              <div class="between"><h3>同步控制台</h3><button class="btn">同步档案</button></div>
+              <div class="t2" style="margin:6px 0 12px">最近档案同步 · 从未 · 已索引 0 份文档</div>
+              <div class="box"><h4>同步流水线</h4><p>扫描 → 解析 → 上传 → 索引 → 重算 → 完成。各阶段由最近一次结果推断，无 sync_diagnostics 流式回报。</p></div>
+              <div class="box"><h4>待绑定队列</h4><p>没有待绑定项。手动绑定暂不可用——请通过 CLI 清单（issue_id）或归档动作绑定。</p></div>
+              <div class="box"><h4>档案映射</h4><p class="mono" style="font-size:11px">requirements/&lt;REQ-KEY&gt;/{s1-prototype, s2-plan, s3-execution, s4-acceptance}</p></div>
+            </div>
+            <div id="pt-features" class="hidden pad">
+              <div class="flex"><button class="chip on">模块</button><button class="chip">变更</button><button class="chip">对象</button><button class="chip">策略</button></div>
+              <table class="grid" style="margin-top:10px">
+                <thead><tr><th>模块</th><th>变更</th><th>对象</th><th>邻域</th></tr></thead>
+                <tbody>
+                  <tr><td>会员</td><td>3</td><td>权益包 / 等级</td><td>支付、首页</td></tr>
+                  <tr><td>支付</td><td>1</td><td>降级通道</td><td>会员</td></tr>
+                  <tr><td>搜索</td><td>2</td><td>排序实验</td><td>首页</td></tr>
+                </tbody>
+              </table>
+              <div class="hint" style="margin:12px 0 0">图谱快照最多 5 份；无快照时保持空态，不造假数。深稿见档案库原型 f10。</div>
+            </div>
+            <div id="pt-data" class="hidden pad">
+              <div class="flex"><button class="chip on">Product</button><button class="chip">Data</button><button class="chip">Iteration</button></div>
+              <div class="matrix" style="margin-top:10px">
+                <div class="h"></div><div class="h">会员</div><div class="h">支付</div><div class="h">首页</div><div class="h">订单</div><div class="h">搜索</div><div class="h">购物车</div>
+                <div class="h">user_level</div><div class="cell-hit">读写</div><div></div><div class="cell-hit">读</div><div></div><div></div><div></div>
+                <div class="h">pay_channel</div><div class="cell-miss">依赖</div><div class="cell-hit">读写</div><div></div><div class="cell-hit">读</div><div></div><div></div>
+                <div class="h">sku_rank</div><div></div><div></div><div class="cell-hit">读</div><div></div><div class="cell-hit">读写</div><div></div>
+              </div>
+            </div>
+            <div id="pt-filing" class="hidden pad">
+              <div class="flex"><button class="chip on">软著</button><button class="chip">专利</button><div class="sp"></div><button class="btn">Run check</button><button class="chip">导出</button></div>
+              <div class="check"><span>must · 源代码鉴别材料</span><span class="bad">缺</span></div>
+              <div class="check"><span>must · 操作说明书</span><span class="ok">已齐</span></div>
+              <div class="check"><span>conditional · 流程图（有架构变更时）</span><span class="ok">已齐</span></div>
+              <div class="check"><span>aux · 答辩 Q&A</span><span class="faint">可选</span></div>
+            </div>
+            <div id="pt-reqs" class="hidden pad">
+              <div class="between"><h3>需求详情</h3><button class="btn pri" data-go="create-issue">新建需求</button></div>
+              <div class="box" style="margin-top:10px;cursor:pointer" data-go="calendar"><div class="between"><b>#128 会员权益改版</b><span class="badge run">执行中</span></div><div class="t2">09-01 ~ 09-12 · stage 3/4</div></div>
+              <div class="box" style="cursor:pointer" data-open-drawer><div class="between"><b>#131 支付降级预案</b><span class="badge warn">原型待确认</span></div><div class="t2">09-08 ~ 09-19 · stage 1/4</div></div>
+              <div class="box"><div class="between"><b>#142 搜索排序实验</b><span class="badge">未拆解</span></div><div class="t2">09-15 ~ 09-26</div></div>
+            </div>
+          </div>
+          <div class="col w280">
+            <div class="props">
+              <div class="t1">Properties</div>
+              <div class="prop"><span>Status</span><span>进行中</span></div>
+              <div class="prop"><span>Priority</span><span>高</span></div>
+              <div class="prop"><span>Lead</span><span>林清</span></div>
+              <div class="t1" style="margin-top:12px">Progress</div>
+              <div class="progress" style="margin:8px 0"><i style="width:62%"></i></div>
+              <div class="t2">18 任务 · 11 已完成</div>
+              <div class="t1" style="margin-top:12px">Modules</div>
+              <div class="sub">会员 · 支付 · 首页 · 搜索</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 自动化 -->
+      <section class="screen" id="autopilots">
+        <div class="topbar"><h1>自动化</h1><div class="sp"></div><button class="chip">筛选</button><button class="btn pri">新建自动化</button></div>
+        <p class="hint">现状：空态先推模板卡（Daily news、PR review 等）。列：名称 / 执行者 / 触发器 / 上次运行 / 下次运行 / 模式 / 创建者。</p>
+        <div class="pane">
+          <table class="grid">
+            <thead><tr><th>名称</th><th>执行者</th><th>触发器</th><th>上次运行</th><th>下次运行</th><th>模式</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr data-go="autopilot-detail"><td>工作日报</td><td>Scout</td><td>每天 18:00</td><td>昨天 18:00</td><td>今天 18:00</td><td>Schedule</td><td>启用</td></tr>
+              <tr><td>PR 预审</td><td>Bohan</td><td>Webhook</td><td>2 小时前</td><td>—</td><td>Webhook</td><td>启用</td></tr>
+              <tr><td>周会纪要</td><td>Writer</td><td>每周五 17:00</td><td>上周五</td><td>周五 17:00</td><td>Schedule</td><td>已暂停</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="screen" id="autopilot-detail">
+        <div class="topbar"><span class="faint">自动化</span><span class="faint">/</span><h1>工作日报</h1><div class="sp"></div><button class="btn pri">Run now</button></div>
+        <div class="pane pad" style="max-width:760px">
+          <div class="box"><h4>执行者</h4><p>Scout · Schedule · 每天 18:00 Asia/Shanghai</p></div>
+          <div class="box"><h4>Subscribers</h4><p>林清、#eng-daily</p></div>
+          <div class="box"><h4>Runs</h4>
+            <div class="sub">#2041 成功 · 昨天 18:00:03 · 42s</div>
+            <div class="sub">#2033 成功 · 前天 18:00:02 · 38s</div>
+            <div class="sub">#2028 失败 · 09-03 · runtime timeout</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 智能体 -->
+      <section class="screen" id="agents">
+        <div class="topbar">
+          <div><h1>智能体</h1><div class="t2">能领取任务、留下评论、推进状态的 AI 队友。</div></div>
+          <div class="sp"></div>
+          <div class="tabs"><button class="tab on">我的</button><button class="tab">全部</button></div>
+          <button class="chip">筛选</button>
+          <button class="btn pri" data-go="agent-create">新建智能体</button>
+        </div>
+        <p class="hint">现状：两行 ListGrid。列：头像+名称+描述 / 状态 / Owner / Access / Runtime / Last active / Runs / Model。创建分「从空白开始」和「用 AI 构建（推荐）」。</p>
+        <div class="pane">
+          <table class="grid">
+            <thead><tr><th>智能体</th><th>状态</th><th>Owner</th><th>Runtime</th><th>最近活跃</th><th>Runs</th><th>Model</th></tr></thead>
+            <tbody>
+              <tr data-go="agent-detail"><td><div class="flex"><span class="av g">B</span><div><div class="t1">Bohan</div><div class="t2">全栈实现，持模块锁后才开写</div></div></div></td><td>在线</td><td>林清</td><td>MacBook Pro</td><td>刚刚</td><td>128</td><td>claude-sonnet</td></tr>
+              <tr><td><div class="flex"><span class="av p">P</span><div><div class="t1">Prototyper</div><div class="t2">出 HTML 原型并标注确认点</div></div></div></td><td>在线</td><td>林清</td><td>MacBook Pro</td><td>2 小时</td><td>46</td><td>claude-sonnet</td></tr>
+              <tr><td><div class="flex"><span class="av b">T</span><div><div class="t1">Tester</div><div class="t2">验收与回归</div></div></div></td><td>空闲</td><td>林清</td><td>云端 worker</td><td>昨天</td><td>31</td><td>gpt-4.1</td></tr>
+              <tr><td><div class="flex"><span class="av o">S</span><div><div class="t1">Scout</div><div class="t2">日报与频道摘要</div></div></div></td><td>离线</td><td>林清</td><td>—</td><td>3 天</td><td>90</td><td>claude-haiku</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="screen" id="agent-create">
+        <div class="topbar"><span class="faint">Agent creation</span></div>
+        <div class="pane pad" style="max-width:720px;margin:0 auto">
+          <div class="t2">创建智能体</div>
+          <h2 style="font-size:22px;margin:6px 0 16px">How would you like to start?</h2>
+          <div class="cards">
+            <div class="card"><b>Start blank</b><p>手动填写 Identity / Behavior / Execution / Access。</p></div>
+            <div class="card" style="outline:1.5px solid oklch(0.55 0.16 255 / 45%)"><b>Build with AI <span class="pill">Recommended</span></b><p>左侧对话、右侧配置草稿，会话中逐步生成智能体。</p></div>
+          </div>
+          <div class="flex" style="margin-top:16px;justify-content:flex-end"><button class="btn pri">Continue</button></div>
+        </div>
+      </section>
+
+      <section class="screen" id="agent-detail">
+        <div class="topbar">
+          <span class="av g">B</span><h1>Bohan</h1><span class="pill">Online</span><span class="pill">Workspace</span>
+          <div class="sp"></div>
+          <button class="btn pri" data-go="chat">Chat</button>
+          <button class="chip">⋯</button>
+        </div>
+        <div class="line-tabs" id="agentTabs">
+          <button class="line-tab on" data-at="ov">Overview</button>
+          <button class="line-tab" data-at="work">Work</button>
+          <button class="line-tab" data-at="cap">Capabilities</button>
+          <button class="line-tab" data-at="set">Settings</button>
+        </div>
+        <div class="split">
+          <div class="col grow pane pad">
+            <div id="at-ov">
+              <div class="box"><h4>Instructions</h4><p>你是会员中心的实现智能体。未持有 ModuleLocker 不得改支付/会员核心路径。拆解未确认前只做只读探查。</p></div>
+              <div class="kpi" style="padding:0;grid-template-columns:repeat(3,1fr)">
+                <div class="box"><div class="k">Active issues</div><div class="v">2</div></div>
+                <div class="box"><div class="k">Runs · 7D</div><div class="v">18</div></div>
+                <div class="box"><div class="k">Fail rate</div><div class="v">4%</div></div>
+              </div>
+            </div>
+            <div id="at-work" class="hidden">
+              <div class="icard" data-go="issue-detail"><div class="id">#128</div><div class="t1">会员权益改版</div></div>
+              <div class="icard"><div class="id">#131.2</div><div class="t1">支付降级通道（等待原型确认）</div></div>
+            </div>
+            <div id="at-cap" class="hidden">
+              <div class="tabs"><button class="tab on">Instructions</button><button class="tab">Skills</button><button class="tab">MCP</button><button class="tab">Integrations</button></div>
+              <div class="box" style="margin-top:10px"><h4>Skills</h4><div class="sub">frontend-review</div><div class="sub">module-lock-guard</div></div>
+            </div>
+            <div id="at-set" class="hidden">
+              <div class="tabs"><button class="tab on">General</button><button class="tab">Access</button><button class="tab">Environment</button><button class="tab">Runtime</button></div>
+              <div class="prop"><span>Name</span><span>Bohan</span></div>
+              <div class="prop"><span>Visibility</span><span>Workspace</span></div>
+              <div class="prop"><span>Runtime</span><span>MacBook Pro</span></div>
+            </div>
+          </div>
+          <div class="col w280">
+            <div class="props">
+              <div class="t1">Inspector</div>
+              <div class="prop"><span>Model</span><span>claude-sonnet</span></div>
+              <div class="prop"><span>Thinking</span><span>On</span></div>
+              <div class="prop"><span>Runtime</span><span>MacBook Pro</span></div>
+              <div class="prop"><span>Workload</span><span>处理中 1</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 小队 -->
+      <section class="screen" id="squads">
+        <div class="topbar">
+          <h1>小队</h1>
+          <div class="tabs"><button class="tab on">我的</button><button class="tab">全部</button></div>
+          <div class="sp"></div>
+          <button class="btn pri">新建小队</button>
+        </div>
+        <p class="hint">现状：两行 grid。列：名称+描述 / 队长 / 成员头像栈 / 创建者 / 创建时间。归档后进行中任务转交给队长，不可恢复。</p>
+        <div class="pane">
+          <table class="grid">
+            <thead><tr><th>小队</th><th>队长</th><th>成员</th><th>创建者</th><th>创建时间</th></tr></thead>
+            <tbody>
+              <tr data-go="squad-detail"><td><div class="t1">会员交付组</div><div class="t2">权益改版 + 支付预案并行</div></td><td>林清</td><td><span class="av-stack"><span class="av g">B</span><span class="av p">P</span><span class="av b">T</span></span></td><td>林清</td><td>2 个月前</td></tr>
+              <tr><td><div class="t1">增长实验组</div><div class="t2">搜索与推荐小流量</div></td><td>Bohan</td><td><span class="av-stack"><span class="av g">B</span><span class="av o">S</span></span></td><td>林清</td><td>12 天前</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="screen" id="squad-detail">
+        <div class="topbar"><span class="faint">小队</span><span class="faint">/</span><h1>会员交付组</h1><div class="sp"></div><button class="chip">归档</button></div>
+        <div class="pane pad" style="max-width:760px">
+          <p class="muted">权益改版 + 支付预案并行。队长林清。</p>
+          <div class="box" style="margin-top:12px">
+            <div class="between"><h4>成员</h4><button class="chip">添加成员</button></div>
+            <div class="prop"><span>林清 · 成员 · 队长</span><span>3 active issues</span></div>
+            <div class="prop"><span>Bohan · 智能体</span><span>Online · #128</span></div>
+            <div class="prop"><span>Prototyper · 智能体</span><span>Online · #131</span></div>
+            <div class="prop"><span>Tester · 智能体</span><span>空闲</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 统计 -->
+      <section class="screen" id="usage">
+        <div class="topbar">
+          <h1>统计</h1>
+          <div class="tabs"><button class="tab on" id="usageTabU">用量</button><button class="tab" id="usageTabE">错误</button></div>
+          <select class="sel"><option>全部项目</option><option>会员中心</option></select>
+          <div class="tabs"><button class="tab">7D</button><button class="tab on">30D</button><button class="tab">90D</button></div>
+          <div class="sp"></div>
+          <span class="faint">Asia/Shanghai · 更新于 18:20</span>
+          <button class="chip">刷新</button>
+        </div>
+        <p class="hint">现状：路由 /usage，侧栏叫「统计」。Usage KPI = 费用 / Token / 运行时长 / task 数。Errors KPI = 失败 task / 失败率 / 受影响智能体。</p>
+        <div class="pane" id="usagePane">
+          <div class="kpi">
+            <div class="box"><div class="k">费用 · 30天</div><div class="v">$186</div><div class="h">日均 $6.2</div></div>
+            <div class="box"><div class="k">Token · 30天</div><div class="v">42.1M</div><div class="h">输入 31.4M · 输出 10.7M</div></div>
+            <div class="box"><div class="k">运行时长 · 30天</div><div class="v">38h</div><div class="h">共 214 个 task</div></div>
+            <div class="box"><div class="k">task 数 · 30天</div><div class="v">214</div><div class="h">失败 9 个</div></div>
+          </div>
+          <div class="chart">
+            <svg viewBox="0 0 600 160" preserveAspectRatio="none">
+              <polyline fill="none" stroke="oklch(0.55 0.16 255)" stroke-width="2"
+                points="10,120 50,110 90,100 130,108 170,90 210,95 250,70 290,80 330,60 370,72 410,55 450,62 490,48 530,52 570,40"/>
+            </svg>
+          </div>
+          <div class="pad">
+            <div class="t1" style="margin-bottom:8px">Agent leaderboard</div>
+            <table class="grid">
+              <thead><tr><th>智能体</th><th>费用</th><th>Token</th><th>Tasks</th></tr></thead>
+              <tbody>
+                <tr><td>Bohan</td><td>$92</td><td>21.0M</td><td>88</td></tr>
+                <tr><td>Prototyper</td><td>$41</td><td>8.2M</td><td>46</td></tr>
+                <tr><td>Scout</td><td>$18</td><td>6.1M</td><td>90</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="pane hidden" id="errorsPane">
+          <div class="kpi">
+            <div class="box"><div class="k">失败 task · 30天</div><div class="v">9</div><div class="h">共 214 次运行</div></div>
+            <div class="box"><div class="k">失败率</div><div class="v">4.2%</div></div>
+            <div class="box"><div class="k">受影响智能体</div><div class="v">3</div></div>
+            <div class="box"><div class="k">Top offender</div><div class="v" style="font-size:16px">Scout</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 运行时 -->
+      <section class="screen" id="runtimes">
+        <div class="topbar">
+          <div><h1>运行时</h1><div class="t2">为智能体跑 CLI 会话的机器和云端 worker。</div></div>
+          <div class="sp"></div>
+          <button class="chip">我的</button>
+          <button class="btn">添加电脑</button>
+        </div>
+        <p class="hint">现状：机器卡片（健康点、本机/远端、runtime 行、负载）。桌面端会自动扫描本机。未分配 machine 的 profile 单独成 Orphan 区。</p>
+        <div class="pane pad">
+          <div class="cards">
+            <div class="card">
+              <div class="flex"><span class="unread" style="background:var(--success)"></span><b>MacBook Pro</b><span class="pill">本机</span></div>
+              <p>default · claude-code · 处理中 1</p>
+              <div class="t2">Bohan · Prototyper</div>
+            </div>
+            <div class="card">
+              <div class="flex"><span class="unread" style="background:var(--success)"></span><b>cloud-worker-02</b><span class="pill">远端</span></div>
+              <p>idle · Tester</p>
+            </div>
+            <div class="card">
+              <div class="flex"><span class="unread" style="background:var(--warning)"></span><b>办公台</b><span class="pill">远端</span></div>
+              <p>不稳定 · 上次心跳 68s</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Skills -->
+      <section class="screen" id="skills">
+        <div class="topbar">
+          <div><h1>Skills</h1><div class="t2">工作区里任何智能体都能使用的指令。</div></div>
+          <div class="sp"></div>
+          <div class="tabs"><button class="tab on">全部</button><button class="tab">使用中</button><button class="tab">未使用</button><button class="tab">我创建的</button></div>
+          <button class="btn pri">新建 skill</button>
+        </div>
+        <div class="pane">
+          <table class="grid">
+            <thead><tr><th>名称</th><th>Used by</th><th>Source</th><th>创建者</th><th>更新</th></tr></thead>
+            <tbody>
+              <tr><td>frontend-review</td><td>Bohan</td><td>workspace</td><td>林清</td><td>昨天</td></tr>
+              <tr><td>module-lock-guard</td><td>Bohan, Tester</td><td>workspace</td><td>林清</td><td>3 天前</td></tr>
+              <tr><td>prototype-gate</td><td>Prototyper</td><td>imported</td><td>林清</td><td>1 周前</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 设置 -->
+      <section class="screen" id="settings">
+        <div class="topbar"><h1>设置</h1></div>
+        <p class="hint">现状：桌面左侧竖 TAB（宽 56 的图标栏在实码里是 56 + 内容）。Account 7 项；Workspace 含账单/Plugins feature flag。URL ?tab=profile。桌面额外 Daemon / Updates。</p>
+        <div class="split">
+          <div class="col" style="width:200px;flex:none">
+            <div class="s-group">我的账号</div>
+            <button class="s-item active" data-st="profile">个人资料</button>
+            <button class="s-item" data-st="preferences">偏好设置</button>
+            <button class="s-item" data-st="shortcuts">快捷键</button>
+            <button class="s-item" data-st="issue">任务</button>
+            <button class="s-item" data-st="chat">聊天</button>
+            <button class="s-item" data-st="notifications">通知</button>
+            <button class="s-item" data-st="tokens">API Token</button>
+            <div class="s-group">工作区</div>
+            <button class="s-item" data-st="general">常规</button>
+            <button class="s-item" data-st="repositories">代码仓库</button>
+            <button class="s-item" data-st="github">GitHub</button>
+            <button class="s-item" data-st="integrations">集成</button>
+            <button class="s-item" data-st="labs">实验室</button>
+            <button class="s-item" data-st="members">成员</button>
+            <button class="s-item" data-st="billing">账单与套餐</button>
+            <button class="s-item" data-st="labels">标签</button>
+            <button class="s-item" data-st="issue_statuses">任务状态</button>
+            <button class="s-item" data-st="properties">属性</button>
+            <button class="s-item" data-st="quick_actions">快捷操作</button>
+            <button class="s-item" data-st="mcp">MCP</button>
+            <button class="s-item" data-st="plugins">Plugins</button>
+            <div class="s-group">桌面端</div>
+            <button class="s-item" data-st="daemon">Daemon</button>
+            <button class="s-item" data-st="updates">Updates</button>
+          </div>
+          <div class="col grow pane pad" style="max-width:720px" id="settingsBody">
+            <h3 style="margin-bottom:6px">个人信息</h3>
+            <p class="muted">会随 task 一起发送给为你工作的智能体——角色、技术栈、偏好，任何你会在第一天告诉新同事的内容。</p>
+            <div class="box" style="margin-top:12px">
+              <div class="t2">关于你</div>
+              <p>后端工程师（Go + Postgres）。喜欢简洁的 PR，改动同时附上测试。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 创建任务覆盖在任意页上，由 JS 处理 -->
+    </div>
+  </div>
+
+  <div class="modal" id="createModal">
+    <div class="dialog">
+      <div class="dialog-h">
+        <div class="tabs"><button class="tab on" id="cmManual">手动创建</button><button class="tab" id="cmAgent">用智能体创建</button></div>
+        <div class="sp"></div>
+        <button class="chip" id="cmClose">关闭</button>
+      </div>
+      <div class="dialog-b" id="cmManualBox">
+        <input class="field title" placeholder="Issue title" value="搜索排序实验补充评测">
+        <textarea class="field desc" placeholder="Add description...">补充 20 条评测集，覆盖会员/搜索交叉。</textarea>
+        <div class="attr">
+          <span class="pill">Todo</span><span class="pill">中</span><span class="pill">项目 · 会员中心</span>
+          <span class="pill">09-15 ~ 09-26</span><span class="pill">模块 · 搜索</span>
+        </div>
+        <div class="box">
+          <h4>班底 RoleStrip <span class="anno">2</span></h4>
+          <div class="flex"><span class="pill">PM 林清</span><span class="pill">原型师 Prototyper</span><span class="pill">Dev Bohan</span><span class="pill">Data —</span><span class="pill">Tester Tester</span></div>
+          <p class="t2" style="margin-top:6px">从日历点「新建需求」会预填 project_id 与 source=calendar，并带出 goal / decompose_mode / repo。</p>
+        </div>
+        <div class="dialog-f"><button class="btn ghost">更多选项</button><button class="btn pri">Create Issue</button></div>
+      </div>
+      <div class="dialog-b hidden" id="cmAgentBox">
+        <p class="muted">Pick an agent…</p>
+        <div class="flex" style="margin:8px 0"><span class="av g">B</span><b>Bohan</b></div>
+        <textarea class="field desc" placeholder="let Bohan fix the inbox…">让 Bohan 把搜索评测集补齐并开 PR。</textarea>
+        <div class="t2" style="margin:8px 0">Bohan will start working right after creation.</div>
+        <div class="dialog-f"><button class="btn pri">Create</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+const TITLES = {
+  inbox: "eleme / 收件箱",
+  chat: "eleme / 聊天",
+  "my-issues": "eleme / 我的任务",
+  issues: "eleme / 任务",
+  "issue-detail": "eleme / #128 会员权益改版",
+  calendar: "eleme / 日历",
+  projects: "eleme / 项目",
+  project: "eleme / 会员中心",
+  autopilots: "eleme / 自动化",
+  "autopilot-detail": "eleme / 工作日报",
+  agents: "eleme / 智能体",
+  "agent-create": "eleme / 创建智能体",
+  "agent-detail": "eleme / Bohan",
+  squads: "eleme / 小队",
+  "squad-detail": "eleme / 会员交付组",
+  usage: "eleme / 统计",
+  runtimes: "eleme / 运行时",
+  skills: "eleme / Skills",
+  settings: "eleme / 设置",
+  "create-issue": "eleme / 新建任务",
+};
+const NAV_ALIAS = {
+  "issue-detail": "issues",
+  "create-issue": "issues",
+  project: "projects",
+  "autopilot-detail": "autopilots",
+  "agent-create": "agents",
+  "agent-detail": "agents",
+  "squad-detail": "squads",
+};
+
+function go(id) {
+  if (id === "atlas" || !id) {
+    document.getElementById("atlas").style.display = "";
+    document.getElementById("productStage").hidden = true;
+    document.querySelectorAll(".proto-nav .navbtn").forEach((b) => b.classList.toggle("on", b.dataset.go === "atlas"));
+    history.replaceState(null, "", "#atlas");
+    return;
+  }
+  document.getElementById("atlas").style.display = "none";
+  document.getElementById("productStage").hidden = false;
+  document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("on", s.id === id));
+  document.querySelectorAll(".proto-nav .navbtn").forEach((b) => b.classList.toggle("on", b.dataset.go === id));
+  const nav = NAV_ALIAS[id] || id;
+  document.querySelectorAll(".sidebar .s-item[data-nav]").forEach((b) => b.classList.toggle("active", b.dataset.nav === nav));
+  document.getElementById("frameTitle").textContent = TITLES[id] || "eleme";
+  const modal = document.getElementById("createModal");
+  modal.classList.toggle("on", id === "create-issue");
+  if (id === "create-issue") {
+    document.getElementById("issues").classList.add("on");
+  }
+  history.replaceState(null, "", "#" + id);
+  window.scrollTo(0, 0);
+}
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-go]");
+  if (t) { e.preventDefault(); go(t.dataset.go); }
+  if (e.target.closest("[data-open-drawer]")) {
+    go("calendar");
+    document.getElementById("calDrawer").classList.add("on");
+  }
+});
+document.getElementById("closeDrawer")?.addEventListener("click", () => {
+  document.getElementById("calDrawer").classList.remove("on");
+});
+document.getElementById("annoTog").addEventListener("change", (e) => {
+  document.body.classList.toggle("show-anno", e.target.checked);
+});
+
+document.getElementById("issueView")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-view]");
+  if (!b) return;
+  document.querySelectorAll("#issueView .tab").forEach((x) => x.classList.toggle("on", x === b));
+  ["board", "list", "table", "swim"].forEach((v) => {
+    const el = document.getElementById("issues" + v[0].toUpperCase() + v.slice(1));
+    if (el) el.classList.toggle("hidden", v !== b.dataset.view);
+  });
+});
+
+document.getElementById("projView")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-pv]");
+  if (!b) return;
+  document.querySelectorAll("#projView .tab").forEach((x) => x.classList.toggle("on", x === b));
+  document.getElementById("projTable").classList.toggle("hidden", b.dataset.pv !== "table");
+  const cards = document.getElementById("projCards");
+  cards.classList.toggle("hidden", b.dataset.pv !== "cards");
+  cards.style.display = b.dataset.pv === "cards" ? "block" : "none";
+});
+
+document.getElementById("projTabs")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-pt]");
+  if (!b) return;
+  document.querySelectorAll("#projTabs .line-tab").forEach((x) => x.classList.toggle("on", x === b));
+  ["overview", "archive", "features", "data", "filing", "reqs"].forEach((k) => {
+    document.getElementById("pt-" + k).classList.toggle("hidden", k !== b.dataset.pt);
+  });
+});
+
+document.getElementById("agentTabs")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-at]");
+  if (!b) return;
+  document.querySelectorAll("#agentTabs .line-tab").forEach((x) => x.classList.toggle("on", x === b));
+  ["ov", "work", "cap", "set"].forEach((k) => {
+    document.getElementById("at-" + k).classList.toggle("hidden", k !== b.dataset.at);
+  });
+});
+
+document.getElementById("usageTabU")?.addEventListener("click", () => {
+  document.getElementById("usageTabU").classList.add("on");
+  document.getElementById("usageTabE").classList.remove("on");
+  document.getElementById("usagePane").classList.remove("hidden");
+  document.getElementById("errorsPane").classList.add("hidden");
+});
+document.getElementById("usageTabE")?.addEventListener("click", () => {
+  document.getElementById("usageTabE").classList.add("on");
+  document.getElementById("usageTabU").classList.remove("on");
+  document.getElementById("errorsPane").classList.remove("hidden");
+  document.getElementById("usagePane").classList.add("hidden");
+});
+
+const SETTINGS_COPY = {
+  profile: ["个人信息", "会随 task 一起发送给为你工作的智能体——角色、技术栈、偏好。"],
+  preferences: ["偏好设置", "主题、语言、密度、默认视图。"],
+  shortcuts: ["快捷键", "C 新建任务。可自定义。"],
+  issue: ["任务", "创建默认字段、完成行为、子任务展示。"],
+  chat: ["聊天", "发送快捷键、排队、项目上下文默认值。"],
+  notifications: ["通知", "Inbox / 邮件 / 桌面推送。"],
+  tokens: ["API Token", "个人访问令牌，用于 CLI 与 MCP。"],
+  general: ["工作区信息", "名称、slug、默认时区、删除工作区。"],
+  repositories: ["代码仓库", "绑定 git 资源，日历需求的 repo_resource 来源于此。"],
+  github: ["GitHub", "安装 GitHub App，映射 PR。"],
+  integrations: ["集成", "Lark / Slack / Teams / 钉钉 / 企微。"],
+  labs: ["实验室", "未完成能力的 opt-in 开关。"],
+  members: ["成员", "邀请、角色、停用。"],
+  billing: ["账单与套餐", "feature flag 控制是否出现。"],
+  labels: ["标签", "工作区标签库。"],
+  issue_statuses: ["任务状态", "Backlog / Todo / In Progress / In Review / Done / Blocked / Cancelled。分类不可改。"],
+  properties: ["属性", "自定义字段，可进筛选与表格列。"],
+  quick_actions: ["快捷操作", "预置智能体+提示词，任务侧栏一键触发。"],
+  mcp: ["MCP", "工作区级 MCP server 注册。"],
+  plugins: ["Plugins", "owner/admin 安装与授权。feature flag。"],
+  daemon: ["Daemon", "桌面端守护进程状态（仅 desktop）。"],
+  updates: ["Updates", "桌面端自动更新（仅 desktop）。"],
+};
+document.querySelector("#settings")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-st]");
+  if (!b) return;
+  document.querySelectorAll("#settings .s-item").forEach((x) => x.classList.toggle("active", x === b));
+  const [title, desc] = SETTINGS_COPY[b.dataset.st] || ["", ""];
+  document.getElementById("settingsBody").innerHTML =
+    `<h3 style="margin-bottom:6px">${title}</h3><p class="muted">${desc}</p>`;
+});
+
+document.getElementById("cmClose")?.addEventListener("click", () => go("issues"));
+document.getElementById("cmManual")?.addEventListener("click", () => {
+  document.getElementById("cmManual").classList.add("on");
+  document.getElementById("cmAgent").classList.remove("on");
+  document.getElementById("cmManualBox").classList.remove("hidden");
+  document.getElementById("cmAgentBox").classList.add("hidden");
+});
+document.getElementById("cmAgent")?.addEventListener("click", () => {
+  document.getElementById("cmAgent").classList.add("on");
+  document.getElementById("cmManual").classList.remove("on");
+  document.getElementById("cmAgentBox").classList.remove("hidden");
+  document.getElementById("cmManualBox").classList.add("hidden");
+});
+
+document.querySelectorAll(".topbar .tabs .tab, .line-tabs .line-tab").forEach((btn) => {
+  if (btn.closest("#issueView,#projView,#projTabs,#agentTabs")) return;
+  btn.addEventListener("click", () => {
+    btn.parentElement.querySelectorAll(".tab,.line-tab").forEach((x) => x.classList.remove("on"));
+    btn.classList.add("on");
+  });
+});
+
+const hash = (location.hash || "#atlas").slice(1);
+if (hash && hash !== "atlas") go(hash);
+</script>
+</body>
+</html>

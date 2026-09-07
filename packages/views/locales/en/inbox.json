@@ -27,7 +27,8 @@
     "mark_unread": "Mark as unread",
     "archive": "Archive",
     "unarchive": "Unarchive",
-    "open_in_new_tab": "Open in new tab"
+    "open_in_new_tab": "Open in new tab",
+    "quick_confirm": "Confirm now"
   },
   "list": {
     "empty": "No notifications",

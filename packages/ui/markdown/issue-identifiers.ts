@@ -32,11 +32,13 @@ import {
 // `abc-1` in prose is almost never an issue reference, and matching it would
 // linkify ordinary hyphenated words. The look-around excludes alphanumerics,
 // `_`, and `-` on both sides so we only match standalone tokens.
-const IDENTIFIER_RE = /(?<![A-Za-z0-9_-])([A-Z][A-Z0-9]*-\d+)(?![A-Za-z0-9_-])/g
+const IDENTIFIER_RE =
+  /(?<![A-Za-z0-9_-])((?:[A-Z][A-Z0-9]*-\d+)|(?:req|task|REQ|TASK)_\d+)(?![A-Za-z0-9_-])/g
 
 // Anchored single-token form — used by render sites to distinguish a bare
 // identifier (carried through `mention://issue/<identifier>`) from a real UUID.
-export const ISSUE_IDENTIFIER_PATTERN = /^[A-Z][A-Z0-9]*-\d+$/
+export const ISSUE_IDENTIFIER_PATTERN =
+  /^(?:[A-Z][A-Z0-9]*-\d+|(?:req|task|REQ|TASK)_\d+)$/
 
 /**
  * True when `value` is a bare issue identifier (e.g. "MUL-123"). A UUID never
@@ -60,7 +62,7 @@ export function isIssueIdentifier(value: string): boolean {
  */
 export function preprocessIssueIdentifiers(text: string): string {
   // Cheap early-out: no `<UPPER>…-<DIGIT>` shape at all.
-  if (!/[A-Z][A-Z0-9]*-\d/.test(text)) return text
+  if (!/(?:[A-Z][A-Z0-9]*-\d|(?:req|task|REQ|TASK)_\d)/.test(text)) return text
 
   const codeRanges = findCodeRanges(text)
   const linkRanges = findMarkdownLinkRanges(text)

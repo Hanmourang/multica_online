@@ -139,10 +139,32 @@ describe("RequirementDecomposePanel", () => {
     expect(screen.getByText("先做账户模型，再落地规则引擎。")).toBeTruthy();
   });
 
+  it("草稿卡可以改标题", () => {
+    const onDraftsChange = vi.fn();
+    renderWithI18n(
+      <RequirementDecomposePanel
+        issue={requirement()}
+        moduleName="内核"
+        repoLabel="multica/app"
+        roster={ROSTER}
+        plan="先做账户模型"
+        drafts={[execDraft("t1", "账户模型扩展")]}
+        onDraftsChange={onDraftsChange}
+        confirmDecomposition={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("draft-title-t1"), {
+      target: { value: "账户模型改造" },
+    });
+    expect(onDraftsChange).toHaveBeenCalledWith([
+      expect.objectContaining({ temp_id: "t1", title: "账户模型改造" }),
+    ]);
+  });
+
   it("子任务功能点表标注新增/改造", () => {
     renderPanel();
     const card = screen.getByTestId("draft-card-t1");
-    expect(within(card).getByText("账户模型扩展 fp")).toBeTruthy();
+    expect(within(card).getByDisplayValue("账户模型扩展 fp")).toBeTruthy();
     expect(within(card).getByText("Modify")).toBeTruthy();
     expect(within(card).getByText("server/internal/x.go")).toBeTruthy();
     const card2 = screen.getByTestId("draft-card-t2");
@@ -158,9 +180,33 @@ describe("RequirementDecomposePanel", () => {
     const acc = screen.getByTestId("draft-acc-t1");
     expect(within(acc).getByText("Acceptance spec")).toBeTruthy();
     expect(within(acc).getByText("c1")).toBeTruthy();
-    // stage4 验收草稿 t3 二者皆无 → 不渲染摘要框（防御式：空数据不出框）。
-    expect(screen.queryByTestId("draft-gn-t3")).toBeNull();
-    expect(screen.queryByTestId("draft-acc-t3")).toBeNull();
+    // stage4 无图谱/规约时仍渲染区块，文案降级为档案未就绪。
+    expect(screen.getByTestId("draft-gn-t3").textContent).toMatch(/not ready|未就绪|未準備|준비되지/i);
+    expect(screen.getByTestId("draft-acc-t3").textContent).toMatch(/not ready|未就绪|未準備|준비되지/i);
+  });
+
+  it("splits a headed plan, flags titles missing from goals, and lets requery fire", async () => {
+    const requery = vi.fn().mockResolvedValue(undefined);
+    renderWithI18n(
+      <RequirementDecomposePanel
+        issue={requirement()}
+        moduleName="内核"
+        repoLabel="multica/app"
+        roster={ROSTER}
+        plan={"## 目标\n账户模型扩展\n## 阶段\n二期\n## 风险\n回滚"}
+        drafts={[
+          execDraft("t1", "账户模型扩展"),
+          execDraft("t2", "完全无关的标题"),
+        ]}
+        onDraftsChange={() => {}}
+        confirmDecomposition={vi.fn()}
+        requeryGraph={requery}
+      />,
+    );
+    expect(screen.getByTestId("decompose-plan-goals").textContent).toContain("账户模型扩展");
+    expect(screen.getByTestId("draft-mismatch-t2")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("decompose-requery"));
+    await vi.waitFor(() => expect(requery).toHaveBeenCalledTimes(1));
   });
 
   it("存在未标注 kind 的功能点时确认按钮禁用并提示", () => {

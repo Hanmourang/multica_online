@@ -309,8 +309,19 @@ func (h *Handler) fillStatusCategory(ctx context.Context, wsID pgtype.UUID, resp
 	h.newStatusCategoryFiller(ctx, wsID)(resp)
 }
 
+func identifierForIssueFields(parentValid bool, number int32, startAt, decomp, triggered pgtype.Timestamptz, repo pgtype.UUID) string {
+	return formatKindIdentifier(
+		issueKindIsRequirement(parentValid, startAt, decomp, triggered, repo),
+		number,
+	)
+}
+
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
-	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	identifier := identifierForIssueFields(
+		i.ParentIssueID.Valid, i.Number,
+		i.StartAt, i.DecompositionConfirmedAt, i.TriggeredAt, i.RepoResourceID,
+	)
+	_ = issuePrefix
 	// A built-in status IS its own category, so this costs no catalog lookup and
 	// every response carries it. A CUSTOM status is left empty here and filled
 	// in by endpoints that resolve the catalog (see the children endpoints'
@@ -365,7 +376,11 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 	if issuestatus.IsBuiltIn(i.Status) {
 		statusCategory = i.Status
 	}
-	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	identifier := identifierForIssueFields(
+		i.ParentIssueID.Valid, i.Number,
+		i.StartAt, i.DecompositionConfirmedAt, i.TriggeredAt, i.RepoResourceID,
+	)
+	_ = issuePrefix
 	return IssueResponse{
 		ID:                       uuidToString(i.ID),
 		WorkspaceID:              uuidToString(i.WorkspaceID),
@@ -446,7 +461,11 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 	if issuestatus.IsBuiltIn(i.Status) {
 		statusCategory = i.Status
 	}
-	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	identifier := identifierForIssueFields(
+		i.ParentIssueID.Valid, i.Number,
+		i.StartAt, i.DecompositionConfirmedAt, i.TriggeredAt, i.RepoResourceID,
+	)
+	_ = issuePrefix
 	return IssueResponse{
 		ID:                       uuidToString(i.ID),
 		WorkspaceID:              uuidToString(i.WorkspaceID),
@@ -1126,7 +1145,14 @@ const requirementProgressJoin = `LEFT JOIN LATERAL (
 	WHERE c.parent_issue_id = i.id
 ) prog ON TRUE`
 
-const requirementStatusProjection = `CASE
+const requirementStatusProjection = `COALESCE(CASE
+		WHEN i.parent_issue_id IS NOT NULL THEN NULL
+		WHEN i.start_at IS NULL
+		     AND i.decomposition_confirmed_at IS NULL
+		     AND i.triggered_at IS NULL
+		     AND i.repo_resource_id IS NULL THEN NULL
+		ELSE (
+	CASE
 		WHEN issue_effective_status(i.workspace_id, i.status) = 'done' THEN '已完成'
 		WHEN issue_effective_status(i.workspace_id, i.status) = 'cancelled' THEN '已取消'
 		WHEN i.acceptance_round > 3 THEN '验收失败'
@@ -1146,7 +1172,9 @@ const requirementStatusProjection = `CASE
 		WHEN COALESCE(prog.has_open_stage3, FALSE) THEN '执行中'
 		WHEN COALESCE(prog.has_open_stage4, FALSE) THEN '验收中'
 		ELSE '已完成'
-	END AS requirement_status,
+	END
+		)
+	END, '') AS requirement_status,
 	(CASE WHEN COALESCE(prog.stage3_total, 0) > 0
 		THEN concat(prog.stage3_done, '/', prog.stage3_total)
 		ELSE ''
@@ -1530,6 +1558,18 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("top_level_only") == "true" {
 		where = append(where, "i.parent_issue_id IS NULL")
+	}
+	if next, ok := appendIssueKindFilter(where, r.URL.Query().Get("kind")); !ok {
+		writeError(w, http.StatusBadRequest, "invalid kind, expected requirement|task")
+		return
+	} else {
+		where = next
+	}
+	if next, ok := appendIssueKindFilter(where, r.URL.Query().Get("kind")); !ok {
+		writeError(w, http.StatusBadRequest, "invalid kind, expected requirement|task")
+		return
+	} else {
+		where = next
 	}
 	where = appendIssueTableSearchFilter(where, addArg, r.URL.Query().Get("q"))
 	if scheduledFilter.Valid {
@@ -2103,6 +2143,12 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	where = appendIssueDateFilter(where, addArg, dateFilter)
+	if next, ok := appendIssueKindFilter(where, r.URL.Query().Get("kind")); !ok {
+		writeError(w, http.StatusBadRequest, "invalid kind, expected requirement|task")
+		return
+	} else {
+		where = next
+	}
 
 	if groupAssigneeType := r.URL.Query().Get("group_assignee_type"); groupAssigneeType != "" {
 		if groupAssigneeType == "none" {
@@ -3333,8 +3379,14 @@ type UpdateIssueRequest struct {
 	DueDate         *string  `json:"due_date"`
 	// StartAt 需求开始时间（分钟粒度 RFC3339；null = 清空）。已触发需求
 	// （triggered_at 非空）改期会被 409 拒绝——排期归运行中流水线所有。
-	StartAt       *string `json:"start_at"`
-	ParentIssueID *string `json:"parent_issue_id"`
+	StartAt *string `json:"start_at"`
+	// Goal / RepoResourceID / DecomposeMode / AutoTrigger：创建后可改的需求配置。
+	// 显式 null 清空 goal / repo；decompose_mode 仅接受 auto|confirm|manual。
+	Goal           *string `json:"goal"`
+	RepoResourceID *string `json:"repo_resource_id"`
+	DecomposeMode  *string `json:"decompose_mode"`
+	AutoTrigger    *bool   `json:"auto_trigger"`
+	ParentIssueID  *string `json:"parent_issue_id"`
 	ProjectID     *string `json:"project_id"`
 	// ModuleID：显式 null = 清空模块；省略 = 不动。AvoidConflict 同理
 	//（省略保持现值）。模块必须属于 issue 所在项目，违反 409。
@@ -3432,6 +3484,15 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 	}
 	if _, touched := rawFields["stage"]; !touched {
 		params.Stage = current.Stage
+	}
+	if _, touched := rawFields["start_at"]; !touched {
+		params.StartAt = current.StartAt
+	}
+	if _, touched := rawFields["goal"]; !touched {
+		params.Goal = current.Goal
+	}
+	if _, touched := rawFields["repo_resource_id"]; !touched {
+		params.RepoResourceID = current.RepoResourceID
 	}
 }
 
@@ -3690,6 +3751,44 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			}
 			params.StartAt = pgtype.Timestamptz{Valid: false} // explicit null = clear start_at
 		}
+	}
+	if _, ok := rawFields["goal"]; ok {
+		if req.Goal != nil && strings.TrimSpace(*req.Goal) != "" {
+			params.Goal = pgtype.Text{String: strings.TrimSpace(*req.Goal), Valid: true}
+		} else {
+			params.Goal = pgtype.Text{Valid: false}
+		}
+	}
+	if _, ok := rawFields["repo_resource_id"]; ok {
+		if req.RepoResourceID != nil && *req.RepoResourceID != "" {
+			id, ok := parseUUIDOrBadRequest(w, *req.RepoResourceID, "repo_resource_id")
+			if !ok {
+				return
+			}
+			params.RepoResourceID = id
+		} else {
+			params.RepoResourceID = pgtype.UUID{Valid: false}
+		}
+	}
+	if _, ok := rawFields["decompose_mode"]; ok {
+		if req.DecomposeMode == nil || *req.DecomposeMode == "" {
+			writeError(w, http.StatusBadRequest, "invalid decompose_mode, expected auto|confirm|manual")
+			return
+		}
+		switch *req.DecomposeMode {
+		case "auto", "confirm", "manual":
+			params.DecomposeMode = pgtype.Text{String: *req.DecomposeMode, Valid: true}
+		default:
+			writeError(w, http.StatusBadRequest, "invalid decompose_mode, expected auto|confirm|manual")
+			return
+		}
+	}
+	if _, ok := rawFields["auto_trigger"]; ok {
+		if req.AutoTrigger == nil {
+			writeError(w, http.StatusBadRequest, "auto_trigger must be a boolean")
+			return
+		}
+		params.AutoTrigger = pgtype.Bool{Bool: *req.AutoTrigger, Valid: true}
 	}
 	if _, ok := rawFields["parent_issue_id"]; ok {
 		if req.ParentIssueID != nil {

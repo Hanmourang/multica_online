@@ -25,7 +25,8 @@
     "mark_unread": "읽지 않음으로 표시",
     "archive": "보관",
     "unarchive": "보관 해제",
-    "open_in_new_tab": "새 탭에서 열기"
+    "open_in_new_tab": "새 탭에서 열기",
+    "quick_confirm": "원클릭 확인"
   },
   "list": {
     "empty": "알림이 없습니다",

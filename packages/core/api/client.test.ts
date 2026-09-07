@@ -142,6 +142,25 @@ describe("ApiClient edit guards", () => {
   });
 });
 
+describe("ApiClient listIssues status_category", () => {
+  it("puts status_category on the query string so calendar fan-out is not 7 identical pages", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ issues: [], total: 0 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.listIssues({ status_category: "todo", limit: 50 });
+
+    const url = String(fetchMock.mock.calls[0]?.[0]);
+    expect(url).toContain("status_category=todo");
+    expect(url).toContain("limit=50");
+  });
+});
+
 describe("ApiClient pull-request response schema", () => {
   const validPR = {
     id: "pr-1",
