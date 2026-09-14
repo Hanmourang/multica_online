@@ -889,10 +889,16 @@ func TestGrokSelectAuthMethod(t *testing.T) {
 	}{
 		{"none advertised", nil, false, "", true},
 		{"cached only", []string{"cached_token"}, false, "cached_token", false},
+		{"grok.com login only", []string{"grok.com"}, false, "grok.com", false},
+		{"grok.com preferred over cached_token", []string{"cached_token", "grok.com"}, false, "grok.com", false},
 		{"api key preferred when present", []string{"cached_token", "xai.api_key"}, true, "xai.api_key", false},
+		{"api key preferred over grok.com", []string{"grok.com", "xai.api_key"}, true, "xai.api_key", false},
+		{"api key used even when grok.com is the only advertised method", []string{"grok.com"}, true, "xai.api_key", false},
+		{"api key used even when unadvertised", []string{"future_method"}, true, "xai.api_key", false},
 		{"api key ignored without env", []string{"cached_token", "xai.api_key"}, false, "cached_token", false},
+		{"grok.com used when api key unset", []string{"grok.com", "xai.api_key"}, false, "grok.com", false},
 		{"api only requires env", []string{"xai.api_key"}, false, "", true},
-		{"unknown fails closed", []string{"future_method"}, true, "", true},
+		{"unknown fails closed without key", []string{"future_method"}, false, "", true},
 	}
 	for _, tc := range cases {
 		got, err := selectGrokAuthMethod(tc.methods, tc.haveKey)

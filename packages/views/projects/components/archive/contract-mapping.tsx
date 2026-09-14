@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FolderSearch, FolderTree, Layers, Pencil, Plus, Trash2 } from "lucide-react";
+import { Database, FolderSearch, FolderTree, GitBranch, Layers, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { clientErrorMessage } from "@multica/core/api";
 import { useDeleteArtifact } from "@multica/core/artifacts";
@@ -20,6 +20,7 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { useT } from "../../../i18n";
 import { artifactDisplayName } from "./archive-display";
+import { ArchiveRecognitionPanel } from "./archive-recognition-panel";
 import { ArchiveRootCard } from "./archive-root-card";
 import { ArchiveEmpty, QueryError, QueryLoading } from "./query-states";
 
@@ -30,11 +31,13 @@ import { ArchiveEmpty, QueryError, QueryLoading } from "./query-states";
  */
 export function ContractMapping({
   projectId,
+  archiveRoot,
   onCreate,
   onEdit,
   onImport,
 }: {
   projectId: string;
+  archiveRoot?: string | null;
   onCreate?: () => void;
   onEdit?: (artifact: ProjectArtifact) => void;
   onImport?: () => void;
@@ -54,14 +57,6 @@ export function ContractMapping({
         (artifact.requirement_key ?? "").toLowerCase().includes(needle),
     );
   }, [listQuery.data, query]);
-
-  const dirRows = [
-    { path: "_shared/", label: t(($) => $.mapping.dir_shared) },
-    { path: "overview/", label: t(($) => $.mapping.dir_overview) },
-    { path: "requirements/", label: t(($) => $.mapping.dir_requirements) },
-    { path: "filing/", label: t(($) => $.mapping.dir_filing) },
-    { path: "change_logs/", label: t(($) => $.mapping.dir_changelogs) },
-  ];
 
   return (
     <div className="space-y-4" data-testid="archive-contract-mapping">
@@ -93,29 +88,72 @@ export function ContractMapping({
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
+            <CardTitle className="text-title-sm">{t(($) => $.mapping.auto_title)}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-caption leading-relaxed text-muted-foreground">
+              {t(($) => $.mapping.auto_hint)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-title-sm">{t(($) => $.mapping.manual_title)}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-caption leading-relaxed text-muted-foreground">
+              {t(($) => $.mapping.manual_hint)}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-title-sm">
+            <FolderTree className="size-4 text-muted-foreground" />
+            {t(($) => $.mapping.dir_title)}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-caption leading-relaxed text-muted-foreground">
+            {t(($) => $.mapping.rules_readonly)}
+          </p>
+          <pre className="overflow-x-auto rounded-lg border border-surface-border bg-surface px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+{`projects_mgmt/
+├── _shared/          handbook · catalog · format · process · archive · inbox
+├── projects/<key>/
+│   ├── PROJECT.md
+│   ├── overview/{research, product-design, architecture, retrospective}/
+│   ├── requirements/<REQ-KEY>/{s1-prototype, s2-plan, s3-execution, s4-acceptance}/
+│   └── filing/{software-copyright, patent}/
+└── change_logs/<key>/{plans, daily_logs}/`}
+          </pre>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-title-sm">
-              <FolderTree className="size-4 text-muted-foreground" />
-              {t(($) => $.mapping.dir_title)}
+              <Database className="size-4 text-muted-foreground" />
+              {t(($) => $.mapping.er_title)}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            <p className="text-caption leading-relaxed text-muted-foreground">
-              {t(($) => $.mapping.rules_readonly)}
-            </p>
-            {dirRows.map((row) => (
-              <div
-                key={row.path}
-                className="flex flex-col gap-1 rounded-lg border border-surface-border bg-surface px-3 py-2"
-              >
-                <code className="text-caption font-medium">{row.path}</code>
-                <span className="text-caption leading-relaxed text-muted-foreground">
-                  {row.label}
-                </span>
-              </div>
+            {[
+              t(($) => $.mapping.er_artifact),
+              t(($) => $.mapping.er_graph),
+              t(($) => $.mapping.er_ontology),
+              t(($) => $.mapping.er_filing),
+              t(($) => $.mapping.er_runs),
+            ].map((line) => (
+              <p key={line} className="rounded-lg border border-surface-border bg-surface px-3 py-2 text-caption">
+                {line}
+              </p>
             ))}
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-title-sm">
@@ -138,6 +176,31 @@ export function ContractMapping({
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-title-sm">
+            <GitBranch className="size-4 text-muted-foreground" />
+            {t(($) => $.mapping.sync_title)}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-2 sm:grid-cols-5">
+          {[
+            t(($) => $.mapping.step_1),
+            t(($) => $.mapping.step_2),
+            t(($) => $.mapping.step_3),
+            t(($) => $.mapping.step_4),
+            t(($) => $.mapping.step_5),
+          ].map((step, index) => (
+            <div key={step} className="rounded-lg border border-surface-border bg-surface px-3 py-2">
+              <div className="text-[10px] font-semibold text-muted-foreground">{index + 1}</div>
+              <p className="text-caption leading-relaxed">{step}</p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <ArchiveRecognitionPanel archiveRoot={archiveRoot} />
 
       <Card>
         <CardHeader className="pb-3">
@@ -218,6 +281,7 @@ function IndexRow({
           <Badge variant="outline">{artifact.scope}</Badge>
           {artifact.stage ? <Badge variant="outline">{`S${artifact.stage}`}</Badge> : null}
           <Badge variant="secondary">{artifact.doc_type}</Badge>
+          {artifact.doc_class ? <Badge variant="outline">{artifact.doc_class}</Badge> : null}
           <Badge variant="outline">{artifact.source}</Badge>
         </div>
       </div>

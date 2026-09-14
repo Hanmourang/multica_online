@@ -124,6 +124,9 @@ import type {
   ArtifactMatrixResponse,
   CreateProjectArtifactRequest,
   PatchProjectArtifactRequest,
+  ListArchiveSyncDiagnosticsResponse,
+  ArchiveSyncConfig,
+  PutArchiveSyncConfigRequest,
   GraphSyncPayload,
   GraphSyncResponse,
   RebridgeGraphResponse,
@@ -1492,6 +1495,29 @@ export class ApiClient {
   /** 原型版本历史（version 降序）。 */
   async listPrototypeVersions(issueId: string): Promise<{ versions: PrototypeVersion[] }> {
     return this.fetch(`/api/issues/${issueId}/prototypes`);
+  }
+
+  /** 人工把已有 HTML 登记为新版本（不派 prototyper 任务）。 */
+  async registerPrototype(
+    issueId: string,
+    body: { html_path: string; prompt?: string },
+  ): Promise<{ version: PrototypeVersion }> {
+    return this.fetch(`/api/issues/${issueId}/prototypes`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** 改某个版本指向的 HTML 文件。 */
+  async updatePrototypePath(
+    issueId: string,
+    version: number,
+    body: { html_path: string; prompt?: string },
+  ): Promise<{ version: PrototypeVersion }> {
+    return this.fetch(`/api/issues/${issueId}/prototypes/${version}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
   }
 
   /** 整体替换某个 pending 版本的逐项标记。 */
@@ -3939,6 +3965,8 @@ export class ApiClient {
     if (params?.scope) search.set("scope", params.scope);
     if (params?.stage) search.set("stage", String(params.stage));
     if (params?.doc_type) search.set("doc_type", params.doc_type);
+    if (params?.doc_class) search.set("doc_class", params.doc_class);
+    if (params?.q) search.set("q", params.q);
     if (params?.issue_id) search.set("issue_id", params.issue_id);
     const qs = search.toString();
     return this.fetch(
@@ -3997,6 +4025,34 @@ export class ApiClient {
   // binding is still null. Bare array response (newest sync first).
   async listUnboundArtifacts(projectId: string): Promise<ProjectArtifact[]> {
     return this.fetch(`/api/projects/${projectId}/artifacts/unbound`);
+  }
+
+  async getArchiveSyncConfig(projectId: string): Promise<ArchiveSyncConfig> {
+    return this.fetch(`/api/projects/${projectId}/archive/sync-config`);
+  }
+
+  async putArchiveSyncConfig(
+    projectId: string,
+    data: PutArchiveSyncConfigRequest,
+  ): Promise<ArchiveSyncConfig> {
+    return this.fetch(`/api/projects/${projectId}/archive/sync-config`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listArchiveSyncDiagnostics(
+    projectId: string,
+    params?: { stage?: string; level?: string; limit?: number },
+  ): Promise<ListArchiveSyncDiagnosticsResponse> {
+    const search = new URLSearchParams();
+    if (params?.stage) search.set("stage", params.stage);
+    if (params?.level) search.set("level", params.level);
+    if (params?.limit) search.set("limit", String(params.limit));
+    const qs = search.toString();
+    return this.fetch(
+      `/api/projects/${projectId}/archive/sync-diagnostics${qs ? `?${qs}` : ""}`,
+    );
   }
 
   // Attach an artifact to a requirement (issue) in the same project; the
@@ -4103,9 +4159,13 @@ export class ApiClient {
   async getModuleNeighborhood(
     projectId: string,
     nodeId: string,
+    opts?: { depth?: number },
   ): Promise<ModuleNeighborhoodResponse> {
+    const depth = opts?.depth;
+    const query =
+      typeof depth === "number" ? `?depth=${encodeURIComponent(String(depth))}` : "";
     return this.fetch(
-      `/api/projects/${projectId}/graph/modules/${encodeURIComponent(nodeId)}/neighborhood`,
+      `/api/projects/${projectId}/graph/modules/${encodeURIComponent(nodeId)}/neighborhood${query}`,
     );
   }
 
@@ -4115,12 +4175,13 @@ export class ApiClient {
 
   async getBusMatrixDrilldown(
     projectId: string,
-    filters: { module_node_id?: string; page_key?: string; domain?: string },
+    filters: { module_node_id?: string; page_key?: string; process_key?: string; domain?: string },
   ): Promise<BusMatrixDrilldownResponse> {
     const search = new URLSearchParams();
     if (filters.module_node_id)
       search.set("module_node_id", filters.module_node_id);
     if (filters.page_key) search.set("page_key", filters.page_key);
+    if (filters.process_key) search.set("process_key", filters.process_key);
     if (filters.domain) search.set("domain", filters.domain);
     const qs = search.toString();
     return this.fetch(

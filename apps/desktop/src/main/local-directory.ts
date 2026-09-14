@@ -1,5 +1,5 @@
 import { ipcMain, dialog, BrowserWindow } from "electron";
-import { access, mkdir, readFile, readdir, stat, writeFile } from "fs/promises";
+import { access, mkdir, readFile, readdir, rm, stat, writeFile } from "fs/promises";
 import { constants as fsConstants } from "fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 
@@ -142,6 +142,12 @@ export function setupLocalDirectory(
     async (_event, root: string, relPath: string) =>
       readArchiveFile(root, relPath),
   );
+
+  ipcMain.handle(
+    "archive:remove-file",
+    async (_event, root: string, relPath: string) =>
+      removeArchiveFile(root, relPath),
+  );
 }
 
 const SKIP_DIRS = new Set([
@@ -153,6 +159,12 @@ const SKIP_DIRS = new Set([
   "qoder_backup",
   "db_backups",
   "wiki_snapshots",
+  "dist",
+  "vendor",
+  "build",
+  ".next",
+  "coverage",
+  "page-navigator",
 ]);
 const DOC_EXTS = new Set([".md", ".html"]);
 
@@ -233,6 +245,26 @@ async function readArchiveFile(
     if (!st.isFile()) return { ok: false, reason: "not_found" };
     const content = await readFile(target, "utf8");
     return { ok: true, content };
+  } catch (err) {
+    return { ok: false, reason: "error", error: errorMessage(err) };
+  }
+}
+
+async function removeArchiveFile(
+  root: string,
+  relPath: string,
+): Promise<{ ok: boolean; reason?: string; error?: string }> {
+  if (!root || !isAbsolute(root) || !relPath) {
+    return { ok: false, reason: "error", error: "invalid path" };
+  }
+  const target = resolve(root, relPath);
+  const rootResolved = resolve(root);
+  if (!target.startsWith(rootResolved + sep) && target !== rootResolved) {
+    return { ok: false, reason: "error", error: "path escapes archive root" };
+  }
+  try {
+    await rm(target, { force: true });
+    return { ok: true };
   } catch (err) {
     return { ok: false, reason: "error", error: errorMessage(err) };
   }

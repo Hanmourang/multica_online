@@ -32,7 +32,7 @@ import (
 
 var archiveCmd = &cobra.Command{
 	Use:   "archive",
-	Short: "Sync the projects_mgmt document archive into multica",
+	Short: "Init and sync the projects_mgmt document archive into multica",
 }
 
 var archiveSyncCmd = &cobra.Command{
@@ -46,8 +46,43 @@ func init() {
 	archiveSyncCmd.Flags().String("path", "", "archive repo root (default: MULTICA_ARCHIVE_ROOT or ~/Documents/workspace/projects_mgmt)")
 	archiveSyncCmd.Flags().String("mode", "manual", "incremental (reuse server-known blob_sha for git-clean files) | full | manual (= full)")
 	archiveSyncCmd.Flags().Bool("dry-run", false, "scan and parse only; print the manifest without uploading or syncing")
+	archiveInitCmd.Flags().String("project", "", "project key to scaffold (required; must match projects.yaml key)")
+	archiveInitCmd.Flags().String("path", "", "archive repo root (default: MULTICA_ARCHIVE_ROOT or ~/Documents/workspace/projects_mgmt)")
+	archiveInitCmd.Flags().String("name", "", "display name written into PROJECT.md (default: --project)")
+	archiveInitCmd.Flags().Bool("with-prd", false, "also write overview/product-design/PRD.md from the shared template")
+	archiveInitCmd.Flags().Bool("with-mrd", false, "also write overview/research/MRD.md from the shared template")
+	archiveInitCmd.Flags().Bool("force", false, "overwrite existing scaffold files")
+	archiveInitCmd.Flags().Bool("dry-run", false, "print the files that would be written")
+	archiveInitReqCmd.Flags().String("project", "", "project key (required)")
+	archiveInitReqCmd.Flags().String("path", "", "archive repo root")
+	archiveInitReqCmd.Flags().String("key", "", "REQ-YYYYMMDD-NN (default: next for today)")
+	archiveInitReqCmd.Flags().String("issue", "", "multica issue id written into frontmatter")
+	archiveInitReqCmd.Flags().String("title", "", "requirement title")
+	archiveInitReqCmd.Flags().Bool("force", false, "overwrite existing requirement.md")
 	archiveCmd.AddCommand(archiveSyncCmd)
+	archiveCmd.AddCommand(archiveInitCmd)
+	archiveCmd.AddCommand(archiveInitReqCmd)
 	rootCmd.AddCommand(archiveCmd)
+}
+
+func resolveArchiveRoot(explicit string) (string, error) {
+	archiveRoot := explicit
+	if archiveRoot == "" {
+		archiveRoot = os.Getenv("MULTICA_ARCHIVE_ROOT")
+	}
+	if archiveRoot == "" {
+		home, _ := os.UserHomeDir()
+		archiveRoot = filepath.Join(home, "Documents", "workspace", "projects_mgmt")
+	}
+	if st, err := os.Stat(archiveRoot); err != nil || !st.IsDir() {
+		return "", fmt.Errorf("档案仓库根不存在: %s（用 --path 或 MULTICA_ARCHIVE_ROOT 指定）", archiveRoot)
+	}
+	return archiveRoot, nil
+}
+
+func mustFlagString(cmd *cobra.Command, name string) string {
+	value, _ := cmd.Flags().GetString(name)
+	return value
 }
 
 // ── 路径契约解析（CONTRACT.md §1，纯函数，cmd_archive_test.go 锁死）─────────────
@@ -313,24 +348,30 @@ func versionFromName(base string) int32 {
 	return 1
 }
 
-// parseFrontmatter 提取 YAML frontmatter 的 multica_issue_id / doc_type
-// （有意只解析行级 key: value 子集——契约 §3 只定义这两个键，引入完整 YAML
-// 解析器换取的能力为零）。
-func parseFrontmatter(abs string) (issueID, docType string) {
+type archiveFrontmatter struct {
+	IssueID   string
+	DocType   string
+	DocClass  string
+	DocModule string
+}
+
+// parseFrontmatter 提取 YAML frontmatter 的子集（issue / doc_type / doc_class / doc_module）。
+func parseFrontmatter(abs string) archiveFrontmatter {
+	var out archiveFrontmatter
 	f, err := os.Open(abs)
 	if err != nil {
-		return "", ""
+		return out
 	}
 	defer f.Close()
 	head := make([]byte, 4096)
 	n, _ := f.Read(head)
 	text := string(head[:n])
 	if !strings.HasPrefix(text, "---\n") {
-		return "", ""
+		return out
 	}
 	end := strings.Index(text[4:], "\n---")
 	if end < 0 {
-		return "", ""
+		return out
 	}
 	for _, line := range strings.Split(text[4:4+end], "\n") {
 		kv := strings.SplitN(line, ":", 2)
@@ -341,12 +382,42 @@ func parseFrontmatter(abs string) (issueID, docType string) {
 		val := strings.Trim(strings.TrimSpace(kv[1]), `"'`)
 		switch key {
 		case "multica_issue_id":
-			issueID = val
+			out.IssueID = val
 		case "doc_type":
-			docType = val
+			out.DocType = val
+		case "doc_class":
+			out.DocClass = val
+		case "doc_module":
+			out.DocModule = val
 		}
 	}
-	return issueID, docType
+	return out
+}
+
+func normalizeCLIDocClass(explicit, docType, relPath string) string {
+	c := strings.ToLower(strings.TrimSpace(explicit))
+	switch c {
+	case "prd", "mrd", "brd", "roadmap":
+		return c
+	}
+	base := strings.ToLower(filepath.Base(filepath.ToSlash(relPath)))
+	name := strings.TrimSuffix(strings.TrimSuffix(base, ".md"), ".html")
+	if name == "prd" || strings.HasPrefix(name, "prd-") || name == "requirement" {
+		return "prd"
+	}
+	if name == "mrd" || strings.HasPrefix(name, "mrd-") {
+		return "mrd"
+	}
+	if name == "brd" || strings.HasPrefix(name, "brd-") {
+		return "brd"
+	}
+	if docType == "requirement" {
+		return "prd"
+	}
+	if docType == "work-plan" {
+		return "roadmap"
+	}
+	return ""
 }
 
 // gitBlobSHA 计算 git blob 对象 sha1（"blob <len>\0<content>"），与 git hash-object 一致。
@@ -364,6 +435,8 @@ func gitBlobSHA(data []byte) string {
 var archiveSkipDirs = map[string]bool{
 	"_attic": true, "assets": true, "node_modules": true, ".git": true,
 	"qoder_backup": true, "db_backups": true, "wiki_snapshots": true,
+	"dist": true, "vendor": true, "build": true, ".next": true,
+	"coverage": true, "page-navigator": true,
 }
 
 // scanArchiveFiles 递归收集档案文件（跳过 _attic/assets/node_modules/.git/*.zip）。
@@ -536,16 +609,9 @@ func runArchiveSync(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	archiveRoot, _ := cmd.Flags().GetString("path")
-	if archiveRoot == "" {
-		archiveRoot = os.Getenv("MULTICA_ARCHIVE_ROOT")
-	}
-	if archiveRoot == "" {
-		home, _ := os.UserHomeDir()
-		archiveRoot = filepath.Join(home, "Documents", "workspace", "projects_mgmt")
-	}
-	if st, err := os.Stat(archiveRoot); err != nil || !st.IsDir() {
-		return fmt.Errorf("档案仓库根不存在: %s（用 --path 或 MULTICA_ARCHIVE_ROOT 指定）", archiveRoot)
+	archiveRoot, err := resolveArchiveRoot(mustFlagString(cmd, "path"))
+	if err != nil {
+		return err
 	}
 	mode, _ := cmd.Flags().GetString("mode")
 	if mode != "incremental" && mode != "full" && mode != "manual" {
@@ -722,10 +788,10 @@ func syncOneProject(ctx context.Context, client *cli.APIClient, projectID, key s
 		if !scopeFilterAllowed(scopeFilter, relSlash) {
 			continue
 		}
-		issueID, docTypeOverride := parseFrontmatter(p.AbsPath)
-		p.IssueID = issueID
-		if docTypeOverride != "" {
-			p.DocType = docTypeOverride
+		fm := parseFrontmatter(p.AbsPath)
+		p.IssueID = fm.IssueID
+		if fm.DocType != "" {
+			p.DocType = fm.DocType
 		} else {
 			p.DocType = docTypeFromName(p)
 		}
@@ -795,6 +861,12 @@ func syncOneProject(ctx context.Context, client *cli.APIClient, projectID, key s
 		}
 		if p.AttachmentID != "" {
 			item["attachment_id"] = p.AttachmentID
+		}
+		if class := normalizeCLIDocClass(fm.DocClass, p.DocType, relSlash); class != "" {
+			item["doc_class"] = class
+		}
+		if module := strings.TrimSpace(fm.DocModule); module != "" {
+			item["doc_module"] = module
 		}
 		items = append(items, item)
 	}

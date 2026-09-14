@@ -30,7 +30,12 @@
     "change_project_context": "プロジェクトコンテキストを変更",
     "remove_project_context": "プロジェクトコンテキストを削除",
     "no_projects": "プロジェクトがまだありません",
-    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です"
+    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です",
+    "page_prototype_mounted": "プロトタイプを接続 · {{name}}",
+    "placeholder_named_many": "{{name}} など {{count}} 体のエージェントに送信…",
+    "fanout_ok": "{{count}} 体のエージェントに送信しました",
+    "fanout_partial": "{{sent}} 体に送信、{{failed}} 体は失敗",
+    "fanout_failed": "他のエージェントへの送信に失敗しました"
   },
   "queue": {
     "title_other": "キュー内のメッセージ {{count}} 件",
@@ -135,7 +140,9 @@
     "history_group": "チャット履歴",
     "agent_filter_placeholder": "エージェントを検索...",
     "agent_needs_runtime": "ランタイム未設定",
-    "agent_needs_runtime_hint": "このエージェントとチャットする前にランタイムを設定してください"
+    "agent_needs_runtime_hint": "このエージェントとチャットする前にランタイムを設定してください",
+    "agent_multi_hint": "複数選択できます。追加分はそれぞれ別セッションになり、この会話はそのままです。",
+    "agent_primary_hint": "この会話のエージェント"
   },
   "empty_state": {
     "first_time_title": "エージェントとチャット",

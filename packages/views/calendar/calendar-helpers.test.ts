@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Issue } from "@multica/core/types";
 import {
+  alignDueToStartDay,
   findModuleHolder,
   findRescheduleConflict,
   formatTriggerLabel,
   parseStageProgress,
+  requirementWindow,
   roleForRequirementStatus,
   showsTriggerLabel,
   firstWorkbenchStage,
@@ -24,6 +26,27 @@ function issue(overrides: Partial<Issue> = {}): Issue {
     ...overrides,
   } as unknown as Issue;
 }
+
+describe("alignDueToStartDay", () => {
+  it("keeps the due clock on the start calendar day", () => {
+    expect(alignDueToStartDay("2026-09-14T09:00", "2026-09-17T18:00")).toBe(
+      "2026-09-14T18:00",
+    );
+  });
+});
+
+describe("requirementWindow", () => {
+  it("collapses a later due_date onto the start UTC day", () => {
+    const win = requirementWindow(
+      issue({
+        start_at: "2026-09-10T09:00:00Z",
+        due_date: "2026-09-12",
+      }),
+    );
+    expect(win?.start.toISOString().slice(0, 10)).toBe("2026-09-10");
+    expect(win?.end.toISOString().slice(0, 10)).toBe("2026-09-10");
+  });
+});
 
 describe("parseStageProgress", () => {
   it("parses N/M and rejects empty or invalid strings", () => {
@@ -89,10 +112,18 @@ describe("findRescheduleConflict / windowsOverlap", () => {
       findRescheduleConflict(
         [moving, occupier],
         moving,
-        new Date("2026-09-11T00:00:00Z"),
-        new Date("2026-09-12T00:00:00Z"),
+        new Date("2026-09-10T00:00:00Z"),
+        new Date("2026-09-10T00:00:00Z"),
       )?.id,
     ).toBe("o");
+    expect(
+      findRescheduleConflict(
+        [moving, occupier],
+        moving,
+        new Date("2026-09-11T00:00:00Z"),
+        new Date("2026-09-11T00:00:00Z"),
+      ),
+    ).toBeNull();
     expect(
       windowsOverlap(
         new Date("2026-09-01T00:00:00Z"),
@@ -132,9 +163,9 @@ describe("suggestFreeWindow", () => {
       start_at: "2026-09-10T09:00:00Z",
       due_date: "2026-09-12",
     });
-    const free = suggestFreeWindow([moving, occupier], moving, 1);
-    expect(free?.start.toISOString().slice(0, 10)).toBe("2026-09-13");
-    expect(free?.end.toISOString().slice(0, 10)).toBe("2026-09-14");
+    const free = suggestFreeWindow([moving, occupier], moving, 0);
+    expect(free?.start.toISOString().slice(0, 10)).toBe("2026-09-11");
+    expect(free?.end.toISOString().slice(0, 10)).toBe("2026-09-11");
   });
 });
 

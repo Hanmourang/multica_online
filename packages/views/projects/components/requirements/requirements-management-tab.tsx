@@ -7,13 +7,11 @@ import {
   CalendarPlus,
   ChevronRight,
   GitBranch,
-  Package,
   RotateCcw,
   Workflow,
   Zap,
 } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueStatusCategory } from "@multica/core/issues";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   calendarIssuesOptions,
@@ -24,7 +22,7 @@ import { projectArtifactListOptions } from "@multica/core/artifacts/queries";
 import { projectModulesOptions } from "@multica/core/modules";
 import { projectResourcesOptions } from "@multica/core/projects";
 import { useModalStore } from "@multica/core/modals";
-import type { Issue, IssueStatusCategory } from "@multica/core/types";
+import type { Issue } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../i18n";
@@ -32,6 +30,7 @@ import { AppLink } from "../../../navigation";
 import { ProgressRing } from "../../../issues/components/progress-ring";
 import { useStatusLabel } from "../../../issues/utils/status-label";
 import { stageForRequirementStatus } from "../../../calendar/calendar-helpers";
+import { RequirementDrawer } from "../../../calendar/requirement-drawer";
 import { StageDots } from "./stage-dots";
 import {
   ArchiveEmpty,
@@ -48,8 +47,9 @@ import {
   stageDots,
 } from "./requirement-helpers";
 import { QuickConfirmButton } from "../../../issues/components/quick-confirm-button";
-import { displayTaskTitle, needsQuickConfirm } from "../requirement-drill/requirement-display";
+import { needsQuickConfirm } from "../requirement-drill/requirement-display";
 import { repoDisplayName } from "../requirement-drill/requirement-drill-helpers";
+import { REQ_ROW_GRID, RequirementTaskList } from "./requirement-task-list";
 
 type StatusFilter = "all" | "active" | "pending" | "done";
 
@@ -71,6 +71,7 @@ export function RequirementsManagementTab({
     () => new Set([1, 2, 3, 4]),
   );
   const [moduleId, setModuleId] = useState<string | null>(null);
+  const [benchIssue, setBenchIssue] = useState<Issue | null>(null);
 
   const issuesQuery = useQuery(calendarIssuesOptions(wsId));
   const modulesQuery = useQuery(projectModulesOptions(wsId, projectId));
@@ -271,7 +272,23 @@ export function RequirementsManagementTab({
           description={t(($) => $.req_mgmt.empty_hint)}
         />
       ) : (
-        <ul className="divide-y divide-surface-border overflow-hidden rounded-lg border border-surface-border">
+        <div className="space-y-2">
+          <div
+            className={cn(
+              REQ_ROW_GRID,
+              "hidden px-3 py-0 text-micro text-muted-foreground sm:grid",
+            )}
+          >
+            <span />
+            <span />
+            <span />
+            <span className="text-center">{t(($) => $.req_mgmt.col_stage_h)}</span>
+            <span className="text-center">{t(($) => $.req_mgmt.col_tasks_h)}</span>
+            <span className="text-center">{t(($) => $.req_mgmt.col_accept_h)}</span>
+            <span className="text-center">{t(($) => $.req_mgmt.col_artifacts_h)}</span>
+            <span />
+          </div>
+          <ul className="space-y-2">
           {filtered.map((issue) => (
             <RequirementRow
               key={issue.id}
@@ -291,11 +308,8 @@ export function RequirementsManagementTab({
               tasksLoading={childrenQuery.isPending}
               artifactCount={artifactCountByIssue.get(issue.id) ?? 0}
               failedChildren={failedChildCount.get(issue.id) ?? 0}
-              benchHref={paths.calendarRequirement(
-                issue.id,
-                stageForRequirementStatus(issue.requirement_status),
-                "project",
-              )}
+              requirementHref={paths.projectRequirement(projectId, issue.id)}
+              onOpenWorkbench={() => setBenchIssue(issue)}
               taskHref={(taskId) => paths.issueDetail(taskId)}
               statusLabelOf={statusLabelOf}
               onOpen={() => onOpenRequirement(issue.id)}
@@ -305,8 +319,21 @@ export function RequirementsManagementTab({
               }
             />
           ))}
-        </ul>
+          </ul>
+        </div>
       )}
+      <RequirementDrawer
+        issueId={benchIssue?.id ?? null}
+        statusBadge={benchIssue?.requirement_status}
+        initialViewedStage={
+          benchIssue
+            ? stageForRequirementStatus(benchIssue.requirement_status)
+            : undefined
+        }
+        onOpenChange={(open) => {
+          if (!open) setBenchIssue(null);
+        }}
+      />
     </div>
   );
 }
@@ -345,21 +372,6 @@ function decomposeModeKey(
   return null;
 }
 
-function childStatusTone(category: IssueStatusCategory | null | undefined): string {
-  switch (category) {
-    case "done":
-      return "bg-success/15 text-success";
-    case "in_progress":
-      return "bg-primary/10 text-primary";
-    case "in_review":
-      return "bg-warning/15 text-warning";
-    case "blocked":
-      return "bg-destructive/10 text-destructive";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
-
 function MetaChip({
   children,
   title,
@@ -386,7 +398,8 @@ function RequirementRow({
   tasksLoading,
   artifactCount,
   failedChildren,
-  benchHref,
+  requirementHref,
+  onOpenWorkbench,
   taskHref,
   statusLabelOf,
   onOpen,
@@ -401,7 +414,8 @@ function RequirementRow({
   tasksLoading: boolean;
   artifactCount: number;
   failedChildren: number;
-  benchHref: string;
+  requirementHref: string;
+  onOpenWorkbench: () => void;
   taskHref: (taskId: string) => string;
   statusLabelOf: (statusKey: string) => string;
   onOpen: () => void;
@@ -420,8 +434,13 @@ function RequirementRow({
   const goal = issue.goal?.trim();
 
   return (
-    <li className={cn(failed && "bg-destructive/5")}>
-      <div className="grid grid-cols-[28px_64px_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 px-3 py-3 sm:grid-cols-[28px_72px_minmax(0,1fr)_72px_96px_64px_72px_auto] sm:items-center">
+    <li
+      className={cn(
+        "overflow-hidden rounded-lg border border-surface-border bg-surface",
+        failed && "border-destructive/40 bg-destructive/5",
+      )}
+    >
+      <div className={REQ_ROW_GRID}>
         <button
           type="button"
           aria-expanded={expanded}
@@ -431,20 +450,20 @@ function RequirementRow({
               : t(($) => $.req_mgmt.expand_tasks)
           }
           onClick={() => setExpanded((open) => !open)}
-          className="mt-0.5 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="mt-0.5 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground sm:mt-0"
           data-testid="requirement-expand"
         >
           <ChevronRight
             className={cn("size-3.5 transition-transform", expanded && "rotate-90")}
           />
         </button>
-        <button
-          type="button"
-          onClick={onOpen}
-          className="pt-0.5 text-left font-mono text-caption text-primary hover:underline"
-        >
-          {issue.identifier}
-        </button>
+        <IssueIdLink
+          href={requirementHref}
+          identifier={issue.identifier}
+          ariaLabel={t(($) => $.req_mgmt.open_requirement, { id: issue.identifier })}
+          testId="requirement-id-link"
+          fill
+        />
         <button type="button" onClick={onOpen} className="min-w-0 text-left">
           <div className="flex min-w-0 items-center gap-1.5">
             <span
@@ -492,48 +511,49 @@ function RequirementRow({
             )}
           </div>
         </button>
-        <div
-          className="hidden sm:flex"
-          title={t(($) => $.req_mgmt.col_stage, { stage })}
-        >
+        <MetricCell title={t(($) => $.req_mgmt.col_stage, { stage })}>
           <StageDots states={states} />
-        </div>
-        <div className="hidden items-center gap-1.5 sm:flex">
-          {progress ? (
-            <>
-              <ProgressRing done={progress.done} total={progress.total} />
-              <span className="text-micro tabular-nums text-muted-foreground">
-                {progress.done}/{progress.total}
-                {failedChildren > 0
-                  ? ` · ${t(($) => $.req_mgmt.fail_count, { n: failedChildren })}`
-                  : ""}
+        </MetricCell>
+        <MetricCell>
+          <div className="flex flex-col items-center gap-0.5">
+            <span className="inline-flex items-center gap-1">
+              {progress ? (
+                <ProgressRing done={progress.done} total={progress.total} />
+              ) : null}
+              <span className="text-micro tabular-nums text-foreground">
+                {progress
+                  ? `${progress.done}/${progress.total}`
+                  : tasks.length}
               </span>
-            </>
-          ) : (
-            <span className="text-micro text-muted-foreground">
-              {t(($) => $.req_mgmt.task_count, { n: tasks.length })}
             </span>
-          )}
-        </div>
-        <div className="hidden sm:block">
+            {failedChildren > 0 ? (
+              <span className="text-micro text-destructive">
+                {t(($) => $.req_mgmt.fail_count, { n: failedChildren })}
+              </span>
+            ) : null}
+          </div>
+        </MetricCell>
+        <MetricCell>
           <VerdictPill verdict={verdict} />
-        </div>
-        <div className="hidden items-center gap-1 text-micro tabular-nums text-muted-foreground sm:flex">
-          <Package className="size-3" />
-          {artifactCount}
-        </div>
-        <div className="flex items-center justify-end gap-1">
+        </MetricCell>
+        <MetricCell>
+          <span className="text-caption font-semibold tabular-nums">{artifactCount}</span>
+        </MetricCell>
+        <div className="flex flex-wrap items-center justify-end gap-1">
           {needsQuickConfirm({
             status: issue.status,
             statusCategory: issue.status_category,
             requirementStatus: issue.requirement_status,
           }) && <QuickConfirmButton issueId={issue.id} onDone={onConfirmed} />}
-          <AppLink href={benchHref}>
-            <Button size="xs" variant="ghost">
-              <Workflow className="size-3" />
-              {t(($) => $.req_mgmt.workbench)}
-            </Button>
-          </AppLink>
+          <Button
+            size="xs"
+            variant="ghost"
+            data-testid="open-requirement-workbench"
+            onClick={onOpenWorkbench}
+          >
+            <Workflow className="size-3" />
+            {t(($) => $.req_mgmt.workbench)}
+          </Button>
           {(canReflow(issue) || failed) && (
             <Button size="xs" variant="outline" onClick={onReflow}>
               <RotateCcw className="size-3" />
@@ -543,54 +563,74 @@ function RequirementRow({
         </div>
       </div>
       {expanded && (
-        <ul
-          className="space-y-1 border-t border-surface-border/70 bg-muted/20 px-3 py-2 pl-11"
-          data-testid="requirement-task-list"
-        >
-          {tasksLoading ? (
-            <li className="px-2 py-1.5 text-micro text-muted-foreground">
-              {t(($) => $.common.loading)}
-            </li>
-          ) : tasks.length === 0 ? (
-            <li className="px-2 py-1.5 text-micro text-muted-foreground">
-              {t(($) => $.req_mgmt.tasks_empty)}
-            </li>
-          ) : (
-            tasks.map((task) => {
-              const category = issueStatusCategory(task);
-              return (
-                <li key={task.id}>
-                  <AppLink
-                    href={taskHref(task.id)}
-                    className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/60"
-                  >
-                    <span className="w-16 shrink-0 font-mono text-micro text-muted-foreground">
-                      {task.identifier}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-caption">
-                      {displayTaskTitle(task.title, task.identifier)}
-                    </span>
-                    {task.stage != null && (
-                      <span className="hidden shrink-0 text-micro text-muted-foreground sm:inline">
-                        S{task.stage}
-                      </span>
-                    )}
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-full px-1.5 py-0.5 text-micro",
-                        childStatusTone(category),
-                      )}
-                    >
-                      {statusLabelOf(task.status)}
-                    </span>
-                  </AppLink>
-                </li>
-              );
-            })
+        <RequirementTaskList
+          parentId={issue.id}
+          tasks={tasks}
+          tasksLoading={tasksLoading}
+          taskHref={taskHref}
+          statusLabelOf={statusLabelOf}
+          renderId={(task, href) => (
+            <IssueIdLink
+              href={href}
+              identifier={task.identifier}
+              ariaLabel={t(($) => $.req_mgmt.open_task, { id: task.identifier })}
+              testId="task-id-link"
+              fill={false}
+            />
           )}
-        </ul>
+        />
       )}
     </li>
+  );
+}
+
+function MetricCell({
+  children,
+  title,
+}: {
+  children: ReactNode;
+  title?: string;
+}) {
+  return (
+    <div
+      title={title}
+      className="hidden min-w-0 flex-col items-center justify-center text-center sm:flex"
+    >
+      {children}
+    </div>
+  );
+}
+
+/** C5 `.rq-id`：左列 identifier 用 brand 高亮 + 加粗，单行不换行。 */
+const ID_LINK_CLASS =
+  "block w-full truncate font-mono text-caption font-bold text-brand hover:underline";
+
+function IssueIdLink({
+  href,
+  identifier,
+  ariaLabel,
+  testId,
+  className,
+  fill = true,
+}: {
+  href: string;
+  identifier: string;
+  ariaLabel: string;
+  testId: string;
+  className?: string;
+  fill?: boolean;
+}) {
+  return (
+    <AppLink
+      href={href}
+      newTabTitle={identifier}
+      aria-label={ariaLabel}
+      title={identifier}
+      className={cn(ID_LINK_CLASS, fill ? "block w-full" : "block min-w-0", className)}
+      data-testid={testId}
+    >
+      {identifier}
+    </AppLink>
   );
 }
 

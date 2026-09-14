@@ -118,6 +118,13 @@ SET marks = @marks::jsonb
 WHERE issue_id = @issue_id AND version = @version
 RETURNING *;
 
+-- name: UpdatePrototypeHtmlPath :one
+UPDATE issue_prototype_version
+SET html_path = @html_path,
+    prompt = CASE WHEN @prompt = '' THEN prompt ELSE @prompt END
+WHERE issue_id = @issue_id AND version = @version
+RETURNING *;
+
 -- name: SetPrototypeStatus :exec
 UPDATE issue_prototype_version
 SET status = @status

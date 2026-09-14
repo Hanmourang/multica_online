@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api, ApiError } from "../api";
-import type { GraphSnapshotSummary } from "../types";
+import type { GraphSnapshotSummary, Issue } from "../types";
 
 /**
  * Query keys + options for the project graph snapshot store (migration 456)
@@ -38,7 +38,38 @@ export const graphKeys = {
     [...graphKeys.busMatrix(wsId, projectId), "alerts"] as const,
   busMatrixTimeline: (wsId: string, projectId: string) =>
     [...graphKeys.busMatrix(wsId, projectId), "timeline"] as const,
+  projectIssues: (wsId: string, projectId: string) =>
+    [...graphKeys.project(wsId, projectId), "issues"] as const,
 };
+
+const PROJECT_ISSUE_PAGE = 500;
+const PROJECT_ISSUE_MAX = 10_000;
+
+/** 功能模块 TAB 聚合用：项目下全部 issue（含任务子项），不限日历/甘特窗口。 */
+async function fetchProjectIssuesForModules(projectId: string): Promise<Issue[]> {
+  const issues: Issue[] = [];
+  let offset = 0;
+  while (offset < PROJECT_ISSUE_MAX) {
+    const res = await api.listIssues({
+      project_id: projectId,
+      limit: PROJECT_ISSUE_PAGE,
+      offset,
+    });
+    issues.push(...res.issues);
+    if (res.issues.length < PROJECT_ISSUE_PAGE) break;
+    if (issues.length >= res.total) break;
+    offset += PROJECT_ISSUE_PAGE;
+  }
+  return issues;
+}
+
+export function projectIssuesForModulesOptions(wsId: string, projectId: string) {
+  return queryOptions({
+    queryKey: graphKeys.projectIssues(wsId, projectId),
+    queryFn: () => fetchProjectIssuesForModules(projectId),
+    enabled: Boolean(wsId && projectId),
+  });
+}
 
 /**
  * Latest snapshot summary (no nodes/edges payload). A project that has
@@ -125,7 +156,7 @@ export function moduleNeighborhoodOptions(
 ) {
   return queryOptions({
     queryKey: graphKeys.module(wsId, projectId, nodeId, "neighborhood"),
-    queryFn: () => api.getModuleNeighborhood(projectId, nodeId),
+    queryFn: () => api.getModuleNeighborhood(projectId, nodeId, { depth: 2 }),
     enabled: Boolean(wsId && projectId && nodeId),
   });
 }
@@ -142,14 +173,12 @@ export function busMatrixOptions(wsId: string, projectId: string) {
 export function busMatrixDrilldownOptions(
   wsId: string,
   projectId: string,
-  filters: { module_node_id?: string; page_key?: string; domain?: string },
+  filters: { module_node_id?: string; page_key?: string; process_key?: string; domain?: string },
 ) {
   return queryOptions({
     queryKey: graphKeys.busMatrixDrilldown(wsId, projectId, filters),
     queryFn: () => api.getBusMatrixDrilldown(projectId, filters),
-    enabled:
-      Boolean(wsId && projectId) &&
-      Boolean(filters.module_node_id || filters.page_key || filters.domain),
+    enabled: Boolean(wsId && projectId),
   });
 }
 

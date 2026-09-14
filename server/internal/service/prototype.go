@@ -177,3 +177,60 @@ func (s *IssueService) ConfirmPrototypeVersion(ctx context.Context, issueID pgty
 	v.Status = "confirmed"
 	return v, nil
 }
+
+// RegisterPrototypeVersion 人工登记：把已有 HTML 路径写成新版本，不派
+// prototyper 任务。已有 confirmed 也不拦截——那是 AI 重生成的门，人工关联
+// 只 supersede pending，历史 confirmed 行保留。
+func (s *IssueService) RegisterPrototypeVersion(ctx context.Context, p GeneratePrototypeVersionParams) (db.IssuePrototypeVersion, error) {
+	if strings.TrimSpace(p.HtmlPath) == "" {
+		return db.IssuePrototypeVersion{}, &PrototypeValidationError{Msg: "html_path required"}
+	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.IssuePrototypeVersion{}, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	if err := qtx.SupersedePendingPrototypeVersions(ctx, p.IssueID); err != nil {
+		return db.IssuePrototypeVersion{}, fmt.Errorf("supersede pending prototype versions: %w", err)
+	}
+	version, err := qtx.CreatePrototypeVersion(ctx, db.CreatePrototypeVersionParams{
+		IssueID:       p.IssueID,
+		WorkspaceID:   p.WorkspaceID,
+		HtmlPath:      strings.TrimSpace(p.HtmlPath),
+		Prompt:        p.Prompt,
+		CreatedByType: p.CreatorType,
+		CreatedByID:   p.CreatorID,
+	})
+	if err != nil {
+		return db.IssuePrototypeVersion{}, fmt.Errorf("create prototype version: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.IssuePrototypeVersion{}, err
+	}
+	return version, nil
+}
+
+// UpdatePrototypeHtmlPath 改某个版本指向的 HTML 文件，不改 version / status。
+func (s *IssueService) UpdatePrototypeHtmlPath(ctx context.Context, issueID pgtype.UUID, version int32, htmlPath, prompt string) (db.IssuePrototypeVersion, error) {
+	if strings.TrimSpace(htmlPath) == "" {
+		return db.IssuePrototypeVersion{}, &PrototypeValidationError{Msg: "html_path required"}
+	}
+	_, err := s.Queries.GetPrototypeVersion(ctx, db.GetPrototypeVersionParams{IssueID: issueID, Version: version})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.IssuePrototypeVersion{}, ErrPrototypeVersionNotFound
+	}
+	if err != nil {
+		return db.IssuePrototypeVersion{}, fmt.Errorf("load prototype version: %w", err)
+	}
+	updated, err := s.Queries.UpdatePrototypeHtmlPath(ctx, db.UpdatePrototypeHtmlPathParams{
+		HtmlPath: strings.TrimSpace(htmlPath),
+		Prompt:   prompt,
+		IssueID:  issueID,
+		Version:  version,
+	})
+	if err != nil {
+		return db.IssuePrototypeVersion{}, fmt.Errorf("update prototype html_path: %w", err)
+	}
+	return updated, nil
+}

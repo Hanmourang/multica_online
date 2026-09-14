@@ -817,6 +817,7 @@
     "copy_filtered": "复制筛选结果",
     "copied": "已复制",
     "waiting_events": "等待事件中...",
+    "waiting_events_hint": "步骤会按发生顺序出现在这里",
     "antigravity_live_unavailable": "Antigravity 暂不提供实时执行事件。task 完成后即可查看执行记录。",
     "no_data": "未记录执行数据。",
     "sort_chronological": "最早在前",

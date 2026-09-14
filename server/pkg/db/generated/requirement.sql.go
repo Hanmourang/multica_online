@@ -769,6 +769,40 @@ func (q *Queries) ResetRequirementTrigger(ctx context.Context, id pgtype.UUID) (
 	return result.RowsAffected(), nil
 }
 
+const updatePrototypeHtmlPath = `-- name: UpdatePrototypeHtmlPath :one
+UPDATE issue_prototype_version
+SET html_path = $1,
+    prompt = CASE WHEN $2 = '' THEN prompt ELSE $2 END
+WHERE issue_id = $3 AND version = $4
+RETURNING id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at
+`
+
+type UpdatePrototypeHtmlPathParams struct {
+	HtmlPath string      `json:"html_path"`
+	Prompt   string      `json:"prompt"`
+	IssueID  pgtype.UUID `json:"issue_id"`
+	Version  int32       `json:"version"`
+}
+
+func (q *Queries) UpdatePrototypeHtmlPath(ctx context.Context, arg UpdatePrototypeHtmlPathParams) (IssuePrototypeVersion, error) {
+	row := q.db.QueryRow(ctx, updatePrototypeHtmlPath, arg.HtmlPath, arg.Prompt, arg.IssueID, arg.Version)
+	var i IssuePrototypeVersion
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.WorkspaceID,
+		&i.Version,
+		&i.HtmlPath,
+		&i.Prompt,
+		&i.Marks,
+		&i.Status,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const setPrototypeStatus = `-- name: SetPrototypeStatus :exec
 UPDATE issue_prototype_version
 SET status = $1

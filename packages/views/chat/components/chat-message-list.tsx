@@ -52,6 +52,7 @@ import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-f
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
+import { visiblePageSurfaceContent } from "../lib/page-surface-context";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
 import { useT } from "../../i18n";
 
@@ -486,14 +487,14 @@ const MessageBubble = memo(function MessageBubble({
            * too. `compact` trims the leading/trailing block margins so a
            * single-line bubble stays as tight as the plain-text version. */}
           <RichContent
-            content={message.content}
+            content={visiblePageSurfaceContent(message.content)}
             attachments={message.attachments}
             density="compact"
             phase="settled"
           />
           <AttachmentList
             attachments={message.attachments}
-            content={message.content}
+            content={visiblePageSurfaceContent(message.content)}
             className="mt-1.5"
           />
         </div>

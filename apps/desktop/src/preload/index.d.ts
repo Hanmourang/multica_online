@@ -123,6 +123,10 @@ interface DesktopAPI {
     reason?: string;
     error?: string;
   }>;
+  removeArchiveFile: (
+    root: string,
+    relPath: string,
+  ) => Promise<{ ok: boolean; reason?: string; error?: string }>;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;

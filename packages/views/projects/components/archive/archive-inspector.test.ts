@@ -108,4 +108,21 @@ describe("suggestedRelPath", () => {
       }),
     ).toBe("change_logs/daily_logs/20260907-客户端重启.md");
   });
+
+  it("folds PRD alias onto product-design and work-plan onto plans/", () => {
+    expect(
+      suggestedRelPath({
+        scope: "project",
+        docType: "prd",
+        filename: "PRD.md",
+      }),
+    ).toBe("overview/product-design/PRD.md");
+    expect(
+      suggestedRelPath({
+        scope: "project",
+        docType: "work-plan",
+        filename: "20260913_档案P0.md",
+      }),
+    ).toBe("change_logs/plans/20260913_档案P0.md");
+  });
 });

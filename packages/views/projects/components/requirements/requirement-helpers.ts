@@ -3,12 +3,13 @@
  * All derived from list-projection fields (requirement_status, stage_progress,
  * acceptance_round) — no new API.
  */
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueProgressTask, IssueStatusCategory } from "@multica/core/types";
 import {
   parseStageProgress,
   stageForRequirementStatus,
   type PipelineStage,
 } from "../../../calendar/calendar-helpers";
+import { displayTaskTitle, isOpaqueTaskTitle } from "../requirement-drill/requirement-display";
 
 export const PENDING_CONFIRM_STATUSES = new Set(["原型待确认", "拆解待确认"]);
 export const IN_PROGRESS_STATUSES = new Set([
@@ -112,4 +113,58 @@ export function formatWindow(issue: Issue): string {
   if (!start && !end) return "—";
   if (start && end) return `${start} – ${end}`;
   return start || end;
+}
+
+/** 展开行标题：不把队列 id / identifier 再当标题重复展示。 */
+export function taskRowTitle(task: Issue, untitled: string): string {
+  const raw = (task.title ?? "").trim();
+  if (raw && !isOpaqueTaskTitle(raw) && raw !== task.identifier) return raw;
+  const fallback = displayTaskTitle(raw, "");
+  if (fallback && fallback !== task.identifier) return fallback;
+  return untitled;
+}
+
+/** 子任务进度：优先 stage_progress / 进度树待办，没有数字就不编造分数。 */
+export function taskRowProgress(
+  task: Issue,
+  progress?: IssueProgressTask,
+): { done: number; total: number } | null {
+  if (progress && progress.todos_progress.total > 0) {
+    return {
+      done: progress.todos_progress.done,
+      total: progress.todos_progress.total,
+    };
+  }
+  return parseStageProgress(task.stage_progress);
+}
+
+export function matchChildProgress(
+  task: Issue,
+  rows: IssueProgressTask[],
+): IssueProgressTask | undefined {
+  const title = (task.title ?? "").trim().toLowerCase();
+  if (!title) return undefined;
+  return rows.find((row) => row.title.trim().toLowerCase() === title);
+}
+
+/** 没有 N/M 时用状态画条，不显示假分数。 */
+export function taskProgressPercent(
+  category: IssueStatusCategory | null | undefined,
+  fraction: { done: number; total: number } | null,
+): number {
+  if (fraction && fraction.total > 0) {
+    return Math.round((Math.min(fraction.done, fraction.total) / fraction.total) * 100);
+  }
+  switch (category) {
+    case "done":
+      return 100;
+    case "in_review":
+      return 70;
+    case "in_progress":
+      return 45;
+    case "blocked":
+      return 20;
+    default:
+      return 0;
+  }
 }

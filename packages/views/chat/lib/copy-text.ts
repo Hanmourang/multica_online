@@ -1,5 +1,6 @@
 import type { ChatMessage } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { visiblePageSurfaceContent } from "./page-surface-context";
 
 /**
  * Split an assistant timeline into three regions for the conductor-style fold:
@@ -44,11 +45,15 @@ export function extractCopyText(
   message: ChatMessage,
   timeline: ChatTimelineItem[],
 ): string {
-  if (timeline.length === 0) return message.content ?? "";
-  const { preface, final } = splitTimeline(timeline);
-  const pieces = [...preface, ...final]
-    .map((i) => i.content ?? "")
-    .filter((s) => s.length > 0);
-  if (pieces.length === 0) return message.content ?? "";
-  return pieces.join("\n\n");
+  const raw =
+    timeline.length === 0
+      ? (message.content ?? "")
+      : (() => {
+          const { preface, final } = splitTimeline(timeline);
+          const pieces = [...preface, ...final]
+            .map((i) => i.content ?? "")
+            .filter((s) => s.length > 0);
+          return pieces.length === 0 ? (message.content ?? "") : pieces.join("\n\n");
+        })();
+  return message.role === "user" ? visiblePageSurfaceContent(raw) : raw;
 }

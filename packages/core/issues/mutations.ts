@@ -1156,6 +1156,31 @@ export function useUnsubscribeFromIssueSubtree(issueId: string) {
  * C8 一键回炉：复用已有 POST /acceptance/verdict。
  * fail → acceptance_round+1 并新建 stage3 修复子任务（服务端已有机制）。
  */
+export function useRegisterPrototype(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { html_path: string; prompt?: string }) =>
+      api.registerPrototype(issueId, body),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.prototypeVersions(issueId) });
+    },
+  });
+}
+
+export function useUpdatePrototypePath(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { version: number; html_path: string; prompt?: string }) =>
+      api.updatePrototypePath(issueId, vars.version, {
+        html_path: vars.html_path,
+        prompt: vars.prompt,
+      }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.prototypeVersions(issueId) });
+    },
+  });
+}
+
 export function useSubmitAcceptanceVerdict(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

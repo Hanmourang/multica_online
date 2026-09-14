@@ -7,6 +7,7 @@ export {
   moduleObjectsOptions,
   moduleStrategiesOptions,
   moduleNeighborhoodOptions,
+  projectIssuesForModulesOptions,
   busMatrixOptions,
   busMatrixDrilldownOptions,
   busMatrixAlertsOptions,

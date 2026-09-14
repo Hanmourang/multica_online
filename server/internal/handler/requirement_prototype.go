@@ -362,3 +362,72 @@ func (h *Handler) ConfirmPrototype(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"version": prototypeVersionToResponse(confirmed)})
 }
+
+type registerPrototypeRequest struct {
+	HtmlPath string `json:"html_path"`
+	Prompt   string `json:"prompt"`
+}
+
+// RegisterPrototype handles POST /api/issues/{id}/prototypes — 人工把已有 HTML
+// 登记为新版本，不派 prototyper 任务。
+func (h *Handler) RegisterPrototype(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	var body registerPrototypeRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	prompt := strings.TrimSpace(body.Prompt)
+	if prompt == "" {
+		prompt = "manual attach"
+	}
+	version, err := h.IssueService.RegisterPrototypeVersion(r.Context(), service.GeneratePrototypeVersionParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		HtmlPath:    strings.TrimSpace(body.HtmlPath),
+		Prompt:      prompt,
+		CreatorType: actorType,
+		CreatorID:   parseUUID(actorID),
+	})
+	if err != nil {
+		prototypeHandlerError(w, err, "failed to register prototype version")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"version": prototypeVersionToResponse(version)})
+}
+
+// UpdatePrototypePath handles PATCH /api/issues/{id}/prototypes/{version} —
+// 改该版本指向的 HTML 文件。
+func (h *Handler) UpdatePrototypePath(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	versionNum, err := strconv.Atoi(chi.URLParam(r, "version"))
+	if err != nil || versionNum < 1 {
+		writeError(w, http.StatusBadRequest, "invalid version")
+		return
+	}
+	var body registerPrototypeRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	updated, err := h.IssueService.UpdatePrototypeHtmlPath(
+		r.Context(),
+		issue.ID,
+		int32(versionNum),
+		strings.TrimSpace(body.HtmlPath),
+		strings.TrimSpace(body.Prompt),
+	)
+	if err != nil {
+		prototypeHandlerError(w, err, "failed to update prototype html_path")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": prototypeVersionToResponse(updated)})
+}

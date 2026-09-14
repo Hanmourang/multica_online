@@ -1,10 +1,11 @@
 "use client";
 
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { History } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { busMatrixTimelineOptions } from "@multica/core/graph/queries";
-import type { OntologyChangeType } from "@multica/core/types";
+import type { OntologyChangeType, OntologyChangelog } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../i18n";
 import { useGraphData } from "./graph-data-provider";
@@ -13,27 +14,37 @@ import {
   QueryError,
   QueryLoading,
 } from "../archive/query-states";
+import { ChangeBadge } from "./bus-matrix-change-badge";
 
 /**
- * f11 迭代时间线（OntologyChangelog，按 TableObject 聚合）。
- *
- * GET .../graph/bus-matrix/timeline — until ontology extraction lands the
- * changes array is legitimately empty and the panel says so; no migration
- * history is fabricated.
+ * f11 迭代时间线：按 added / modified / removed 分组（本体 changelog 暂空则诚实空态）。
  */
+const GROUPS: OntologyChangeType[] = ["added", "modified", "removed", "status_change"];
+
 const CHANGE_TYPE_CLASS: Record<OntologyChangeType, string> = {
-  added: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  modified: "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  removed: "border-destructive/40 bg-destructive/10 text-destructive",
-  status_change: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  added: "border-emerald-500/40 bg-emerald-500/10",
+  modified: "border-blue-500/40 bg-blue-500/10",
+  removed: "border-destructive/40 bg-destructive/10",
+  status_change: "border-amber-500/40 bg-amber-500/10",
 };
 
 export function BusMatrixTimeline() {
   const { t } = useT("archive");
   const wsId = useWorkspaceId();
-  const { projectId } = useGraphData();
+  const { projectId, snapshot } = useGraphData();
 
-  const query = useQuery(busMatrixTimelineOptions(wsId, projectId, 20));
+  const query = useQuery(busMatrixTimelineOptions(wsId, projectId, 50));
+
+  const grouped = useMemo(() => {
+    const map = new Map<OntologyChangeType, OntologyChangelog[]>();
+    for (const type of GROUPS) map.set(type, []);
+    for (const change of query.data?.changes ?? []) {
+      const bucket = map.get(change.change_type) ?? [];
+      bucket.push(change);
+      map.set(change.change_type, bucket);
+    }
+    return map;
+  }, [query.data?.changes]);
 
   if (query.isPending) {
     return <QueryLoading rows={4} />;
@@ -55,33 +66,44 @@ export function BusMatrixTimeline() {
   }
 
   return (
-    <div className="space-y-2">
-      <h4 className="text-caption font-medium text-foreground">
-        {t(($) => $.bus_matrix.timeline_title)}
-      </h4>
-      <ul className="rounded-lg border border-surface-border">
-        {changes.map((change) => (
-          <li
-            key={change.id}
-            className="flex flex-wrap items-center gap-2 border-b border-surface-border px-3 py-2 text-caption last:border-b-0"
-          >
-            <span className="shrink-0 tabular-nums text-micro text-muted-foreground">
-              {new Date(change.created_at).toLocaleDateString()}
-            </span>
-            <span
-              className={cn(
-                "shrink-0 rounded border px-1.5 py-0.5 font-mono text-micro font-semibold",
-                CHANGE_TYPE_CLASS[change.change_type] ?? CHANGE_TYPE_CLASS.modified,
-              )}
-            >
-              {change.change_type}
-            </span>
-            <span className="min-w-0 flex-1 truncate font-mono font-medium" title={change.object_name}>
-              {change.object_name}
-            </span>
-          </li>
-        ))}
-      </ul>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h4 className="text-caption font-medium text-foreground">
+          {t(($) => $.bus_matrix.timeline_title)}
+        </h4>
+        {snapshot?.scan_id ? (
+          <span className="font-mono text-micro text-muted-foreground">
+            {t(($) => $.bus_v2.scan_current, { scan: snapshot.scan_id.slice(0, 8) })}
+          </span>
+        ) : null}
+      </div>
+      {GROUPS.map((type) => {
+        const items = grouped.get(type) ?? [];
+        if (items.length === 0) return null;
+        return (
+          <section key={type} className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <ChangeBadge type={type} />
+              <span className="text-micro tabular-nums text-muted-foreground">{items.length}</span>
+            </div>
+            <ul className={cn("rounded-lg border", CHANGE_TYPE_CLASS[type])}>
+              {items.map((change) => (
+                <li
+                  key={change.id}
+                  className="flex flex-wrap items-center gap-2 border-b border-surface-border/60 px-3 py-2 text-caption last:border-b-0"
+                >
+                  <span className="shrink-0 tabular-nums text-micro text-muted-foreground">
+                    {new Date(change.created_at).toLocaleDateString()}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-mono font-medium" title={change.object_name}>
+                    {change.object_name}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
     </div>
   );
 }

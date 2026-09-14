@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { Database } from "lucide-react";
-import type { BusMatrixCell } from "@multica/core/types";
 import {
   Select,
   SelectContent,
@@ -28,10 +27,19 @@ import { BusMatrixAlerts } from "./bus-matrix-alerts";
 import { ArchiveEmpty } from "../archive/query-states";
 import { Button } from "@multica/ui/components/ui/button";
 import { BusMatrixManage } from "./bus-matrix-manage";
+import { BusMatrixDataView } from "./bus-matrix-data-view";
+import { BusMatrixTablesPanel } from "./bus-matrix-tables-panel";
+import { DataModelAssets } from "./data-model-assets";
+import { DataModelIterations } from "./data-model-iterations";
 import {
+  applyCellEdits,
   applyDomainLayout,
+  applyRowLayout,
+  cellRowKey,
+  collectRowSeeds,
   loadBusMatrixLayout,
   saveBusMatrixLayout,
+  saveCellCounts,
   type BusMatrixLayout,
 } from "./bus-matrix-layout";
 
@@ -53,7 +61,7 @@ import {
  */
 export function BusMatrixTab() {
   return (
-    <div className="space-y-3">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-hidden">
       <ScanStatusBar />
       <BusMatrixViews />
     </div>
@@ -65,49 +73,85 @@ function BusMatrixViews() {
   const { projectId, snapshot, selectedCell, setSelectedCell } = useGraphData();
   const [domainFilter, setDomainFilter] = useState<string | null>(null);
   const [crossOnly, setCrossOnly] = useState(false);
-  const [layoutOpen, setLayoutOpen] = useState(false);
+  const [layoutOpen, setLayoutOpen] = useState(true);
   const [layout, setLayout] = useState<BusMatrixLayout>(() =>
     loadBusMatrixLayout(projectId),
   );
 
   const rawCells = useMemo(() => snapshot?.bus_matrix ?? [], [snapshot]);
 
-  const cells = useMemo(() => {
-    const visible = new Set(
+  const persistLayout = (next: BusMatrixLayout) => {
+    setLayout(next);
+    saveBusMatrixLayout(projectId, next);
+  };
+
+  const visibleDomains = useMemo(
+    () =>
       applyDomainLayout(
-        [...new Set(rawCells.map((c) => c.domain))],
+        [...new Set([...rawCells.map((cell) => cell.domain), ...layout.manualDomains])],
         layout,
       ),
+    [layout, rawCells],
+  );
+
+  const cells = useMemo(() => {
+    const visible = new Set(visibleDomains);
+    const mapped = rawCells.filter(
+      (cell) => visible.has(cell.domain) && !layout.hiddenRows.includes(cellRowKey(cell)),
     );
-    const mapped = rawCells
-      .filter((cell) => visible.has(cell.domain) && !layout.hiddenRows.includes(cell.page_key))
-      .map((cell) => ({
-        ...cell,
-        domain: layout.aliases[cell.domain] ?? cell.domain,
+    const manuals: typeof mapped = layout.manualRows
+      .filter((row) => visible.has(row.domain) && !layout.hiddenRows.includes(row.id))
+      .map((row) => ({
+        module_name: row.name,
+        module_node_id: row.id,
+        page_name: row.name,
+        page_key: row.id,
+        domain: row.domain,
+        table_count: row.read + row.write,
+        read_count: row.read,
+        write_count: row.write,
       }));
-    const manuals: typeof mapped = layout.manualRows.map((row) => ({
-      module_name: row.name,
-      module_node_id: row.id,
-      page_name: row.name,
-      page_key: row.id,
-      domain: layout.aliases[row.domain] ?? row.domain,
-      table_count: row.read + row.write,
-      read_count: row.read,
-      write_count: row.write,
+    const combined = applyCellEdits([...mapped, ...manuals], layout).map((cell) => ({
+      ...cell,
+      module_name: layout.moduleAliases[cell.module_node_id] ?? cell.module_name,
+      page_name: layout.rowAliases[cell.page_key] ?? cell.page_name,
+      process_name: cell.process_key
+        ? layout.rowAliases[cell.process_key] ?? cell.process_name
+        : cell.process_name,
     }));
-    return [...mapped, ...manuals];
-  }, [rawCells, layout]);
+    const rank = new Map(
+      applyRowLayout(
+        [...new Set(combined.map((cell) => cellRowKey(cell)))],
+        layout,
+      ).map((key, index) => [key, index]),
+    );
+    return combined.sort(
+      (a, b) => (rank.get(cellRowKey(a)) ?? 999) - (rank.get(cellRowKey(b)) ?? 999),
+    );
+  }, [layout, rawCells, visibleDomains]);
 
-  const domainItems = useMemo(() => {
-    const seen = new Set<string>();
-    for (const cell of cells) seen.add(cell.domain);
-    return [...seen].sort().map((value) => ({ value, label: value }));
-  }, [cells]);
+  const rowSeeds = useMemo(() => collectRowSeeds(rawCells, layout), [layout, rawCells]);
 
-  const empty = cells.length === 0;
+  const layoutRows = useMemo(
+    () =>
+      rowSeeds.map((seed) => ({
+        key: seed.processKey ?? seed.pageKey,
+        name: seed.processName ?? seed.pageName,
+      })),
+    [rowSeeds],
+  );
+
+  const domainItems = useMemo(
+    () =>
+      visibleDomains.map((value) => ({
+        value,
+        label: layout.aliases[value] ?? value,
+      })),
+    [layout.aliases, visibleDomains],
+  );
 
   return (
-    <Tabs defaultValue="product">
+    <Tabs defaultValue="product" className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <TabsList variant="line">
         <TabsTrigger value="product">
           {t(($) => $.bus_matrix.perspective_product)}
@@ -120,9 +164,14 @@ function BusMatrixViews() {
         </TabsTrigger>
       </TabsList>
 
-      <TabsContent value="product" className="mt-3 space-y-3">
+      <TabsContent value="product" className="mt-3 min-h-0 flex-1 space-y-3 overflow-auto">
         {/* Perspective toolbar — domain column filter + cross-only switch. */}
         <div className="flex flex-wrap items-center gap-2">
+          {snapshot?.scan_id ? (
+            <span className="rounded-md border border-primary/20 bg-primary/5 px-2 py-1 font-mono text-micro text-primary">
+              {t(($) => $.bus_v2.scan_current, { scan: snapshot.scan_id.slice(0, 8) })}
+            </span>
+          ) : null}
           <Select
             items={domainItems}
             value={domainFilter}
@@ -164,26 +213,42 @@ function BusMatrixViews() {
           </button>
         </div>
 
-        {empty ? (
+        {rawCells.length === 0 && cells.length === 0 && rowSeeds.length === 0 && (
           <ArchiveEmpty
             icon={<Database className="size-5" />}
             title={t(($) => $.bus_matrix.matrix_empty)}
             description={t(($) => $.bus_matrix.matrix_empty_hint)}
           />
-        ) : (
-        <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+        )}
+        <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(220px,28%)]">
           <BusMatrixGrid
             cells={cells}
+            rowSeeds={rowSeeds}
+            domains={visibleDomains}
             domainFilter={domainFilter}
             crossOnly={crossOnly}
             selectedCell={selectedCell}
             onSelectCell={setSelectedCell}
+            layout={layout}
+            onChangeLayout={persistLayout}
           />
-          <BusMatrixSidebar cells={cells} selectedCell={selectedCell} />
+          <BusMatrixSidebar
+            cells={cells}
+            selectedCell={selectedCell}
+            onSaveCell={(cell, read, write) => {
+              persistLayout(
+                saveCellCounts(layout, cell.module_node_id, cellRowKey(cell), cell.domain, read, write),
+              );
+              setSelectedCell({
+                ...cell,
+                read_count: read,
+                write_count: write,
+                table_count: read + write,
+              });
+            }}
+          />
         </div>
-        )}
 
-        {!empty && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-micro text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <span aria-hidden className="size-3 rounded-sm bg-emerald-500/25" />
@@ -208,126 +273,41 @@ function BusMatrixViews() {
             {t(($) => $.bus_matrix.legend_cross)}
           </span>
         </div>
-        )}
 
-        {!empty && <BusMatrixDrilldown />}
+        <BusMatrixTablesPanel
+          layout={layout}
+          onChange={persistLayout}
+        />
+        {selectedCell ? <BusMatrixDrilldown /> : null}
         {layoutOpen && (
           <BusMatrixManage
             projectId={projectId}
-            domains={[...new Set(rawCells.map((c) => c.domain))]}
+            domains={[...new Set([...rawCells.map((c) => c.domain), ...layout.manualDomains])]}
+            rows={layoutRows}
             layout={layout}
-            onChange={(next) => {
-              setLayout(next);
-              saveBusMatrixLayout(projectId, next);
-            }}
+            onChange={persistLayout}
           />
         )}
       </TabsContent>
 
-      <TabsContent value="data" className="mt-3">
-        <BusMatrixDataView cells={cells} />
+      <TabsContent value="data" className="mt-3 min-h-0 flex-1 overflow-auto">
+        {snapshot?.data_model?.schema_version === 2 ? (
+          <DataModelAssets dataModel={snapshot.data_model} aliases={layout.aliases} />
+        ) : (
+          <BusMatrixDataView cells={cells} aliases={layout.aliases} layout={layout} />
+        )}
       </TabsContent>
 
-      <TabsContent value="iteration" className="mt-3 grid items-start gap-3 lg:grid-cols-2">
-        <BusMatrixTimeline />
-        <BusMatrixAlerts />
+      <TabsContent value="iteration" className="mt-3 min-h-0 flex-1 space-y-3 overflow-auto">
+        {snapshot?.data_model?.schema_version === 2 ? (
+          <DataModelIterations dataModel={snapshot.data_model} />
+        ) : null}
+        <div className="grid items-start gap-3 lg:grid-cols-2">
+          <BusMatrixTimeline />
+          <BusMatrixAlerts />
+        </div>
       </TabsContent>
     </Tabs>
   );
 }
 
-/** 数据视角：按列汇总 — 每个数据域被谁读写（客户端聚合，真实 cells）。 */
-function BusMatrixDataView({ cells }: { cells: BusMatrixCell[] }) {
-  const { t } = useT("archive");
-
-  const domainStats = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        tables: number;
-        read: number;
-        write: number;
-        modules: Set<string>;
-        cross: number;
-        newTables: number;
-      }
-    >();
-    for (const cell of cells) {
-      let entry = map.get(cell.domain);
-      if (!entry) {
-        entry = {
-          tables: 0,
-          read: 0,
-          write: 0,
-          modules: new Set(),
-          cross: 0,
-          newTables: 0,
-        };
-        map.set(cell.domain, entry);
-      }
-      entry.tables += cell.table_count;
-      entry.read += cell.read_count;
-      entry.write += cell.write_count;
-      entry.modules.add(cell.module_name);
-      if (cell.is_cross_domain_write) entry.cross += 1;
-      if (cell.is_new_table) entry.newTables += 1;
-    }
-    return [...map.entries()].sort((a, b) => b[1].tables - a[1].tables);
-  }, [cells]);
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {domainStats.map(([domain, stat]) => (
-        <div
-          key={domain}
-          className="space-y-2 rounded-lg border border-surface-border bg-surface p-3"
-        >
-          <div className="truncate font-mono text-caption font-semibold" title={domain}>
-            {domain}
-          </div>
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-title-sm font-semibold tabular-nums">
-              {stat.tables}
-            </span>
-            <span className="text-micro text-muted-foreground">
-              {t(($) => $.bus_matrix.table_count, { count: stat.tables })}
-            </span>
-            <span className="text-micro tabular-nums text-muted-foreground">
-              {t(($) => $.bus_matrix.read_write, {
-                read: stat.read,
-                write: stat.write,
-              })}
-            </span>
-          </div>
-          <div className="text-micro text-muted-foreground">
-            {t(($) => $.bus_matrix.modules_touched, { count: stat.modules.size })}
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {[...stat.modules].map((module) => (
-              <span
-                key={module}
-                className="rounded border border-surface-border px-1.5 py-0.5 text-micro text-muted-foreground"
-              >
-                {module}
-              </span>
-            ))}
-          </div>
-          {(stat.cross > 0 || stat.newTables > 0) && (
-            <div className="flex flex-wrap gap-1.5 text-micro">
-              {stat.cross > 0 && (
-                <span className="text-destructive">
-                  {t(($) => $.bus_matrix.legend_cross)} {stat.cross}
-                </span>
-              )}
-              {stat.newTables > 0 && (
-                <span className="text-blue-600 dark:text-blue-400">
-                  {t(($) => $.bus_matrix.legend_new)} {stat.newTables}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}

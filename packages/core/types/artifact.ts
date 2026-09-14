@@ -31,6 +31,10 @@ export interface ProjectArtifact {
   version: number;
   rel_path: string;
   requirement_key?: string | null;
+  /** 人口语别名：prd / mrd / brd / roadmap。不参与路径契约。 */
+  doc_class?: string | null;
+  /** 人工标签覆盖。缺省由文件直属目录推导，不参与路径契约。 */
+  doc_module?: string | null;
   blob_sha: string;
   /** 渲染快照（attachment/content）；null = 仅索引未上传（>100MB 只索引）。 */
   attachment_id?: string | null;
@@ -48,6 +52,9 @@ export interface ListArtifactsParams {
   scope?: ArtifactScope;
   stage?: ArtifactStage;
   doc_type?: ArtifactDocType;
+  /** prd / mrd / brd / roadmap，或 planning 虚拟组。 */
+  doc_class?: string;
+  q?: string;
   issue_id?: string;
 }
 
@@ -96,6 +103,8 @@ export interface ArtifactSyncItem {
   version: number;
   requirement_key?: string;
   issue_id?: string;
+  doc_class?: string;
+  doc_module?: string;
   size_bytes: number;
   attachment_id?: string;
 }
@@ -155,9 +164,48 @@ export interface CreateProjectArtifactRequest {
   rel_path: string;
   requirement_key?: string | null;
   issue_id?: string | null;
+  doc_class?: string | null;
+  doc_module?: string | null;
   content?: string;
   attachment_id?: string | null;
   version?: number;
+}
+
+/** GET /projects/{id}/archive/sync-diagnostics 条目。 */
+export interface ArchiveSyncDiagnostic {
+  id?: string;
+  sync_run_id: string;
+  stage: string;
+  rel_path?: string | null;
+  level: string;
+  message: string;
+  created_at?: string;
+}
+
+export interface ListArchiveSyncDiagnosticsResponse {
+  diagnostics: ArchiveSyncDiagnostic[];
+}
+
+/** GET /projects/{id}/archive/sync-config。无行时服务端返回默认值，不落库。 */
+export interface ArchiveSyncConfig {
+  project_id: string;
+  workspace_id: string;
+  sync_mode: "hook" | "scheduled" | "manual";
+  conflict_policy: "path_first" | "review_queue";
+  scope_filter?: unknown;
+  batch_bind_threshold: number;
+  cron_expr?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** PUT /projects/{id}/archive/sync-config */
+export interface PutArchiveSyncConfigRequest {
+  sync_mode: "hook" | "scheduled" | "manual";
+  conflict_policy: "path_first" | "review_queue";
+  scope_filter?: unknown;
+  batch_bind_threshold?: number;
+  cron_expr?: string | null;
 }
 
 /** PATCH /projects/{id}/artifacts/{id} 可写字段。 */
@@ -168,5 +216,7 @@ export interface PatchProjectArtifactRequest {
   rel_path?: string;
   requirement_key?: string | null;
   issue_id?: string | null;
+  doc_class?: string | null;
+  doc_module?: string | null;
   content?: string;
 }

@@ -123,6 +123,10 @@ vi.mock("@multica/core/chat", () => ({
   ),
 }));
 
+vi.mock("./components/agent-dropdown", () => ({
+  AgentDropdown: () => null,
+}));
+
 vi.mock("./components/use-chat-controller", async () => {
   const { useSyncExternalStore } = await import("react");
   return {

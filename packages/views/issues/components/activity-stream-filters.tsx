@@ -23,7 +23,7 @@ export function ActivityStreamFilters({
   return (
     <div
       data-testid="activity-stream-filters"
-      className="mb-3 flex flex-wrap items-center gap-1.5"
+      className="mb-2 mt-2 flex flex-wrap items-center gap-1.5"
     >
       {FILTERS.map((key) => {
         const on = selected.has(key);

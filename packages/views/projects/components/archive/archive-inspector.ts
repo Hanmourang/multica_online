@@ -3,6 +3,8 @@
  * 纯函数，不读磁盘——调用方传入相对路径列表（桌面扫目录或已索引 artifact）。
  */
 
+import { resolveArchiveDocChoice } from "./archive-templates";
+
 export type InspectSeverity = "blocking" | "suggestion";
 
 export interface InspectFinding {
@@ -553,20 +555,19 @@ export function suggestedRelPath(input: {
   requirementKey?: string | null;
   filename: string;
 }): string {
-  const file = input.filename.trim() || `${input.docType}.md`;
+  const shelf = resolveArchiveDocChoice(input.docType).shelf;
+  const file = input.filename.trim() || `${shelf}.md`;
   if (input.scope === "shared") return `_shared/${file}`;
   if (input.scope === "project") {
-    if (input.docType === "project") return file === "PROJECT.md" ? "PROJECT.md" : `PROJECT.md`;
-    if (input.docType.startsWith("filing-")) {
-      return `filing/${input.docType.slice("filing-".length)}/${file}`;
+    if (shelf === "project") return file === "PROJECT.md" ? "PROJECT.md" : `PROJECT.md`;
+    if (shelf.startsWith("filing-")) {
+      return `filing/${shelf.slice("filing-".length)}/${file}`;
     }
-    if (input.docType === "change-log" || input.docType === "work-plan") {
-      const folder = input.docType === "work-plan" ? "qoder-plans" : "daily_logs";
+    if (shelf === "change-log" || shelf === "work-plan") {
+      const folder = shelf === "work-plan" ? "plans" : "daily_logs";
       return `change_logs/${folder}/${file}`;
     }
-    const overview = OVERVIEW_CATS.has(input.docType)
-      ? input.docType
-      : "architecture";
+    const overview = OVERVIEW_CATS.has(shelf) ? shelf : "architecture";
     return `overview/${overview}/${file}`;
   }
   const key = input.requirementKey?.trim() || "REQ-00000000-00";

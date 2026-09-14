@@ -1,4 +1,5 @@
 import { normalizeScanRel } from "./archive-import";
+import { previewRelPathCandidates } from "./archive-preview-resolve";
 
 const texts = new Map<string, string>();
 let generation = 0;
@@ -33,11 +34,13 @@ export function putArchivePreviewTexts(
 }
 
 export function getArchivePreviewText(relPath: string): string | null {
-  const raw = relPath.replace(/\\/g, "/");
-  const hit = texts.get(raw) ?? texts.get(normalizeScanRel(raw));
-  if (hit) return hit;
-  for (const [key, text] of texts) {
-    if (key.endsWith(`/${raw}`) || normalizeScanRel(key) === raw) return text;
+  for (const candidate of previewRelPathCandidates(relPath)) {
+    const raw = candidate.replace(/\\/g, "/");
+    const hit = texts.get(raw) ?? texts.get(normalizeScanRel(raw));
+    if (hit) return hit;
+    for (const [key, text] of texts) {
+      if (key.endsWith(`/${raw}`) || normalizeScanRel(key) === raw) return text;
+    }
   }
   return null;
 }

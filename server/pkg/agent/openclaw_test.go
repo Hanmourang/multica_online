@@ -1558,3 +1558,38 @@ func TestOpenclawExecuteAllowsCurrentVersion(t *testing.T) {
 		t.Fatal("timeout waiting for result")
 	}
 }
+
+func TestExtractOpenclawUpstreamError(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, stderr, want string
+	}{
+		{
+			name:   "model taken down",
+			stderr: `rawError=404 data: {"error":{"message":"模型已下架，建议更换新模型"}}`,
+			want:   "openclaw: 模型已下架，建议更换新模型",
+		},
+		{
+			name:   "invalid ideaLab key",
+			stderr: `openai.APIError: 无效的api key`,
+			want:   "openclaw: 无效的api key",
+		},
+		{
+			name:   "model not found english",
+			stderr: `reason=model_not_found The selected model was not found by the provider`,
+			want:   "openclaw: the selected model was not found by the provider",
+		},
+		{
+			name:   "unrelated stderr",
+			stderr: `some warning about a plugin`,
+			want:   "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractOpenclawUpstreamError(tc.stderr); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

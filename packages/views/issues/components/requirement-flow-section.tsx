@@ -109,12 +109,16 @@ export interface RequirementFlowSectionProps {
   embedded?: boolean;
 }
 
-/** 普通顶层任务（无日历/流水线字段）不挂四阶段条。不用 goal：任务创建也会带交付目标。 */
+/**
+ * 普通顶层任务（无日历/流水线字段）不挂四阶段条。不用 goal：任务创建也会带交付目标。
+ * 与项目需求列表 `isTopLevelRequirement` 对齐：有 requirement_status 即视为需求。
+ */
 export function isRequirementWorkbench(issue: Issue): boolean {
   if (issue.parent_issue_id != null) return false;
   if (!issue.project_id) return false;
   return Boolean(
-    issue.start_at ||
+    issue.requirement_status ||
+      issue.start_at ||
       issue.repo_resource_id ||
       issue.decomposition_confirmed_at ||
       issue.triggered_at,
@@ -141,7 +145,10 @@ export function RequirementFlowSection({
   } | null>(null);
 
   const isTopLevel = issue.parent_issue_id == null;
-  const showWorkbench = isRequirementWorkbench(issue);
+  // 工作台抽屉（embedded）按用户意图打开：GetIssue 往往没有列表投影列，
+  // 也不能因为缺 start_at 就把四阶段主区留空。
+  const showWorkbench =
+    isRequirementWorkbench(issue) || (embedded && isTopLevel && Boolean(issue.project_id));
   const projectId = issue.project_id ?? null;
   const createComment = useCreateComment(issue.id);
   const autoStarted = useRef(false);
@@ -429,7 +436,18 @@ export function RequirementFlowSection({
   }, [stage]);
 
   if (!isTopLevel || !showWorkbench) return null;
-  if (!roster || !versions || !decomp) return null;
+  if (!roster || !versions || !decomp) {
+    return (
+      <div
+        data-testid="requirement-flow-loading"
+        className="space-y-3"
+        aria-busy
+      >
+        <div className="h-8 animate-pulse rounded-md bg-muted" />
+        <div className="h-40 animate-pulse rounded-md bg-muted" />
+      </div>
+    );
+  }
 
   const moduleName =
     modulesQuery.data?.find((m) => m.id === issue.module_id)?.name ?? null;

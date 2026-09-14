@@ -297,6 +297,9 @@
     "start_at_past": "开始时间早于当前，创建后将立即进入待触发",
     "roster_required": "请先为 PM 和研发各指派一名执行人（开关开着但没人，拆解会失败）",
     "toast_roster_save_failed": "需求已创建，但班底保存失败。请到工作台补拍 PM 后再拆解",
-    "toast_playbook_save_failed": "需求已创建，但角色执行标准保存失败。可在工作台或项目设置里补改"
+    "toast_playbook_save_failed": "需求已创建，但角色执行标准保存失败。可在工作台或项目设置里补改",
+    "scaffold_ok": "已建需求档案 {{key}}",
+    "scaffold_ok_disk": "已建需求档案 {{key}}，并写入本机目录",
+    "scaffold_failed": "需求已创建，但档案目录未写成功"
   }
 }

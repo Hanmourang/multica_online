@@ -27,6 +27,7 @@ import {
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import { visiblePageSurfaceContent } from "../lib/page-surface-context";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   RowActionsMenu,
@@ -55,7 +56,7 @@ function formatChatTime(dateStr: string, locale: string): string {
 
 // Collapse a (possibly markdown / multi-line) message into a one-line preview.
 function toPreview(content: string): string {
-  return content
+  return visiblePageSurfaceContent(content)
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/[#*`>~]/g, "")
     .replace(/\s+/g, " ")

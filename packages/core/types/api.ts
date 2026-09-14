@@ -241,6 +241,12 @@ export interface GeneratePrototypeResponse {
   task: import("./issue").Issue;
 }
 
+/** POST /issues/{id}/prototypes · PATCH /issues/{id}/prototypes/{version} */
+export interface RegisterPrototypeRequest {
+  html_path: string;
+  prompt?: string;
+}
+
 export interface UpdateIssueRequest {
   /** Legacy aggregate compare-and-swap token. New text editors use field
    * baselines so unrelated issue activity does not reject their edits. */

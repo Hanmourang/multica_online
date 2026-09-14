@@ -38,6 +38,8 @@ type ProjectArtifactResponse struct {
 	Version        int32   `json:"version"`
 	RelPath        string  `json:"rel_path"`
 	RequirementKey *string `json:"requirement_key"`
+	DocClass       *string `json:"doc_class,omitempty"`
+	DocModule      *string `json:"doc_module,omitempty"`
 	BlobSha        string  `json:"blob_sha"`
 	AttachmentID   *string `json:"attachment_id"`
 	SizeBytes      int64   `json:"size_bytes"`
@@ -61,6 +63,8 @@ type projectArtifactRow struct {
 	Version        int32
 	RelPath        string
 	RequirementKey pgtype.Text
+	DocClass       pgtype.Text
+	DocModule      pgtype.Text
 	BlobSha        string
 	AttachmentID   pgtype.UUID
 	SizeBytes      int64
@@ -72,7 +76,7 @@ type projectArtifactRow struct {
 
 const projectArtifactColumns = `id, workspace_id, project_id, resource_id, issue_id, task_id,
 	scope, stage, doc_type, version, rel_path, requirement_key, blob_sha, attachment_id,
-	size_bytes, source, synced_at, created_at, updated_at`
+	size_bytes, source, synced_at, created_at, updated_at, doc_class, doc_module`
 
 func scanProjectArtifactRow(scan func(dest ...any) error) (projectArtifactRow, error) {
 	var row projectArtifactRow
@@ -80,7 +84,7 @@ func scanProjectArtifactRow(scan func(dest ...any) error) (projectArtifactRow, e
 		&row.ID, &row.WorkspaceID, &row.ProjectID, &row.ResourceID, &row.IssueID, &row.TaskID,
 		&row.Scope, &row.Stage, &row.DocType, &row.Version, &row.RelPath, &row.RequirementKey,
 		&row.BlobSha, &row.AttachmentID, &row.SizeBytes, &row.Source, &row.SyncedAt,
-		&row.CreatedAt, &row.UpdatedAt,
+		&row.CreatedAt, &row.UpdatedAt, &row.DocClass, &row.DocModule,
 	)
 	return row, err
 }
@@ -99,6 +103,8 @@ func projectArtifactToResponse(row projectArtifactRow) ProjectArtifactResponse {
 		Version:        row.Version,
 		RelPath:        row.RelPath,
 		RequirementKey: textToPtr(row.RequirementKey),
+		DocClass:       textToPtr(row.DocClass),
+		DocModule:      textToPtr(row.DocModule),
 		BlobSha:        row.BlobSha,
 		AttachmentID:   util.UUIDToPtr(row.AttachmentID),
 		SizeBytes:      row.SizeBytes,
@@ -188,6 +194,8 @@ type ArtifactSyncItemRequest struct {
 	Version        int32   `json:"version"`
 	RequirementKey *string `json:"requirement_key"`
 	IssueID        *string `json:"issue_id"`
+	DocClass       *string `json:"doc_class"`
+	DocModule      *string `json:"doc_module"`
 	SizeBytes      int64   `json:"size_bytes"`
 	AttachmentID   *string `json:"attachment_id"`
 }
@@ -502,11 +510,11 @@ func upsertProjectArtifact(ctx context.Context, tx pgx.Tx, project db.Project, a
 		INSERT INTO project_artifact (
 			workspace_id, project_id, resource_id, issue_id, scope, stage, doc_type,
 			version, rel_path, requirement_key, blob_sha, attachment_id, size_bytes,
-			source, synced_at
+			source, synced_at, doc_class, doc_module
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11, $12, $13,
-			'sync', now()
+			'sync', now(), $14, $15
 		)
 		ON CONFLICT (resource_id, rel_path, version) DO UPDATE SET
 			issue_id = CASE WHEN project_artifact.source = 'manual'
@@ -515,6 +523,11 @@ func upsertProjectArtifact(ctx context.Context, tx pgx.Tx, project db.Project, a
 			blob_sha = EXCLUDED.blob_sha,
 			attachment_id = EXCLUDED.attachment_id,
 			size_bytes = EXCLUDED.size_bytes,
+			doc_class = EXCLUDED.doc_class,
+			doc_module = CASE
+				WHEN EXCLUDED.doc_module IS NOT NULL THEN EXCLUDED.doc_module
+				WHEN project_artifact.doc_module IS NOT NULL THEN project_artifact.doc_module
+				ELSE NULL END,
 			synced_at = now(),
 			updated_at = now(),
 			deleted_at = NULL
@@ -522,6 +535,8 @@ func upsertProjectArtifact(ctx context.Context, tx pgx.Tx, project db.Project, a
 		project.WorkspaceID, project.ID, archiveResourceID, issueID, item.Scope,
 		util.PtrToInt4(item.Stage), item.DocType, item.Version, item.RelPath,
 		util.PtrToText(item.RequirementKey), item.BlobSha, attachmentID, item.SizeBytes,
+		util.PtrToText(docClassPtr(item.DocClass, item.DocType, item.RelPath)),
+		util.PtrToText(normalizeDocModulePtr(item.DocModule)),
 	).Scan(&inserted, &manualKept)
 	return inserted, manualKept, err
 }
@@ -552,6 +567,12 @@ func (h *Handler) ListProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 		stage = &s
 	}
 	docType := strings.TrimSpace(query.Get("doc_type"))
+	docClass := strings.ToLower(strings.TrimSpace(query.Get("doc_class")))
+	if docClass != "" && !knownDocClasses[docClass] && docClass != "planning" {
+		writeError(w, http.StatusBadRequest, "doc_class must be one of prd/mrd/brd/roadmap/planning")
+		return
+	}
+	q := strings.TrimSpace(query.Get("q"))
 	issueIDStr := strings.TrimSpace(query.Get("issue_id"))
 	var issueID pgtype.UUID
 	if issueIDStr != "" {
@@ -578,6 +599,29 @@ func (h *Handler) ListProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 	if docType != "" {
 		args = append(args, docType)
 		sql += ` AND doc_type = $` + strconv.Itoa(len(args))
+	}
+	if docClass == "planning" {
+		sql += ` AND (
+			doc_class IN ('prd','mrd','brd','roadmap')
+			OR doc_type IN ('research','product-design','work-plan')
+			OR rel_path LIKE '%/overview/research/%'
+			OR rel_path LIKE '%/overview/product-design/%'
+			OR rel_path LIKE '%/change_logs/%/plans/%'
+		)`
+	} else if docClass != "" {
+		args = append(args, docClass)
+		sql += ` AND doc_class = $` + strconv.Itoa(len(args))
+	}
+	if q != "" {
+		args = append(args, "%"+q+"%")
+		n := strconv.Itoa(len(args))
+		sql += ` AND (
+			rel_path ILIKE $` + n + `
+			OR doc_type ILIKE $` + n + `
+			OR COALESCE(doc_class, '') ILIKE $` + n + `
+			OR COALESCE(doc_module, '') ILIKE $` + n + `
+			OR COALESCE(requirement_key, '') ILIKE $` + n + `
+		)`
 	}
 	if issueID.Valid {
 		args = append(args, issueID)
@@ -925,6 +969,8 @@ type PatchProjectArtifactRequest struct {
 	DocType        *string `json:"doc_type"`
 	RelPath        *string `json:"rel_path"`
 	RequirementKey *string `json:"requirement_key"`
+	DocClass       *string `json:"doc_class"`
+	DocModule      *string `json:"doc_module"`
 	Content        *string `json:"content"`
 }
 
@@ -997,6 +1043,24 @@ func (h *Handler) PatchProjectArtifact(w http.ResponseWriter, r *http.Request) {
 			setClauses = append(setClauses, "requirement_key = $"+strconv.Itoa(len(args)))
 		}
 	}
+	if req.DocClass != nil {
+		class := normalizeDocClass(*req.DocClass, row.DocType, row.RelPath)
+		if class == "" {
+			setClauses = append(setClauses, "doc_class = NULL")
+		} else {
+			args = append(args, class)
+			setClauses = append(setClauses, "doc_class = $"+strconv.Itoa(len(args)))
+		}
+	}
+	if req.DocModule != nil {
+		module := normalizeDocModule(*req.DocModule)
+		if module == "" {
+			setClauses = append(setClauses, "doc_module = NULL")
+		} else {
+			args = append(args, module)
+			setClauses = append(setClauses, "doc_module = $"+strconv.Itoa(len(args)))
+		}
+	}
 	if req.Content != nil {
 		content := []byte(*req.Content)
 		args = append(args, gitBlobSHA(content))
@@ -1034,7 +1098,14 @@ func (h *Handler) PatchProjectArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setClauses = append(setClauses, "source = 'manual'", "updated_at = now()")
+	moduleOnly := req.DocModule != nil &&
+		req.Scope == nil && req.Stage == nil && req.IssueID == nil &&
+		req.DocType == nil && req.RelPath == nil && req.RequirementKey == nil &&
+		req.DocClass == nil && req.Content == nil
+	if !moduleOnly {
+		setClauses = append(setClauses, "source = 'manual'")
+	}
+	setClauses = append(setClauses, "updated_at = now()")
 	args = append(args, row.ID, project.WorkspaceID)
 	sql := `UPDATE project_artifact SET ` + strings.Join(setClauses, ", ") +
 		` WHERE id = $` + strconv.Itoa(len(args)-1) +
@@ -1288,6 +1359,8 @@ type CreateProjectArtifactRequest struct {
 	RelPath        string  `json:"rel_path"`
 	RequirementKey *string `json:"requirement_key"`
 	IssueID        *string `json:"issue_id"`
+	DocClass       *string `json:"doc_class"`
+	DocModule      *string `json:"doc_module"`
 	Content        string  `json:"content"`
 	AttachmentID   *string `json:"attachment_id"`
 	Version        int32   `json:"version"`
@@ -1369,11 +1442,11 @@ func (h *Handler) CreateProjectArtifact(w http.ResponseWriter, r *http.Request) 
 			INSERT INTO project_artifact (
 				workspace_id, project_id, resource_id, issue_id, scope, stage, doc_type,
 				version, rel_path, requirement_key, blob_sha, attachment_id, size_bytes,
-				source, synced_at
+				source, synced_at, doc_class, doc_module
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7,
 				$8, $9, $10, $11, $12, $13,
-				'manual', now()
+				'manual', now(), $14, $15
 			)
 			ON CONFLICT (resource_id, rel_path, version) DO UPDATE SET
 				scope = EXCLUDED.scope,
@@ -1381,6 +1454,8 @@ func (h *Handler) CreateProjectArtifact(w http.ResponseWriter, r *http.Request) 
 				doc_type = EXCLUDED.doc_type,
 				issue_id = EXCLUDED.issue_id,
 				requirement_key = EXCLUDED.requirement_key,
+				doc_class = EXCLUDED.doc_class,
+				doc_module = EXCLUDED.doc_module,
 				blob_sha = EXCLUDED.blob_sha,
 				attachment_id = COALESCE(EXCLUDED.attachment_id, project_artifact.attachment_id),
 				size_bytes = EXCLUDED.size_bytes,
@@ -1392,6 +1467,8 @@ func (h *Handler) CreateProjectArtifact(w http.ResponseWriter, r *http.Request) 
 			project.WorkspaceID, project.ID, archiveResourceID, issueID, req.Scope,
 			util.PtrToInt4(req.Stage), req.DocType, req.Version, req.RelPath,
 			requirementKey, blobSha, attachmentID, int64(len(content)),
+			util.PtrToText(docClassPtr(req.DocClass, req.DocType, req.RelPath)),
+			util.PtrToText(normalizeDocModulePtr(req.DocModule)),
 		).Scan(dest...)
 	})
 	if err != nil {

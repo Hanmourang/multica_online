@@ -3072,6 +3072,52 @@ func TestSanitizeCodexDiagnosticRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestAppendCodexKnownStderrHintTransportFailure(t *testing.T) {
+	t.Parallel()
+
+	const prefix = "codex app-server no progress timeout after 60s"
+	tests := []struct {
+		name   string
+		stderr string
+		want   string
+	}{
+		{
+			name:   "connection reset",
+			stderr: "stream disconnected before completion: Connection reset by peer (os error 54)",
+			want:   "cannot reach the OpenAI/Codex service",
+		},
+		{
+			name:   "websocket fallback",
+			stderr: "Falling back from WebSockets to HTTPS transport.",
+			want:   "cannot reach the OpenAI/Codex service",
+		},
+		{
+			name:   "reconnect loop",
+			stderr: "Reconnecting.. waiting for network (2h 03m 15s)",
+			want:   "cannot reach the OpenAI/Codex service",
+		},
+		{
+			name:   "unrelated stderr is unchanged",
+			stderr: "some other warning",
+			want:   "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := appendCodexKnownStderrHint(prefix, tc.stderr)
+			if tc.want == "" {
+				if got != prefix {
+					t.Fatalf("expected hint unchanged, got %q", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("expected hint to contain %q, got %q", tc.want, got)
+			}
+		})
+	}
+}
+
 func TestClassifyCodexStartupStderr(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -3294,9 +3340,52 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 	}
 }
 
+// TestCodexExecuteFirstTurnNoProgressWithoutTurnStarted covers the
+// plugin-sync / websocket-reconnect hang: turn/start is accepted, but
+// Codex never emits turn/started. The first-turn watchdog must still
+// fire instead of waiting out the semantic-inactivity backstop.
+func TestCodexExecuteFirstTurnNoProgressWithoutTurnStarted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-silent"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo 'Falling back from WebSockets to HTTPS transport.' >&2`+"\n"+
+		`echo 'stream disconnected before completion: Connection reset by peer (os error 54)' >&2`+"\n"+
+		`echo 'Reconnecting.. waiting for network (2h 03m 15s)' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  5 * time.Second,
+		FirstTurnNoProgressTimeout: 80 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	for _, want := range []string{
+		CodexFirstTurnNoProgressMarker,
+		"cannot reach the OpenAI/Codex service",
+		"Connection reset by peer",
+	} {
+		if !strings.Contains(result.Error, want) {
+			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
+		}
+	}
+}
+
 // TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated pins the competing-
-// timer contract for MULTICA_CODEX_FIRST_TURN_TIMEOUT (GH #3262 / #5959): the
-// first status:running arms the semantic-inactivity timer and the first-turn
+// timer contract for MULTICA_CODEX_FIRST_TURN_TIMEOUT (GH #3262 / #5959):
+// turn/start acceptance arms the semantic-inactivity timer and the first-turn
 // timer together, so a first-turn override ABOVE the semantic timeout cannot
 // extend the first-item wait — the semantic timer fires first. That also
 // reclassifies the failure as semantic inactivity, so the model-catalog startup

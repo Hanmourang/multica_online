@@ -31,7 +31,12 @@
     "change_project_context": "Change project context",
     "remove_project_context": "Remove project context",
     "no_projects": "No projects yet",
-    "project_context_unsupported": "Project description won't apply — this agent's daemon needs an upgrade"
+    "project_context_unsupported": "Project description won't apply — this agent's daemon needs an upgrade",
+    "page_prototype_mounted": "Prototype attached · {{name}}",
+    "placeholder_named_many": "Message {{name}} and {{count}} agents…",
+    "fanout_ok": "Sent to {{count}} agents",
+    "fanout_partial": "Sent to {{sent}} agents, {{failed}} failed",
+    "fanout_failed": "Could not send to the other agents"
   },
   "queue": {
     "title_one": "{{count}} queued message",
@@ -139,7 +144,9 @@
     "history_group": "Chat history",
     "agent_filter_placeholder": "Search agents...",
     "agent_needs_runtime": "Needs runtime",
-    "agent_needs_runtime_hint": "Bind a runtime before starting a chat with this agent"
+    "agent_needs_runtime_hint": "Bind a runtime before starting a chat with this agent",
+    "agent_multi_hint": "Select more than one. Each extra agent gets its own session; this chat stays put.",
+    "agent_primary_hint": "Agent for this conversation"
   },
   "empty_state": {
     "first_time_title": "Chat with your agents",

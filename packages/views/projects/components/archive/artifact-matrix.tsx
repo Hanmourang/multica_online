@@ -1,13 +1,31 @@
 "use client";
 
-import { useMemo } from "react";
-import { Check, FileStack } from "lucide-react";
-import type { ArtifactStage, ProjectArtifact } from "@multica/core/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronUp, FileStack } from "lucide-react";
+import type { ArtifactStage, Issue, ProjectArtifact } from "@multica/core/types";
 import type { ArtifactEditorSeed } from "./artifact-editor-dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../i18n";
+import { AppLink } from "../../../navigation";
+import { matrixRequirementDisplay } from "./artifact-matrix-label";
+import { requirementBucket } from "../requirements/requirement-helpers";
 import { artifactDisplayName } from "./archive-display";
+import { ArchiveMarqueeSurface } from "./archive-marquee-surface";
+import type { PlanningShelf } from "./archive-mapping";
+import {
+  ARTIFACT_DND_MIME,
+  dragArtifactIds,
+  setPendingDragIds,
+  takePendingDragIds,
+} from "./archive-relocate";
+import { ArtifactModuleChipControl } from "./artifact-module-tag";
+import {
+  blockingReadiness,
+  missingBlockingDocTypes,
+  requirementMissingBlocking as requirementHasBlockingGap,
+} from "./archive-stage-gate";
 import { ArchiveEmpty } from "./query-states";
 
 /**
@@ -21,6 +39,20 @@ import { ArchiveEmpty } from "./query-states";
  */
 
 const STAGES: ArtifactStage[] = [1, 2, 3, 4];
+
+const PROJECT_SHELVES = [
+  { docType: "research", title: "shelf_research" as const },
+  { docType: "product-design", title: "shelf_product_design" as const },
+  { docType: "architecture", title: "shelf_architecture" as const },
+  { docType: "retrospective", title: "shelf_retrospective" as const },
+];
+
+function requirementMissingBlocking(row: RequirementRow): boolean {
+  return requirementHasBlockingGap({
+    rootDocs: row.cells.get(null) ?? [],
+    filesByStage: row.cells,
+  });
+}
 
 interface RequirementRow {
   key: string;
@@ -38,60 +70,325 @@ interface ScopeGroup {
 
 type Translator = ReturnType<typeof useT<"archive">>["t"];
 
+function ArtifactChip({
+  artifact,
+  selected,
+  tagging,
+  checked,
+  pickedIds,
+  onClick,
+  onToggle,
+  onSaveTag,
+  tagBusy,
+}: {
+  artifact: ProjectArtifact;
+  selected: boolean;
+  tagging?: boolean;
+  checked?: boolean;
+  pickedIds?: Set<string>;
+  onClick: (event: React.MouseEvent) => void;
+  onToggle?: (next: boolean) => void;
+  onSaveTag?: (value: string) => Promise<void> | void;
+  tagBusy?: boolean;
+}) {
+  const { t } = useT("archive");
+  const label = artifactDisplayName(artifact.rel_path);
+  const dragging = useRef(false);
+  return (
+    <div
+      data-artifact-id={artifact.id}
+      className={cn(
+        "flex w-full items-center gap-1.5 rounded-md border px-2 py-1 text-caption transition-colors",
+        selected
+          ? "border-primary/60 bg-primary/10 text-foreground"
+          : "border-surface-border bg-surface hover:bg-surface-hover",
+        (tagging || checked) && checked && "border-amber-500/50 bg-amber-400/10",
+      )}
+    >
+      {tagging || checked ? (
+        <Checkbox
+          checked={checked === true}
+          aria-label={label}
+          onCheckedChange={(value) => onToggle?.(value === true)}
+        />
+      ) : null}
+      <button
+        type="button"
+        draggable
+        onDragStart={(event) => {
+          dragging.current = true;
+          const ids = dragArtifactIds(artifact.id, pickedIds);
+          setPendingDragIds(ids);
+          const payload = JSON.stringify(ids);
+          event.dataTransfer.setData(ARTIFACT_DND_MIME, payload);
+          event.dataTransfer.setData("text/plain", payload);
+          event.dataTransfer.effectAllowed = "move";
+        }}
+        onDragEnd={() => {
+          window.setTimeout(() => {
+            dragging.current = false;
+          }, 0);
+        }}
+        onClick={(event) => {
+          if (dragging.current) return;
+          onClick(event);
+        }}
+        title={artifact.rel_path}
+        aria-pressed={selected}
+        className="min-w-0 flex-1 cursor-grab truncate text-left font-medium text-[11px] active:cursor-grabbing"
+      >
+        {label}
+      </button>
+      <ArtifactModuleChipControl
+        artifact={artifact}
+        onSave={onSaveTag}
+        busy={tagBusy}
+      />
+      <span className="shrink-0 tabular-nums text-muted-foreground">
+        {t(($) => $.common.version_badge, { version: artifact.version })}
+      </span>
+    </div>
+  );
+}
+
+const SHELF_PREVIEW = 5;
+
+function ExpandableArtifactList({
+  items,
+  selectedId,
+  onSelect,
+  tagging,
+  pickedIds,
+  onTogglePick,
+  onSaveTag,
+  tagBusy,
+}: {
+  items: ProjectArtifact[];
+  selectedId: string | null;
+  onSelect: (artifact: ProjectArtifact) => void;
+  tagging?: boolean;
+  pickedIds?: Set<string>;
+  onTogglePick?: (id: string, next: boolean) => void;
+  onSaveTag?: (artifact: ProjectArtifact, value: string) => Promise<void> | void;
+  tagBusy?: boolean;
+}) {
+  const { t } = useT("archive");
+  const [expanded, setExpanded] = useState(false);
+  const hidden = Math.max(0, items.length - SHELF_PREVIEW);
+  const visible = expanded ? items : items.slice(0, SHELF_PREVIEW);
+
+  useEffect(() => {
+    if (!selectedId || expanded) return;
+    if (items.slice(SHELF_PREVIEW).some((artifact) => artifact.id === selectedId)) {
+      setExpanded(true);
+    }
+  }, [expanded, items, selectedId]);
+
+  return (
+    <div className="mt-2 space-y-1">
+      <ul
+        className={cn(
+          "space-y-1",
+          expanded && hidden > 0 && "max-h-72 overflow-y-auto pr-0.5",
+        )}
+      >
+        {visible.map((artifact) => (
+          <li key={artifact.id}>
+            <ArtifactChip
+              artifact={artifact}
+              selected={artifact.id === selectedId}
+              tagging={tagging}
+              checked={pickedIds?.has(artifact.id)}
+              pickedIds={pickedIds}
+              onClick={(event) => {
+                onSelect(artifact);
+                if (tagging || event.shiftKey || event.metaKey || event.ctrlKey) {
+                  onTogglePick?.(artifact.id, !pickedIds?.has(artifact.id));
+                }
+              }}
+              onToggle={(next) => onTogglePick?.(artifact.id, next)}
+              onSaveTag={
+                onSaveTag ? (value) => onSaveTag(artifact, value) : undefined
+              }
+              tagBusy={tagBusy}
+            />
+          </li>
+        ))}
+      </ul>
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          data-testid="archive-shelf-more"
+          className="flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-surface-border px-2 py-1 text-caption text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+        >
+          {expanded ? (
+            <>
+              <ChevronUp className="size-3" aria-hidden />
+              {t(($) => $.browser.show_less)}
+            </>
+          ) : (
+            <>
+              <ChevronDown className="size-3" aria-hidden />
+              {t(($) => $.browser.show_more, { n: hidden })}
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** C5 `.rq-id`：brand + 等宽加粗，hover 才下划线。 */
+const REQ_ID_CLASS =
+  "block min-w-0 truncate font-mono text-caption font-bold text-brand hover:underline";
+
+/** 需求信息三子列 + S1–S4 + 就绪度。 */
+const MATRIX_GRID =
+  "grid grid-cols-[minmax(6.5rem,7.75rem)_minmax(8.5rem,1.15fr)_minmax(7.5rem,8.75rem)_repeat(4,minmax(128px,1fr))_5.75rem]";
+
 export function ArtifactMatrix({
   artifacts,
+  issues = [],
+  requirementHref,
   selectedId,
   onSelect,
   onOpenRequirement,
   onCreateMissing,
   missingOnly,
+  tagging,
+  pickedIds,
+  onTogglePick,
+  onSaveTag,
+  tagBusy,
+  onPickMany,
+  onRelocate,
 }: {
   artifacts: ProjectArtifact[];
+  issues?: Issue[];
+  requirementHref?: (issueId: string) => string;
   selectedId: string | null;
   onSelect: (artifact: ProjectArtifact) => void;
   onOpenRequirement?: (issueId: string, drill?: string) => void;
   onCreateMissing?: (seed: ArtifactEditorSeed) => void;
   missingOnly: boolean;
+  tagging?: boolean;
+  pickedIds?: Set<string>;
+  onTogglePick?: (id: string, next: boolean) => void;
+  onSaveTag?: (artifact: ProjectArtifact, value: string) => Promise<void> | void;
+  tagBusy?: boolean;
+  onPickMany?: (ids: string[], additive: boolean) => void;
+  onRelocate?: (ids: string[], shelf: PlanningShelf) => void;
 }) {
   const { t } = useT("archive");
+  const [overShelf, setOverShelf] = useState<PlanningShelf | null>(null);
 
-  const { projectRows, sharedRows, requirementRows } = useMemo(
+  const { projectRows, sharedRows, filingRows, requirementRows } = useMemo(
     () => groupArtifacts(artifacts, t),
     [artifacts, t],
   );
+  const projectByType = useMemo(() => {
+    const map = new Map(projectRows.map((row) => [row.docType, row.items]));
+    return map;
+  }, [projectRows]);
 
   const visibleRequirementRows = useMemo(
     () =>
       missingOnly
-        ? requirementRows.filter((row) => {
-            const touched = STAGES.some((stage) => row.cells.get(stage)?.length);
-            if (!touched) return false;
-            return STAGES.some((stage) => !row.cells.get(stage)?.length);
-          })
+        ? requirementRows.filter((row) => requirementMissingBlocking(row))
         : requirementRows,
     [requirementRows, missingOnly],
   );
 
-  if (artifacts.length === 0) {
-    return (
-      <ArchiveEmpty
-        title={t(($) => $.browser.empty)}
-        description={t(($) => $.browser.empty_never_synced_hint)}
-        icon={<FileStack className="size-4" />}
-      />
-    );
-  }
-
   return (
     <div className="space-y-6" data-testid="archive-matrix">
-      {/* Project-scope + shared cards */}
-      {(projectRows.length > 0 || sharedRows.length > 0) && (
-        <section className="space-y-2" aria-label={t(($) => $.browser.project_scope_title)}>
-          <h4 className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.browser.project_scope_title)}
-          </h4>
+      <section className="space-y-2" aria-label={t(($) => $.browser.project_scope_title)}>
+        <h4 className="text-caption font-medium text-muted-foreground">
+          {t(($) => $.browser.project_scope_title)}
+        </h4>
+        <p className="text-[11px] text-muted-foreground">{t(($) => $.browser.drag_hint)}</p>
+        <ArchiveMarqueeSurface
+          onPickIds={(ids, additive) => onPickMany?.(ids, additive)}
+        >
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {PROJECT_SHELVES.map((shelf) => {
+            const items = projectByType.get(shelf.docType) ?? [];
+            const missing = items.length === 0;
+            const dropping = overShelf === shelf.docType;
+            return (
+              <div
+                key={shelf.docType}
+                data-testid={`archive-shelf-${shelf.docType}`}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setOverShelf(shelf.docType);
+                }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                  setOverShelf((current) => (current === shelf.docType ? null : current));
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setOverShelf(null);
+                  const ids = takePendingDragIds(
+                    event.dataTransfer.getData(ARTIFACT_DND_MIME) ||
+                      event.dataTransfer.getData("text/plain"),
+                  );
+                  if (ids.length > 0) onRelocate?.(ids, shelf.docType);
+                }}
+                className={cn(
+                  "min-h-28 rounded-lg border bg-surface p-3",
+                  dropping
+                    ? "border-amber-500 bg-amber-400/10"
+                    : missing
+                      ? "border-dashed border-destructive/50"
+                      : "border-surface-border",
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-caption font-medium">
+                    {shelfTitle(t, shelf.title)}
+                  </span>
+                  <code className="text-[10px] text-muted-foreground">{shelf.docType}</code>
+                  <span className="ml-auto text-caption tabular-nums text-muted-foreground">
+                    {items.length}
+                  </span>
+                </div>
+                {missing ? (
+                  <button
+                    type="button"
+                    className="mt-2 w-full rounded-md border border-dashed border-destructive/50 bg-destructive/5 p-1.5 text-[10px] font-medium text-destructive"
+                    onClick={() =>
+                      onCreateMissing?.({
+                        scope: "project",
+                        docType: shelf.docType,
+                      })
+                    }
+                  >
+                    {t(($) => $.browser.shelf_missing)}
+                  </button>
+                ) : (
+                  <ExpandableArtifactList
+                    items={items}
+                    selectedId={selectedId}
+                    onSelect={onSelect}
+                    tagging={tagging}
+                    pickedIds={pickedIds}
+                    onTogglePick={onTogglePick}
+                    onSaveTag={onSaveTag}
+                    tagBusy={tagBusy}
+                  />
+                )}
+              </div>
+            );
+          })}
+          </div>
+        </ArchiveMarqueeSurface>
+        {sharedRows.length > 0 && (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {[...projectRows, ...sharedRows].map((group) => (
+            {sharedRows.map((group) => (
               <div
                 key={group.key}
                 className="rounded-lg border border-surface-border bg-surface p-3"
@@ -103,22 +400,49 @@ export function ArtifactMatrix({
                     {group.items.length}
                   </span>
                 </div>
-                <ul className="mt-2 space-y-1">
-                  {group.items.slice(0, 5).map((artifact) => (
-                    <li key={artifact.id}>
-                      <ArtifactChip
-                        artifact={artifact}
-                        selected={artifact.id === selectedId}
-                        onClick={() => onSelect(artifact)}
-                      />
-                    </li>
-                  ))}
-                  {group.items.length > 5 && (
-                    <li className="text-caption text-muted-foreground">
-                      +{group.items.length - 5}
-                    </li>
-                  )}
-                </ul>
+                <ExpandableArtifactList
+                  items={group.items}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  tagging={tagging}
+                  pickedIds={pickedIds}
+                  onTogglePick={onTogglePick}
+                  onSaveTag={onSaveTag}
+                  tagBusy={tagBusy}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {filingRows.length > 0 && (
+        <section className="space-y-2" aria-label={t(($) => $.browser.filing_title)}>
+          <h4 className="text-caption font-medium text-muted-foreground">
+            {t(($) => $.browser.filing_title)}
+          </h4>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {filingRows.map((group) => (
+              <div
+                key={group.key}
+                className="rounded-lg border border-surface-border bg-surface p-3"
+              >
+                <div className="flex items-center gap-2">
+                  <code className="text-caption font-medium">{group.docType}</code>
+                  <span className="ml-auto text-caption tabular-nums text-muted-foreground">
+                    {group.items.length}
+                  </span>
+                </div>
+                <ExpandableArtifactList
+                  items={group.items}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  tagging={tagging}
+                  pickedIds={pickedIds}
+                  onTogglePick={onTogglePick}
+                  onSaveTag={onSaveTag}
+                  tagBusy={tagBusy}
+                />
               </div>
             ))}
           </div>
@@ -134,109 +458,139 @@ export function ArtifactMatrix({
           <ArchiveEmpty title={t(($) => $.browser.empty)} icon={<FileStack className="size-4" />} />
         ) : (
           <div className="overflow-x-auto rounded-lg border border-surface-border">
-            <div className="min-w-[760px]">
-              {/* Header */}
-              <div className="grid grid-cols-[220px_repeat(4,1fr)_120px] border-b border-surface-border bg-surface-hover/40 text-caption font-medium text-muted-foreground">
-                <div className="px-3 py-2">{t(($) => $.browser.scope_requirement)}</div>
+            <div className="min-w-[1080px]">
+              <div
+                className={cn(
+                  MATRIX_GRID,
+                  "grid-rows-[auto_auto] border-b border-surface-border bg-surface-hover/40 text-caption font-medium text-muted-foreground",
+                )}
+              >
+                <div className="col-span-3 border-r border-surface-border px-3 py-1.5">
+                  {t(($) => $.browser.mx_req_info)}
+                </div>
                 {STAGES.map((stage) => (
-                  <div key={stage} className="px-3 py-2">
+                  <div key={stage} className="row-span-2 flex items-end px-3 py-2">
                     {stageName(t, stage)}
                   </div>
                 ))}
-                <div className="px-2 py-2 text-right">{t(($) => $.browser.mx_status)}</div>
+                <div className="row-span-2 flex items-end justify-end px-2 py-2 text-right">
+                  {t(($) => $.browser.mx_status)}
+                </div>
+                <div className="border-t border-surface-border px-3 py-1.5 text-micro">
+                  {t(($) => $.browser.mx_col_id)}
+                </div>
+                <div className="border-t border-surface-border px-2 py-1.5 text-micro">
+                  {t(($) => $.browser.mx_col_name)}
+                </div>
+                <div className="border-r border-t border-surface-border px-2 py-1.5 text-micro">
+                  {t(($) => $.browser.mx_col_state_gap)}
+                </div>
               </div>
-              {/* Rows */}
               {visibleRequirementRows.map((row) => {
-                /* Readiness = how many of the 4 calendar stages hold ≥1 doc. */
-                const filled = STAGES.filter(
-                  (stage) => (row.cells.get(stage)?.length ?? 0) > 0,
-                ).length;
-                const unstaged = row.cells.get(null)?.length ?? 0;
+                const readiness = blockingReadiness({
+                  rootDocs: row.cells.get(null) ?? [],
+                  filesByStage: row.cells,
+                });
+                const gap = Math.max(0, readiness.total - readiness.filled);
+                const display = matrixRequirementDisplay(row, issues);
                 return (
                   <div
                     key={row.key}
-                    className="grid grid-cols-[220px_repeat(4,1fr)_120px] border-b border-surface-border last:border-b-0"
+                    className={cn(MATRIX_GRID, "border-b border-surface-border last:border-b-0")}
                   >
                     <div className="min-w-0 px-3 py-2">
-                      {row.issueId && onOpenRequirement ? (
-                        <button
-                          type="button"
-                          className="block min-w-0 text-left"
-                          onClick={() => onOpenRequirement(row.issueId!, "deliverables")}
-                        >
-                          <div className="truncate text-caption font-medium hover:underline" title={row.label}>
-                            {row.label}
-                          </div>
-                          <div className="truncate font-mono text-caption text-muted-foreground">
-                            {row.issueId.slice(0, 8)}
-                          </div>
-                        </button>
-                      ) : (
-                        <>
-                          <div className="truncate text-caption font-medium" title={row.label}>
-                            {row.label}
-                          </div>
-                          {row.issueId && (
-                            <div className="truncate font-mono text-caption text-muted-foreground">
-                              {row.issueId.slice(0, 8)}
-                            </div>
-                          )}
-                        </>
-                      )}
-                      {unstaged > 0 && (
-                        <Badge variant="outline" className="mt-1">
-                          {t(($) => $.browser.stage_missing)} · {unstaged}
-                        </Badge>
-                      )}
+                      <MatrixRequirementId
+                        display={display}
+                        requirementHref={requirementHref}
+                        onOpenRequirement={onOpenRequirement}
+                      />
+                    </div>
+                    <div className="min-w-0 px-2 py-2">
+                      <span
+                        className="block truncate text-caption font-medium"
+                        title={display.title ?? undefined}
+                      >
+                        {display.title ?? "—"}
+                      </span>
+                    </div>
+                    <div className="min-w-0 border-r border-surface-border px-2 py-2">
+                      <RequirementStateGap
+                        status={display.status}
+                        gap={gap}
+                        issueId={display.issueId}
+                        issues={issues}
+                      />
                     </div>
                     {STAGES.map((stage) => {
                       const cellArtifacts = row.cells.get(stage) ?? [];
+                      const missing = missingBlockingDocTypes(stage, cellArtifacts);
                       return (
                         <div key={stage} className="min-w-0 border-l border-surface-border px-2 py-2">
-                          {cellArtifacts.length === 0 ? (
-                            <button
-                              type="button"
-                              className="w-full rounded-md border border-dashed border-destructive/50 bg-destructive/5 p-1.5 text-center text-[10px] font-medium text-destructive hover:bg-destructive/10"
-                              onClick={() =>
-                                onCreateMissing?.({
-                                  scope: "requirement",
-                                  stage,
-                                  docType:
-                                    stage === 1
-                                      ? "prototype"
-                                      : stage === 2
-                                        ? "design"
-                                        : stage === 4
-                                          ? "acceptance"
-                                          : "plan",
-                                  requirementKey:
-                                    row.key.startsWith("REQ-") ? row.key : null,
-                                  issueId: row.issueId,
-                                  title: row.label,
-                                })
-                              }
-                            >
-                              {t(($) => $.browser.stage_missing)}
-                              {onCreateMissing ? ` · ${t(($) => $.manage.create)}` : ""}
-                            </button>
-                          ) : (
+                          {cellArtifacts.length > 0 && (
                             <ul className="space-y-1">
                               {cellArtifacts.map((artifact) => (
                                 <li key={artifact.id}>
                                   <ArtifactChip
                                     artifact={artifact}
                                     selected={artifact.id === selectedId}
-                                    onClick={() => onSelect(artifact)}
+                                    tagging={tagging}
+                                    checked={pickedIds?.has(artifact.id)}
+                                    pickedIds={pickedIds}
+                                    onClick={(event) => {
+                                      onSelect(artifact);
+                                      if (
+                                        tagging ||
+                                        event.shiftKey ||
+                                        event.metaKey ||
+                                        event.ctrlKey
+                                      ) {
+                                        onTogglePick?.(
+                                          artifact.id,
+                                          !pickedIds?.has(artifact.id),
+                                        );
+                                      }
+                                    }}
+                                    onToggle={(next) => onTogglePick?.(artifact.id, next)}
+                                    onSaveTag={
+                                      onSaveTag
+                                        ? (value) => onSaveTag(artifact, value)
+                                        : undefined
+                                    }
+                                    tagBusy={tagBusy}
                                   />
                                 </li>
                               ))}
                             </ul>
                           )}
+                          {missing.map((docType) => (
+                            <button
+                              key={docType}
+                              type="button"
+                              className="mt-1 w-full rounded-md border border-dashed border-destructive/50 bg-destructive/5 p-1.5 text-center text-[10px] font-medium text-destructive hover:bg-destructive/10"
+                              onClick={() =>
+                                onCreateMissing?.({
+                                  scope: "requirement",
+                                  stage,
+                                  docType,
+                                  requirementKey:
+                                    row.key.startsWith("REQ-") ? row.key : null,
+                                  issueId: row.issueId,
+                                  title: matrixRequirementDisplay(row, issues).title ?? row.label,
+                                })
+                              }
+                            >
+                              {t(($) => $.browser.missing_doc, { doc: docType })}
+                              {onCreateMissing ? ` · ${t(($) => $.manage.create)}` : ""}
+                            </button>
+                          ))}
+                          {cellArtifacts.length === 0 && missing.length === 0 && (
+                            <p className="text-center text-[10px] text-muted-foreground">—</p>
+                          )}
                         </div>
                       );
                     })}
                     <div className="px-2 py-2 text-right">
-                      <ReadinessPill filled={filled} total={STAGES.length} />
+                      <ReadinessPill filled={readiness.filled} total={readiness.total} />
                     </div>
                   </div>
                 );
@@ -249,41 +603,91 @@ export function ArtifactMatrix({
   );
 }
 
-/** One doc chip: path label + version + source badge; click selects it. */
-function ArtifactChip({
-  artifact,
-  selected,
-  onClick,
+function MatrixRequirementId({
+  display,
+  requirementHref,
+  onOpenRequirement,
 }: {
-  artifact: ProjectArtifact;
-  selected: boolean;
-  onClick: () => void;
+  display: ReturnType<typeof matrixRequirementDisplay>;
+  requirementHref?: (issueId: string) => string;
+  onOpenRequirement?: (issueId: string, drill?: string) => void;
 }) {
   const { t } = useT("archive");
-  const label = artifactDisplayName(artifact.rel_path);
+  const href = display.issueId && requirementHref ? requirementHref(display.issueId) : null;
+
+  if (href) {
+    return (
+      <AppLink
+        href={href}
+        newTabTitle={display.identifier}
+        aria-label={t(($) => $.req_mgmt.open_requirement, { id: display.identifier })}
+        title={display.identifier}
+        className={REQ_ID_CLASS}
+        data-testid="matrix-requirement-id"
+      >
+        {display.identifier}
+      </AppLink>
+    );
+  }
+  if (display.issueId && onOpenRequirement) {
+    return (
+      <button
+        type="button"
+        data-testid="matrix-requirement-id"
+        className={`${REQ_ID_CLASS} text-left`}
+        onClick={() => onOpenRequirement(display.issueId!, "deliverables")}
+      >
+        {display.identifier}
+      </button>
+    );
+  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={artifact.rel_path}
-      aria-pressed={selected}
-      className={cn(
-        "flex w-full items-center gap-1.5 rounded-md border px-2 py-1 text-left text-caption transition-colors",
-        selected
-          ? "border-primary/60 bg-primary/10 text-foreground"
-          : "border-surface-border bg-surface hover:bg-surface-hover",
-      )}
-    >
-      <span className="min-w-0 flex-1 truncate font-medium font-mono text-[11px]">
-        {label}
+    <span className={REQ_ID_CLASS} data-testid="matrix-requirement-id">
+      {display.identifier}
+    </span>
+  );
+}
+
+function RequirementStateGap({
+  status,
+  gap,
+  issueId,
+  issues,
+}: {
+  status: string | null;
+  gap: number;
+  issueId: string | null;
+  issues: Issue[];
+}) {
+  const { t } = useT("archive");
+  const issue = issueId ? issues.find((row) => row.id === issueId) : undefined;
+  const bucket = issue ? requirementBucket(issue) : "other";
+  const tone =
+    bucket === "failed"
+      ? "bg-destructive/10 text-destructive"
+      : bucket === "pending"
+        ? "bg-warning/15 text-warning"
+        : bucket === "done"
+          ? "bg-success/15 text-success"
+          : bucket === "active"
+            ? "bg-primary/10 text-primary"
+            : "bg-muted text-muted-foreground";
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5" data-testid="matrix-requirement-state-gap">
+      <span className={cn("w-fit max-w-full truncate rounded-full px-1.5 py-0.5 text-micro", tone)}>
+        {status ?? t(($) => $.browser.mx_status_none)}
       </span>
-      <span className="shrink-0 tabular-nums text-muted-foreground">
-        {t(($) => $.common.version_badge, { version: artifact.version })}
+      <span
+        className={cn(
+          "text-micro tabular-nums",
+          gap > 0 ? "text-destructive" : "text-muted-foreground",
+        )}
+      >
+        {gap > 0
+          ? t(($) => $.browser.mx_gap_n, { n: gap })
+          : t(($) => $.browser.mx_gap_ok)}
       </span>
-      <Badge variant="ghost" className="shrink-0">
-        {artifact.source}
-      </Badge>
-    </button>
+    </div>
   );
 }
 
@@ -317,21 +721,32 @@ function ReadinessPill({ filled, total }: { filled: number; total: number }) {
   );
 }
 
+function isFilingArtifact(artifact: ProjectArtifact): boolean {
+  return (
+    artifact.doc_type.startsWith("filing") ||
+    artifact.rel_path.replace(/\\/g, "/").includes("/filing/")
+  );
+}
+
 function groupArtifacts(artifacts: ProjectArtifact[], t: Translator) {
   const projectMap = new Map<string, ProjectArtifact[]>();
   const sharedMap = new Map<string, ProjectArtifact[]>();
+  const filingMap = new Map<string, ProjectArtifact[]>();
   const rowMap = new Map<string, RequirementRow>();
 
   for (const artifact of artifacts) {
+    if (isFilingArtifact(artifact)) {
+      const bucket = filingMap.get(artifact.doc_type);
+      if (bucket) bucket.push(artifact);
+      else filingMap.set(artifact.doc_type, [artifact]);
+      continue;
+    }
     if (artifact.scope === "requirement") {
       const rowKey = artifact.requirement_key ?? artifact.issue_id ?? "__unassigned__";
       let row = rowMap.get(rowKey);
       if (!row) {
         row = {
           key: rowKey,
-          // TODO(backend): GetArtifactMatrix does not JOIN the issue table, so
-          // ProjectArtifact carries no issue_title. Once the handler returns a
-          // title, prefer it here (truncated ~20 chars) over requirement_key.
           label:
             artifact.requirement_key ??
             (artifact.issue_id
@@ -382,6 +797,7 @@ function groupArtifacts(artifacts: ProjectArtifact[], t: Translator) {
   return {
     projectRows: toGroups(projectMap, t(($) => $.browser.scope_project)),
     sharedRows: toGroups(sharedMap, t(($) => $.browser.scope_shared)),
+    filingRows: toGroups(filingMap, t(($) => $.browser.filing_title)),
     requirementRows,
   };
 }
@@ -397,6 +813,26 @@ function dedupeByDocType(items: ProjectArtifact[]): ProjectArtifact[] {
 }
 
 /** Stage display name via i18n. */
+function shelfTitle(
+  t: Translator,
+  key:
+    | "shelf_research"
+    | "shelf_product_design"
+    | "shelf_architecture"
+    | "shelf_retrospective",
+): string {
+  switch (key) {
+    case "shelf_research":
+      return t(($) => $.browser.shelf_research);
+    case "shelf_product_design":
+      return t(($) => $.browser.shelf_product_design);
+    case "shelf_architecture":
+      return t(($) => $.browser.shelf_architecture);
+    case "shelf_retrospective":
+      return t(($) => $.browser.shelf_retrospective);
+  }
+}
+
 function stageName(t: Translator, stage: ArtifactStage): string {
   switch (stage) {
     case 1:

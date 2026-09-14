@@ -33,14 +33,21 @@ export function findModuleHolder(issues: Issue[], issue: Issue): Issue | null {
   );
 }
 
+/** 把截止日期对齐到起始日，保留原截止时刻。用于创建表单默认不跨天。 */
+export function alignDueToStartDay(startLocal: string, dueLocal: string): string {
+  const startDay = startLocal.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDay)) return dueLocal;
+  const sep = dueLocal.indexOf("T");
+  const time = (sep >= 0 ? dueLocal.slice(sep + 1) : "") || "18:00";
+  return `${startDay}T${time}`;
+}
+
 export function requirementWindow(issue: Issue): { start: Date; end: Date } | null {
-  const start = dateOnlyToUTCDate(issue.start_at ?? issue.start_date ?? null);
-  const end = dateOnlyToUTCDate(issue.due_date ?? null);
-  if (!start && !end) return null;
-  const s = start ?? end;
-  const e = end ?? start;
-  if (!s || !e) return null;
-  return { start: s, end: e };
+  const day = dateOnlyToUTCDate(
+    issue.start_at ?? issue.start_date ?? issue.due_date ?? null,
+  );
+  if (!day) return null;
+  return { start: day, end: day };
 }
 
 export function windowsOverlap(
@@ -151,7 +158,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
  * 同模块占用方结束后的第一天空窗，给改期拒绝 toast 一个可落区间。
- * 窗长沿用原 spanDays（至少 0）。
+ * 窗长沿用 spanDays（同日改期传 0）。
  */
 export function suggestFreeWindow(
   issues: Issue[],

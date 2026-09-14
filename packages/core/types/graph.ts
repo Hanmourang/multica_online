@@ -104,6 +104,9 @@ export interface GraphSnapshotSummary {
   stats: GraphStats;
   module_summary: ModuleGraphSummary[];
   bus_matrix: BusMatrixCell[];
+  /** 数据模型 v2 投影（migration 467）；旧快照没有该列时为 undefined，
+   *  前端按 v1 降级渲染。 */
+  data_model?: DataModelV2;
   created_at: string;
 }
 
@@ -118,6 +121,7 @@ export interface ModuleGraphSummary {
     calls_external: number;
   };
   tables_touched: string[];
+  biz_kind?: string;
 }
 
 /** 总线矩阵单元格：模块 × 页面 → 表读写（「数据模型」Tab）。
@@ -144,6 +148,11 @@ export interface BusMatrixCell {
   modified?: number;
   /** 本期移除表数；CLI 未投递时为 undefined（≠ 0）。 */
   removed?: number;
+  /** 业务过程（主键组合）定位符：CLI 投递后矩阵按 模块→页面→业务过程
+   *  三级行渲染；缺省时退化为 page 粒度（v1 行为）。 */
+  process_key?: string;
+  /** 业务过程显示名（解释产品动线，如「详情读取」「阶段流转」）。 */
+  process_name?: string;
 }
 
 /** 格子下钻的列级明细：仅当 CLI 预聚合投递了 columns 才存在。 */
@@ -266,6 +275,76 @@ export interface OntologyChangelog {
 /** 本体就绪度：ready = 已抽取；empty = 未抽取（降级展示）；partial = 部分抽取。 */
 export type OntologyReadiness = "ready" | "empty" | "partial";
 
+// --- 数据模型 v2（migration 467：快照 data_model JSONB，CLI 预聚合 / 服务端透传） ---
+
+/** 一个数据版本（= 一次扫描快照）的摘要。 */
+export interface DataModelVersion {
+  scan_id: string;
+  git_sha?: string;
+  /** 版本标签（如 v0.9.1）；未投递时回退为 scan_id 短码。 */
+  label?: string;
+  created_at: string;
+  /** 相对上一版本的表级变更计数。 */
+  change_summary?: { added: number; modified: number; removed: number };
+  /** 本版本的表级变更明细：迭代视角的变更追踪数据源，也用于数据视角
+   *  任意基线版本的 diff 推导（累加基线之后所有版本的 changes）。 */
+  changes?: { table: string; change_type: "added" | "modified" | "removed"; detail?: string }[];
+}
+
+/** 表相对上一版本的状态。 */
+export type DataModelTableStatus = "added" | "modified" | "removed" | "unchanged";
+
+/** 资产 360° 的消费方绑定：这张表被哪个模块的哪个页面 / 业务过程使用。 */
+export interface DataModelConsumer {
+  module_node_id: string;
+  module_name: string;
+  page_key: string;
+  page_name: string;
+  process_key?: string;
+  process_name?: string;
+  rw: "R" | "W" | "RW";
+}
+
+/** 前后端调用链的一段：页面组件 → API 路由 → 服务端 handler → 表。 */
+export interface DataModelCallChain {
+  frontend: string[];
+  api: string[];
+  service: string[];
+  /** 断链 / 风险提示（如「页面无对应 API」「写入无审计」）。 */
+  risks?: string[];
+}
+
+/** 列级 diff（相对上一版本）。 */
+export interface DataModelColumnDiff {
+  added: string[];
+  removed: string[];
+  type_changed: { name: string; from: string; to: string }[];
+}
+
+/** 数据视角 v2 的表级资产清单行。 */
+export interface DataModelTable {
+  name: string;
+  domain: string;
+  status: DataModelTableStatus;
+  columns: { name: string; type?: string; access?: string; changed?: boolean }[];
+  column_diffs?: DataModelColumnDiff;
+  /** 最近一次结构变更的迁移号（如 0456）。 */
+  migration?: string;
+  read_count?: number;
+  write_count?: number;
+  consumers: DataModelConsumer[];
+  call_chain?: DataModelCallChain[];
+}
+
+/** data_model JSONB 的顶层契约（服务端不透明透传，前端做容错读取）。 */
+export interface DataModelV2 {
+  schema_version: 2;
+  /** 当前版本 scan_id。 */
+  current_version: string;
+  versions: DataModelVersion[];
+  tables: DataModelTable[];
+}
+
 // --- API 响应 wrapper（字段以 server/internal/handler/project_graph.go 实际 JSON 为准） ---
 
 /** POST /projects/{id}/graph/sync 响应。 */
@@ -356,8 +435,8 @@ export interface ModuleStrategiesResponse {
   total: number;
 }
 
-/** GET .../graph/modules/{nodeId}/neighborhood 响应；服务端 BFS 提取未实现，
- *  nodes/edges 恒为空数组（真实空态，不伪造）。 */
+/** GET .../graph/modules/{nodeId}/neighborhood 响应：最新快照上的有界 BFS。
+ *  `?depth=1..3` 扩 hop，缺省 1；空邻域保持空，不伪造节点。 */
 export interface ModuleNeighborhoodResponse {
   snapshot_id: string;
   scan_id: string;

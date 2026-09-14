@@ -446,3 +446,152 @@ func TestPrototypeMarksAndConfirmGate(t *testing.T) {
 		}
 	})
 }
+
+// 人工关联 / 改路径：不派 prototyper，已有 confirmed 也不 409。
+func TestRegisterAndUpdatePrototype(t *testing.T) {
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+
+	insertRequirement := func(t *testing.T) string {
+		t.Helper()
+		var number int
+		if err := testPool.QueryRow(ctx, `
+			UPDATE workspace
+			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+			WHERE id = $1 RETURNING issue_counter
+		`, testWorkspaceID).Scan(&number); err != nil {
+			t.Fatalf("next issue number: %v", err)
+		}
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id,
+				number, position, goal, decompose_mode)
+			VALUES ($1, $2, 'todo', 'none', 'member', $3, $4, 100, $5, 'confirm')
+			RETURNING id
+		`, testWorkspaceID, "人工关联原型 "+suffix, testUserID, number, "手动挂 HTML").Scan(&id); err != nil {
+			t.Fatalf("insert requirement: %v", err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM issue_prototype_version WHERE issue_id = $1`, id)
+			testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1 OR parent_issue_id = $1`, id)
+		})
+		return id
+	}
+	register := func(t *testing.T, issueID string, body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/prototypes", body)
+		req = withURLParam(req, "id", issueID)
+		testHandler.RegisterPrototype(w, req)
+		return w
+	}
+	patch := func(t *testing.T, issueID string, version int, body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("PATCH", fmt.Sprintf("/api/issues/%s/prototypes/%d", issueID, version), body)
+		req = withURLParams(req, "id", issueID, "version", fmt.Sprint(version))
+		testHandler.UpdatePrototypePath(w, req)
+		return w
+	}
+
+	t.Run("empty html_path is 400", func(t *testing.T) {
+		issueID := insertRequirement(t)
+		w := register(t, issueID, map[string]any{"html_path": "  "})
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("register without prototyper creates version and no stage-1 task", func(t *testing.T) {
+		issueID := insertRequirement(t)
+		w := register(t, issueID, map[string]any{
+			"html_path": "docs/prototypes/manual-v1.html",
+			"prompt":    "manual attach",
+		})
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Version struct {
+				Version  int32  `json:"version"`
+				Status   string `json:"status"`
+				HtmlPath string `json:"html_path"`
+				Prompt   string `json:"prompt"`
+			} `json:"version"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Version.Version != 1 || resp.Version.HtmlPath != "docs/prototypes/manual-v1.html" {
+			t.Fatalf("unexpected version: %+v", resp.Version)
+		}
+		var children int
+		if err := testPool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM issue WHERE parent_issue_id = $1 AND stage = 1
+		`, issueID).Scan(&children); err != nil {
+			t.Fatalf("count stage-1: %v", err)
+		}
+		if children != 0 {
+			t.Fatalf("register must not dispatch prototyper, got %d stage-1 children", children)
+		}
+	})
+
+	t.Run("patch updates html_path only", func(t *testing.T) {
+		issueID := insertRequirement(t)
+		if w := register(t, issueID, map[string]any{"html_path": "docs/prototypes/a.html"}); w.Code != http.StatusCreated {
+			t.Fatalf("register: %d: %s", w.Code, w.Body.String())
+		}
+		w := patch(t, issueID, 1, map[string]any{
+			"html_path": "docs/prototypes/b.html",
+			"prompt":    "manual update",
+		})
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Version struct {
+				Version  int32  `json:"version"`
+				Status   string `json:"status"`
+				HtmlPath string `json:"html_path"`
+			} `json:"version"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Version.Version != 1 || resp.Version.HtmlPath != "docs/prototypes/b.html" {
+			t.Fatalf("expected v1 path b.html, got %+v", resp.Version)
+		}
+	})
+
+	t.Run("register after confirmed is not 409", func(t *testing.T) {
+		issueID := insertRequirement(t)
+		if w := register(t, issueID, map[string]any{"html_path": "docs/prototypes/v1.html"}); w.Code != http.StatusCreated {
+			t.Fatalf("register v1: %d: %s", w.Code, w.Body.String())
+		}
+		if _, err := testPool.Exec(ctx, `
+			UPDATE issue_prototype_version SET status = 'confirmed' WHERE issue_id = $1 AND version = 1
+		`, issueID); err != nil {
+			t.Fatalf("confirm v1: %v", err)
+		}
+		w := register(t, issueID, map[string]any{"html_path": "docs/prototypes/v2.html"})
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 after confirmed, got %d: %s", w.Code, w.Body.String())
+		}
+		var version int32
+		if err := json.NewDecoder(w.Body).Decode(&struct {
+			Version struct {
+				Version int32 `json:"version"`
+			} `json:"version"`
+		}{}); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if err := testPool.QueryRow(ctx, `
+			SELECT version FROM issue_prototype_version WHERE issue_id = $1 ORDER BY version DESC LIMIT 1
+		`, issueID).Scan(&version); err != nil {
+			t.Fatalf("read latest: %v", err)
+		}
+		if version != 2 {
+			t.Fatalf("expected version 2, got %d", version)
+		}
+	})
+}

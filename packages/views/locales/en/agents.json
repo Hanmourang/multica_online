@@ -832,6 +832,7 @@
     "copy_filtered": "Copy filtered",
     "copied": "Copied",
     "waiting_events": "Waiting for events...",
+    "waiting_events_hint": "Steps will appear here in order as the run progresses",
     "antigravity_live_unavailable": "Antigravity does not currently provide live execution events. The transcript will be available after the task completes.",
     "no_data": "No execution data recorded.",
     "sort_chronological": "Oldest first",

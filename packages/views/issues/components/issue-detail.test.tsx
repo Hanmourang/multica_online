@@ -1254,6 +1254,8 @@ describe("IssueDetail (shared)", () => {
     expect(await screen.findByTestId("execution-log-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("activity-stream-filters")).toBeNull();
     expect(screen.getByTestId("issue-tab-exec")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("issue-detail-column").className).toContain("flex");
+    expect(screen.getByTestId("issue-stream-workspace").className).toContain("flex-1");
   });
 
   it("defaults activity filters to comments, status, and artifacts", async () => {

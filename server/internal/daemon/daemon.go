@@ -8033,6 +8033,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if provider == "hermes" {
+		// CLI login keys live in <HERMES_HOME>/.env. Promote them so a
+		// shell/Codex OPENAI_API_KEY inherited by the daemon cannot win
+		// over the named custom provider (IdeaLab dogfooding, etc.).
+		home := env.HermesHome
+		if home == "" {
+			home = hermesSourceHome
+		}
+		execenv.PromoteHermesProviderSecrets(agentEnv, agentCustomEnv, home, d.logger)
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -8050,6 +8060,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
+	}
+	// Persist the task-scoped MULTICA_* credentials to a daemon-owned sidecar
+	// under envRoot. Some runtimes (notably Wukong print mode) execute tools in
+	// a separate long-lived service process whose environment is rebuilt from
+	// the user's login shell, so every var injected above is gone by the time
+	// the agent shells out to `multica`; the CLI recovers them from this file
+	// (see bootstrapDaemonTaskCredentials) instead of failing closed. Written
+	// under envRoot rather than the workdir so a secret never lands in a
+	// local_directory user repo. Best-effort: a write failure must not abort a
+	// task whose environment injection may still be intact for a normal runtime.
+	if err := execenv.WriteTaskCredentials(env.RootDir, agentEnv); err != nil {
+		taskLog.Warn("write task credentials sidecar failed; an agent that loses its injected env will not be able to recover it", "error", err)
 	}
 	// The overlay is authoritative once built, so nothing on the command line
 	// may re-point HERMES_HOME out of it. Both argv regions are stripped

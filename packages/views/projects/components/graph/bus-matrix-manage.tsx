@@ -6,28 +6,37 @@ import { Input } from "@multica/ui/components/ui/input";
 import { useT } from "../../../i18n";
 import {
   applyDomainLayout,
+  applyRowLayout,
+  moveListItem,
   type BusMatrixLayout,
   type ManualRegisterRow,
 } from "./bus-matrix-layout";
 
-/** C4 人工管理控制台：域展示 / 行隐藏 / 手工登记。全部只写展示配置。 */
+/** C4 人工管理控制台：列序 / 行序 / 隐藏 / 别名 / 手工登记。只写展示配置。 */
 export function BusMatrixManage({
   projectId,
   domains,
+  rows,
   layout,
   onChange,
 }: {
   projectId: string;
   domains: string[];
+  rows: Array<{ key: string; name: string }>;
   layout: BusMatrixLayout;
   onChange: (next: BusMatrixLayout) => void;
 }) {
   const { t } = useT("archive");
   const [name, setName] = useState("");
   const [domain, setDomain] = useState(domains[0] ?? "");
+  const [columnName, setColumnName] = useState("");
   const [read, setRead] = useState("0");
   const [write, setWrite] = useState("0");
-  const visible = applyDomainLayout(domains, layout);
+  const visibleDomains = applyDomainLayout(domains, layout);
+  const visibleRows = applyRowLayout(
+    rows.map((row) => row.key),
+    layout,
+  );
 
   const addManual = () => {
     const trimmed = name.trim();
@@ -43,6 +52,18 @@ export function BusMatrixManage({
     setName("");
   };
 
+  const addColumn = () => {
+    const trimmed = columnName.trim();
+    if (!trimmed || visibleDomains.includes(trimmed) || layout.manualDomains.includes(trimmed)) return;
+    onChange({
+      ...layout,
+      manualDomains: [...layout.manualDomains, trimmed],
+      domainOrder: [...visibleDomains, trimmed],
+    });
+    setColumnName("");
+    setDomain(trimmed);
+  };
+
   return (
     <div
       className="grid gap-3 rounded-lg border border-dashed border-surface-border bg-surface p-3 sm:grid-cols-3"
@@ -54,11 +75,25 @@ export function BusMatrixManage({
           {t(($) => $.bus_manage.domain_hint)}
         </p>
         <ul className="space-y-1">
-          {visible.map((item) => (
-            <li key={item} className="flex items-center gap-1.5 text-caption">
-              <span className="min-w-0 flex-1 truncate">
-                {layout.aliases[item] ?? item}
-              </span>
+          {visibleDomains.map((item) => (
+            <li key={item} className="flex items-center gap-1 text-caption">
+              <span className="min-w-0 flex-1 truncate">{layout.aliases[item] ?? item}</span>
+              <IconBtn
+                label={t(($) => $.bus_manage.move_left)}
+                onClick={() =>
+                  onChange({ ...layout, domainOrder: moveListItem(visibleDomains, item, -1) })
+                }
+              >
+                ←
+              </IconBtn>
+              <IconBtn
+                label={t(($) => $.bus_manage.move_right)}
+                onClick={() =>
+                  onChange({ ...layout, domainOrder: moveListItem(visibleDomains, item, 1) })
+                }
+              >
+                →
+              </IconBtn>
               <button
                 type="button"
                 className="text-micro text-muted-foreground hover:text-foreground"
@@ -91,6 +126,17 @@ export function BusMatrixManage({
             </li>
           ))}
         </ul>
+        <div className="mt-2 flex gap-1.5">
+          <Input
+            value={columnName}
+            onChange={(event) => setColumnName(event.target.value)}
+            placeholder={t(($) => $.bus_manage.column_name)}
+            className="h-8 text-caption"
+          />
+          <Button size="xs" type="button" disabled={!columnName.trim()} onClick={addColumn}>
+            {t(($) => $.bus_manage.add_column)}
+          </Button>
+        </div>
         {layout.hiddenDomains.length > 0 && (
           <Button
             size="xs"
@@ -108,9 +154,69 @@ export function BusMatrixManage({
         <p className="mb-2 text-micro text-muted-foreground">
           {t(($) => $.bus_manage.row_hint)}
         </p>
-        <p className="text-micro text-muted-foreground">
-          {t(($) => $.bus_manage.row_note)}
-        </p>
+        <ul className="space-y-1">
+          {visibleRows.map((key) => {
+            const row = rows.find((item) => item.key === key);
+            const label = layout.rowAliases[key] ?? row?.name ?? key;
+            return (
+              <li key={key} className="flex items-center gap-1 text-caption">
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                <IconBtn
+                  label={t(($) => $.bus_manage.move_up)}
+                  onClick={() =>
+                    onChange({ ...layout, rowOrder: moveListItem(visibleRows, key, -1) })
+                  }
+                >
+                  ↑
+                </IconBtn>
+                <IconBtn
+                  label={t(($) => $.bus_manage.move_down)}
+                  onClick={() =>
+                    onChange({ ...layout, rowOrder: moveListItem(visibleRows, key, 1) })
+                  }
+                >
+                  ↓
+                </IconBtn>
+                <button
+                  type="button"
+                  className="text-micro text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    const next = window.prompt(t(($) => $.bus_manage.row_rename_prompt), label);
+                    if (!next) return;
+                    onChange({
+                      ...layout,
+                      rowAliases: { ...layout.rowAliases, [key]: next.trim() },
+                    });
+                  }}
+                >
+                  {t(($) => $.bus_manage.rename)}
+                </button>
+                <button
+                  type="button"
+                  className="text-micro text-muted-foreground hover:text-destructive"
+                  onClick={() =>
+                    onChange({
+                      ...layout,
+                      hiddenRows: [...layout.hiddenRows, key],
+                    })
+                  }
+                >
+                  {t(($) => $.bus_manage.hide)}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        {layout.hiddenRows.length > 0 && (
+          <Button
+            size="xs"
+            variant="ghost"
+            className="mt-1"
+            onClick={() => onChange({ ...layout, hiddenRows: [] })}
+          >
+            {t(($) => $.bus_manage.show_rows)}
+          </Button>
+        )}
       </section>
 
       <section>
@@ -130,7 +236,7 @@ export function BusMatrixManage({
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
           >
-            {domains.map((item) => (
+            {visibleDomains.map((item) => (
               <option key={item} value={item}>
                 {layout.aliases[item] ?? item}
               </option>
@@ -168,7 +274,7 @@ export function BusMatrixManage({
                   onClick={() =>
                     onChange({
                       ...layout,
-                      manualRows: layout.manualRows.filter((r) => r.id !== row.id),
+                      manualRows: layout.manualRows.filter((item) => item.id !== row.id),
                     })
                   }
                 >
@@ -181,5 +287,27 @@ export function BusMatrixManage({
       </section>
       <span className="sr-only">{projectId}</span>
     </div>
+  );
+}
+
+function IconBtn({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      className="rounded px-1 font-mono text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }

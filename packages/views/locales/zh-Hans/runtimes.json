@@ -318,6 +318,7 @@
     "dialog_description": "自定义运行时定义属于整个工作区，会同步到所有已连接的机器。只有机器上能找到对应命令时，才会注册该运行时。",
     "create_dialog_description": "从 {{machine}} 配置一个自定义命令。定义会同步到整个工作区，但只会在能找到该命令的机器上注册。",
     "learn_more": "查看配置指南",
+    "family_docs": "查看 {{family}} 配置指南",
     "close": "关闭",
     "add_new": "新建自定义运行时",
     "list_title": "运行时后端",

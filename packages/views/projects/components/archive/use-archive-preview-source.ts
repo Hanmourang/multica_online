@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useSyncExternalStore } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { projectArtifactContentOptions } from "@multica/core/artifacts/queries";
@@ -15,8 +15,13 @@ import {
   subscribeArchivePreviewCache,
 } from "./archive-preview-cache";
 import {
+  contractMgmtRoots,
+  contractProjectsRoots,
+  extractProjectKeysFromYaml,
+  isContractRelPath,
   matchListedPath,
   previewProbeRoots,
+  previewRelPathCandidates,
   shouldListProbe,
 } from "./archive-preview-resolve";
 import { resolveArchivePreviewRoots } from "./archive-display";
@@ -24,8 +29,25 @@ import {
   classifyArchivePreviewKind,
   type ArchivePreviewKind,
 } from "./archive-display";
+import {
+  archiveFileUrl,
+  collectRelativeScripts,
+  collectRelativeStylesheets,
+  inlineRelativeScripts,
+  inlineRelativeStylesheets,
+  resolveRelativeRelPath,
+  stripRemotePreviewAssets,
+} from "./archive-html-preview";
 
 const LOCAL_PREVIEW_MAX = 800_000;
+
+/** disabled 查询在 RQ v5 里 isPending=true，不能当「还在加载」。 */
+function queryOpening(
+  enabled: boolean,
+  query: { isFetched: boolean; isFetching: boolean },
+): boolean {
+  return enabled && (query.isFetching || !query.isFetched);
+}
 
 export type ArchivePreviewSource =
   | { status: "idle" }
@@ -40,13 +62,26 @@ export type ArchivePreviewSource =
     }
   | { status: "unavailable"; reason?: "unsupported" | "not_found" };
 
+type LocalPreviewHit = {
+  text: string;
+  root?: string;
+  relPath?: string;
+};
+
 function clip(text: string): string {
   return text.length > LOCAL_PREVIEW_MAX ? text.slice(0, LOCAL_PREVIEW_MAX) : text;
 }
 
 const listedByRoot = new Map<string, Promise<string[] | null>>();
+const hitCache = new Map<string, LocalPreviewHit>();
+const projectKeysByMgmt = new Map<string, Promise<string[]>>();
 let rememberedRoot: string | null = null;
 let lastReadReason: "unsupported" | "not_found" | undefined;
+
+function isConcretePrototypePath(relPath: string): boolean {
+  const path = relPath.replace(/\\/g, "/");
+  return path.includes("/") && /\.html?$/i.test(path);
+}
 
 function listedFiles(root: string): Promise<string[] | null> {
   const hit = listedByRoot.get(root);
@@ -59,48 +94,145 @@ function listedFiles(root: string): Promise<string[] | null> {
   return pending;
 }
 
-async function readAt(root: string, relPath: string): Promise<string | null> {
-  const result = await readArchiveFile(root, relPath);
-  if (result.reason === "unsupported") lastReadReason = "unsupported";
-  if (result.ok && result.content != null) {
+async function readAt(root: string, relPath: string): Promise<LocalPreviewHit | null> {
+  const key = `${root}\0${relPath}`;
+  const cached = hitCache.get(key);
+  if (cached) {
     rememberedRoot = root;
     lastReadReason = undefined;
-    return clip(result.content);
+    return cached;
+  }
+  const result = await readArchiveFile(root, relPath);
+  if (result.reason === "unsupported") lastReadReason = "unsupported";
+  if (result.ok && result.content != null && result.content.trim() !== "") {
+    rememberedRoot = root;
+    lastReadReason = undefined;
+    const hit = { text: clip(result.content), root, relPath };
+    hitCache.set(key, hit);
+    return hit;
   }
   return null;
+}
+
+function projectKeysForMgmt(mgmtRoot: string): Promise<string[]> {
+  const hit = projectKeysByMgmt.get(mgmtRoot);
+  if (hit) return hit;
+  const pending = readAt(mgmtRoot, "_shared/archive/projects.yaml").then((file) =>
+    file ? extractProjectKeysFromYaml(file.text) : [],
+  );
+  projectKeysByMgmt.set(mgmtRoot, pending);
+  return pending;
+}
+
+async function readFromContractProjects(
+  relPath: string,
+  hintRoots: string[],
+): Promise<LocalPreviewHit | null> {
+  if (!isContractRelPath(relPath)) return null;
+  const keys = new Set<string>();
+  await Promise.all(
+    contractMgmtRoots(hintRoots).map(async (mgmt) => {
+      for (const key of await projectKeysForMgmt(mgmt)) keys.add(key);
+    }),
+  );
+  if (keys.size === 0) return null;
+  const candidates = previewRelPathCandidates(relPath);
+  const reads = contractProjectsRoots(hintRoots).flatMap((projectsRoot) =>
+    [...keys].flatMap((key) =>
+      candidates.map((candidate) => readAt(`${projectsRoot}/${key}`, candidate)),
+    ),
+  );
+  const hits = await Promise.all(reads);
+  return hits.find((row): row is LocalPreviewHit => Boolean(row)) ?? null;
+}
+
+async function withInlinedStyles(hit: LocalPreviewHit): Promise<LocalPreviewHit> {
+  if (!hit.root || !hit.relPath) return hit;
+  const ext = hit.relPath.replace(/\\/g, "/").toLowerCase();
+  if (!ext.endsWith(".html") && !ext.endsWith(".htm")) return hit;
+  const hrefs = collectRelativeStylesheets(hit.text);
+  const scripts = collectRelativeScripts(hit.text);
+  if (hrefs.length === 0 && scripts.length === 0) {
+    return { ...hit, text: stripRemotePreviewAssets(hit.text) };
+  }
+  const files: Record<string, string> = {};
+  await Promise.all(
+    [...hrefs, ...scripts].map(async (href) => {
+      const assetPath = resolveRelativeRelPath(hit.relPath, href);
+      const asset = await readAt(hit.root, assetPath);
+      if (asset) files[href] = asset.text;
+    }),
+  );
+  const withCss = inlineRelativeStylesheets(hit.text, files);
+  const withJs = inlineRelativeScripts(withCss, files);
+  return { ...hit, text: stripRemotePreviewAssets(withJs) };
 }
 
 async function readLocalPreview(
   relPath: string,
   hintRoots: string[],
-): Promise<string | null> {
+): Promise<LocalPreviewHit | null> {
   lastReadReason = undefined;
   const cached = getArchivePreviewText(relPath);
-  if (cached) return clip(cached);
+  if (cached) return { text: clip(cached), relPath };
   if (!isDesktopShell()) return null;
 
   const roots = rememberedRoot
     ? [rememberedRoot, ...hintRoots.filter((root) => root !== rememberedRoot)]
     : hintRoots;
+  const exact = relPath.replace(/\\/g, "/");
+  const exactHits = await Promise.all(roots.map((root) => readAt(root, exact)));
+  const exactHit = exactHits.find((row): row is LocalPreviewHit => Boolean(row));
+  if (exactHit) return withInlinedStyles(exactHit);
 
+  const candidates = previewRelPathCandidates(relPath).filter((path) => path !== exact);
   for (const root of roots) {
-    const direct = await readAt(root, relPath);
-    if (direct) return direct;
+    const extras = await Promise.all(candidates.map((candidate) => readAt(root, candidate)));
+    const extraHit = extras.find((row): row is LocalPreviewHit => Boolean(row));
+    if (extraHit) return withInlinedStyles(extraHit);
+  }
+
+  const contractHit = await readFromContractProjects(exact, roots);
+  if (contractHit) return withInlinedStyles(contractHit);
+
+  // 契约相对路径已经定点试过 projects/<key>/：不要再扫整棵 projects_mgmt。
+  if (isConcretePrototypePath(exact) || isContractRelPath(exact)) {
+    if (!lastReadReason) lastReadReason = "not_found";
+    return null;
   }
 
   for (const probe of previewProbeRoots(roots)) {
-    const direct = await readAt(probe, relPath);
-    if (direct) return direct;
+    if (roots.includes(probe)) continue;
+    const extras = await Promise.all(candidates.map((candidate) => readAt(probe, candidate)));
+    const extraHit = extras.find((row): row is LocalPreviewHit => Boolean(row));
+    if (extraHit) return withInlinedStyles(extraHit);
     if (!shouldListProbe(probe)) continue;
     const files = await listedFiles(probe);
     if (!files) continue;
     const matched = matchListedPath(relPath, files);
     if (!matched) continue;
     const fallback = await readAt(probe, matched);
-    if (fallback) return fallback;
+    if (fallback) return withInlinedStyles(fallback);
   }
   if (!lastReadReason) lastReadReason = "not_found";
   return null;
+}
+
+function readyFromLocal(
+  kind: ArchivePreviewKind,
+  hit: LocalPreviewHit,
+): Extract<ArchivePreviewSource, { status: "ready" }> {
+  const fileUrl =
+    kind === "html" && hit.root && hit.relPath && isDesktopShell()
+      ? archiveFileUrl(hit.root, hit.relPath)
+      : undefined;
+  return {
+    status: "ready",
+    kind,
+    from: "local",
+    text: hit.text,
+    url: fileUrl,
+  };
 }
 
 export function useArchivePreviewSource({
@@ -149,14 +281,15 @@ export function useArchivePreviewSource({
     ).concat(locals.filter((path) => !archiveRoots.includes(path) && path !== boundPath));
   }, [archiveRoots, projectQuery.data, resourcesQuery.data]);
 
+  const snapshotEnabled = enabled && Boolean(artifactId) && Boolean(attachmentId);
   const snapshotQuery = useQuery({
     ...projectArtifactContentOptions(wsId, projectId, artifactId),
-    enabled: enabled && Boolean(artifactId),
+    enabled: snapshotEnabled,
   });
 
   const attachmentTextQuery = useQuery({
     queryKey: ["archive-preview-attachment-text", attachmentId],
-    enabled: enabled && Boolean(attachmentId) && kind !== "html" && kind !== "image",
+    enabled: enabled && Boolean(attachmentId) && kind !== "image" && kind !== "html",
     queryFn: async () => {
       const { text } = await api.getAttachmentTextContent(attachmentId!);
       return text;
@@ -170,28 +303,41 @@ export function useArchivePreviewSource({
     kind !== "binary" &&
     (isDesktopShell() || getArchivePreviewText(artifact?.rel_path ?? "") != null);
 
+  const effectiveRoots =
+    hintRoots.length > 0 ? hintRoots : rememberedRoot ? [rememberedRoot] : [];
+  const localEnabled =
+    enabled &&
+    Boolean(artifact) &&
+    canReadLocal &&
+    (effectiveRoots.length > 0 || !isDesktopShell());
+  const hintKey = effectiveRoots.join("\0");
   const localQuery = useQuery({
-    queryKey: [
-      "archive-preview-local",
-      artifact?.rel_path,
-      hintRoots,
-      cacheGen,
-    ],
-    enabled: enabled && Boolean(artifact) && canReadLocal,
-    queryFn: () => readLocalPreview(artifact!.rel_path, hintRoots),
+    queryKey: ["archive-preview-local", "contract-v1", artifact?.rel_path, hintKey, cacheGen],
+    enabled: localEnabled,
+    queryFn: () => readLocalPreview(artifact!.rel_path, effectiveRoots),
     retry: false,
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
   });
 
   if (!enabled || !artifact) return { status: "idle" };
-  if (snapshotQuery.isPending || resourcesQuery.isPending) return { status: "loading" };
-  if (snapshotQuery.isError) {
-    if (localQuery.isPending && localQuery.fetchStatus !== "idle") {
-      return { status: "loading" };
-    }
-    if (localQuery.data) {
-      return { status: "ready", kind, from: "local", text: localQuery.data };
-    }
+  if (queryOpening(localEnabled, localQuery)) {
+    if (localQuery.data) return readyFromLocal(kind, localQuery.data);
+    return { status: "loading" };
+  }
+  if (
+    queryOpening(enabled && Boolean(projectId), resourcesQuery) &&
+    !localQuery.data &&
+    !rememberedRoot
+  ) {
+    return { status: "loading" };
+  }
+  if (snapshotQuery.isError && !localQuery.data) {
     return { status: "error" };
+  }
+  // HTML 原型优先走本机目录，相对 CSS / 多页面链接才能生效。
+  if (kind === "html" && localQuery.data) {
+    return readyFromLocal(kind, localQuery.data);
   }
 
   const snapshot = snapshotQuery.data;
@@ -201,7 +347,7 @@ export function useArchivePreviewSource({
     Boolean(snapshot.attachment_url);
 
   if (hasSnapshot) {
-    if (kind === "html" || kind === "image") {
+    if (kind === "image") {
       return {
         status: "ready",
         kind,
@@ -209,29 +355,32 @@ export function useArchivePreviewSource({
         url: snapshot.attachment_url,
       };
     }
-    if (attachmentTextQuery.isPending) return { status: "loading" };
+    if (queryOpening(enabled && Boolean(attachmentId) && kind !== "image", attachmentTextQuery)) {
+      return { status: "loading" };
+    }
     if (attachmentTextQuery.data) {
       return {
         status: "ready",
         kind,
         from: "attachment",
         text: attachmentTextQuery.data,
+      };
+    }
+    if (kind === "html") {
+      // 附件接口是 text/plain + nosniff，不能当 iframe.src；继续试本地。
+    } else {
+      return {
+        status: "ready",
+        kind: kind === "markdown" ? "text" : kind,
+        from: "attachment",
         url: snapshot.attachment_url,
       };
     }
-    return {
-      status: "ready",
-      kind: kind === "markdown" ? "text" : kind,
-      from: "attachment",
-      url: snapshot.attachment_url,
-    };
   }
 
-  if (localQuery.isPending && localQuery.fetchStatus !== "idle") {
-    return { status: "loading" };
-  }
+  if (queryOpening(snapshotEnabled, snapshotQuery)) return { status: "loading" };
   if (localQuery.data) {
-    return { status: "ready", kind, from: "local", text: localQuery.data };
+    return readyFromLocal(kind, localQuery.data);
   }
 
   const cached = getArchivePreviewText(artifact.rel_path);

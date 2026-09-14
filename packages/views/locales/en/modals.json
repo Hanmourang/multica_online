@@ -299,6 +299,9 @@
     "start_at_past": "Start is in the past — this will enter awaiting-trigger immediately",
     "roster_required": "Assign someone to PM and Developer first (a locked-on toggle without an assignee will fail decompose)",
     "toast_roster_save_failed": "Issue created, but the roster was not saved. Assign a PM in the workbench before decomposing",
-    "toast_playbook_save_failed": "Issue created, but role standards were not saved. Edit them in the workbench or project settings"
+    "toast_playbook_save_failed": "Issue created, but role standards were not saved. Edit them in the workbench or project settings",
+    "scaffold_ok": "Requirement archive {{key}} created",
+    "scaffold_ok_disk": "Requirement archive {{key}} created and written locally",
+    "scaffold_failed": "Issue created, but the requirement folder was not written"
   }
 }

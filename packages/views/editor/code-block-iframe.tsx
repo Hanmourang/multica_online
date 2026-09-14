@@ -21,6 +21,7 @@
  * the text body we fetched, never point iframe.src at the proxy URL.
  */
 
+import { forwardRef, type IframeHTMLAttributes } from "react";
 import { cn } from "@multica/ui/lib/utils";
 
 interface CodeBlockIframeProps {
@@ -31,28 +32,37 @@ interface CodeBlockIframeProps {
   className?: string;
   /** Tailwind height token; defaults to h-[480px]. */
   heightClassName?: string;
+  onLoad?: IframeHTMLAttributes<HTMLIFrameElement>["onLoad"];
 }
 
-export function CodeBlockIframe({
-  html,
-  title,
-  className,
-  heightClassName = "h-[480px]",
-}: CodeBlockIframeProps) {
-  return (
-    <iframe
-      // srcDoc keeps the body in the parent's process but isolated to an
-      // opaque origin via sandbox. Critical that we never combine
-      // `allow-scripts` with `allow-same-origin` — that pairing defeats the
-      // sandbox per the HTML spec (notes on the sandbox attribute).
-      srcDoc={html}
-      sandbox="allow-scripts"
-      title={title}
-      className={cn(
-        "w-full rounded-md border border-border bg-background",
-        heightClassName,
-        className,
-      )}
-    />
-  );
-}
+export const CodeBlockIframe = forwardRef<HTMLIFrameElement, CodeBlockIframeProps>(
+  function CodeBlockIframe(
+    {
+      html,
+      title,
+      className,
+      heightClassName = "h-[480px]",
+      onLoad,
+    },
+    ref,
+  ) {
+    return (
+      <iframe
+        ref={ref}
+        // srcDoc keeps the body in the parent's process but isolated to an
+        // opaque origin via sandbox. Critical that we never combine
+        // `allow-scripts` with `allow-same-origin` — that pairing defeats the
+        // sandbox per the HTML spec (notes on the sandbox attribute).
+        srcDoc={html}
+        sandbox="allow-scripts"
+        title={title}
+        onLoad={onLoad}
+        className={cn(
+          "w-full rounded-md border border-border bg-background",
+          heightClassName,
+          className,
+        )}
+      />
+    );
+  },
+);

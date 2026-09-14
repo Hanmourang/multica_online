@@ -9,8 +9,11 @@ import {
   TableHeader,
   TableRow,
 } from "@multica/ui/components/ui/table";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../i18n";
+import { artifactDisplayName } from "./archive-display";
+import { ArtifactModuleChipControl } from "./artifact-module-tag";
 import { formatBytes } from "./query-states";
 
 /**
@@ -21,10 +24,20 @@ export function ArtifactListTable({
   artifacts,
   selectedId,
   onSelect,
+  tagging,
+  pickedIds,
+  onTogglePick,
+  onSaveTag,
+  tagBusy,
 }: {
   artifacts: ProjectArtifact[];
   selectedId: string | null;
   onSelect: (artifact: ProjectArtifact) => void;
+  tagging?: boolean;
+  pickedIds?: Set<string>;
+  onTogglePick?: (id: string, next: boolean) => void;
+  onSaveTag?: (artifact: ProjectArtifact, value: string) => Promise<void> | void;
+  tagBusy?: boolean;
 }) {
   const { t } = useT("archive");
 
@@ -38,10 +51,12 @@ export function ArtifactListTable({
 
   return (
     <div className="overflow-x-auto rounded-lg border border-surface-border" data-testid="archive-list">
-      <Table>
+      <Table className="min-w-[720px]">
         <TableHeader>
           <TableRow>
-            <TableHead>{t(($) => $.preview.field_rel_path)}</TableHead>
+            {tagging ? <TableHead className="w-8" /> : null}
+            <TableHead>{t(($) => $.mapping.col_name)}</TableHead>
+            <TableHead>{t(($) => $.browser.module)}</TableHead>
             <TableHead>{t(($) => $.preview.field_scope)}</TableHead>
             <TableHead>{t(($) => $.preview.field_stage)}</TableHead>
             <TableHead>{t(($) => $.preview.field_doc_type)}</TableHead>
@@ -51,17 +66,48 @@ export function ArtifactListTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {artifacts.map((artifact) => (
+          {artifacts.map((artifact) => {
+            const checked = pickedIds?.has(artifact.id) === true;
+            return (
             <TableRow
               key={artifact.id}
-              onClick={() => onSelect(artifact)}
+              onClick={(event) => {
+                onSelect(artifact);
+                if (tagging || event.shiftKey || event.metaKey || event.ctrlKey) {
+                  onTogglePick?.(artifact.id, !checked);
+                }
+              }}
               className={cn(
                 "cursor-pointer",
                 artifact.id === selectedId && "bg-primary/5",
+                tagging && checked && "bg-amber-400/10",
               )}
             >
-              <TableCell className="max-w-72 truncate font-mono text-caption" title={artifact.rel_path}>
-                {artifact.rel_path}
+              {tagging ? (
+                <TableCell className="w-8" onClick={(event) => event.stopPropagation()}>
+                  <Checkbox
+                    checked={checked}
+                    aria-label={artifactDisplayName(artifact.rel_path)}
+                    onCheckedChange={(value) =>
+                      onTogglePick?.(artifact.id, value === true)
+                    }
+                  />
+                </TableCell>
+              ) : null}
+              <TableCell className="max-w-72 truncate text-caption" title={artifact.rel_path}>
+                {artifactDisplayName(artifact.rel_path)}
+              </TableCell>
+              <TableCell
+                className="text-caption"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <ArtifactModuleChipControl
+                  artifact={artifact}
+                  onSave={
+                    onSaveTag ? (value) => onSaveTag(artifact, value) : undefined
+                  }
+                  busy={tagBusy}
+                />
               </TableCell>
               <TableCell className="text-caption">{artifact.scope}</TableCell>
               <TableCell className="text-caption">
@@ -76,7 +122,8 @@ export function ArtifactListTable({
                 {formatBytes(artifact.size_bytes)}
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
         </TableBody>
       </Table>
     </div>

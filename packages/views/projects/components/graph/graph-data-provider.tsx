@@ -1,17 +1,13 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
-import {
-  latestGraphSnapshotOptions,
-  moduleStrategiesOptions,
-} from "@multica/core/graph/queries";
+import { latestGraphSnapshotOptions } from "@multica/core/graph/queries";
 import type {
   BusMatrixCell,
   GraphSnapshotSummary,
-  OntologyReadiness,
 } from "@multica/core/types";
 
 /**
@@ -20,9 +16,8 @@ import type {
  * Owns the latest-snapshot query — the single source for scan identity, the
  * module summary and the bus-matrix pre-aggregation — plus the two selection
  * states these tabs drive: the module picked in the left list and the matrix
- * cell picked in the grid. Ontology readiness piggybacks on the selected
- * module's strategies query; the strategies sub-tab reads the same query
- * key, so React Query dedupes this into one request (no fabricated state).
+ * cell picked in the grid. Ontology readiness stays on ScanStatusBar so a
+ * strategies fetch does not re-render the whole feature tree.
  */
 interface GraphDataValue {
   projectId: string;
@@ -37,8 +32,6 @@ interface GraphDataValue {
   /** Matrix cell selected in the grid (f11 drilldown driver). */
   selectedCell: BusMatrixCell | null;
   setSelectedCell: (cell: BusMatrixCell | null) => void;
-  /** Ontology readiness of the selected module; null before a selection. */
-  ontologyReady: OntologyReadiness | null;
 }
 
 const GraphDataContext = createContext<GraphDataValue | null>(null);
@@ -51,33 +44,46 @@ export function GraphDataProvider({
   children: ReactNode;
 }) {
   const wsId = useWorkspaceId();
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedCell, setSelectedCell] = useState<BusMatrixCell | null>(null);
+  const [selectedNodeId, setSelectedNodeIdState] = useState<string | null>(null);
+  const [selectedCell, setSelectedCellState] = useState<BusMatrixCell | null>(null);
 
   const snapshotQuery = useQuery(latestGraphSnapshotOptions(wsId, projectId));
-  const strategiesQuery = useQuery({
-    ...moduleStrategiesOptions(wsId, projectId, selectedNodeId ?? ""),
-    enabled: Boolean(selectedNodeId),
-  });
+  const setSelectedNodeId = useCallback((nodeId: string | null) => {
+    setSelectedNodeIdState((prev) => (prev === nodeId ? prev : nodeId));
+  }, []);
+  const setSelectedCell = useCallback((cell: BusMatrixCell | null) => {
+    setSelectedCellState(cell);
+  }, []);
+  const refetchSnapshot = useCallback(() => {
+    void snapshotQuery.refetch();
+  }, [snapshotQuery.refetch]);
 
-  return (
-    <GraphDataContext.Provider
-      value={{
-        projectId,
-        snapshot: snapshotQuery.data ?? null,
-        snapshotLoading: snapshotQuery.isPending,
-        snapshotError: snapshotQuery.isError,
-        refetchSnapshot: () => void snapshotQuery.refetch(),
-        selectedNodeId,
-        setSelectedNodeId,
-        selectedCell,
-        setSelectedCell,
-        ontologyReady: strategiesQuery.data?.ontology_ready ?? null,
-      }}
-    >
-      {children}
-    </GraphDataContext.Provider>
+  const value = useMemo<GraphDataValue>(
+    () => ({
+      projectId,
+      snapshot: snapshotQuery.data ?? null,
+      snapshotLoading: snapshotQuery.isPending,
+      snapshotError: snapshotQuery.isError,
+      refetchSnapshot,
+      selectedNodeId,
+      setSelectedNodeId,
+      selectedCell,
+      setSelectedCell,
+    }),
+    [
+      projectId,
+      refetchSnapshot,
+      selectedCell,
+      selectedNodeId,
+      setSelectedCell,
+      setSelectedNodeId,
+      snapshotQuery.data,
+      snapshotQuery.isError,
+      snapshotQuery.isPending,
+    ],
   );
+
+  return <GraphDataContext.Provider value={value}>{children}</GraphDataContext.Provider>;
 }
 
 export function useGraphData(): GraphDataValue {

@@ -1899,6 +1899,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// 一键生成/重生成 + 版本历史 + 逐项标记 + 确认门。
 					r.Post("/prototype/generate", h.GeneratePrototype)
 					r.Get("/prototypes", h.ListPrototypeVersions)
+					r.Post("/prototypes", h.RegisterPrototype)
+					r.Patch("/prototypes/{version}", h.UpdatePrototypePath)
 					r.Post("/prototypes/{version}/marks", h.UpdatePrototypeMarks)
 					r.Post("/prototypes/{version}/confirm", h.ConfirmPrototype)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)

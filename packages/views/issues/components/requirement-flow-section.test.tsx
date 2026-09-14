@@ -545,6 +545,47 @@ describe("RequirementFlowSection", () => {
     expect(mockApi.listIssueRoleAssignments).not.toHaveBeenCalled();
   });
 
+  it("工作台 embedded 时即使 GetIssue 没有日历字段也拉流水线", async () => {
+    mockApi.listIssueRoleAssignments.mockResolvedValue({
+      roles: [rosterRow({ role: "pm", enabled: true })],
+      total: 1,
+    });
+    renderSection(
+      <RequirementFlowSection
+        embedded
+        issue={requirement({
+          goal: null,
+          start_at: null,
+          repo_resource_id: null,
+          decomposition_confirmed_at: null,
+          triggered_at: null,
+        })}
+        childIssues={[]}
+      />,
+    );
+    expect(await screen.findByTestId("requirement-flow")).toBeTruthy();
+  });
+
+  it("只有 requirement_status 的顶层需求也挂四阶段条", async () => {
+    mockApi.listIssueRoleAssignments.mockResolvedValue({
+      roles: [rosterRow({ role: "pm", enabled: true })],
+      total: 1,
+    });
+    renderSection(
+      <RequirementFlowSection
+        issue={requirement({
+          start_at: null,
+          repo_resource_id: null,
+          decomposition_confirmed_at: null,
+          triggered_at: null,
+          requirement_status: "原型待确认",
+        })}
+        childIssues={[]}
+      />,
+    );
+    expect(await screen.findByTestId("requirement-flow")).toBeTruthy();
+  });
+
   it("点击未来阶段节点可预览面板且动作置灰", async () => {
     mockApi.listIssueRoleAssignments.mockResolvedValue({
       roles: [rosterRow()],

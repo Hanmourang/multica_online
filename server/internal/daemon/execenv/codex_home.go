@@ -306,6 +306,14 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home ensure multi-agent config failed", "error", err)
 	}
 
+	// Disable Codex native plugins so API-key sessions skip the curated
+	// GitHub marketplace clone (`openai/plugins.git`) that otherwise
+	// blocks initialize / thread setup on hosts that cannot reach
+	// GitHub. See codex_plugins.go for the full rationale and escape hatch.
+	if err := ensureCodexPluginsConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {
+		logger.Warn("execenv: codex-home ensure plugins config failed", "error", err)
+	}
+
 	// Disable Codex native auto-memory inside daemon-managed task sessions
 	// so cross-task and cross-workspace context leaks (multica#3130) cannot
 	// happen via `codex-home/memories/` or `~/.codex/memories/`. See

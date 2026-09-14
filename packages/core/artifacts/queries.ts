@@ -20,6 +20,8 @@ export const artifactKeys = {
     [...artifactKeys.all(wsId), projectId] as const,
   list: (wsId: string, projectId: string, filters?: ListArtifactsParams) =>
     [...artifactKeys.project(wsId, projectId), "list", filters ?? {}] as const,
+  diagnostics: (wsId: string, projectId: string) =>
+    [...artifactKeys.project(wsId, projectId), "diagnostics"] as const,
   detail: (wsId: string, projectId: string, artifactId: string) =>
     [...artifactKeys.project(wsId, projectId), "detail", artifactId] as const,
   content: (wsId: string, projectId: string, artifactId: string) =>
@@ -30,6 +32,8 @@ export const artifactKeys = {
     ] as const,
   matrix: (wsId: string, projectId: string) =>
     [...artifactKeys.project(wsId, projectId), "matrix"] as const,
+  syncConfig: (wsId: string, projectId: string) =>
+    [...artifactKeys.project(wsId, projectId), "sync-config"] as const,
 };
 
 /** Filters are part of the request URL, so they belong in the key. */
@@ -122,6 +126,26 @@ export function projectArtifactMatrixOptions(
  * contract has no dedicated unbound/bind endpoint yet, so this selects from
  * the same cache entry the browser list uses.
  */
+export function archiveSyncDiagnosticsOptions(wsId: string, projectId: string) {
+  return queryOptions({
+    queryKey: artifactKeys.diagnostics(wsId, projectId),
+    queryFn: () =>
+      api.listArchiveSyncDiagnostics(projectId, {
+        limit: 50,
+      }),
+    enabled: Boolean(wsId && projectId),
+    select: (data) => data.diagnostics ?? [],
+  });
+}
+
+export function archiveSyncConfigOptions(wsId: string, projectId: string) {
+  return queryOptions({
+    queryKey: artifactKeys.syncConfig(wsId, projectId),
+    queryFn: () => api.getArchiveSyncConfig(projectId),
+    enabled: Boolean(wsId && projectId),
+  });
+}
+
 export function unboundArtifactsOptions(wsId: string, projectId: string) {
   return queryOptions({
     queryKey: artifactKeys.list(wsId, projectId),

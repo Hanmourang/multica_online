@@ -35,6 +35,10 @@ type GraphSyncPayload struct {
 	Stats           json.RawMessage `json:"stats"`
 	ModuleSummary   json.RawMessage `json:"module_summary"`
 	BusMatrix       json.RawMessage `json:"bus_matrix"`
+	// DataModel carries the v2 versioned data-asset projection (migration
+	// 467): opaque JSONB like module_summary / bus_matrix — the server never
+	// parses it, it only validates well-formedness implicitly via JSONB.
+	DataModel json.RawMessage `json:"data_model"`
 	// ExpectedScanID is an OPTIONAL optimistic-lock precondition (task 27):
 	// when non-empty, the sync only proceeds if the project's newest snapshot
 	// still carries this scan_id; otherwise the handler answers 409 with the
@@ -89,6 +93,15 @@ func jsonOrNullArray(raw json.RawMessage) json.RawMessage {
 	return raw
 }
 
+// jsonOrNullObject is jsonOrNullArray's sibling for object-typed fields
+// (data_model): an absent extraction surfaces as `{}`, never null.
+func jsonOrNullObject(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return json.RawMessage("{}")
+	}
+	return raw
+}
+
 // extractStatsField pulls a top-level key out of the stats JSONB payload.
 func extractStatsField(stats []byte, key string) json.RawMessage {
 	if len(stats) == 0 {
@@ -115,6 +128,7 @@ type graphSnapshotRow struct {
 	Stats           []byte
 	ModuleSummary   []byte
 	BusMatrix       []byte
+	DataModel       []byte
 	CreatedAt       pgtype.Timestamptz
 }
 
@@ -124,13 +138,13 @@ type graphSnapshotRow struct {
 func (h *Handler) loadLatestGraphSnapshot(w http.ResponseWriter, r *http.Request, project db.Project) (graphSnapshotRow, bool) {
 	row := graphSnapshotRow{}
 	err := h.DB.QueryRow(r.Context(), `
-		SELECT id, project_id, scan_id, git_sha, gitnexus_version, stats, module_summary, bus_matrix, created_at
+		SELECT id, project_id, scan_id, git_sha, gitnexus_version, stats, module_summary, bus_matrix, data_model, created_at
 		FROM project_graph_snapshot
 		WHERE project_id = $1
 		ORDER BY created_at DESC
 		LIMIT 1`,
 		project.ID,
-	).Scan(&row.ID, &row.ProjectID, &row.ScanID, &row.GitSha, &row.GitnexusVersion, &row.Stats, &row.ModuleSummary, &row.BusMatrix, &row.CreatedAt)
+	).Scan(&row.ID, &row.ProjectID, &row.ScanID, &row.GitSha, &row.GitnexusVersion, &row.Stats, &row.ModuleSummary, &row.BusMatrix, &row.DataModel, &row.CreatedAt)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "no graph snapshot available for this project")
 		return graphSnapshotRow{}, false
@@ -390,6 +404,16 @@ func syncGraphSnapshotDetailedInTx(ctx context.Context, tx pgx.Tx, project db.Pr
 			busMatrix = []byte("[]")
 		}
 	}
+	// data_model is the v2 versioned asset projection (object, not array);
+	// absent payloads degrade to {} so older snapshots stay readable.
+	dataModel := payload.DataModel
+	if len(dataModel) == 0 || string(dataModel) == "null" {
+		if v := extractStatsField(stats, "data_model"); v != nil {
+			dataModel = v
+		} else {
+			dataModel = []byte("{}")
+		}
+	}
 
 	var snapshotID pgtype.UUID
 	var inserted bool
@@ -397,8 +421,8 @@ func syncGraphSnapshotDetailedInTx(ctx context.Context, tx pgx.Tx, project db.Pr
 		INSERT INTO project_graph_snapshot (
 			workspace_id, project_id, resource_id, scan_id,
 			gitnexus_version, git_sha, nodes, edges, communities, stats,
-			module_summary, bus_matrix
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			module_summary, bus_matrix, data_model
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT (project_id, scan_id) DO UPDATE SET
 			gitnexus_version = EXCLUDED.gitnexus_version,
 			git_sha = EXCLUDED.git_sha,
@@ -407,11 +431,12 @@ func syncGraphSnapshotDetailedInTx(ctx context.Context, tx pgx.Tx, project db.Pr
 			communities = EXCLUDED.communities,
 			stats = EXCLUDED.stats,
 			module_summary = EXCLUDED.module_summary,
-			bus_matrix = EXCLUDED.bus_matrix
+			bus_matrix = EXCLUDED.bus_matrix,
+			data_model = EXCLUDED.data_model
 		RETURNING id, (xmax = 0)`,
 		project.WorkspaceID, project.ID, archiveResourceID, payload.ScanID,
 		payload.GitnexusVersion, payload.GitSha, nodes, edges, communities, stats,
-		moduleSummary, busMatrix,
+		moduleSummary, busMatrix, dataModel,
 	).Scan(&snapshotID, &inserted)
 	if err != nil {
 		return graphSyncResult{}, err
@@ -600,6 +625,7 @@ type GraphSnapshotSummaryResponse struct {
 	Stats           json.RawMessage `json:"stats"`
 	ModuleSummary   json.RawMessage `json:"module_summary"`
 	BusMatrix       json.RawMessage `json:"bus_matrix"`
+	DataModel       json.RawMessage `json:"data_model"`
 	CreatedAt       string          `json:"created_at"`
 }
 
@@ -624,6 +650,7 @@ func (h *Handler) GetLatestGraphSnapshot(w http.ResponseWriter, r *http.Request)
 		Stats:           json.RawMessage(row.Stats),
 		ModuleSummary:   jsonOrNullArray(row.ModuleSummary),
 		BusMatrix:       jsonOrNullArray(row.BusMatrix),
+		DataModel:       jsonOrNullObject(row.DataModel),
 		CreatedAt:       timestampToString(row.CreatedAt),
 	})
 }
@@ -917,7 +944,8 @@ func (h *Handler) listOntologyObjects(r *http.Request, projectID pgtype.UUID, no
 	rows, err := h.DB.Query(r.Context(), `
 		SELECT id, entity_type, name, qualified_name, domain, lifecycle, impl_status, properties
 		FROM ontology_object
-		WHERE project_id = $1 AND node_id = $2
+		WHERE project_id = $1
+		  AND (node_id = $2 OR properties->>'community_id' = $2)
 		ORDER BY name`,
 		projectID, nodeID)
 	if err != nil {
@@ -1411,6 +1439,11 @@ type BusMatrixCell struct {
 	WriteCount         int64  `json:"write_count"`
 	IsNewTable         *bool  `json:"is_new_table,omitempty"`
 	IsCrossDomainWrite *bool  `json:"is_cross_domain_write,omitempty"`
+	// Process granularity (数据模型 v2): a page can carry several business
+	// processes (主键组合); each becomes its own matrix row. Absent on v1
+	// payloads, where rows stay page-level.
+	ProcessKey  string `json:"process_key,omitempty"`
+	ProcessName string `json:"process_name,omitempty"`
 }
 
 // loadBusMatrixCells reads the CLI's pre-aggregated bus_matrix projection
@@ -1602,7 +1635,7 @@ type BusMatrixDrilldownResponse struct {
 
 // GetBusMatrixDrilldown implements GET .../graph/bus-matrix/drilldown:
 // validates the filters and selects the matching matrix cells.
-// Supported filters: module_node_id, page_key, domain.
+// Supported filters: module_node_id, page_key, process_key, domain.
 //
 // On top of the matched cells it rolls up the table / column detail the CLI
 // pre-aggregation attached to them. That detail is optional in the payload:
@@ -1617,6 +1650,7 @@ func (h *Handler) GetBusMatrixDrilldown(w http.ResponseWriter, r *http.Request) 
 	query := r.URL.Query()
 	moduleNodeID := strings.TrimSpace(query.Get("module_node_id"))
 	pageKey := strings.TrimSpace(query.Get("page_key"))
+	processKey := strings.TrimSpace(query.Get("process_key"))
 	domain := strings.TrimSpace(query.Get("domain"))
 
 	_, cells, ok := h.loadBusMatrixCellDetails(w, r, project)
@@ -1629,6 +1663,9 @@ func (h *Handler) GetBusMatrixDrilldown(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 		if pageKey != "" && c.PageKey != pageKey {
+			continue
+		}
+		if processKey != "" && c.ProcessKey != processKey {
 			continue
 		}
 		if domain != "" && c.Domain != domain {

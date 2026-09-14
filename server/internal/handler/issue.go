@@ -2987,6 +2987,18 @@ func duplicateIssueMessage(issue IssueResponse) string {
 	return issueguard.DuplicateMessage(issue.Identifier, issue.Title, issue.Status)
 }
 
+// defaultRequirementDueDate 用 start_at 的 UTC 日历日作为顶层需求默认截止日。
+func defaultRequirementDueDate(startAt pgtype.Timestamptz) pgtype.Date {
+	if !startAt.Valid {
+		return pgtype.Date{}
+	}
+	d, err := util.ParseCalendarDate(startAt.Time.UTC().Format("2006-01-02"))
+	if err != nil {
+		return pgtype.Date{}
+	}
+	return d
+}
+
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	var req CreateIssueRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -3138,6 +3150,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		startAt = ts
+	}
+	// 顶层需求未给 due_date 时，默认与 start_at 同一天，避免日历跨天色块。
+	if !parentIssueID.Valid && startAt.Valid && !dueDate.Valid {
+		dueDate = defaultRequirementDueDate(startAt)
 	}
 	var goal pgtype.Text
 	if req.Goal != nil && *req.Goal != "" {

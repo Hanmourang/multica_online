@@ -18,5 +18,8 @@ describe("archive preview cache", () => {
     expect(
       getArchivePreviewText("dsh_desktop/overview/product-design/01-可行性评估报告.md"),
     ).toBe("# 可行性");
+    expect(getArchivePreviewText("overview/research/01-可行性评估报告.md")).toBe(
+      "# 可行性",
+    );
   });
 });

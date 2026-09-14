@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -143,6 +144,20 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 				if _, err := os.Stat(p); err == nil {
 					return AgentEntry{
 						Path:    p,
+						Command: cmd,
+						Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
+			// npm i -g @openai/codex under nvm lives in a versioned prefix
+			// that GUI-launched daemons often cannot see: nvm only mutates
+			// PATH from ~/.zshrc, and the login-shell fallback is TTL-cached
+			// and time-bounded. Scanning the stable nvm versions directory
+			// finds that install without forking a shell.
+			for _, p := range nvmUserCodexPaths() {
+				if path, err := resolveAgentExecutablePath(p); err == nil {
+					return AgentEntry{
+						Path:    path,
 						Command: cmd,
 						Model:   strings.TrimSpace(os.Getenv(modelEnv)),
 					}, true
@@ -370,4 +385,74 @@ func probeDshMulticaProfile(executablePath string) bool {
 		}
 	}
 	return false
+}
+
+// nvmUserCodexPaths returns candidate Codex CLIs installed by
+// `npm i -g @openai/codex` under nvm. GUI-launched daemons often miss nvm's
+// PATH because ~/.zshrc is not sourced; scanning the stable versions
+// directory finds the binary without forking a login shell.
+func nvmUserCodexPaths() []string {
+	var nvmDirs []string
+	if nvmDir := strings.TrimSpace(os.Getenv("NVM_DIR")); nvmDir != "" {
+		nvmDirs = append(nvmDirs, nvmDir)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		homeNvm := filepath.Join(home, ".nvm")
+		if len(nvmDirs) == 0 || nvmDirs[0] != homeNvm {
+			nvmDirs = append(nvmDirs, homeNvm)
+		}
+	}
+
+	var paths []string
+	seen := map[string]struct{}{}
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		paths = append(paths, p)
+	}
+	addCodex := func(binDir string) {
+		add(filepath.Join(binDir, "codex"))
+		add(filepath.Join(binDir, "codex.cmd"))
+	}
+
+	if bin := strings.TrimSpace(os.Getenv("NVM_BIN")); bin != "" {
+		addCodex(bin)
+	}
+
+	for _, nvmDir := range nvmDirs {
+		if _, err := os.Stat(nvmDir); err != nil {
+			continue
+		}
+		if alias, err := os.ReadFile(filepath.Join(nvmDir, "alias", "default")); err == nil {
+			name := strings.TrimSpace(string(alias))
+			if nested, nestErr := os.ReadFile(filepath.Join(nvmDir, "alias", name)); nestErr == nil {
+				if trimmed := strings.TrimSpace(string(nested)); trimmed != "" {
+					name = trimmed
+				}
+			}
+			if name != "" {
+				addCodex(filepath.Join(nvmDir, "versions", "node", name, "bin"))
+			}
+		}
+		entries, err := os.ReadDir(filepath.Join(nvmDir, "versions", "node"))
+		if err != nil {
+			continue
+		}
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir() {
+				names = append(names, entry.Name())
+			}
+		}
+		sort.Sort(sort.Reverse(sort.StringSlice(names)))
+		for _, name := range names {
+			addCodex(filepath.Join(nvmDir, "versions", "node", name, "bin"))
+		}
+	}
+	return paths
 }

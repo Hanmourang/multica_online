@@ -5,8 +5,12 @@ import {
   canReflow,
   compareRequirements,
   hasAcceptanceScene,
+  matchChildProgress,
   projectRequirements,
   requirementBucket,
+  taskProgressPercent,
+  taskRowProgress,
+  taskRowTitle,
 } from "./requirement-helpers";
 
 function issue(overrides: Partial<Issue> = {}): Issue {
@@ -88,5 +92,48 @@ describe("canReflow / acceptanceVerdict", () => {
     expect(hasAcceptanceScene(issue({ requirement_status: "验收中" }))).toBe(true);
     expect(hasAcceptanceScene(issue({ requirement_status: "执行中" }))).toBe(false);
     expect(requirementBucket(issue({ requirement_status: "原型待确认" }))).toBe("pending");
+  });
+
+  it("uses a human title on expanded task rows and drops queue ids", () => {
+    expect(taskRowTitle(issue({ title: "实现邻域 BFS", identifier: "task_18" }), "未命名任务")).toBe(
+      "实现邻域 BFS",
+    );
+    expect(taskRowTitle(issue({ title: "Task abcdef", identifier: "task_18" }), "未命名任务")).toBe(
+      "未命名任务",
+    );
+    expect(taskRowTitle(issue({ title: "task_18", identifier: "task_18" }), "未命名任务")).toBe(
+      "未命名任务",
+    );
+  });
+
+  it("prefers progress-tree todos over stage_progress", () => {
+    const task = issue({ title: "实现邻域 BFS", stage_progress: "1/4" });
+    expect(taskRowProgress(task)).toEqual({ done: 1, total: 4 });
+    expect(
+      taskRowProgress(task, {
+        id: "q1",
+        title: "实现邻域 BFS",
+        status: "running",
+        agent_id: "a",
+        created_at: "2026-09-01T00:00:00Z",
+        runs: [],
+        todos_progress: { done: 3, total: 5 },
+      }),
+    ).toEqual({ done: 3, total: 5 });
+    expect(
+      matchChildProgress(task, [
+        {
+          id: "q1",
+          title: "实现邻域 BFS",
+          status: "running",
+          agent_id: "a",
+          created_at: "2026-09-01T00:00:00Z",
+          runs: [],
+          todos_progress: { done: 3, total: 5 },
+        },
+      ])?.id,
+    ).toBe("q1");
+    expect(taskProgressPercent("done", null)).toBe(100);
+    expect(taskProgressPercent("todo", { done: 1, total: 4 })).toBe(25);
   });
 });

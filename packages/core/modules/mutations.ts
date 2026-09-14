@@ -14,6 +14,16 @@ import { dependencyKeys, moduleKeys } from "./queries";
  * avoid_conflict, and a rename/recolor/delete changes what the board cards
  * render for those ids.
  */
+function invalidateModuleReads(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  projectId: string,
+) {
+  qc.invalidateQueries({ queryKey: moduleKeys.byProject(wsId, projectId) });
+  // 功能模块左栏读 graphKeys.modules，不只 project-modules。
+  qc.invalidateQueries({ queryKey: graphKeys.project(wsId, projectId) });
+}
+
 export function useCreateProjectModule(projectId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -21,7 +31,7 @@ export function useCreateProjectModule(projectId: string) {
     mutationFn: (data: { name: string; color?: string }) =>
       api.createProjectModule(projectId, data),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: moduleKeys.byProject(wsId, projectId) });
+      invalidateModuleReads(qc, wsId, projectId);
     },
   });
 }
@@ -41,10 +51,7 @@ export function useUpdateProjectModule(projectId: string) {
       graph_node_id?: string | null;
     }) => api.updateProjectModule(projectId, moduleId, data),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: moduleKeys.byProject(wsId, projectId) });
-      // Bind / unbind changes the f10 module-bridge list (graphKeys.modules
-      // nests under graphKeys.project).
-      qc.invalidateQueries({ queryKey: graphKeys.project(wsId, projectId) });
+      invalidateModuleReads(qc, wsId, projectId);
     },
   });
 }
@@ -56,7 +63,7 @@ export function useDeleteProjectModule(projectId: string) {
     mutationFn: (moduleId: string) =>
       api.deleteProjectModule(projectId, moduleId),
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: moduleKeys.byProject(wsId, projectId) });
+      invalidateModuleReads(qc, wsId, projectId);
       // Deleted modules fall back to module_id = null on the server
       // (ON DELETE SET NULL); the affected issue rows keep a stale id until
       // refetched.

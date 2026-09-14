@@ -21,6 +21,7 @@ import type {
   RuntimeProtocolFamily,
 } from "@multica/core/types";
 import {
+  providerDisplayName,
   runtimeProfileListOptions,
   useCreateRuntimeProfile,
   useUpdateRuntimeProfile,
@@ -52,7 +53,10 @@ import {
   type RuntimeCatalogSections,
 } from "./runtime-profile-catalog";
 import { useT } from "../../i18n";
-import { customRuntimeDocsHref } from "./runtime-docs";
+import {
+  customRuntimeDocsHref,
+  protocolFamilyDocsHref,
+} from "./runtime-docs";
 
 // The dialog runs in two surfaces that swap inside one Popup:
 //   - "browse": custom-first master list + adaptive detail
@@ -524,6 +528,10 @@ function DetailPanel({
             family: entry.protocolFamily,
           })}
         </p>
+        <ProtocolFamilyDocsLink
+          family={entry.protocolFamily}
+          className="mt-3"
+        />
       </div>
     );
   }
@@ -608,6 +616,34 @@ function DetailPanel({
         }}
       />
     </div>
+  );
+}
+
+function ProtocolFamilyDocsLink({
+  family,
+  className,
+}: {
+  family: RuntimeProtocolFamily;
+  className?: string;
+}) {
+  const { t } = useT("runtimes");
+  const href = protocolFamilyDocsHref(family);
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(
+        "inline-flex items-center gap-1 rounded-sm font-medium text-foreground underline underline-offset-2 transition-colors hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        className,
+      )}
+    >
+      {t(($) => $.profiles.family_docs, {
+        family: providerDisplayName(family),
+      })}
+      <ExternalLink aria-hidden="true" className="h-3 w-3" />
+    </a>
   );
 }
 
@@ -875,6 +911,7 @@ function ProfileDetailsForm({
           <p className="text-micro text-muted-foreground">
             {t(($) => $.profiles.form.family_locked_hint)}
           </p>
+          <ProtocolFamilyDocsLink family={family} className="text-caption" />
         </div>
 
         <div className="space-y-1.5">

@@ -1,11 +1,9 @@
 /**
  * @vitest-environment jsdom
  *
- * Requirement calendar view: month grid lays requirement blocks across
- * start_at ~ due_date (minute-granularity floored to days), with the derived
- * pipeline status badge and stage progress on the block; the week grid greys
- * weekends and clips cross-week ranges at the grid edge; tooltips keep the
- * minute component.
+ * Requirement calendar view: month/week grids place each requirement on its
+ * start day only (a later due_date does not paint extra cells); weekends
+ * grey; tooltips keep the minute component.
  */
 import { createStore } from "zustand/vanilla";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
@@ -135,6 +133,7 @@ describe("CalendarView", () => {
     vi.setSystemTime(new Date("2026-09-15T12:00:00Z"));
     mockUpdateMutate.mockClear();
     vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
     vi.mocked(toast.warning).mockClear();
   });
   afterEach(() => {
@@ -167,7 +166,7 @@ describe("CalendarView", () => {
     expect(anchor!.getAttribute("href")).toBe("/acme/issues/req-1");
   });
 
-  it("month view spans a requirement across start_at ~ due_date with status badge and progress", () => {
+  it("month view paints only the start day even when due_date is later", () => {
     renderCalendar([
       requirement({
         start_at: "2026-09-15T09:30:00Z",
@@ -177,33 +176,25 @@ describe("CalendarView", () => {
       }),
     ]);
 
-    // The block lands on all three days; only the first segment carries the
-    // title.
     const startSeg = screen.getByTestId("req-block-req-1-2026-09-15");
     expect(startSeg.getAttribute("data-segment")).toBe("start");
     expect(startSeg.textContent).toContain("会员积分重构");
-    expect(
-      screen.getByTestId("req-block-req-1-2026-09-16").getAttribute("data-segment"),
-    ).toBe("mid");
-    expect(
-      screen.getByTestId("req-block-req-1-2026-09-17").getAttribute("data-segment"),
-    ).toBe("end");
-    // Nothing spills onto the day after the due date.
+    expect(screen.queryByTestId("req-block-req-1-2026-09-16")).toBeNull();
+    expect(screen.queryByTestId("req-block-req-1-2026-09-17")).toBeNull();
     expect(screen.queryByTestId("req-block-req-1-2026-09-18")).toBeNull();
 
-    // Derived pipeline status + stage progress ride the first segment.
     expect(startSeg.textContent).toContain("执行中");
     expect(startSeg.textContent).toContain("2/5");
   });
 
-  it("week view greys weekend cells and clips a cross-week range at the grid edge", () => {
+  it("week view greys weekend cells and keeps a same-day block on its start day", () => {
     renderCalendar(
       [
         requirement({
           id: "req-2",
           identifier: "REQ-2",
-          start_at: "2026-09-11T09:00:00Z", // previous week (Fri)
-          due_date: "2026-09-16T18:00:00Z", // this week (Wed)
+          start_at: "2026-09-16T09:00:00Z",
+          due_date: "2026-09-20T18:00:00Z",
           requirement_status: "执行中",
           stage_progress: "1/3",
         }),
@@ -211,19 +202,16 @@ describe("CalendarView", () => {
       "week",
     );
 
-    // Saturday / Sunday of the current week render greyed.
     expect(screen.getByTestId("cal-cell-2026-09-19").getAttribute("data-weekend")).toBe("true");
     expect(screen.getByTestId("cal-cell-2026-09-20").getAttribute("data-weekend")).toBe("true");
     expect(screen.getByTestId("cal-cell-2026-09-15").getAttribute("data-weekend")).not.toBe("true");
 
-    // The range started before this week: Monday's segment is a clipped
-    // continuation, not a rounded start.
-    expect(
-      screen.getByTestId("req-block-req-2-2026-09-14").getAttribute("data-segment"),
-    ).toBe("mid");
-    expect(
-      screen.getByTestId("req-block-req-2-2026-09-16").getAttribute("data-segment"),
-    ).toBe("end");
+    const block = screen.getByTestId("req-block-req-2-2026-09-16");
+    expect(block.getAttribute("data-segment")).toBe("start");
+    expect(block.textContent).toContain("REQ-2");
+    expect(screen.queryByTestId("req-block-req-2-2026-09-14")).toBeNull();
+    expect(screen.queryByTestId("req-block-req-2-2026-09-17")).toBeNull();
+    expect(screen.queryByTestId("req-block-req-2-2026-09-20")).toBeNull();
   });
 
   it("tooltip keeps the minute-granularity times", () => {
@@ -273,7 +261,7 @@ describe("CalendarView", () => {
     const [payload] = mockUpdateMutate.mock.calls[0]!;
     expect(payload.id).toBe("req-1");
     expect(payload.start_at).toBe("2026-09-22T09:30:00.000Z");
-    expect(payload.due_date).toBe("2026-09-24");
+    expect(payload.due_date).toBe("2026-09-22");
 
     // The reschedule toast names the auto-trigger linkage (spec §7.2).
     expect(toast.success).toHaveBeenCalledWith(
@@ -394,7 +382,7 @@ describe("CalendarView", () => {
     );
   });
 
-  it("end-segment grip refuses a module conflict and names a free window", () => {
+  it("drop onto an occupying module day refuses and names a free window", () => {
     renderCalendar([
       requirement({
         start_at: "2026-09-15T09:30:00Z",
@@ -414,8 +402,15 @@ describe("CalendarView", () => {
       }),
     ]);
 
-    fireEvent.mouseDown(screen.getByTestId("req-grip-req-1"));
-    fireEvent.mouseUp(screen.getByTestId("cal-cell-2026-09-19"));
+    const block = screen.getByTestId("req-block-req-1-2026-09-15");
+    const dataTransfer = {
+      setData: vi.fn(),
+      getData: vi.fn(() => "req-1"),
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    fireEvent.dragStart(block, { dataTransfer });
+    fireEvent.drop(screen.getByTestId("cal-cell-2026-09-18"), { dataTransfer });
 
     expect(mockUpdateMutate).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith(

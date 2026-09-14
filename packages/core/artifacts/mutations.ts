@@ -8,6 +8,7 @@ import type {
   ArtifactSyncPayload,
   CreateProjectArtifactRequest,
   PatchProjectArtifactRequest,
+  PutArchiveSyncConfigRequest,
 } from "../types";
 
 /**
@@ -125,6 +126,19 @@ export function useCreateArtifact(workspaceId: string, projectId: string) {
         queryKey: artifactKeys.project(workspaceId, projectId),
       });
       qc.invalidateQueries({ queryKey: issueArchiveKeys.all(workspaceId) });
+    },
+  });
+}
+
+export function usePutArchiveSyncConfig(workspaceId: string, projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: PutArchiveSyncConfigRequest) =>
+      api.putArchiveSyncConfig(projectId, data),
+    onSettled: () => {
+      qc.invalidateQueries({
+        queryKey: artifactKeys.syncConfig(workspaceId, projectId),
+      });
     },
   });
 }

@@ -2,7 +2,9 @@
 # migrate-archive-structure.sh — projects_mgmt 存量目录一次性迁移（git mv 保历史）
 #
 # 来源：2026-09-05-project-archive-design.md §8 Phase 0 + §11 交付清单；
-#       映射表见 projects_mgmt/CONTRACT.md §5（唯一事实源，本脚本逐行实现该表）。
+#       映射表见 projects_mgmt/CONTRACT.md §5。
+# 存量整理的执行引擎已换为 _shared/archive/tools/doc_classifier.py --wave（见 archive/08）。
+# 本脚本仅作对照；禁止再整树搬 page-navigator（含 dist/node_modules）。
 #
 # 用法：
 #   scripts/migrate-archive-structure.sh [ARCHIVE_REPO]            # dry-run（默认）
@@ -83,14 +85,15 @@ git_mv_dir  "2.spec_infos/multica"                    "projects/multica/overview
 git_mv_dir  "2.spec_infos/dsh_desktop"                "projects/dsh_desktop/overview/architecture/spec_infos"
 git_mv_dir  "2.spec_infos/eleme-agent"                "projects/eleme-agent/overview/architecture"
 git_mv_dir  "2.spec_infos/eleme/alsc_ontology"        "projects/alsc-ontology/overview/architecture"
-git_mv_file "1.requirements/SOP.md"                   "_shared/sop/SOP.md"
-git_mv_dir  "1.requirements/templates"                "_shared/templates"
-git_mv_dir  "1.requirements/tools"                    "_shared/tools"
+git_mv_file "1.requirements/SOP.md"                   "_shared/process/legacy-SOP.md"
+git_mv_dir  "1.requirements/templates"                "_shared/format/templates"
+git_mv_dir  "1.requirements/tools"                    "_shared/archive/tools"
 git_mv_dir  "1.requirements/projects_mgmt"            "projects/projects_mgmt/requirements/REQ-20260902-01/s3-execution"
 git_mv_dir  "3.phone_agent/产品风格"                   "_shared/design-system"
 git_mv_dir  "3.phone_agent/accio_mobile"              "projects/accio_mobile/overview/product-design"
 git_mv_dir  "3.phone_agent/AI阅读"                    "projects/ai_reading/overview/product-design"
-git_mv_dir  "3.phone_agent/page-navigator"            "projects/ai_reading/assets/page-navigator"
+git_mv_file "3.phone_agent/page-navigator/README.md"  "projects/ai_reading/overview/architecture/page-navigator-README.md"
+git_mv_file "3.phone_agent/page-navigator/index.html" "projects/ai_reading/overview/architecture/page-navigator-index.html"
 
 # *.zip 与重复 stitch HTML 副本 → _attic（本地留存，不进版本库索引）。
 if [[ "$APPLY" == "1" ]]; then

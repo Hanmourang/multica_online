@@ -293,10 +293,13 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// or session/load. Skipping this makes a real, logged-in CLI reject
 		// every session op (the fake ACP in tests happens to accept them,
 		// which is exactly why this must be asserted in tests too). xAI's
-		// documented preference is the API key when XAI_API_KEY is set and
-		// offered, otherwise the cached login token.
+		// documented preference is the API key when XAI_API_KEY is set
+		// (Grok 1.0 often advertises only `grok.com` but still accepts
+		// `xai.api_key`). Otherwise use the cached login from `grok login`
+		// (`grok.com` on 1.0+, historically `cached_token`).
 		// Ref: https://docs.x.ai/build/cli/headless-scripting
-		methodID, err := selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
+		haveAPIKey := envHasNonEmpty(childEnv, "XAI_API_KEY")
+		methodID, err := selectGrokAuthMethod(extractACPAuthMethods(initResult), haveAPIKey)
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("grok authentication setup failed: %v", err)
@@ -307,10 +310,26 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			"methodId": methodID,
 			"_meta":    map[string]any{"headless": true},
 		}); err != nil {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("grok authenticate (%s) failed: %v", methodID, err)
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-			return
+			retried := false
+			if methodID != grokAuthMethodAPIKey && haveAPIKey {
+				b.cfg.Logger.Warn("grok authenticate failed; retrying with xai.api_key", "method", methodID, "error", err)
+				if _, retryErr := c.request(runCtx, "authenticate", map[string]any{
+					"methodId": grokAuthMethodAPIKey,
+					"_meta":    map[string]any{"headless": true},
+				}); retryErr == nil {
+					methodID = grokAuthMethodAPIKey
+					retried = true
+				}
+			}
+			if !retried {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("grok authenticate (%s) failed: %v", methodID, err)
+				if methodID == grokAuthMethodGrokCom && grokOIDCDiscoveryFailed(err) {
+					finalError += "; grok.com OIDC needs a reachable auth.x.ai — set XAI_API_KEY on the Grok agent, or run `grok login` after a proxy/VPN is up"
+				}
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
 		}
 		b.cfg.Logger.Info("grok authenticated", "method", methodID)
 
@@ -515,19 +534,26 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 }
 
 // Grok's ACP `authenticate` method ids (from `initialize`.authMethods).
-// `xai.api_key` consumes XAI_API_KEY from the environment; `cached_token`
-// reuses the credentials written by `grok login`.
+// `xai.api_key` consumes XAI_API_KEY from the environment. Grok Build 1.0+
+// advertises `grok.com` for the session written by `grok login`; older CLIs
+// advertised the same cached login as `cached_token`.
 const (
 	grokAuthMethodAPIKey      = "xai.api_key"
+	grokAuthMethodGrokCom     = "grok.com"
 	grokAuthMethodCachedToken = "cached_token"
 )
 
 // selectGrokAuthMethod chooses which advertised ACP auth method to use,
 // following xAI's documented headless flow: prefer the API key when
-// XAI_API_KEY is present in the child env and the CLI offers it, otherwise
-// fall back to the cached login token. Grok requires an explicit authenticate
-// step: an empty or unknown method list is a protocol/authentication failure,
-// not permission to continue directly to session/new.
+// XAI_API_KEY is present in the child env, otherwise fall back to the
+// cached login (`grok.com`, then `cached_token`).
+//
+// Grok Build 1.0+ often advertises only `grok.com` even when an API key
+// is set. The CLI still accepts `xai.api_key`, and that path does not
+// hit auth.x.ai OIDC discovery (which 403s or times out on some networks).
+// Grok requires an explicit authenticate step: an empty or unknown method
+// list without an API key is a protocol/authentication failure, not
+// permission to continue directly to session/new.
 func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
 	offered := make(map[string]bool, len(methods))
 	for _, m := range methods {
@@ -535,8 +561,11 @@ func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
 			offered[m] = true
 		}
 	}
-	if haveAPIKey && offered[grokAuthMethodAPIKey] {
+	if haveAPIKey {
 		return grokAuthMethodAPIKey, nil
+	}
+	if offered[grokAuthMethodGrokCom] {
+		return grokAuthMethodGrokCom, nil
 	}
 	if offered[grokAuthMethodCachedToken] {
 		return grokAuthMethodCachedToken, nil
@@ -553,6 +582,16 @@ func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
 		return "", fmt.Errorf("Grok advertised no usable authentication methods; set XAI_API_KEY or run `grok login`")
 	}
 	return "", fmt.Errorf("Grok advertised unsupported authentication methods %q; update Multica or authenticate with XAI_API_KEY / `grok login`", advertised)
+}
+
+func grokOIDCDiscoveryFailed(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "openid-configuration") ||
+		strings.Contains(msg, "oidc discovery") ||
+		strings.Contains(msg, "auth.x.ai")
 }
 
 // waitForGrokNotificationQuiescence gives the ACP stdout reader a bounded

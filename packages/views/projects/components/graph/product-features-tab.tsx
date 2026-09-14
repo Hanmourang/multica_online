@@ -1,81 +1,124 @@
 "use client";
 
-import { useState } from "react";
-import { LayoutGrid, List, RefreshCw, Share2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Download, LayoutGrid, List, Plus, RefreshCw, Share2 } from "lucide-react";
 import { toast } from "sonner";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useRebridgeGraphSnapshot } from "@multica/core/graph/mutations";
-import { Button } from "@multica/ui/components/ui/button";
 import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@multica/ui/components/ui/tooltip";
+  graphModulesOptions,
+  projectIssuesForModulesOptions,
+} from "@multica/core/graph/queries";
+import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../i18n";
 import { useGraphData } from "./graph-data-provider";
 import { ScanStatusBar } from "./scan-status-bar";
 import { ModuleListPanel } from "./module-list-panel";
 import { ModuleDetailPanel } from "./module-detail-panel";
+import { ModuleGraphView } from "./module-graph-view";
+import { ModuleTableView } from "./module-table-view";
+import {
+  EMPTY_FEATURE_FILTERS,
+  resolveFeatureFilters,
+  type FeatureModuleFilters,
+  type FeatureViewMode,
+} from "./feature-modules-model";
+import {
+  communityLabel,
+  issuesForModule,
+  moduleRequirements,
+  moduleTasks,
+  rollupTasks,
+  summaryForModule,
+} from "./module-feature-stats";
 
 /**
- * f10 产品功能 Tab 顶层（项目详情新视图）。
- *
- * Left column: module list bridged to graph communities (product lens —
- * what the product can do, not where the code lives). Right column: the
- * four module facets as switchable sub-tabs.
- *
- * No GraphDataProvider here: the shared provider is lifted to
- * `project-archive-views.tsx` (GraphViewStack), which wraps f10 and f11 数据
- * 模型 together so both tabs read/write the *same* context. That keeps
- * `selectedNodeId` / `selectedCell` alive across the tab switch and still
- * issues exactly one snapshot request (single provider + React Query
- * dedupe). Mounting this tab outside that stack throws from `useGraphData`.
+ * 画面 11 / C3：工具栏 + 三种视图。模块列表是左右分栏（左 296px 卡片，右四/五子 TAB）。
  */
 export function ProductFeaturesTab() {
+  const [viewMode, setViewMode] = useState<FeatureViewMode>("modules");
+  const [filters, setFilters] = useState<FeatureModuleFilters>(EMPTY_FEATURE_FILTERS);
+  const [creating, setCreating] = useState(false);
+
   return (
-    <div className="space-y-3">
-      <ProductFeaturesToolbar />
-      <ScanStatusBar />
-      <div className="grid items-start gap-3 lg:grid-cols-[296px_minmax(0,1fr)]">
-        <ModuleListPanel />
-        <ModuleDetailPanel />
-      </div>
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-surface-border bg-surface">
+      <ProductFeaturesToolbar
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        filters={filters}
+        onFiltersChange={setFilters}
+        creating={creating}
+        onCreate={() => {
+          setViewMode("modules");
+          setCreating(true);
+        }}
+      />
+      {viewMode === "modules" ? (
+        <div className="flex min-h-0 flex-1 items-stretch">
+          <aside className="flex w-[clamp(200px,22vw,340px)] shrink-0 flex-col overflow-hidden border-r border-surface-border bg-surface px-3 py-3">
+            <ModuleListPanel
+              filters={filters}
+              creating={creating}
+              onCreatingChange={setCreating}
+            />
+          </aside>
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-muted/15 px-4 py-3">
+            <ModuleDetailPanel />
+          </main>
+        </div>
+      ) : viewMode === "graph" ? (
+        <div className="min-h-0 flex-1 overflow-auto bg-muted/15 p-4">
+          <ModuleGraphView filters={filters} />
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto bg-muted/15 p-4">
+          <ModuleTableView filters={filters} />
+        </div>
+      )}
     </div>
   );
 }
 
-/** The f10 toolbar's view modes (原型 seg：模块列表 / 图谱视图 / 表格). */
-type FeatureViewMode = "modules" | "graph" | "table";
-
-/**
- * f10 工具栏（原型 ar-toolbar 行）：视图切换 seg + 「重算模块匹配」。
- *
- * View switch: only 「模块列表」 is implemented — 图谱视图 / 表格 are
- * disabled with a "coming soon" tooltip and render nothing fake. The
- * selection is local state; there is deliberately no second view to drive.
- *
- * Recompute module match (task 27 — bridge-only, no re-upload): the button
- * calls useRebridgeGraphSnapshot → POST /graph/rebridge. The server re-runs
- * the module ↔ community bridge against the latest snapshot it reads straight
- * from the DB, so NOTHING is uploaded (the old read-back-and-re-post of the
- * 9–20 MiB graph body is gone, and with it the read-back race). A real
- * filesystem rescan is still a CLI/gitnexus job — the label/tooltip say so
- * honestly. The toast reports the server's matched/updated counts. Disabled
- * without a snapshot: rebridge would just 404 (an honest empty state), so the
- * button is greyed out with the rescan_none tooltip instead.
- */
-function ProductFeaturesToolbar() {
+function ProductFeaturesToolbar({
+  viewMode,
+  onViewModeChange,
+  filters,
+  onFiltersChange,
+  creating = false,
+  onCreate,
+}: {
+  viewMode: FeatureViewMode;
+  onViewModeChange: (mode: FeatureViewMode) => void;
+  filters?: FeatureModuleFilters;
+  onFiltersChange: (next: FeatureModuleFilters) => void;
+  creating?: boolean;
+  onCreate: () => void;
+}) {
+  const resolvedFilters = resolveFeatureFilters(filters);
   const { t } = useT("archive");
+  const wsId = useWorkspaceId();
   const { projectId, snapshot } = useGraphData();
-  const [viewMode, setViewMode] = useState<FeatureViewMode>("modules");
   const rebridge = useRebridgeGraphSnapshot(projectId);
+  const modulesQuery = useQuery(graphModulesOptions(wsId, projectId));
+  const issuesQuery = useQuery(projectIssuesForModulesOptions(wsId, projectId));
+
+  const bizKinds = useMemo(() => {
+    return [
+      ...new Set(
+        (snapshot?.module_summary ?? [])
+          .map((row) => row.biz_kind)
+          .filter((kind): kind is string => Boolean(kind)),
+      ),
+    ];
+  }, [snapshot]);
+  const unboundCount = (modulesQuery.data?.modules ?? []).filter((module) => !module.graph_node_id).length;
 
   const handleRebridge = () => {
     rebridge.mutate(undefined, {
       onSuccess: (result) => {
-        // RebridgeGraphResponse carries the bridge stats directly (typed), so
-        // no local widening is needed — these counts are the server's honest
-        // match result, never fabricated.
         toast.success(
           t(($) => $.features.rescan_result, {
             matched: result.matched_modules,
@@ -83,124 +126,124 @@ function ProductFeaturesToolbar() {
           }),
         );
       },
-      onError: (error) => {
-        // No read-back race on this path, so there is no GraphSnapshotChanged
-        // branch; a failure here is a real error (e.g. the snapshot vanished
-        // mid-flight → 404) and is surfaced as-is.
-        toast.error(String(error));
-      },
+      onError: (error) => toast.error(String(error)),
     });
   };
 
-  const viewOptions: {
-    id: FeatureViewMode;
-    label: string;
-    icon: typeof List;
-    enabled: boolean;
-  }[] = [
-    { id: "modules", label: t(($) => $.features.view_modules), icon: List, enabled: true },
-    { id: "graph", label: t(($) => $.features.view_graph), icon: Share2, enabled: false },
-    { id: "table", label: t(($) => $.features.view_table), icon: LayoutGrid, enabled: false },
+  const handleExport = () => {
+    const modules = modulesQuery.data?.modules ?? [];
+    const issues = issuesQuery.data ?? [];
+    const summaries = snapshot?.module_summary ?? [];
+    const lines = [
+      `# ${t(($) => $.features.module_list)}`,
+      "",
+      `| ${t(($) => $.features.page_badge)} | ${t(($) => $.features.stat_objects)} | ${t(($) => $.features.stat_strategies)} | ${t(($) => $.features.stat_requirements)} | ${t(($) => $.features.table_community)} |`,
+      "|---|---:|---:|---:|---|",
+      ...modules.map((module) => {
+        const summary = summaryForModule(summaries, module.graph_node_id, module.name);
+        const moduleIssues = issuesForModule(issues, projectId, module.id);
+        const tasks = rollupTasks(moduleTasks(moduleIssues));
+        return `| ${module.name} | ${summary?.obj_count ?? 0} | ${summary?.strategy_count ?? 0} | ${moduleRequirements(moduleIssues).length} | ${communityLabel(module.graph_node_id ?? summary?.node_id)} · ${tasks.done}/${tasks.total} |`;
+      }),
+      "",
+      snapshot ? `scan ${snapshot.scan_id} · ${snapshot.created_at}` : "",
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "module-report.md";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const viewOptions: Array<{ id: FeatureViewMode; label: string; icon: typeof List }> = [
+    { id: "modules", label: t(($) => $.features.view_modules), icon: List },
+    { id: "graph", label: t(($) => $.features.view_graph), icon: Share2 },
+    { id: "table", label: t(($) => $.features.view_table), icon: LayoutGrid },
   ];
 
   return (
     <div
-      className="flex flex-wrap items-center gap-2"
+      className="flex flex-wrap items-center gap-2 border-b border-surface-border px-3 py-2"
       data-testid="product-features-toolbar"
     >
-      <div
-        role="group"
-        aria-label={t(($) => $.features.view_mode)}
-        className="flex items-center gap-0.5 rounded-lg border border-surface-border bg-surface p-0.5"
-      >
-        {viewOptions.map((option) => {
-          const button = (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              disabled={!option.enabled}
-              aria-pressed={viewMode === option.id}
-              className={cn(
-                viewMode === option.id &&
-                  "bg-surface-selected text-foreground shadow-none",
-              )}
-              onClick={() => {
-                if (option.enabled) setViewMode(option.id);
-              }}
-            >
-              <option.icon aria-hidden />
-              {option.label}
-            </Button>
-          );
-          if (option.enabled) return <span key={option.id}>{button}</span>;
-          return (
-            <Tooltip key={option.id}>
-              <TooltipTrigger render={button} />
-              <TooltipContent side="bottom">
-                {t(($) => $.features.view_coming_soon)}
-              </TooltipContent>
-            </Tooltip>
-          );
-        })}
+      <ScanStatusBar />
+      <div role="group" aria-label={t(($) => $.features.view_mode)} className="flex items-center gap-0.5 rounded-lg border border-surface-border bg-muted/40 p-0.5">
+        {viewOptions.map((option) => (
+          <Button
+            key={option.id}
+            type="button"
+            variant="ghost"
+            size="xs"
+            aria-pressed={viewMode === option.id}
+            className={cn(viewMode === option.id && "bg-surface text-foreground shadow-none")}
+            onClick={() => onViewModeChange(option.id)}
+          >
+            <option.icon aria-hidden />
+            {option.label}
+          </Button>
+        ))}
       </div>
-
-      <div className="ml-auto flex items-center gap-2">
-        {rebridge.isError && (
-          <span className="text-caption text-destructive">
-            {String(rebridge.error)}
-          </span>
+      <Input
+        value={resolvedFilters.search}
+        onChange={(event) => onFiltersChange({ ...resolvedFilters, search: event.target.value })}
+        placeholder={t(($) => $.features.module_search)}
+        className="h-7 w-32 text-[11px]"
+        aria-label={t(($) => $.features.module_search)}
+      />
+      {bizKinds.length > 0 && (
+        <select
+          aria-label={t(($) => $.features.biz_kind)}
+          value={resolvedFilters.bizKind}
+          onChange={(event) => onFiltersChange({ ...resolvedFilters, bizKind: event.target.value })}
+          className="h-7 rounded-full border border-surface-border bg-surface px-2.5 text-[11px]"
+        >
+          <option value="all">{t(($) => $.features.biz_kind)} · {t(($) => $.features.biz_kind_all)}</option>
+          {bizKinds.map((kind) => (
+            <option key={kind} value={kind}>{kind}</option>
+          ))}
+        </select>
+      )}
+      <button
+        type="button"
+        aria-pressed={resolvedFilters.unboundOnly}
+        onClick={() => onFiltersChange({ ...resolvedFilters, unboundOnly: !resolvedFilters.unboundOnly })}
+        className={cn(
+          "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+          resolvedFilters.unboundOnly
+            ? "border-primary/40 bg-primary/10 text-primary"
+            : "border-surface-border text-muted-foreground hover:bg-accent/60",
         )}
-        {/* Bridge-only endpoint (task 27): the server re-runs the module match
-            against the stored snapshot, so this button no longer re-uploads the
-            9–20 MiB nodes/edges body. The old re-upload + proxy-413 concern is
-            resolved; graph/sync now also carries a 64 MiB cap for the CLI. */}
-        {snapshot ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={handleRebridge}
-                  disabled={rebridge.isPending}
-                  aria-label={t(($) => $.features.rescan_label)}
-                >
-                  <RefreshCw
-                    className={rebridge.isPending ? "animate-spin" : undefined}
-                  />
-                  {rebridge.isPending
-                    ? t(($) => $.features.rescan_label_pending)
-                    : t(($) => $.features.rescan_label)}
-                </Button>
-              }
-            />
-            <TooltipContent side="bottom">
-              {t(($) => $.features.rescan_tooltip)}
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  disabled
-                  aria-label={t(($) => $.features.rescan_label)}
-                >
-                  <RefreshCw />
-                  {t(($) => $.features.rescan_label)}
-                </Button>
-              }
-            />
-            <TooltipContent side="bottom">
-              {t(($) => $.features.rescan_none)}
-            </TooltipContent>
-          </Tooltip>
-        )}
+      >
+        {t(($) => $.features.unbound_only)}
+        {unboundCount > 0 ? ` ${unboundCount}` : ""}
+      </button>
+      <div className="ml-auto flex items-center gap-1.5">
+        <Button
+          type="button"
+          size="xs"
+          aria-pressed={creating}
+          className="font-semibold"
+          onClick={onCreate}
+        >
+          <Plus className="size-3.5" />
+          {t(($) => $.features.create)}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          onClick={handleRebridge}
+          disabled={!snapshot || rebridge.isPending}
+        >
+          <RefreshCw className={rebridge.isPending ? "animate-spin" : undefined} />
+          {t(($) => $.features.rescan_short)}
+        </Button>
+        <Button type="button" variant="outline" size="xs" onClick={handleExport}>
+          <Download className="size-3.5" />
+          {t(($) => $.features.export_report)}
+        </Button>
       </div>
     </div>
   );

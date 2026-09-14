@@ -216,6 +216,8 @@ const desktopAPI = {
     ipcRenderer.invoke("archive:write-file", root, relPath, content),
   readArchiveFile: (root: string, relPath: string) =>
     ipcRenderer.invoke("archive:read-file", root, relPath),
+  removeArchiveFile: (root: string, relPath: string) =>
+    ipcRenderer.invoke("archive:remove-file", root, relPath),
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,
    *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */

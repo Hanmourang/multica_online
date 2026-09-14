@@ -114,6 +114,7 @@ vi.mock("@multica/core/api", () => ({
   },
   api: {
     sendChatMessage: vi.fn(),
+    uploadFile: vi.fn(),
     cancelTaskById: vi.fn(),
     clearQueuedChatTasks: vi.fn(),
     prioritizeQueuedChatTask: vi.fn(),

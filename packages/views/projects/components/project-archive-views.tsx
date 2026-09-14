@@ -88,15 +88,15 @@ function GraphViewStack({
   if (mounted.length === 0) return null;
 
   return (
-    <div className={active ? undefined : "hidden"}>
+    <div className={active ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
       <GraphDataProvider projectId={projectId}>
         {mounted.includes("features") && (
-          <div className={active === "features" ? undefined : "hidden"}>
+          <div className={active === "features" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
             <ProductFeaturesTab />
           </div>
         )}
         {mounted.includes("data-model") && (
-          <div className={active === "data-model" ? undefined : "hidden"}>
+          <div className={active === "data-model" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
             <BusMatrixTab />
           </div>
         )}
@@ -297,8 +297,20 @@ export function ProjectArchiveViews({
           </div>
         </ProjectTaskTrackingProvider>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="w-full space-y-4 px-4 py-4">
+        <div
+          className={cn(
+            "min-h-0 flex-1",
+            isGraphView(activeView) ? "flex flex-col overflow-hidden" : "overflow-y-auto",
+          )}
+        >
+          <div
+            className={cn(
+              "w-full",
+              isGraphView(activeView)
+                ? "flex min-h-0 flex-1 flex-col px-4 py-3"
+                : "space-y-4 px-4 py-4",
+            )}
+          >
             {activeView === "archive" && (
               <ArchiveTab
                 projectId={projectId}

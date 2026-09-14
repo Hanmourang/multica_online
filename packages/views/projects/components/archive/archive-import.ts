@@ -62,6 +62,8 @@ export interface ArchiveFrontmatter {
   docType?: string;
   issueId?: string;
   requirementKey?: string;
+  docClass?: string;
+  docModule?: string;
   version?: number;
 }
 
@@ -143,6 +145,8 @@ export function parseArchiveFrontmatter(content: string): ArchiveFrontmatter {
     if (key === "doc_type" || key === "doctype") result.docType = value;
     if (key === "multica_issue_id" || key === "issue_id") result.issueId = value;
     if (key === "requirement_key" || key === "req_key") result.requirementKey = value;
+    if (key === "doc_class" || key === "docclass") result.docClass = value;
+    if (key === "doc_module" || key === "docmodule") result.docModule = value;
     if (key === "version") {
       const n = Number(value);
       if (Number.isInteger(n) && n >= 1) result.version = n;

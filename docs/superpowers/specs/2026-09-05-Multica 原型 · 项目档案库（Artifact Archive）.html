@@ -296,19 +296,22 @@ body {
   <a href="#f1">1 · 目录契约 ↔ 数据模型映射</a>
   <a href="#f2">2 · CLI 同步与存量回填</a>
   <a href="#f3">3 · 同步控制台与手动关联</a>
-  <span class="nav-sep">Ⅱ 档案主视图</span>
-  <a href="#f4">4 · 项目档案 Tab（矩阵全景）</a>
-  <a href="#f5">5 · 档案预览与属性</a>
-  <a href="#f6">6 · 交付物归档动作</a>
+    <a href="#f4">4 · 识别与归因引擎</a>
+<span class="nav-sep">Ⅱ 档案主视图</span>
+  <a href="#f5">5 · 项目档案 Tab（矩阵全景）</a>
+  <a href="#f6">6 · 档案预览与属性</a>
+  <a href="#f7">7 · 交付物归档动作</a>
   <span class="nav-sep">Ⅲ 需求级下钻</span>
-  <a href="#f7">7 · 需求动态（对话 + 进展汇总）</a>
-  <a href="#f8">8 · 需求详情「交付概览」Tab</a>
-  <a href="#f9">9 · 需求进度追踪（执行追踪）</a>
+  <a href="#f8">8 · 需求动态（对话 + 进展汇总）</a>
+  <a href="#f9">9 · 需求详情「交付概览」Tab</a>
+  <a href="#f10">10 · 需求进度追踪（执行追踪）</a>
   <span class="nav-sep">Ⅳ 全局分析视角</span>
-  <a href="#f10">10 · 产品功能（图谱 + 本体）</a>
-  <a href="#f11">11 · 数据模型总线矩阵</a>
+  <a href="#f11">11 · 产品功能（图谱 + 本体）</a>
+  <a href="#f14" style="padding-left:22px">14 · 原型图：预览 + 多版本对比</a>
+  <a href="#f15" style="padding-left:22px">15 · 原型 × 代码 × 图谱联动</a>
+  <a href="#f12">12 · 数据模型总线矩阵</a>
   <span class="nav-sep">Ⅴ 申报产出</span>
-  <a href="#f12">12 · 申报就绪度（必备 / 辅助）</a>
+  <a href="#f13">13 · 申报就绪度（必备 / 辅助）</a>
 </nav>
 
 <div class="frame-wrap">
@@ -435,7 +438,7 @@ body {
             <b>rule_result</b> JSONB · blocking bool<br>
             check_run：页数 / 每页行数 / 页眉一致性<br>
             export_log：申报包被拒时降级为诊断包<br>
-            <span style="color:var(--destructive)">↑ 必备件未齐 → 阻断导出，详见画面 12</span>
+            <span style="color:var(--destructive)">↑ 必备件未齐 → 阻断导出，详见画面 13</span>
           </div>
         </div>
         <div class="er-tbl" style="border-color:oklch(0.62 0.14 55 / 45%)">
@@ -447,7 +450,7 @@ body {
             todo：<b>todo_key</b> · phase · status · seq<br>
             source：tool_trace | reply | manual · superseded_by<br>
             event：heartbeat|todo_change|rate_limit|net_err|crash<br>
-            <span style="color:var(--st3)">↑ 会话流是事实源，DB 存单向投影，详见画面 9</span>
+            <span style="color:var(--st3)">↑ 会话流是事实源，DB 存单向投影，详见画面 10</span>
           </div>
         </div>
       </div>
@@ -867,10 +870,242 @@ body {
   <span><span class="anno">5</span> <b>override 必须填原因</b>：否则下一次 sync 无法区分“人工修正”与“路径写错”，会反复覆盖</span>
 </div>
 
+<!-- ============ 画面 4：识别与归因引擎 ============ -->
+<div class="frame-head" id="f4" style="margin-top:24px">
+  <h2>画面 4 · 识别与归因引擎 — 多源级联 + 扩展分类法 + 别名解析（系统性补强）</h2>
+  <p>画面 1–3 的归因只有<b>路径契约</b>一条腿：规范文档能自动归位，但现实存量里 <span class="mono">0.产品设计 / 2.spec_infos / 3.phone_agent</span> 等旧结构、<span class="mono">1_产品功能梳理 / 3.改进计划</span> 等嵌套子分类、<span class="mono">eleme/alsc_knowengine</span> 等路径名≠项目键、以及 png/json/py/pdf 等非 md/html 格式，<b>全部识别失败</b>。实测基线：扫描 2380 个文件，路径契约仅命中 250，<b style="color:var(--destructive)">1130 篇判孤儿 + 973 张图片/60+ 代码配置完全不可见</b>。本画面把识别从「单腿契约」升级为<b>六源级联引擎</b>：每源带置信度，逐级兜底，未识别项进 <span class="mono">_unclassified</span> 并给出<b>失败归因 + 建议源</b>，让「无法识别」从隐性变可见、可处置。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 项目档案库 · 识别与归因引擎</span></div>
+  <div style="background:var(--page-canvas)">
+
+    <style>
+    /* ===== 识别引擎（画面 4） ===== */
+    .rc-wrap { padding: 15px 18px 26px; display: flex; flex-direction: column; gap: 14px; }
+    .rc-2col { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 14px; }
+    .rc-3col { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+    /* 诊断条 */
+    .rc-diag { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+    .rc-diag .cell { flex: 1; padding: 10px 13px; border-right: 1px solid var(--border); }
+    .rc-diag .cell:last-child { border-right: none; }
+    .rc-diag .num { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .rc-diag .num.bad { color: var(--destructive); }
+    .rc-diag .num.ok { color: var(--success); }
+    .rc-diag .num.wn { color: var(--warning); }
+    .rc-diag .lb { font-size: 10px; color: var(--muted-foreground); margin-top: 3px; line-height: 1.45; }
+    /* 级联管道 */
+    .casc { display: flex; align-items: stretch; gap: 0; }
+    .casc-s { flex: 1; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); padding: 9px 10px; position: relative; }
+    .casc-s .lv { font-size: 9px; font-weight: 800; color: var(--brand); letter-spacing: .04em; }
+    .casc-s .t { font-size: 11.5px; font-weight: 700; margin: 2px 0 4px; }
+    .casc-s .d { font-size: 9.5px; color: var(--muted-foreground); line-height: 1.55; }
+    .casc-s .cf { margin-top: 6px; display: flex; align-items: center; gap: 5px; font-size: 9px; color: var(--faint-foreground); }
+    .casc-s .cf .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-selected); overflow: hidden; }
+    .casc-s .cf .bar i { display: block; height: 100%; background: var(--brand); }
+    .casc-s.hit { border-color: var(--success); background: oklch(0.55 0.16 145 / 5%); }
+    .casc-s.hit .cf .bar i { background: var(--success); }
+    .casc-s.last { border-color: var(--warning); background: oklch(0.72 0.15 75 / 6%); }
+    .casc-arrow { width: 22px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--brand); font-size: 14px; opacity: .55; }
+    /* 分类法 chip */
+    .tax { display: flex; flex-wrap: wrap; gap: 5px; }
+    .tax .g { font-size: 9.5px; font-weight: 700; color: var(--faint-foreground); width: 100%; margin: 5px 0 1px; letter-spacing: .04em; }
+    .tax .c { font-size: 10px; padding: 2.5px 8px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface); color: var(--muted-foreground); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    .tax .c.new { border-color: var(--brand); color: var(--brand); background: oklch(0.55 0.16 255 / 7%); font-weight: 650; }
+    /* 识别矩阵行 */
+    .mtx-row { display: flex; align-items: center; gap: 8px; font-size: 10px; padding: 3.5px 0; border-bottom: 1px dashed var(--border); }
+    .mtx-row:last-child { border-bottom: none; }
+    .mtx-row .pat { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted-foreground); flex: 1; min-width: 0; }
+    .mtx-row .arr { color: var(--faint-foreground); flex: none; }
+    .mtx-row .dt { font-weight: 700; color: var(--brand); flex: none; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    /* 格式格 */
+    .fmt { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 8px 10px; }
+    .fmt .h { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; }
+    .fmt .ext { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 9.5px; color: var(--faint-foreground); margin-left: auto; }
+    .fmt .s { font-size: 9.5px; color: var(--muted-foreground); line-height: 1.55; margin-top: 4px; }
+    .fmt .tag { font-size: 8.5px; padding: 1px 6px; border-radius: 4px; font-weight: 700; }
+    .fmt .tag.full { background: oklch(0.55 0.16 145 / 12%); color: var(--success); }
+    .fmt .tag.idx { background: oklch(0.55 0.16 255 / 10%); color: var(--brand); }
+    .fmt .tag.ast { background: var(--surface-selected); color: var(--faint-foreground); }
+    .fmt .tag.skip { background: oklch(0.577 0.245 27.325 / 10%); color: var(--destructive); }
+    /* 诊断分布条 */
+    .dist { display: flex; flex-direction: column; gap: 6px; }
+    .dist .r { display: flex; align-items: center; gap: 8px; font-size: 10px; }
+    .dist .r .k { width: 92px; flex: none; color: var(--muted-foreground); }
+    .dist .r .b { flex: 1; height: 9px; border-radius: 3px; background: var(--surface-selected); overflow: hidden; }
+    .dist .r .b i { display: block; height: 100%; }
+    .dist .r .v { width: 40px; flex: none; text-align: right; font-variant-numeric: tabular-nums; font-weight: 650; }
+    </style>
+
+    <div class="rc-wrap">
+
+      <!-- 诊断条：真实基线 -->
+      <div class="rc-diag">
+        <div class="cell"><div class="num">2380</div><div class="lb">扫描文件总数<br>（md/html 1367 + 图片 973 + 代码配置 40+）</div></div>
+        <div class="cell"><div class="num ok">250</div><div class="lb">路径契约命中<br>（规范 projects/ 结构）</div></div>
+        <div class="cell"><div class="num bad">1130</div><div class="lb">判孤儿 / 路径违规<br>（存量旧结构未识别）</div></div>
+        <div class="cell"><div class="num wn">973</div><div class="lb">图片/代码/配置不可见<br>（非 md/html 格式盲区）</div></div>
+        <div class="cell"><div class="num bad">10.5%</div><div class="lb">当前识别覆盖率<br>（仅靠路径契约单腿）</div></div>
+      </div>
+
+      <!-- 面板 1：六源识别级联 -->
+      <div class="panel">
+        <div class="panel-hd">① 六源识别级联<span class="right">逐级兜底 · 每源带置信度 · 命中即停<span class="anno" style="margin-left:6px">1</span></span></div>
+        <div class="panel-bd">
+          <div class="casc">
+            <div class="casc-s hit"><div class="lv">L1</div><div class="t">路径契约</div><div class="d">projects/&lt;key&gt;/overview/&lt;cat&gt;/ · REQ-KEY · s1..s4</div><div class="cf"><span>conf</span><span class="bar"><i style="width:95%"></i></span><span>95</span></div></div>
+            <div class="casc-arrow">→</div>
+            <div class="casc-s hit"><div class="lv">L2</div><div class="t">frontmatter</div><div class="d">显式 doc_type / multica_issue_id 优先于路径</div><div class="cf"><span>conf</span><span class="bar"><i style="width:90%"></i></span><span>90</span></div></div>
+            <div class="casc-arrow">→</div>
+            <div class="casc-s"><div class="lv">L3</div><div class="t">目录/文件名启发式</div><div class="d">扩展分类法关键词 + 嵌套子目录指纹（面板②④）</div><div class="cf"><span>conf</span><span class="bar"><i style="width:70%"></i></span><span>70</span></div></div>
+            <div class="casc-arrow">→</div>
+            <div class="casc-s"><div class="lv">L4</div><div class="t">内容嗅探</div><div class="d">读首 60 行：标题/代码块/表格结构 → 推 doc_type</div><div class="cf"><span>conf</span><span class="bar"><i style="width:55%"></i></span><span>55</span></div></div>
+            <div class="casc-arrow">→</div>
+            <div class="casc-s"><div class="lv">L5</div><div class="t">LLM 归类</div><div class="d">低置信兜底：给 project + doc_type 候选，需人工确认</div><div class="cf"><span>conf</span><span class="bar"><i style="width:40%"></i></span><span>40</span></div></div>
+            <div class="casc-arrow">→</div>
+            <div class="casc-s last"><div class="lv">L6</div><div class="t">人工归置</div><div class="d">_unclassified 队列 → 关联编辑器（画面 3）覆盖</div><div class="cf"><span>conf</span><span class="bar"><i style="width:100%"></i></span><span>100</span></div></div>
+          </div>
+          <div style="font-size:10px;color:var(--faint-foreground);margin-top:9px;line-height:1.65">
+            规则：自上而下逐源尝试，<b>命中且 conf ≥ 阈值（默认 60）即停</b>；低于阈值继续下探。L5 LLM 仅在 L1–L4 全部 &lt;60 时触发，且<b>不自动写库</b>——结果进待绑定队列。全程未识别 → <span class="mono">_unclassified</span>，记录「失败归因 + 最后命中源 + 建议源」。
+          </div>
+        </div>
+      </div>
+
+      <div class="rc-2col">
+        <!-- 面板 2：扩展分类法 + 识别矩阵 -->
+        <div class="panel">
+          <div class="panel-hd">② 扩展 doc_type 分类法 + 识别矩阵<span class="right">4 类 → 21 类<span class="anno" style="margin-left:6px">2</span></span></div>
+          <div class="panel-bd">
+            <div class="tax">
+              <span class="g">overview 层（项目级）</span>
+              <span class="c">research</span><span class="c">product-design</span><span class="c">architecture</span><span class="c">retrospective</span>
+              <span class="c new">diagnosis</span><span class="c new">selection</span><span class="c new">report</span><span class="c new">summary</span>
+              <span class="c new">matrix</span><span class="c new">checklist</span><span class="c new">coverage</span><span class="c new">integration</span>
+              <span class="g">requirement 层（需求级）</span>
+              <span class="c">requirement</span><span class="c">plan</span><span class="c">decomposition</span><span class="c">design</span>
+              <span class="c">test-plan</span><span class="c">acceptance</span><span class="c">report</span>
+              <span class="g">filing 层（申报）</span>
+              <span class="c">software-copyright</span><span class="c">patent</span>
+            </div>
+            <div style="border-top:1px solid var(--border);margin:10px 0 7px"></div>
+            <div style="font-size:9.5px;color:var(--faint-foreground);margin-bottom:5px">识别矩阵（文件名/目录关键词 → doc_type，L3 启发式）</div>
+            <div class="mtx-row"><span class="pat">*诊断* · *根因* · *排查*</span><span class="arr">→</span><span class="dt">diagnosis</span></div>
+            <div class="mtx-row"><span class="pat">*选型* · *对比评估* · *技术选型*</span><span class="arr">→</span><span class="dt">selection</span></div>
+            <div class="mtx-row"><span class="pat">*复盘* · *踩坑* · *教训*</span><span class="arr">→</span><span class="dt">retrospective</span></div>
+            <div class="mtx-row"><span class="pat">*汇报* · *报告* · *分析报告*</span><span class="arr">→</span><span class="dt">report</span></div>
+            <div class="mtx-row"><span class="pat">*摘要* · *一页纸*</span><span class="arr">→</span><span class="dt">summary</span></div>
+            <div class="mtx-row"><span class="pat">*矩阵* · *成熟度*</span><span class="arr">→</span><span class="dt">matrix</span></div>
+            <div class="mtx-row"><span class="pat">*清单* · *实施清单*</span><span class="arr">→</span><span class="dt">checklist</span></div>
+            <div class="mtx-row"><span class="pat">*覆盖度* · *缺陷补齐*</span><span class="arr">→</span><span class="dt">coverage</span></div>
+            <div class="mtx-row"><span class="pat">*集成方案* · *integration*</span><span class="arr">→</span><span class="dt">integration</span></div>
+            <div class="mtx-row"><span class="pat">*架构* · *技术方案* · *设计文档*</span><span class="arr">→</span><span class="dt">architecture</span></div>
+          </div>
+        </div>
+
+        <!-- 面板 3：project_key 别名解析 -->
+        <div class="panel">
+          <div class="panel-hd">③ project_key 别名解析<span class="right">路径名 ≠ 项目键<span class="anno" style="margin-left:6px">3</span></span></div>
+          <div class="panel-bd">
+            <div style="font-size:9.5px;color:var(--faint-foreground);margin-bottom:6px">解析链：精确匹配 → 别名表 → 前缀剥离 → 模糊匹配 → 人工</div>
+            <table class="tbl" style="border:none;border-radius:0">
+              <tr><th style="width:46%">路径片段</th><th style="width:30%">project_key</th><th>解析法</th></tr>
+              <tr><td class="mono">eleme/alsc_ontology</td><td class="mono">alsc-ontology</td><td>别名表</td></tr>
+              <tr><td class="mono">eleme/alsc_knowengine</td><td class="mono">alsc-knowengine</td><td>别名表</td></tr>
+              <tr><td class="mono">eleme-agent/**</td><td class="mono">eleme-agent</td><td>前缀剥离</td></tr>
+              <tr><td class="mono">phone_agent/accio_mobile</td><td class="mono">accio_mobile</td><td>别名表</td></tr>
+              <tr><td class="mono">phone_agent/AI阅读</td><td class="mono">ai_reading</td><td>别名表</td></tr>
+              <tr><td class="mono">multica/*</td><td class="mono">multica</td><td>精确</td></tr>
+            </table>
+            <div style="font-size:9.5px;color:var(--faint-foreground);margin-top:8px;line-height:1.6">
+              别名表落 <span class="mono">_shared/sop/aliases.yaml</span>，CLI 与 agent 共读；未命中且模糊匹配 conf &lt;60 → 进待绑定，<b>不硬猜项目</b>（归因错比不归因更贵）。
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rc-2col">
+        <!-- 面板 4：存量/嵌套结构识别 -->
+        <div class="panel">
+          <div class="panel-hd">④ 存量 / 嵌套结构识别<span class="right">结构指纹<span class="anno" style="margin-left:6px">4</span></span></div>
+          <div class="panel-bd">
+            <div style="font-size:9.5px;color:var(--faint-foreground);margin-bottom:6px">迁移映射（CONTRACT §5）升级为<b>常驻识别规则</b>，非一次性 git mv；嵌套编号子目录按指纹归 doc_type：</div>
+            <div class="mtx-row"><span class="pat">2.spec_infos/&lt;proj&gt;/*</span><span class="arr">→</span><span class="dt">overview/architecture</span></div>
+            <div class="mtx-row"><span class="pat">…/1_产品功能梳理/</span><span class="arr">→</span><span class="dt">product-design</span></div>
+            <div class="mtx-row"><span class="pat">…/2_功能改造/</span><span class="arr">→</span><span class="dt">architecture</span></div>
+            <div class="mtx-row"><span class="pat">…/3.改进计划/</span><span class="arr">→</span><span class="dt">plan</span></div>
+            <div class="mtx-row"><span class="pat">…/5.汇报沟通/</span><span class="arr">→</span><span class="dt">report</span></div>
+            <div class="mtx-row"><span class="pat">0.产品设计/&lt;proj&gt;/*</span><span class="arr">→</span><span class="dt">product-design</span></div>
+            <div class="mtx-row"><span class="pat">3.phone_agent/产品风格/</span><span class="arr">→</span><span class="dt">_shared/design-system</span></div>
+            <div style="font-size:9.5px;color:var(--faint-foreground);margin-top:8px;line-height:1.6">
+              指纹 = <span class="mono">^\d+[._]</span> 编号前缀 + 中文语义段；命中即按表归位，<b>不要求先 git mv</b>——识别与迁移解耦，存量原地也能归因。
+            </div>
+          </div>
+        </div>
+
+        <!-- 面板 5：多格式识别 -->
+        <div class="panel">
+          <div class="panel-hd">⑤ 多格式识别<span class="right">md/html → 全格式<span class="anno" style="margin-left:6px">5</span></span></div>
+          <div class="panel-bd">
+            <div class="rc-2col" style="gap:9px">
+              <div class="fmt"><div class="h">📄 文档 <span class="tag full">全解析</span><span class="ext">md · html</span></div><div class="s">frontmatter + 正文 + doc_type 推导；预览走 RichContent</div></div>
+              <div class="fmt"><div class="h">📕 PDF <span class="tag idx">索引</span><span class="ext">pdf</span></div><div class="s">抽标题/页数元数据；预览走 attachment/content</div></div>
+              <div class="fmt"><div class="h">⚙️ 配置 <span class="tag idx">索引</span><span class="ext">json · yaml</span></div><div class="s">归 config / data-model；参与契约校验</div></div>
+              <div class="fmt"><div class="h">💻 代码 <span class="tag idx">索引</span><span class="ext">py · ts · tsx · sh</span></div><div class="s">归 code，桥接图谱快照 graph_node_id</div></div>
+              <div class="fmt"><div class="h">🖼 图片 <span class="tag ast">附件</span><span class="ext">png · jpg · svg</span></div><div class="s">归 asset，仅索引 + 附件，不解析正文</div></div>
+              <div class="fmt"><div class="h">📦 压缩包 <span class="tag skip">跳过</span><span class="ext">zip</span></div><div class="s">_attic 留存，不进版本库索引</div></div>
+            </div>
+            <div style="font-size:9.5px;color:var(--faint-foreground);margin-top:9px;line-height:1.6">
+              973 张图片 + 60+ 代码配置从「完全不可见」变为「按格式分级索引」：文档全解析、PDF/配置/代码索引元数据、图片仅附件、zip 跳过——<b>识别覆盖率从 10.5% 提升至 ~95%</b>。
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 面板 6：识别诊断看板 -->
+      <div class="panel">
+        <div class="panel-hd">⑥ 识别诊断看板<span class="right">让「无法识别」可见、可处置<span class="anno" style="margin-left:6px">6</span></span></div>
+        <div class="panel-bd">
+          <div class="rc-2col">
+            <div>
+              <div style="font-size:9.5px;color:var(--faint-foreground);margin-bottom:7px">失败归因分布（1130 篇孤儿 + 973 不可见）</div>
+              <div class="dist">
+                <div class="r"><span class="k">存量旧结构</span><span class="b"><i style="width:78%;background:var(--destructive)"></i></span><span class="v">1130</span></div>
+                <div class="r"><span class="k">图片/附件</span><span class="b"><i style="width:67%;background:var(--warning)"></i></span><span class="v">973</span></div>
+                <div class="r"><span class="k">无 doc_type</span><span class="b"><i style="width:28%;background:var(--warning)"></i></span><span class="v">410</span></div>
+                <div class="r"><span class="k">代码/配置</span><span class="b"><i style="width:5%;background:var(--brand)"></i></span><span class="v">62</span></div>
+                <div class="r"><span class="k">无 project_key</span><span class="b"><i style="width:3%;background:var(--brand)"></i></span><span class="v">38</span></div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:9.5px;color:var(--faint-foreground);margin-bottom:7px">置信度分布（级联命中后）</div>
+              <div class="dist">
+                <div class="r"><span class="k">高 ≥85</span><span class="b"><i style="width:62%;background:var(--success)"></i></span><span class="v">62%</span></div>
+                <div class="r"><span class="k">中 60–85</span><span class="b"><i style="width:26%;background:var(--warning)"></i></span><span class="v">26%</span></div>
+                <div class="r"><span class="k">低 &lt;60</span><span class="b"><i style="width:12%;background:var(--destructive)"></i></span><span class="v">12%</span></div>
+              </div>
+              <div style="font-size:9.5px;color:var(--faint-foreground);margin-top:9px;line-height:1.6">
+                处置策略：高置信自动归位；中置信进待绑定给候选；<b>低置信必须人工</b>（画面 3 关联编辑器）。诊断看板每次 sync 回写 <span class="mono">filing/READINESS.md</span> 同级 <span class="mono">RECOGNITION.md</span>。
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+<div class="anno-legend">
+  <span><span class="anno">1</span> <b>六源级联</b>：把识别从「路径契约单腿」升级为逐级兜底；L5 LLM 不自动写库，未识别项进 <span class="mono">_unclassified</span> 带失败归因</span>
+  <span><span class="anno">2</span> <b>扩展分类法</b>：overview 从 4 类扩到 12 类（诊断/选型/复盘/汇报/摘要/矩阵/清单/覆盖度/集成），识别矩阵把真实文件名形态映射到 doc_type</span>
+  <span><span class="anno">3</span> <b>别名解析</b>：路径名≠项目键时经 <span class="mono">aliases.yaml</span> 归一；模糊匹配低置信不硬猜，进待绑定</span>
+  <span><span class="anno">4</span> <b>结构指纹</b>：迁移映射升级为常驻识别规则，存量原地可归因；嵌套编号子目录（1_/2_/3./5.）按指纹归 doc_type，识别与 git mv 解耦</span>
+  <span><span class="anno">5</span> <b>多格式识别</b>：md/html 之外按格式分级索引（PDF/配置/代码索引元数据、图片仅附件、zip 跳过），覆盖率 10.5% → ~95%</span>
+  <span><span class="anno">6</span> <b>诊断看板</b>：失败归因 + 置信度分布让「无法识别」可见；高置信自动、中置信候选、低置信人工，回写 RECOGNITION.md</span>
+</div>
+
 <div class="part-head"><span class="rn">Ⅱ</span>档案主视图<span class="ds">档案在项目级的呈现：矩阵全景、预览属性、归档动作</span></div>
-<!-- ============ 画面 4：项目档案 Tab ============ -->
-<div class="frame-head" id="f4">
-  <h2>画面 4 · 项目详情「档案」Tab — 阶段 × 需求矩阵（核心全景）</h2>
+<!-- ============ 画面 5：项目档案 Tab ============ -->
+<div class="frame-head" id="f5">
+  <h2>画面 5 · 项目详情「档案」Tab — 阶段 × 需求矩阵（核心全景）</h2>
   <p>项目详情内容区新增<b>「档案」Tab</b>（与看板 / 列表 / 甘特图 / 日历并列）。上半区是 <b>scope=project</b> 的项目级长期资产（立项调研 / 产品设计 / 技术架构 / 复盘），下半区是 <b>scope=requirement</b> 的<b>需求 × 阶段矩阵</b>：每行一个需求，四列对齐 <span class="mono">issue.stage</span> 1–4。格内是该阶段已归档的文档 chip（带版本与来源徽标）；<b>缺件格红框高亮</b>，未启用原型师的需求该格显示「跳过」。右栏是选中文档的元数据与快照状态。</p>
 </div>
 <div class="frame">
@@ -1146,13 +1381,13 @@ body {
   <span><span class="anno">3</span> <b>同步档案</b>：触发 <span class="mono">multica archive sync</span>，进度以 toast + 徽标呈现</span>
   <span><span class="anno">4</span> <b>项目级卡片</b>：<span class="mono">overview/</span> 四类固定分组，缺件卡虚线红框</span>
   <span><span class="anno">5</span> <b>需求 × 阶段矩阵</b>：列 = <span class="mono">issue.stage</span> 1–4，格内 chip 带版本 + 来源徽标</span>
-  <span><span class="anno">6</span> <b>申报区</b>：<span class="mono">filing/</span> 就绪度计数，详见画面 12</span>
+  <span><span class="anno">6</span> <b>申报区</b>：<span class="mono">filing/</span> 就绪度计数，详见画面 13</span>
   <span><span class="anno">7</span> <b>右属性栏</b>：选中项元数据 + 快照一致性 + 关联跳转</span>
-  <span><span class="anno">8</span> <b>产品功能 / 数据模型 Tab</b>：吃 GitNexus 图谱 + 本体快照，详见画面 10 / 9</span>
+  <span><span class="anno">8</span> <b>产品功能 / 数据模型 Tab</b>：吃 GitNexus 图谱 + 本体快照，详见画面 11 / 9</span>
 </div>
 
 <style>
-/* ===== 弹窗（画面 5 / 4 / 5） ===== */
+/* ===== 弹窗（画面 6 / 4 / 5） ===== */
 .modal-back {
   position: absolute; inset: 0; background: oklch(0.15 0.01 285 / 45%);
   display: flex; align-items: center; justify-content: center; z-index: 30;
@@ -1231,7 +1466,7 @@ body {
 .meta-drawer .m-k { color: var(--faint-foreground); font-size: 10px; margin-bottom: 1px; }
 .meta-drawer .m-v { font-weight: 600; word-break: break-all; }
 
-/* ===== 流水线 stage 条（画面 8） ===== */
+/* ===== 流水线 stage 条（画面 9） ===== */
 .stage-flow {
   display: flex; align-items: center; gap: 0; padding: 10px 18px;
   border-bottom: 1px solid var(--border); background: var(--surface); flex: none;
@@ -1302,16 +1537,16 @@ body {
 .miss-row .fix { margin-left: auto; color: var(--brand); font-weight: 650; font-size: 10.5px; }
 </style>
 
-<!-- ============ 画面 5：档案预览 ============ -->
-<div class="frame-head" id="f5" style="margin-top:24px">
-  <h2>画面 5 · 档案预览弹窗（快照渲染 + 元数据抽屉 + 跨文档导航）</h2>
+<!-- ============ 画面 6：档案预览 ============ -->
+<div class="frame-head" id="f6" style="margin-top:24px">
+  <h2>画面 6 · 档案预览弹窗（快照渲染 + 元数据抽屉 + 跨文档导航）</h2>
   <p>点击任意档案 chip / 卡片打开预览。内容取自 <b>attachment 渲染快照</b>（<span class="mono">GET /api/attachments/{id}/content</span> → <span class="mono">RichContent</span>），因此 <b>web / desktop / mobile 三端都能看，且不依赖 daemon 在线</b>。顶栏 ←→ 在<b>同一需求内跨阶段文档</b>间导航（S1→S2→S3→S4 顺序），底部抽屉固定展示路径契约解析出的全量元数据。HTML 原型走 iframe 快照变体，并带版本切换（对齐 <span class="mono">issue_prototype_version</span> 的 pending / confirmed / superseded）。</p>
 </div>
 <div class="frame">
   <div class="frame-bar"><i></i><i></i><i></i><span>Multica — dsh_desktop / 档案 / 预览</span></div>
   <div style="position:relative;height:800px;background:oklch(0.975 0.002 286)">
     <div style="padding:16px 20px;opacity:.32;font-size:12px;color:var(--muted-foreground)">
-      （背景：档案 Tab 矩阵，见画面 4）
+      （背景：档案 Tab 矩阵，见画面 5）
     </div>
     <div class="modal-back">
       <div class="modal">
@@ -1412,7 +1647,7 @@ body {
 </div>
 
 <style>
-/* ===== 交付物卡片墙（画面 6，对齐已落地 DeliverablesSection） ===== */
+/* ===== 交付物卡片墙（画面 7，对齐已落地 DeliverablesSection） ===== */
 .dlv-sec { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; }
 .dlv-hd {
   display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; font-weight: 650;
@@ -1464,7 +1699,7 @@ body {
 .cbx.on { background: var(--brand); border-color: var(--brand); position: relative; }
 .cbx.on::after { content: "✓"; position: absolute; inset: 0; color: #fff; font-size: 9px; display: flex; align-items: center; justify-content: center; font-weight: 700; }
 
-/* ===== 就绪度看板（画面 12） ===== */
+/* ===== 就绪度看板（画面 13） ===== */
 .rd-wrap { flex: 1; min-height: 0; display: flex; }
 .rd-list { flex: 1; min-width: 0; overflow: auto; padding: 14px 18px 26px; }
 .rd-aside { width: 320px; flex: none; border-left: 1px solid var(--border); background: var(--surface); padding: 14px; overflow: auto; }
@@ -1497,9 +1732,9 @@ body {
 .pkg-tree .g { color: oklch(0.72 0.14 145); }
 </style>
 
-<!-- ============ 画面 6：交付物归档动作 ============ -->
-<div class="frame-head" id="f6" style="margin-top:24px">
-  <h2>画面 6 · 动态流交付物卡片 →「归档」为档案条目</h2>
+<!-- ============ 画面 7：交付物归档动作 ============ -->
+<div class="frame-head" id="f7" style="margin-top:24px">
+  <h2>画面 7 · 动态流交付物卡片 →「归档」为档案条目</h2>
   <p>已落地的交付物卡片墙（<span class="mono">packages/views/common/deliverables/</span>，轨迹派生 + 回复声明）是<b>瞬时流</b>，会被后续动态淹没。本画面在每张卡片上加<b>「归档」动作</b>，把该 run 的产物固化成 <span class="mono">project_artifact</span> 行：弹窗内选 scope / stage / doc_type，<b>目标路径按目录契约实时预览</b>；确认后 CLI 把内容写入档案目录并提交，同时生成本地快照上传。板块头另提供<b>「全部归档」</b>批量入口。已归档卡片转为绿底 + 跳转链接。</p>
 </div>
 <div class="frame">
@@ -1626,7 +1861,7 @@ body {
 
 <div class="part-head"><span class="rn">Ⅲ</span>需求级下钻<span class="ds">单需求视角：动态流汇总对话与进展，进度追踪执行过程，交付概览聚合产物</span></div>
 <style>
-/* ===== 需求动态 Tab（画面 7） ===== */
+/* ===== 需求动态 Tab（画面 8） ===== */
 .dy-bar { display: flex; align-items: center; flex-wrap: wrap; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--page-canvas); position: relative; }
 .dy-metric { padding: 0 16px; border-left: 1px solid var(--border); }
 .dy-metric:first-child { border-left: 0; padding-left: 0; }
@@ -1680,10 +1915,10 @@ body {
 .dy-bot { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 14px 18px 18px; border-top: 1px solid var(--border); }
 </style>
 
-<!-- ============ 画面 7：需求详情「动态」Tab — 子任务动态汇总 ============ -->
-<div class="frame-head" id="f7" style="margin-top:24px">
-  <h2>画面 7 · 需求详情「动态」Tab — 各子任务动态汇总（对话 + 进展）</h2>
-  <p>一个需求拆成多个任务、分属不同 agent 与 CLI，各自的<b>对话</b>与<b>进展</b>散落在各会话里，需求负责人看不到全貌。本 Tab 把所有子任务的会话流（<span class="mono">task_message</span>）按时间<b>归并成一条需求级动态流</b>：既看得到每个任务「说了什么」（对话气泡：用户指令 / agent 回复 / 工具调用），也看得到「跑到哪了」（进展事件：待办状态变更 / 阶段推进 / 心跳与卡死 / 产物提交）。与画面 9「进度追踪」<b>同源不同视图</b>——动态是<b>流水叙事</b>，进度追踪是<b>结构化待办树</b>，同出 <span class="mono">task_message</span> 不各存一份。左栏可按任务 / agent / 事件类型过滤，右栏给出每任务的动态汇总卡与选中任务的对话详情。</p>
+<!-- ============ 画面 8：需求详情「动态」Tab — 子任务动态汇总 ============ -->
+<div class="frame-head" id="f8" style="margin-top:24px">
+  <h2>画面 8 · 需求详情「动态」Tab — 各子任务动态汇总（对话 + 进展）</h2>
+  <p>一个需求拆成多个任务、分属不同 agent 与 CLI，各自的<b>对话</b>与<b>进展</b>散落在各会话里，需求负责人看不到全貌。本 Tab 把所有子任务的会话流（<span class="mono">task_message</span>）按时间<b>归并成一条需求级动态流</b>：既看得到每个任务「说了什么」（对话气泡：用户指令 / agent 回复 / 工具调用），也看得到「跑到哪了」（进展事件：待办状态变更 / 阶段推进 / 心跳与卡死 / 产物提交）。与画面 10「进度追踪」<b>同源不同视图</b>——动态是<b>流水叙事</b>，进度追踪是<b>结构化待办树</b>，同出 <span class="mono">task_message</span> 不各存一份。左栏可按任务 / agent / 事件类型过滤，右栏给出每任务的动态汇总卡与选中任务的对话详情。</p>
 </div>
 <div class="frame">
   <div class="frame-bar"><i></i><i></i><i></i><span>Multica — dsh_desktop / REQ-20260828-01 / 动态</span></div>
@@ -1713,7 +1948,7 @@ body {
         <span class="dt-tab active new-el">动态 <span class="n">26</span> <span class="anno" style="margin-left:3px">1</span></span>
         <span class="dt-tab">进度追踪</span>
         <span class="dt-tab">交付概览</span>
-        <span class="dt-tab" style="margin-left:auto;color:var(--faint-foreground);border:0">事实源 = 各 CLI 会话流 task_message · 与画面 9 同源</span>
+        <span class="dt-tab" style="margin-left:auto;color:var(--faint-foreground);border:0">事实源 = 各 CLI 会话流 task_message · 与画面 10 同源</span>
       </div>
 
       <!-- 汇总条 -->
@@ -1775,7 +2010,7 @@ body {
             <div class="dy-ev">
               <span class="tm">14:18:10</span>
               <span class="rail"><span class="dot" style="background:var(--success)"></span></span>
-              <div class="bd"><span class="dy-tag" style="background:var(--success)">T1</span><span class="dy-kind art">产物</span>提交 <span class="mono">migration/452_issue_ext.sql</span> → 归档为档案条目 <span class="drill">下钻画面 6 →</span></div>
+              <div class="bd"><span class="dy-tag" style="background:var(--success)">T1</span><span class="dy-kind art">产物</span>提交 <span class="mono">migration/452_issue_ext.sql</span> → 归档为档案条目 <span class="drill">下钻画面 7 →</span></div>
             </div>
             <div class="dy-ev">
               <span class="tm">14:16:02</span>
@@ -1877,7 +2112,7 @@ body {
         <div class="panel">
           <div class="panel-hd">🧮 归并与过滤规则</div>
           <div class="panel-bd">
-            <div class="kv"><span class="k">事实源</span><span class="v">各 CLI 会话流 <span class="mono">task_message</span>，与画面 9 进度追踪同一份数据</span></div>
+            <div class="kv"><span class="k">事实源</span><span class="v">各 CLI 会话流 <span class="mono">task_message</span>，与画面 10 进度追踪同一份数据</span></div>
             <div class="kv"><span class="k">归并</span><span class="v">按时间戳合并多任务事件；色彩区分任务 / run，避免串行误读</span></div>
             <div class="kv"><span class="k">过滤</span><span class="v">任务 / agent / 事件类型（对话·进展·状态·产物）/ 时间窗</span></div>
             <div class="kv last"><span class="k">对话详情</span><span class="v">选中任务展开完整线程，可一键跳回对应 CLI run</span></div>
@@ -1886,9 +2121,9 @@ body {
         <div class="panel">
           <div class="panel-hd">🔗 与进度追踪同源 <span class="anno" style="margin-left:5px">6</span></div>
           <div class="panel-bd">
-            <div class="miss-row">动态 = <b>流水叙事</b>（谁在何时说了 / 做了什么）；进度追踪（画面 9）= <b>结构化待办树</b>（跑到哪了）。同出 <span class="mono">task_message</span>，不各存一份。</div>
+            <div class="miss-row">动态 = <b>流水叙事</b>（谁在何时说了 / 做了什么）；进度追踪（画面 10）= <b>结构化待办树</b>（跑到哪了）。同出 <span class="mono">task_message</span>，不各存一份。</div>
             <div class="bar-row" style="margin-top:8px"><span class="nm">对话 → 进展转化</span><div class="track"><i style="width:62%;background:var(--st3)"></i></div><span class="n">62%</span></div>
-            <div style="font-size:9.5px;color:var(--muted-foreground);margin-top:6px;line-height:1.6">产物提交事件可一键「归档为档案条目」，复用画面 6 的归档动作。</div>
+            <div style="font-size:9.5px;color:var(--muted-foreground);margin-top:6px;line-height:1.6">产物提交事件可一键「归档为档案条目」，复用画面 7 的归档动作。</div>
           </div>
         </div>
       </div>
@@ -1901,11 +2136,11 @@ body {
   <span><span class="anno">3</span> <b>动态流</b>：对话气泡（用户 / agent / 工具调用）与进展事件（待办变更 / 阶段推进 / 卡死 / 产物）按时间归并，左侧色点区分任务</span>
   <span><span class="anno">4</span> <b>子任务动态汇总卡</b>：每任务的 agent、状态、对话 / 进展计数与最新一条动态，点击切换右下对话详情</span>
   <span><span class="anno">5</span> <b>对话详情</b>：选中任务的完整会话线程，可一键跳回对应 CLI run 继续</span>
-  <span><span class="anno">6</span> <b>同源关系</b>：动态与画面 9 进度追踪同出 <span class="mono">task_message</span>，一个是流水叙事、一个是结构化待办树，不重复存储</span>
+  <span><span class="anno">6</span> <b>同源关系</b>：动态与画面 10 进度追踪同出 <span class="mono">task_message</span>，一个是流水叙事、一个是结构化待办树，不重复存储</span>
 </div>
 
 <style>
-/* ===== 交付概览 Tab（画面 8） ===== */
+/* ===== 交付概览 Tab（画面 9） ===== */
 .dt-tabs { display: flex; gap: 2px; padding: 0 18px; border-bottom: 1px solid var(--border); background: var(--surface); align-items: flex-end; }
 .dt-tab {
   padding: 7px 13px 8px; font-size: 12px; font-weight: 600; color: var(--muted-foreground);
@@ -1927,9 +2162,9 @@ body {
 .dlv-split .cnt { margin-left: auto; border: 0; font-size: 10px; color: var(--faint-foreground); font-weight: 500; }
 </style>
 
-<!-- ============ 画面 8：需求详情「交付概览」Tab ============ -->
-<div class="frame-head" id="f8" style="margin-top:24px">
-  <h2>画面 8 · 需求详情 — 新增「交付概览」Tab（绑定现有 issue-detail）</h2>
+<!-- ============ 画面 9：需求详情「交付概览」Tab ============ -->
+<div class="frame-head" id="f9" style="margin-top:24px">
+  <h2>画面 9 · 需求详情 — 新增「交付概览」Tab（绑定现有 issue-detail）</h2>
   <p>不另建页面，直接长在现有 <span class="mono">packages/views/issues/components/issue-detail.tsx</span>（3663 行）上：主列在既有<b>「动态」时间线</b>之上并列一个<b>「交付概览」Tab</b>。Tab 内三段自上而下：<b>① 需求状态详情</b>（四卡：452 的 8 态派生投影 + ModuleLocker 互斥 + 班底 + 阶段门）、<b>② 四阶段档案带</b>、<b>③ 交付物聚合</b>（本次运行 / 已归档 分段）。第 ②③ 段都是<b>聚合入口层</b>：每行右侧的「下钻 →」跳到需求日历已规划的四面板（原型确认 / 拆解确认 / 执行调度 / 验收报告）与已落地的 <span class="mono">DeliverablesSection</span> 卡片墙，<b>不平行实现第二套阶段 UI</b>。右栏沿用既有折叠 section 序列，在 <span class="mono">IssueDependenciesSection</span> 之后、<span class="mono">ExecutionLogSection</span> 之前插入「档案完整度」。</p>
 </div>
 <div class="frame">
@@ -2204,13 +2439,13 @@ body {
   <span><span class="anno">1</span> <b>交付概览 Tab</b>：与既有「动态」并列，不新建页面；内容均从已有表与已落地组件派生</span>
   <span><span class="anno">2</span> <b>下钻链接</b>：阶段带只做聚合，点击进需求日历已规划的四面板，避免两套阶段 UI</span>
   <span><span class="anno">3</span> <b>阶段门缺件行</b>：红框 + 两个修复入口（模板创建 / agent 补写）</span>
-  <span><span class="anno">4</span> <b>交付物聚合</b>：本次运行（瞬时）vs 已归档（持久）分段，归档动作详见画面 6</span>
+  <span><span class="anno">4</span> <b>交付物聚合</b>：本次运行（瞬时）vs 已归档（持久）分段，归档动作详见画面 7</span>
   <span><span class="anno">5</span> <b>档案完整度环</b>：插在右栏 IssueDependenciesSection 之后、ExecutionLogSection 之前</span>
-  <span><span class="anno">6</span> <b>进度追踪 Tab</b>：排在「交付概览」之前的第二个 Tab，追踪分发任务与待办子项的实际执行，详见画面 9</span>
+  <span><span class="anno">6</span> <b>进度追踪 Tab</b>：排在「交付概览」之前的第二个 Tab，追踪分发任务与待办子项的实际执行，详见画面 10</span>
 </div>
 
 <style>
-/* ===== 进度追踪 Tab（画面 9） ===== */
+/* ===== 进度追踪 Tab（画面 10） ===== */
 .pv-strip { display: flex; gap: 8px; padding: 12px 18px 4px; overflow-x: auto; }
 .pv-run { flex: none; width: 236px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); padding: 8px 10px; }
 .pv-run.stall { border-color: oklch(0.577 0.245 27.325 / 45%); background: oklch(0.577 0.245 27.325 / 4%); }
@@ -2253,9 +2488,9 @@ body {
 .pv-bot { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; padding: 12px 18px 18px; }
 </style>
 
-<!-- ============ 画面 9：需求进度追踪 ============ -->
-<div class="frame-head" id="f9" style="margin-top:24px">
-  <h2>画面 9 · 需求详情「进度追踪」Tab — 分发任务的实际执行追踪（待办随对话自动收集）</h2>
+<!-- ============ 画面 10：需求进度追踪 ============ -->
+<div class="frame-head" id="f10" style="margin-top:24px">
+  <h2>画面 10 · 需求详情「进度追踪」Tab — 分发任务的实际执行追踪（待办随对话自动收集）</h2>
   <p>一个需求拆成多个任务、任务分给不同 agent 与模型、每个 agent CLI 内部又各自规划一份待办（如截图里一次 run 就产出 T1–T21 共 21 项）——<b>待办在横向上扩散，而 multica 原先只看到任务层</b>；同时 CLI 会因 token 限流、网络抖动突然不可用，留下一堆永远停在 in_progress 的待办。本 Tab 用三层树（<b>需求 → 任务 → 待办子项</b>）把执行情况追回来：<b>待办的事实源是各 CLI 的会话流</b>（<span class="mono">task_message</span>），投影器解析 <span class="mono">TodoWrite / task_update</span> 工具调用与回复声明，随对话实时写入 <span class="mono">agent_run_todo</span>；<b>运行存活度</b>靠心跳 + 卡死原因分类（rate_limited / network_lost / crashed，复用 <span class="mono">agent_task_queue</span> 已有的 <span class="mono">waiting_module_lock / waiting_local_directory</span> 真实状态，不另造调度）；<b>扩散治理</b>靠三层 rollup、跨 run 合并血缘与孤儿检测。默认折叠已完成、只展开 doing / stuck。</p>
 </div>
 <div class="frame">
@@ -2443,7 +2678,7 @@ body {
 
 <div class="part-head"><span class="rn">Ⅳ</span>全局分析视角<span class="ds">跨需求的全局分析：产品功能（图谱/本体）与数据模型总线矩阵</span></div>
 <style>
-/* ===== 产品功能 Tab（画面 10）— 左右分栏 ===== */
+/* ===== 产品功能 Tab（画面 11）— 左右分栏 ===== */
 .fn-wrap { flex: 1; min-height: 0; display: flex; }
 .fn-left { width: 296px; flex: none; border-right: 1px solid var(--border); background: var(--surface); overflow: auto; padding: 12px 12px 20px; }
 .fn-lhd { display: flex; align-items: center; font-size: 9.5px; font-weight: 700; color: var(--faint-foreground); letter-spacing: .03em; margin: 0 2px 8px; }
@@ -2486,9 +2721,9 @@ body {
 .src-flag { display: flex; align-items: center; gap: 7px; font-size: 10.5px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
 </style>
 
-<!-- ============ 画面 10：产品功能 Tab ============ -->
-<div class="frame-head" id="f10" style="margin-top:24px">
-  <h2>画面 10 · 项目详情「产品功能」Tab — 左右分栏：模块列表 + 子 TAB 详情</h2>
+<!-- ============ 画面 11：产品功能 Tab ============ -->
+<div class="frame-head" id="f11" style="margin-top:24px">
+  <h2>画面 11 · 项目详情「产品功能」Tab — 左右分栏：模块列表 + 子 TAB 详情</h2>
   <p>以<b>产品功能模块</b>为主体的全局概览，采用<b>左右分栏</b>：左栏是模块列表 —— 模块<b>以具体页面命名</b>（需求看板页 / 需求详情页 / 执行调度面板…，来自 GitNexus 图谱 <span class="mono">Community</span> 功能簇的语义封装），每行直接给出该模块<b>在代码中的对象数与策略数</b>（外加需求数与任务进度）；右栏按选中模块分<b>四个子 TAB</b>：<b>变更概览</b>（需求 / 任务完成情况，由 <span class="mono">issue.module_id</span> 聚合）、<b>模块对象</b>（图谱邻域里的 Component / Hook / Class / Route 及其触达表）、<b>模块策略</b>（S1–S10 策略取值，本体未抽取时降级为 migration / 代码实证）、<b>图谱邻域</b>。<b>关键桥接是 <span class="mono">project_module.graph_node_id</span></b>：同名自动匹配，匹不上的模块进「未绑定」而不是静默丢弃。</p>
 </div>
 <div class="frame">
@@ -2578,7 +2813,9 @@ body {
             <span>模块对象 <span class="n">38</span></span>
             <span>模块策略 <span class="n">5</span></span>
             <span>图谱邻域</span>
+            <span class="new-el">原型图 <span class="n">v3 · 3 版</span></span>
             <span class="anno" style="margin-left:6px">4</span>
+            <span class="anno">6</span>
           </div>
 
           <div class="fn-pane">
@@ -2658,10 +2895,11 @@ body {
   <span><span class="anno">3</span> <b>左栏模块列表</b>：页面名 + 该模块在代码中的<b>对象数 / 策略数</b>（附需求数与任务进度），选中行驱动右栏；未绑定簇虚线置底、不静默丢弃</span>
   <span><span class="anno">4</span> <b>右栏子 TAB</b>：变更概览（需求 / 任务）· 模块对象 · 模块策略 · 图谱邻域 —— 原型将四个 pane 平铺展示，实际实现为切换式</span>
   <span><span class="anno">5</span> <b>图谱邻域</b>：直接用已实现的 <span class="mono">Process / Route / MEMBER_OF / STEP_IN_PROCESS / HANDLES_ROUTE / CALLS</span>，零等待本体层</span>
+  <span><span class="anno">6</span> <b>原型图（新增子 TAB）</b>：模块级 HTML 原型预览 + 多版本对比（变更摘要 / 影响子模块）+ 点热点看代码与图谱 —— 详见画面 14 / 15</span>
 </div>
 
 <style>
-/* ===== 数据模型总线矩阵（画面 11） ===== */
+/* ===== 数据模型总线矩阵（画面 12） ===== */
 .bm-wrap { padding: 12px 18px 18px; }
 .bm-2col { display: grid; grid-template-columns: minmax(0, 1fr) 318px; gap: 14px; align-items: start; }
 .bm-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
@@ -2717,10 +2955,10 @@ body {
 .it-row .im { color: var(--muted-foreground); font-size: 9px; margin-left: auto; text-align: right; }
 </style>
 
-<!-- ============ 画面 11：数据模型总线矩阵 ============ -->
-<div class="frame-head" id="f11" style="margin-top:24px">
-  <h2>画面 11 · 项目详情「数据模型」Tab — 总线矩阵（行=产品模块×功能类型 · 列=数据域）</h2>
-  <p>与「产品功能」Tab 并列的第二个新 Tab，用<b>总线矩阵</b>记录本项目产品底层数据模型的迭代情况。<b>纵坐标（行）= 产品视角</b>：用户使用产品时划分的<b>模块 × 功能类型（页面）</b>，与画面 10 同一批图谱功能簇（<span class="mono">Community</span>），再细分到具体页面与主键维度；<b>横坐标（列）= 数据视角</b>：按<b>数据域</b>划分的数据类型，域内是 multica 真实表（<span class="mono">server/migrations/</span> 全库 176 张，本图归入 8 域 123 张）。<b>格子 = 图谱 <span class="mono">QUERIES / ACCESSES / FETCHES</span> 边按「页面 → 表」聚合</b>，主数字是触达的<b>表数</b>、下角是 <b>R 读 / W 写</b> 拆分，点格子下钻到表清单与具体列。如此构建的矩阵<b>既能从产品视角分析</b>（按行汇总：一个页面 / 模块碰了哪些数据域，找耦合面），<b>也能从数据视角概览</b>（按列汇总：一个数据域被谁读写，找孤儿表、写热点、跨域直写）。<b>迭代情况</b>取自 <span class="mono">OntologyChangelog</span>（added / modified / removed / status_change）与 <span class="mono">S8 StrategyModel</span> 的版本、分区规则、口径规则变更。</p>
+<!-- ============ 画面 12：数据模型总线矩阵 ============ -->
+<div class="frame-head" id="f12" style="margin-top:24px">
+  <h2>画面 12 · 项目详情「数据模型」Tab — 总线矩阵（行=产品模块×功能类型 · 列=数据域）</h2>
+  <p>与「产品功能」Tab 并列的第二个新 Tab，用<b>总线矩阵</b>记录本项目产品底层数据模型的迭代情况。<b>纵坐标（行）= 产品视角</b>：用户使用产品时划分的<b>模块 × 功能类型（页面）</b>，与画面 11 同一批图谱功能簇（<span class="mono">Community</span>），再细分到具体页面与主键维度；<b>横坐标（列）= 数据视角</b>：按<b>数据域</b>划分的数据类型，域内是 multica 真实表（<span class="mono">server/migrations/</span> 全库 176 张，本图归入 8 域 123 张）。<b>格子 = 图谱 <span class="mono">QUERIES / ACCESSES / FETCHES</span> 边按「页面 → 表」聚合</b>，主数字是触达的<b>表数</b>、下角是 <b>R 读 / W 写</b> 拆分，点格子下钻到表清单与具体列。如此构建的矩阵<b>既能从产品视角分析</b>（按行汇总：一个页面 / 模块碰了哪些数据域，找耦合面），<b>也能从数据视角概览</b>（按列汇总：一个数据域被谁读写，找孤儿表、写热点、跨域直写）。<b>迭代情况</b>取自 <span class="mono">OntologyChangelog</span>（added / modified / removed / status_change）与 <span class="mono">S8 StrategyModel</span> 的版本、分区规则、口径规则变更。</p>
 </div>
 <div class="frame">
   <div class="frame-bar"><i></i><i></i><i></i><span>Multica — hanmourang 工作区 / dsh_desktop / 数据模型</span></div>
@@ -3049,9 +3287,9 @@ body {
 </div>
 
 <div class="part-head"><span class="rn">Ⅴ</span>申报产出<span class="ds">最终目的：软著 / 专利申报的就绪度与导出</span></div>
-<!-- ============ 画面 12：申报就绪度 ============ -->
+<!-- ============ 画面 13：申报就绪度 ============ -->
 <style>
-/* ===== 申报清单分档（画面 12） ===== */
+/* ===== 申报清单分档（画面 13） ===== */
 .tier { font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px; flex: none; letter-spacing: .02em; }
 .tier.must { background: oklch(0.577 0.245 27.325 / 13%); color: var(--destructive); }
 .tier.cond { background: oklch(0.72 0.15 75 / 22%); color: oklch(0.45 0.12 75); }
@@ -3072,8 +3310,8 @@ body {
 .rd-item.na { opacity: .58; border-style: dashed; background: var(--surface); }
 </style>
 
-<div class="frame-head" id="f12" style="margin-top:24px">
-  <h2>画面 12 · 申报就绪度看板 — 必备 / 条件必备 / 辅助 三档契约</h2>
+<div class="frame-head" id="f13" style="margin-top:24px">
+  <h2>画面 13 · 申报就绪度看板 — 必备 / 条件必备 / 辅助 三档契约</h2>
   <p>清单<b>不再是拍脑袋的 11 项</b>，而是直接对齐官方受理规定：软著按中国版权保护中心《计算机软件著作权登记办法》、专利按《专利法实施细则》第四十四条（缺少请求书 / 说明书 / 权利要求书 → <b>不予受理</b>）。每项标三个档位：<b>必备</b>（缺则不予受理）、<b>条件必备</b>（权属情形触发）、<b>辅助</b>（不影响受理，但影响通过率与后续维权）。关键在于每项必备材料都挂一条<b>机器可校验规则</b>（页数 / 每页行数 / 页眉与申请表名称版本号一致 / 说明书五段式标题齐备且有序 / 摘要 ≤300 字且无商业宣传用语），sync 时逐条跑，不达标直接降为缺件 —— 这就是「关键信息系统化收集」的落点。导出包按档位分目录，必备未齐时<b>拒绝导出并给出阻塞项</b>。</p>
 </div>
 <div class="frame">
@@ -3388,6 +3626,372 @@ body {
   <span><span class="anno">3</span> <b>阻塞项优先级</b>：P0 = 法定不予受理；P1 = 鉴别材料不达标；P2 = 辅助缺件</span>
   <span><span class="anno">4</span> <b>跨项目对比</b>：申报期挑必备件已齐的项目先报</span>
   <span><span class="anno">5</span> <b>包按档位分目录</b>：A-必备 / B-条件必备 / C-辅助，校验结果直接标在文件名后</span>
+</div>
+
+<style>
+/* ===== 原型图子 TAB（画面 14 / 15） ===== */
+.pv-ver { display: flex; align-items: center; gap: 7px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--surface); font-size: 11.5px; flex-wrap: wrap; }
+.ver-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--page-canvas); font-size: 11px; color: var(--muted-foreground); }
+.ver-chip.on { border-color: var(--brand); background: oklch(0.55 0.16 255 / 8%); color: var(--brand); font-weight: 650; }
+.ver-chip .mono { font-size: 10px; }
+.pv-2col { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 0; min-height: 0; }
+.pv-col { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); }
+.pv-col:last-child { border-right: none; }
+.pv-bar { height: 26px; flex: none; background: var(--app-shell); border-bottom: 1px solid var(--surface-border); display: flex; align-items: center; gap: 5px; padding: 0 10px; }
+.pv-bar i { width: 8px; height: 8px; border-radius: 50%; background: oklch(0.78 0.02 286); display: block; }
+.pv-bar span { margin-left: 6px; font-size: 10.5px; color: var(--faint-foreground); }
+.pv-bar .vdiff { margin-left: auto; font-size: 9.5px; font-weight: 700; }
+.pv-body { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: oklch(0.98 0.002 286); overflow: auto; }
+.spot { position: relative; border: 1.5px dashed oklch(0.72 0.02 286); border-radius: 8px; background: var(--surface); padding: 8px 10px; font-size: 11px; }
+.spot .sid { font-family: ui-monospace, Menlo, monospace; font-size: 9px; color: var(--faint-foreground); display: block; margin-bottom: 3px; }
+.spot .pin { position: absolute; right: 7px; top: 7px; display: flex; gap: 4px; align-items: center; }
+.spot.same { opacity: .55; border-style: solid; }
+.spot.added { border-color: oklch(0.55 0.16 145 / 55%); background: oklch(0.55 0.16 145 / 5%); }
+.spot.modified { border-color: oklch(0.55 0.16 255 / 55%); background: oklch(0.55 0.16 255 / 5%); }
+.spot.removed { border-color: oklch(0.577 0.245 27.325 / 50%); background: oklch(0.577 0.245 27.325 / 4%); }
+.spot.sel { border-style: solid; border-color: var(--brand); box-shadow: 0 0 0 3px oklch(0.55 0.16 255 / 18%); }
+.dtag { display: inline-block; padding: 0.5px 5px; border-radius: 4px; font-size: 9px; font-weight: 700; }
+.dtag.added { background: oklch(0.55 0.16 145 / 14%); color: oklch(0.4 0.11 145); }
+.dtag.modified { background: oklch(0.55 0.16 255 / 13%); color: var(--brand); }
+.dtag.removed { background: oklch(0.577 0.245 27.325 / 12%); color: var(--destructive); }
+.dtag.same { background: var(--surface-selected); color: var(--faint-foreground); }
+.cb { background: #0f1115; color: #d7dae0; border-radius: 9px; padding: 10px 12px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10.5px; line-height: 1.7; overflow: auto; }
+.cb .c { color: oklch(0.65 0.02 286); }
+.cb .k { color: oklch(0.75 0.12 255); }
+.cb .s { color: oklch(0.78 0.12 145); }
+.cb .ln { display: inline-block; width: 22px; color: oklch(0.5 0.02 286); user-select: none; }
+.cb .hit { display: block; background: oklch(0.55 0.16 255 / 18%); border-radius: 4px; }
+.lk-panel { width: 400px; flex: none; border-left: 1px solid var(--border); background: var(--page-canvas); display: flex; flex-direction: column; overflow: auto; }
+.lk-sec { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
+.lk-sec > b { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 650; margin-bottom: 7px; }
+.lk-sec > b .rt { margin-left: auto; font-weight: 400; font-size: 10px; color: var(--faint-foreground); }
+.imp-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 10.5px; margin-bottom: 5px; }
+.imp-row .mono { font-size: 9.5px; }
+.gr-edge { font-size: 10px; color: var(--muted-foreground); padding: 2px 0 4px 14px; }
+.gr-node { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 4px 0; }
+.gr-node .lb { font-size: 8.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: oklch(0.55 0.16 255 / 12%); color: var(--brand); flex: none; }
+.gr-node .ct { margin-left: auto; font-size: 9.5px; color: var(--faint-foreground); }
+</style>
+
+<!-- ============ 画面 14：产品功能「原型图」子 TAB — HTML 预览 + 多版本对比 ============ -->
+<div class="frame-head" id="f14" style="margin-top:24px">
+  <h2>画面 14 · 产品功能「原型图」子 TAB（能力一）— HTML 原型预览 + 多版本对比</h2>
+  <p>沿用画面 11 的左右分栏骨架：<b>左栏仍是功能模块列表</b>（行内追加该模块的原型版本数），选中模块后<b>右栏切到第 5 个子 TAB「原型图」</b>。原型图区内提供 <b>HTML / Storybook 两种预览方式</b>（本画面为 HTML 态）：HTML 原型直接渲染 <span class="mono">docs/prototypes/*.html</span>（权威记录 <span class="mono">issue_prototype_version</span>）；切<b>并排对比</b>后选两个版本并排渲染，底部自动给出<b>变更摘要</b>（按 <span class="mono">data-fp</span> 稳定 ID 对齐的功能点级新增 / 改造 / 移除，非文本 diff）与<b>影响子模块</b>（变更 fp 经 contract.codeHints / 图谱反查所属子模块与在途需求）。切「单版」时右栏摘要区收起、预览全宽。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — dsh_desktop / 产品功能 / 需求详情页 / 原型图</span></div>
+  <div class="app" style="height:1000px">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">H</span> hanmourang</div>
+      <div class="s-item">📥 收件箱 <span class="badge-n">4</span></div>
+      <div class="s-group">项目</div>
+      <div class="s-item active"><span class="s-dot" style="background:var(--brand)"></span> dsh_desktop</div>
+      <div class="s-item"><span class="s-dot" style="background:var(--st4)"></span> multica</div>
+      <div class="s-item"><span class="s-dot" style="background:var(--warning)"></span> eleme-agent</div>
+      <div class="s-group">视图</div>
+      <div class="s-item">📋 看板</div>
+      <div class="s-item">🗂 档案</div>
+      <div class="s-item active">🧩 产品功能</div>
+      <div class="s-item">🗄 数据模型</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb">项目 <span>/</span> <b>dsh_desktop</b></div>
+        <span class="tab-pill">看板</span>
+        <span class="tab-pill">列表</span>
+        <span class="tab-pill">甘特图</span>
+        <span class="tab-pill">档案</span>
+        <span class="tab-pill active">产品功能</span>
+        <span class="tab-pill">数据模型</span>
+        <div class="topbar-right"><span class="btn">⚙ 资源 3</span></div>
+      </div>
+      <div class="ar-toolbar">
+        <span class="src-flag">🕸 图谱 <span class="mono">scan a91f</span> · 09-05 03:10 · <span style="color:var(--success)">图谱层 ✓</span> · <span style="color:oklch(0.55 0.14 75)">本体层 ⏳ 未抽取</span></span>
+        <span class="seg"><span class="active">模块列表</span><span>图谱视图</span><span>表格</span></span>
+        <div class="toolbar-right">
+          <span class="btn sm">⟳ 重新扫描</span>
+          <span class="btn sm">⇪ 导出模块报告</span>
+        </div>
+      </div>
+      <div class="fn-wrap">
+        <div class="fn-left">
+          <div class="fn-lhd">功能模块（页面）<span class="rt">7 · 对象 181 · 策略 22</span></div>
+          <div class="fn-mod">
+            <div class="m1"><span class="pg">page</span>需求看板页<span class="st" style="background:var(--success)"></span></div>
+            <div class="m2"><span>对象 <b>46</b></span><span>策略 <b>6</b></span><span>需求 <b>4</b></span></div>
+            <div class="m3">Community#12 · 任务 18/23 · 原型 2 版</div>
+          </div>
+          <div class="fn-mod sel">
+            <div class="m1"><span class="pg">page</span>需求详情页<span class="st" style="background:var(--brand)"></span></div>
+            <div class="m2"><span>对象 <b>38</b></span><span>策略 <b>5</b></span><span>需求 <b>3</b></span></div>
+            <div class="m3">Community#12 · 任务 12/16 · <b style="color:var(--brand)">原型 3 版</b></div>
+          </div>
+          <div class="fn-mod">
+            <div class="m1"><span class="pg">page</span>拆解确认面板<span class="st" style="background:var(--warning)"></span></div>
+            <div class="m2"><span>对象 <b>21</b></span><span>策略 <b>3</b></span><span>需求 <b>2</b></span></div>
+            <div class="m3">Community#12 · 任务 6/9 · 原型 1 版</div>
+          </div>
+          <div class="fn-mod">
+            <div class="m1"><span class="pg">page</span>执行调度面板<span class="st" style="background:var(--brand)"></span></div>
+            <div class="m2"><span>对象 <b>17</b></span><span>策略 <b>4</b></span><span>需求 <b>3</b></span></div>
+            <div class="m3">Community#7 · 任务 21/21 · 原型 2 版</div>
+          </div>
+          <div class="fn-mod">
+            <div class="m1"><span class="pg">page</span>档案预览弹窗<span class="st" style="background:var(--warning)"></span></div>
+            <div class="m2"><span>对象 <b>24</b></span><span>策略 <b>2</b></span><span>需求 <b>2</b></span></div>
+            <div class="m3">Community#31 · 任务 6/19 · 无原型</div>
+          </div>
+          <div class="fn-mod">
+            <div class="m1"><span class="pg">page</span>数据模型矩阵页<span class="st" style="background:var(--brand)"></span></div>
+            <div class="m2"><span>对象 <b>12</b></span><span>策略 <b>2</b></span><span>需求 <b>1</b></span></div>
+            <div class="m3">Community#31 · 本期新增 · 原型 1 版</div>
+          </div>
+          <div class="fn-mod unbound">
+            <div class="m1"><span class="pg" style="background:var(--surface-selected);color:var(--faint-foreground)">?</span>legacy-import<span class="st" style="background:var(--destructive)"></span></div>
+            <div class="m2"><span>对象 <b>23</b></span><span>策略 <b>0</b></span><span>需求 <b>0</b></span></div>
+            <div class="m3" style="color:var(--destructive)">Community#27 · 未绑定</div>
+          </div>
+        </div>
+        <div class="fn-right">
+          <div class="fn-sub">
+            <span>变更概览 <span class="n">需求 3 · 任务 12</span></span>
+            <span>模块对象 <span class="n">38</span></span>
+            <span>模块策略 <span class="n">5</span></span>
+            <span>图谱邻域</span>
+            <span class="on new-el">原型图 <span class="n">v3 · 3 版</span><span class="anno" style="margin-left:5px">1</span></span>
+          </div>
+          <div class="fn-pane" style="flex:1;display:flex;flex-direction:column;min-height:0">
+            <div class="ph"><span class="tag">子TAB 5</span>原型图 · 能力一 — HTML 快速预览 + 多版本对比<span class="rt">SIRI-26 购物车合并结算</span></div>
+            <div class="pb" style="flex:1;display:flex;flex-direction:column;gap:8px;min-height:0">
+              <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+                <span style="font-size:11px;color:var(--faint-foreground);font-weight:650">预览方式</span>
+                <span class="seg"><span class="active">HTML 原型</span><span>Storybook 对照</span><span class="anno" style="margin:0 6px 0 2px">2</span></span>
+                <span class="chip-filter">需求 <b>SIRI-26 购物车合并结算</b> ▾</span>
+                <span class="seg"><span>单版</span><span class="active">并排对比</span></span>
+                <span class="ver-chip"><span class="mono">v1</span> 09-01</span>
+                <span class="ver-chip"><span class="mono">v2</span> 09-04</span>
+                <span class="ver-chip on"><span class="mono">v3</span> 09-08 · confirmed · 当前 <span class="anno">3</span></span>
+                <span style="margin-left:auto" class="mono"><span style="font-size:10px;color:var(--faint-foreground)">issue_prototype_version · 7b2e1f4 / a3f19c2</span></span>
+              </div>
+              <div class="pv-2col" style="flex:none;height:308px;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+                <div class="pv-col">
+                  <div class="pv-bar"><i></i><i></i><i></i><span class="mono">SIRI-26-cart-merge.html · v2</span><span class="vdiff" style="color:var(--faint-foreground)">基线</span></div>
+                  <div class="pv-body">
+                    <div class="spot same"><span class="sid">fp.cart.merge · 合并结算入口</span>合并 2 单结算 · 金额汇总条<span class="pin"><span class="dtag same">不变</span></span></div>
+                    <div class="spot modified"><span class="sid">fp.cart.coupon · 优惠券叠加</span>多券叠加选择器（v2 为单券下拉）<span class="pin"><span class="dtag modified">改造</span><span class="anno" style="min-width:15px;height:15px;font-size:9.5px">4</span></span></div>
+                    <div class="spot removed"><span class="sid">fp.cart.promo_banner · 活动 Banner 位</span>占位居（v3 已移除）<span class="pin"><span class="dtag removed">移除</span></span></div>
+                    <div class="spot same"><span class="sid">fp.cart.price · 价格明细</span>明细折叠面板<span class="pin"><span class="dtag same">不变</span></span></div>
+                  </div>
+                </div>
+                <div class="pv-col">
+                  <div class="pv-bar"><i></i><i></i><i></i><span class="mono">SIRI-26-cart-merge.html · v3</span><span class="vdiff" style="color:var(--success)">当前</span></div>
+                  <div class="pv-body">
+                    <div class="spot same"><span class="sid">fp.cart.merge · 合并结算入口</span>合并 2 单结算 · 金额汇总条<span class="pin"><span class="dtag same">不变</span></span></div>
+                    <div class="spot modified"><span class="sid">fp.cart.coupon · 优惠券叠加</span>多券叠加 + 互斥规则提示<span class="pin"><span class="dtag modified">改造</span></span></div>
+                    <div class="spot added"><span class="sid">fp.cart.inventory · 库存锁定提示</span>并发锁库存 · 超时释放说明<span class="pin"><span class="dtag added">新增</span><span class="anno" style="min-width:15px;height:15px;font-size:9.5px">5</span></span></div>
+                    <div class="spot same"><span class="sid">fp.cart.price · 价格明细</span>明细折叠面板<span class="pin"><span class="dtag same">不变</span></span></div>
+                  </div>
+                </div>
+              </div>
+              <div style="font-size:10.5px;color:var(--muted-foreground);line-height:1.6">对齐键 = <b class="mono">data-fp</b> 稳定 ID；同一 fp 在两版间的 detail / mark / token 变化才进摘要，纯位置移动不算变更。</div>
+              <div class="fn-2col" style="flex:1;min-height:0">
+                <div>
+                  <div class="impl-lg" style="margin-bottom:6px"><b>变更摘要 v2 → v3</b> <span class="anno">6</span><span style="float:right;font-weight:400;font-size:9.5px;color:var(--faint-foreground)">自动总结 · 可写入评论</span></div>
+                  <div class="it-row"><span class="ct added">新增</span><span class="tb">fp.cart.inventory</span><span class="im">库存锁定提示 · 源自验收打回 R2（超卖）</span></div>
+                  <div class="it-row"><span class="ct modified">改造</span><span class="tb">fp.cart.coupon</span><span class="im">单券下拉 → 多券叠加 + 互斥提示</span></div>
+                  <div class="it-row"><span class="ct removed">移除</span><span class="tb">fp.cart.promo_banner</span><span class="im">活动位移交「首页推荐位」需求</span></div>
+                  <div class="it-row"><span class="ct status">标记</span><span class="tb">marks</span><span class="im">✓ 4/4 → v3 全符合，确认门通过</span></div>
+                  <div style="margin-top:6px;font-size:10px;color:var(--faint-foreground)">风格：token 快照两版一致（tokens.css @a91f），无漂移。</div>
+                </div>
+                <div>
+                  <div class="impl-lg" style="margin-bottom:6px"><b>影响子模块</b> <span class="anno">7</span><span style="float:right;font-weight:400;font-size:9.5px;color:var(--faint-foreground)">变更 fp 经 contract 反查</span></div>
+                  <div class="imp-row"><span class="dtag modified">改造</span><span class="mono">fp.cart.coupon</span> → <b>结算页 / 优惠子模块</b><span class="mono" style="margin-left:auto;color:var(--faint-foreground)">promotion/engine</span></div>
+                  <div class="imp-row"><span class="dtag added">新增</span><span class="mono">fp.cart.inventory</span> → <b>结算页 / 库存子模块</b><span class="mono" style="margin-left:auto;color:var(--faint-foreground)">inventory/deduct</span></div>
+                  <div class="imp-row" style="opacity:.65"><span class="dtag removed">移除</span><span class="mono">fp.cart.promo_banner</span> → 无代码引用（纯原型位）<span style="margin-left:auto">✓ 安全</span></div>
+                  <div style="margin-top:4px;font-size:10px;color:var(--faint-foreground);line-height:1.6">在途需求影响：<b style="color:var(--warning)">SIRI-27 优惠券叠加</b> 与本变更同模块 → 互斥窗口已在调度层生效。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="anno-legend">
+  <span><span class="anno">1</span> <b>入口</b>：画面 11 右栏第 5 个子 TAB；左栏模块列表不变（行内追加原型版本数），换模块即换右栏原型</span>
+  <span><span class="anno">2</span> <b>两种预览方式</b>：HTML 原型（docs/prototypes 原始画布）/ Storybook 对照（真组件，见画面 15）</span>
+  <span><span class="anno">3</span> 版本 chip 显示状态（pending / confirmed / superseded）；当前版固定右栏，基线版可换</span>
+  <span><span class="anno">4</span> 改造热点紫框：点击看两版 detail 逐字段差异（detail / mark / token / 备注）</span>
+  <span><span class="anno">5</span> 新增热点绿框：可追溯来源（本例 = 验收打回 R2 的修复项回流）</span>
+  <span><span class="anno">6</span> <b>变更摘要自动生成</b>：按 data-fp 对齐两版 contract，输出 新增/改造/移除/标记 四类；可一键写入需求评论存档</span>
+  <span><span class="anno">7</span> <b>影响子模块</b>：变更 fp → contract.codeHints / 图谱邻域反查所属子模块与在途需求，纯原型位无代码引用时明示「安全」</span>
+</div>
+
+<!-- ============ 画面 15：产品功能「原型图」子 TAB — Storybook 预览 × 代码 × 图谱联动 ============ -->
+<div class="frame-head" id="f15" style="margin-top:24px">
+  <h2>画面 15 · 产品功能「原型图」子 TAB（能力二）— Storybook 预览态：点原型看代码与图谱（GitNexus 联动）</h2>
+  <p>同一子 TAB 切到 <b>Storybook 对照</b> 预览方式：左栏模块列表不变，中间渲染区从 HTML 画布换成 story 真组件（<span class="mono">preview-cartmerge--default</span>）。在此态点任意热点，右栏自上而下给出三层联动：<b>① Storybook 锚点</b>（同一组 <span class="mono">fp.id</span> 对齐 story 的 <span class="mono">parameters.featurePointIds</span>）；<b>② 关联代码</b>（GN Preview <span class="mono">source-locate</span> 回填的 <span class="mono">codeHints</span>：文件 + 行块切片，来自 <span class="mono">entity_code_object</span>）；<b>③ 图谱邻域</b>（该功能点的 Component / Route / CALLS 一度邻居，可跳进 GitNexus 图谱页）。<b>未实现的功能点诚实降级</b>：②③ 显示「codeHints 为空 · 实现后回填」，只保留 contract 信息，不拿旧代码冒充。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — dsh_desktop / 产品功能 / 需求详情页 / 原型图 · Storybook 态 · 已点中 fp.cart.coupon</span></div>
+  <div class="app" style="height:960px">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">H</span> hanmourang</div>
+      <div class="s-item">📥 收件箱 <span class="badge-n">4</span></div>
+      <div class="s-group">项目</div>
+      <div class="s-item active"><span class="s-dot" style="background:var(--brand)"></span> dsh_desktop</div>
+      <div class="s-item"><span class="s-dot" style="background:var(--st4)"></span> multica</div>
+      <div class="s-item"><span class="s-dot" style="background:var(--warning)"></span> eleme-agent</div>
+      <div class="s-group">视图</div>
+      <div class="s-item">📋 看板</div>
+      <div class="s-item">🗂 档案</div>
+      <div class="s-item active">🧩 产品功能</div>
+      <div class="s-item">🗄 数据模型</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb">项目 <span>/</span> <b>dsh_desktop</b></div>
+        <span class="tab-pill">看板</span>
+        <span class="tab-pill">列表</span>
+        <span class="tab-pill">甘特图</span>
+        <span class="tab-pill">档案</span>
+        <span class="tab-pill active">产品功能</span>
+        <span class="tab-pill">数据模型</span>
+        <div class="topbar-right">
+          <span class="chip-filter">联动状态 <b style="color:var(--success)">SB ✓ · GN ✓</b></span>
+          <span class="btn">⚙ 资源 3</span>
+        </div>
+      </div>
+      <div class="ar-toolbar">
+        <span class="src-flag">🕸 图谱 <span class="mono">scan a91f</span> · 09-05 03:10 · <span style="color:var(--success)">图谱层 ✓</span> · <span style="color:oklch(0.55 0.14 75)">本体层 ⏳ 未抽取</span></span>
+        <span class="seg"><span class="active">模块列表</span><span>图谱视图</span><span>表格</span></span>
+        <div class="toolbar-right"><span class="btn sm">⟳ 重新扫描</span></div>
+      </div>
+      <div class="fn-wrap">
+        <div class="fn-left">
+          <div class="fn-lhd">功能模块（页面）<span class="rt">7 · 对象 181 · 策略 22</span></div>
+          <div class="fn-mod">
+            <div class="m1"><span class="pg">page</span>需求看板页<span class="st" style="background:var(--success)"></span></div>
+            <div class="m2"><span>对象 <b>46</b></span><span>策略 <b>6</b></span><span>需求 <b>4</b></span></div>
+            <div class="m3">Community#12 · 原型 2 版</div>
+          </div>
+          <div class="fn-mod sel">
+            <div class="m1"><span class="pg">page</span>需求详情页<span class="st" style="background:var(--brand)"></span></div>
+            <div class="m2"><span>对象 <b>38</b></span><span>策略 <b>5</b></span><span>需求 <b>3</b></span></div>
+            <div class="m3">Community#12 · <b style="color:var(--brand)">原型 3 版 · SB 2 story</b></div>
+          </div>
+          <div class="fn-mod">
+            <div class="m1"><span class="pg">page</span>拆解确认面板<span class="st" style="background:var(--warning)"></span></div>
+            <div class="m2"><span>对象 <b>21</b></span><span>策略 <b>3</b></span><span>需求 <b>2</b></span></div>
+            <div class="m3">Community#12 · 原型 1 版</div>
+          </div>
+          <div class="fn-mod">
+            <div class="m1"><span class="pg">page</span>执行调度面板<span class="st" style="background:var(--brand)"></span></div>
+            <div class="m2"><span>对象 <b>17</b></span><span>策略 <b>4</b></span><span>需求 <b>3</b></span></div>
+            <div class="m3">Community#7 · 原型 2 版</div>
+          </div>
+          <div class="fn-mod">
+            <div class="m1"><span class="pg">page</span>档案预览弹窗<span class="st" style="background:var(--warning)"></span></div>
+            <div class="m2"><span>对象 <b>24</b></span><span>策略 <b>2</b></span><span>需求 <b>2</b></span></div>
+            <div class="m3">Community#31 · 无原型</div>
+          </div>
+          <div class="fn-mod">
+            <div class="m1"><span class="pg">page</span>数据模型矩阵页<span class="st" style="background:var(--brand)"></span></div>
+            <div class="m2"><span>对象 <b>12</b></span><span>策略 <b>2</b></span><span>需求 <b>1</b></span></div>
+            <div class="m3">Community#31 · 原型 1 版</div>
+          </div>
+          <div class="fn-mod unbound">
+            <div class="m1"><span class="pg" style="background:var(--surface-selected);color:var(--faint-foreground)">?</span>legacy-import<span class="st" style="background:var(--destructive)"></span></div>
+            <div class="m2"><span>对象 <b>23</b></span><span>策略 <b>0</b></span><span>需求 <b>0</b></span></div>
+            <div class="m3" style="color:var(--destructive)">Community#27 · 未绑定</div>
+          </div>
+        </div>
+        <div class="fn-right">
+          <div class="fn-sub">
+            <span>变更概览 <span class="n">需求 3 · 任务 12</span></span>
+            <span>模块对象 <span class="n">38</span></span>
+            <span>模块策略 <span class="n">5</span></span>
+            <span>图谱邻域</span>
+            <span class="on new-el">原型图 <span class="n">v3 · 3 版</span></span>
+          </div>
+          <div class="fn-pane" style="flex:1;display:flex;flex-direction:column;min-height:0">
+            <div class="ph"><span class="tag">子TAB 5</span>原型图 · 能力二 — Storybook 原型 ↔ 代码 / 图谱联动<span class="rt">SIRI-26 · v3 confirmed</span></div>
+            <div class="pb" style="flex:1;display:flex;flex-direction:column;gap:8px;min-height:0">
+              <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+                <span style="font-size:11px;color:var(--faint-foreground);font-weight:650">预览方式</span>
+                <span class="seg"><span>HTML 原型</span><span class="active">Storybook 对照</span><span class="anno" style="margin:0 6px 0 2px">1</span></span>
+                <span class="chip-filter">story <b class="mono">preview-cartmerge--default</b> ▾</span>
+                <div class="toolbar-right"><span class="btn sm">打开 Storybook</span></div>
+              </div>
+              <div style="flex:1;display:flex;min-height:0;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+                <div style="flex:1.2;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--border)">
+                  <div class="pv-bar"><i></i><i></i><i></i><span class="mono">storybook · preview-cartmerge--default · 点击热点联动右栏</span><span class="vdiff" style="color:var(--success)">真组件</span></div>
+                  <div class="pv-body">
+                    <div class="spot"><span class="sid">fp.cart.merge</span>合并结算入口 · 金额汇总</div>
+                    <div class="spot sel"><span class="sid">fp.cart.coupon · 已选中</span><b>优惠券叠加</b> · 多券叠加 + 互斥规则提示
+                      <span class="pin"><span class="anno" style="min-width:15px;height:15px;font-size:9.5px">2</span></span>
+                      <div style="margin-top:6px;display:flex;gap:5px;align-items:center">
+                        <span class="dtag modified">改造</span>
+                        <span style="font-size:9.5px;color:var(--faint-foreground)">story parameters 命中 · mark ✓</span>
+                      </div>
+                    </div>
+                    <div class="spot"><span class="sid">fp.cart.inventory</span>库存锁定提示<span class="pin"><span class="dtag added">新增</span></span></div>
+                    <div class="spot" style="opacity:.6"><span class="sid">fp.cart.price</span>价格明细（未实现 · codeHints 空）<span class="pin"><span class="dtag same">契约态</span></span></div>
+                  </div>
+                  <div style="padding:6px 12px;border-top:1px solid var(--border);background:var(--surface);font-size:10px;color:var(--muted-foreground)">
+                    热点命中顺序：data-fp → contract（必有）→ story parameters（有 story 时）→ codeHints（GN Preview 回填）。
+                  </div>
+                </div>
+                <div class="lk-panel" style="width:410px;border-left:none">
+                  <div class="lk-sec">
+                    <b>① Storybook 锚点 <span class="anno">3</span><span class="rt">同一组 fp.id 对齐</span></b>
+                    <div class="gr-node"><span class="lb">story</span><span class="mono">preview-cartmerge--default</span><span class="ct">ready</span></div>
+                    <div class="cb" style="margin-top:6px;font-size:10px">
+                      parameters: {<br>
+                      &nbsp;&nbsp;featurePointIds: [<span class="s">'fp.cart.coupon'</span>, <span class="s">'fp.cart.merge'</span>],<br>
+                      &nbsp;&nbsp;sourcePath: <span class="s">'packages/views/cart/CartMerge.tsx'</span><br>
+                      }
+                    </div>
+                    <div style="margin-top:5px;font-size:10px;color:var(--faint-foreground)">设计稿与 story 文案不一致时出「漂移」黄条 —— 两套真相不允许静默并存。</div>
+                  </div>
+                  <div class="lk-sec">
+                    <b>② 关联代码 <span class="anno">4</span><span class="rt">source-locate 回填 · a3f19c2</span></b>
+                    <div class="cb" style="font-size:10px">
+                      <span class="c">// src/cart/CouponStack.tsx</span><br>
+                      <span class="ln">18</span>export function CouponStack({ rules }) {<br>
+                      <span class="ln">19</span>&nbsp;&nbsp;const usable = rules.filter(r =&gt; !r.mutex)<br>
+                      <span class="hit"><span class="ln">23</span>&nbsp;&nbsp;return &lt;StackPicker items={usable} max={2} /&gt;</span>
+                      <span class="ln">24</span>}<br>
+                      <span class="c">// L18–L24 · object CouponStack · entity_code_object#8871</span>
+                    </div>
+                    <div style="margin-top:5px;display:flex;gap:6px">
+                      <span class="btn sm">跳源码</span><span class="btn sm">看完整文件</span>
+                    </div>
+                  </div>
+                  <div class="lk-sec" style="border-bottom:none">
+                    <b>③ 图谱邻域 <span class="anno">5</span><span class="rt">GitNexus 图谱 · scan a91f</span></b>
+                    <div class="gr-node"><span class="lb">Component</span><span class="mono">CouponStack</span><span class="ct">MEMBER_OF 需求详情页</span></div>
+                    <div class="gr-edge">└ CALLS → <span class="mono">promotion/engine.checkMutex</span>（2 处）· ← <span class="mono">CartMerge</span></div>
+                    <div class="gr-node"><span class="lb">Route</span><span class="mono">POST /api/cart/merge</span><span class="ct">HANDLES_ROUTE</span></div>
+                    <div class="gr-node"><span class="lb">Process</span>结算链路 · 步骤 3/5<span class="ct">STEP_IN_PROCESS</span></div>
+                    <div style="margin-top:6px;font-size:10px;color:var(--faint-foreground);line-height:1.6">未实现 fp（如 fp.cart.price）此处显示「契约态 · 无图谱节点」，实现后随 scan 自动点亮。</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="anno-legend">
+  <span><span class="anno">1</span> Storybook 对照态复用同一子 TAB：中间渲染区换成 story 真组件，左栏模块列表与版本信息不变</span>
+  <span><span class="anno">2</span> 选中热点 = 唯一联动上下文：右栏三层都跟着同一个 <span class="mono">fp.id</span> 走，不出现「左栏点 A 右栏显 B」</span>
+  <span><span class="anno">3</span> Storybook 锚点来自 GitNexus <span class="mono">discoverViews</span> + story parameters 桥；无 story 时该节诚实空态</span>
+  <span><span class="anno">4</span> 代码行块来自 GN Preview 已验证的 source-locate 通道（fiber <span class="mono">__source</span>），写回 <span class="mono">codeHints</span> 后拆解 / 验收 / AI 工作包共用</span>
+  <span><span class="anno">5</span> 图谱邻域复用画面 11 子 TAB 4 的查询，零等待本体层；节点可点击跳进 GitNexus 图谱页</span>
 </div>
 
 </div><!-- /frame-wrap -->

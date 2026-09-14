@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MousePointerClick } from "lucide-react";
 import type { BusMatrixCell } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../i18n";
 import { ArchiveEmpty } from "../archive/query-states";
@@ -22,11 +24,19 @@ import { ArchiveEmpty } from "../archive/query-states";
 export function BusMatrixSidebar({
   cells,
   selectedCell,
+  onSaveCell,
 }: {
   cells: BusMatrixCell[];
   selectedCell: BusMatrixCell | null;
+  onSaveCell?: (cell: BusMatrixCell, read: number, write: number) => void;
 }) {
   const { t } = useT("archive");
+  const [readDraft, setReadDraft] = useState("0");
+  const [writeDraft, setWriteDraft] = useState("0");
+  useEffect(() => {
+    setReadDraft(String(selectedCell?.read_count ?? 0));
+    setWriteDraft(String(selectedCell?.write_count ?? 0));
+  }, [selectedCell]);
 
   // All three derivations run before the `!selectedCell` early return: hooks
   // must not be conditional, and the empty state is a return, not a branch.
@@ -211,6 +221,55 @@ export function BusMatrixSidebar({
           ))}
         </ul>
       </div>
+
+      {onSaveCell && (
+        <div className="space-y-2 border-t border-surface-border pt-3">
+          <div className="text-caption font-medium">
+            {t(($) => $.bus_manage.edit_cell)} · {selectedCell.domain}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="space-y-1">
+              <span className="text-micro text-muted-foreground">
+                {t(($) => $.bus_manage.cell_read)}
+              </span>
+              <Input
+                type="number"
+                min={0}
+                value={readDraft}
+                onChange={(event) => setReadDraft(event.target.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-micro text-muted-foreground">
+                {t(($) => $.bus_manage.cell_write)}
+              </span>
+              <Input
+                type="number"
+                min={0}
+                value={writeDraft}
+                onChange={(event) => setWriteDraft(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="flex gap-1.5">
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => onSaveCell(selectedCell, 0, 0)}
+            >
+              {t(($) => $.bus_manage.cell_clear)}
+            </Button>
+            <Button
+              size="xs"
+              onClick={() =>
+                onSaveCell(selectedCell, Number(readDraft) || 0, Number(writeDraft) || 0)
+              }
+            >
+              {t(($) => $.bus_manage.cell_save)}
+            </Button>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

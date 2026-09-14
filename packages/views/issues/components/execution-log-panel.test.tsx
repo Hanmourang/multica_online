@@ -101,6 +101,13 @@ describe("ExecutionLogPanel", () => {
     await screen.findByTestId("agent-transcript-embedded");
   });
 
+  it("hides the run rail when there is only one run", async () => {
+    renderPanel([labeled({ id: "only", status: "running" }, "T1")]);
+    await screen.findByTestId("agent-transcript-embedded");
+    expect(screen.queryByText("Runs")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("exec-run-only")).not.toBeInTheDocument();
+  });
+
   it("honors a deep-linked run id", async () => {
     renderPanel(
       [

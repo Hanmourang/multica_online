@@ -50,6 +50,8 @@ import type {
   ChatPendingTask,
 } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { preparePageSurfaceSend, usePageSurfaceContext } from "../lib/page-surface-context";
+import { fanOutChatMessage, useChatFanout } from "../lib/fanout-agents";
 import { useAppForeground } from "../../common/use-app-foreground";
 
 const uiLogger = createLogger("chat.ui");
@@ -383,6 +385,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const noAgent = agentAvailability === "none";
 
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
+  const pageSurface = usePageSurfaceContext((state) => state.context);
 
   const presenceDetail = useAgentPresenceDetail(wsId, activeAgent?.id);
   const availability =
@@ -529,20 +532,19 @@ export function useChatController(opts?: { isActive?: boolean }) {
         return false;
       }
 
-      const finalContent = content;
       const isNewSession = !activeSessionId;
 
       apiLogger.info("sendChatMessage.start", {
         sessionId: activeSessionId,
         isNewSession,
         agentId: activeAgent.id,
-        contentLength: finalContent.length,
+        contentLength: content.length,
         attachmentCount: attachmentIds?.length ?? 0,
       });
 
       let sessionId: string | null = null;
       try {
-        sessionId = await ensureSession(finalContent);
+        sessionId = await ensureSession(content);
       } catch (err) {
         apiLogger.error("sendChatMessage.ensureSession.error", err);
         // A revoked invoke permission blocks session create with a structured
@@ -568,9 +570,24 @@ export function useChatController(opts?: { isActive?: boolean }) {
       // draft is never cleared, before the roundtrip settles — a slow send never
       // reads as "posted but the box is still full", and a rejected one keeps
       // the draft for retry (ChatInput never cleared it).
+      let prepared;
+      try {
+        prepared = await preparePageSurfaceSend(api, content, pageSurface, sessionId);
+      } catch (err) {
+        apiLogger.error("sendChatMessage.pageSurface.error", { sessionId, err });
+        prepared = { content, attachmentIds: [], attachments: [] };
+      }
+      const finalContent = prepared.content;
+      const mergedAttachmentIds = [...(attachmentIds ?? []), ...prepared.attachmentIds];
+      const mergedAttachments = [...draftAttachments, ...prepared.attachments];
+
       let result;
       try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+        result = await api.sendChatMessage(
+          sessionId,
+          finalContent,
+          mergedAttachmentIds.length > 0 ? mergedAttachmentIds : undefined,
+        );
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
         // Invoke permission can be revoked mid-session; the send is refused with
@@ -607,7 +624,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
         content: finalContent,
         task_id: result.task_id,
         created_at: result.created_at,
-        attachments: draftAttachments,
+        attachments: mergedAttachments,
       };
       // Single door into the message caches (MUL-5711): idempotent by id, so
       // this row and the chat:message echo of the same send converge in either
@@ -641,9 +658,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
         });
         return false;
       }
-      if (attachmentIds && attachmentIds.length > 0 && result.attachment_ids) {
+      if (mergedAttachmentIds.length > 0 && result.attachment_ids) {
         const boundIds = new Set(result.attachment_ids);
-        const missing = attachmentIds.filter((id) => !boundIds.has(id));
+        const missing = mergedAttachmentIds.filter((id) => !boundIds.has(id));
         if (missing.length > 0) {
           apiLogger.warn("sendChatMessage.attachments missing after send", {
             sessionId,
@@ -655,6 +672,28 @@ export function useChatController(opts?: { isActive?: boolean }) {
       }
       qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
       qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+
+      const extraAgentIds = useChatFanout.getState().extraAgentIds;
+      if (extraAgentIds.length > 0) {
+        const fanout = await fanOutChatMessage({
+          extraAgentIds,
+          agents: availableAgents,
+          content,
+          projectId: activeProjectId,
+          pageSurface,
+          api,
+          createSession: (data) => createSession.mutateAsync(data),
+        });
+        if (fanout.failed === 0) {
+          toast.success(t(($) => $.input.fanout_ok, { count: fanout.sent + 1 }));
+        } else if (fanout.sent === 0) {
+          toast.error(t(($) => $.input.fanout_failed));
+        } else {
+          toast.error(
+            t(($) => $.input.fanout_partial, { sent: fanout.sent + 1, failed: fanout.failed }),
+          );
+        }
+      }
       return true;
     },
     [
@@ -669,6 +708,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
       cancelChatTask,
       qc,
       setActiveSession,
+      pageSurface,
+      availableAgents,
+      createSession,
+      activeProjectId,
       t,
     ],
   );

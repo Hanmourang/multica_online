@@ -62,7 +62,7 @@ import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import { firstWorkbenchStage } from "../calendar/calendar-helpers";
+import { alignDueToStartDay, firstWorkbenchStage } from "../calendar/calendar-helpers";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
@@ -88,7 +88,7 @@ import {
   useSetIssueProperty,
 } from "@multica/core/properties";
 import { projectRoleDefaultsOptions, projectRolePlaybooksOptions } from "@multica/core/issues/queries";
-import { projectResourcesOptions } from "@multica/core/projects";
+import { projectDetailOptions, projectResourcesOptions } from "@multica/core/projects";
 import type { ProjectResource, RoleAssignment, RolePlaybookBundle } from "@multica/core/types";
 import {
   ApiError,
@@ -115,6 +115,11 @@ import {
 } from "../issues/components/role-roster";
 import { overridesEqual, withOverride } from "../issues/components/role-playbook";
 import { useT } from "../i18n";
+import { isDesktopShell } from "../platform";
+import {
+  requirementKeysFromArtifacts,
+  scaffoldRequirementArchive,
+} from "../projects/components/archive/requirement-scaffold";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
@@ -450,7 +455,9 @@ export function ManualCreatePanel({
   const [dueAt, setDueAt] = useState(() => {
     if (typeof data?.due_at === "string") return data.due_at;
     if (typeof data?.due_date === "string") return `${data.due_date}T18:00`;
-    return defaultRequirementTimes().due;
+    const start =
+      typeof data?.start_at === "string" ? data.start_at : defaultRequirementTimes().start;
+    return alignDueToStartDay(start, defaultRequirementTimes().due);
   });
   const [decomposeMode, setDecomposeMode] = useState<"auto" | "confirm" | "manual">("confirm");
   const [autoTrigger, setAutoTrigger] = useState(true);
@@ -503,6 +510,10 @@ export function ManualCreatePanel({
   const { data: projectResources = [] } = useQuery({
     ...projectResourcesOptions(wsId, projectId ?? ""),
     enabled: showRequirementFields,
+  });
+  const { data: projectDetail } = useQuery({
+    ...projectDetailOptions(wsId, projectId ?? ""),
+    enabled: showRequirementFields && !!projectId,
   });
   const { data: projectModules = [] } = useQuery({
     ...projectModulesOptions(wsId, projectId ?? ""),
@@ -776,6 +787,33 @@ export function ManualCreatePanel({
             auto_trigger: false,
           } : {}),
         });
+      }
+
+      if (showRequirementFields && projectId && !parentIssueId && !anchorCommentId) {
+        try {
+          const listed = await api.listProjectArtifacts(projectId);
+          const boundId = projectDetail?.archive_resource_id;
+          const bound = projectResources.find((resource) => resource.id === boundId);
+          const localPath =
+            bound?.resource_type === "local_directory"
+              ? (bound.resource_ref as { local_path?: string }).local_path
+              : undefined;
+          const result = await scaffoldRequirementArchive({
+            issueId: issue.id,
+            title: title.trim(),
+            existingKeys: requirementKeysFromArtifacts(listed.artifacts),
+            archiveRoot: isDesktopShell() ? localPath ?? null : null,
+            createArtifact: (body) => api.createProjectArtifact(projectId, body),
+          });
+          toast.info(
+            result.written
+              ? t(($) => $.create_issue.scaffold_ok_disk, { key: result.key })
+              : t(($) => $.create_issue.scaffold_ok, { key: result.key }),
+          );
+        } catch (err) {
+          console.error("[create-issue] requirement archive scaffold failed", err);
+          toast.info(t(($) => $.create_issue.scaffold_failed));
+        }
       }
 
       // Dependency edges can only be addressed once the issue has an id.
@@ -1910,7 +1948,11 @@ export function ManualCreatePanel({
                       step={60}
                       className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-body focus:outline-none focus:ring-1 focus:ring-ring"
                       value={startAt}
-                      onChange={(e) => setStartAt(e.target.value)}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setStartAt(next);
+                        setDueAt((current) => alignDueToStartDay(next, current));
+                      }}
                     />
                   </div>
                   <div>

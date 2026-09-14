@@ -1094,7 +1094,7 @@ export function AgentTranscriptDialog({
 
         {/* ── List toolbar: search left, the two menus right ── */}
         <div className="flex items-center gap-2 border-b px-4 py-1.5 shrink-0">
-          <label className="flex h-7 min-w-0 max-w-xs flex-1 items-center gap-1.5 rounded-md bg-muted px-2 text-caption">
+          <label className="flex h-7 min-w-0 max-w-xl flex-1 items-center gap-1.5 rounded-md bg-muted px-2 text-caption">
             <Search aria-hidden className="h-3 w-3 shrink-0 text-faint-foreground" />
             <input
               value={query}
@@ -1201,19 +1201,29 @@ export function AgentTranscriptDialog({
         </div>
 
         {/* ── Steps, and the inspector when one is selected ───────────── */}
-        <div className={embedded ? "flex" : "flex min-h-0 flex-1"}>
+        <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
             {displayRows.length === 0 ? (
-              <div className="flex items-center justify-center py-10 text-body text-muted-foreground">
+              <div
+                className={cn(
+                  "flex items-center justify-center text-body text-muted-foreground",
+                  embedded ? "px-4 py-8" : "py-10",
+                )}
+              >
                 {isAntigravityLiveEmpty ? (
                   <div className="flex max-w-md items-center gap-2 px-4 text-center">
                     <Clock className="h-4 w-4 shrink-0" />
                     {t(($) => $.transcript.antigravity_live_unavailable)}
                   </div>
                 ) : isLive && steps.length === 0 ? (
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {t(($) => $.transcript.waiting_events)}
+                  <div className="flex max-w-md flex-col items-center gap-1.5 text-center">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {t(($) => $.transcript.waiting_events)}
+                    </div>
+                    <p className="text-caption text-muted-foreground">
+                      {t(($) => $.transcript.waiting_events_hint)}
+                    </p>
                   </div>
                 ) : steps.length === 0 ? (
                   t(($) => $.transcript.no_data)
@@ -1294,7 +1304,7 @@ export function AgentTranscriptDialog({
     return (
       <div
         data-testid="agent-transcript-embedded"
-        className="flex flex-col bg-background"
+        className="flex h-full min-h-0 flex-col bg-background"
       >
         {shell}
       </div>

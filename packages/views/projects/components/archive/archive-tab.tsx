@@ -2,12 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Eye, FileStack, FolderGit2, FolderSearch, Link2, Package, Pencil, Play, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Ticket } from "lucide-react";
+import { Eye, FileStack, FolderGit2, FolderSearch, Link2, MoreHorizontal, Package, Pencil, Play, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Tags, Ticket } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useSyncProjectArtifacts } from "@multica/core/artifacts/mutations";
-import { projectArtifactListOptions } from "@multica/core/artifacts/queries";
+import { usePatchArtifact, useSyncProjectArtifacts } from "@multica/core/artifacts/mutations";
+import {
+  archiveSyncConfigOptions,
+  projectArtifactListOptions,
+} from "@multica/core/artifacts/queries";
+import { calendarIssuesOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions, projectResourcesOptions } from "@multica/core/projects";
 import type {
   ArtifactScope,
@@ -26,16 +30,44 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
+import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { isDesktopShell } from "../../../platform";
 import { useT } from "../../../i18n";
+import { collectLocalArchiveSyncItems } from "./archive-sync-manifest";
 import { AppLink } from "../../../navigation";
 import { ArchiveActionDialog } from "./archive-action-dialog";
 import { ArchiveImportDialog } from "./archive-import-dialog";
 import { ArtifactEditorDialog, type ArtifactEditorSeed } from "./artifact-editor-dialog";
 import { ArtifactListTable } from "./artifact-list";
 import { ArtifactMatrix } from "./artifact-matrix";
-import { artifactDisplayName, resolveArchivePreviewRoots } from "./archive-display";
+import {
+  artifactDisplayName,
+  artifactModuleTag,
+  resolveArchivePreviewRoots,
+} from "./archive-display";
+import { persistDocModuleValue } from "./archive-module";
+import {
+  PLANNING_SHELVES,
+  writebackArtifactFrontmatter,
+  type PlanningShelf,
+} from "./archive-mapping";
+import {
+  relocateToShelf,
+  writeRelocatedArchiveFile,
+} from "./archive-relocate";
+import {
+  ArtifactModuleBadge,
+  ArtifactModuleField,
+} from "./artifact-module-tag";
 import { ArtifactPreviewDialog } from "./artifact-preview";
 import { ArtifactPreviewPane } from "./artifact-preview-pane";
 import { ContractMapping } from "./contract-mapping";
@@ -68,6 +100,7 @@ export function ArchiveTab({
   const [scope, setScope] = useState<ArtifactScope | null>(null);
   const [stage, setStage] = useState<ArtifactStage | null>(null);
   const [docType, setDocType] = useState<string | null>(null);
+  const [docClass, setDocClass] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [missingOnly, setMissingOnly] = useState(false);
   const [view, setView] = useState<"matrix" | "list">("matrix");
@@ -80,22 +113,44 @@ export function ArchiveTab({
   const [editorSeed, setEditorSeed] = useState<ArtifactEditorSeed | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [archiveRoot, setArchiveRoot] = useState<string | null>(null);
+  const [localSyncing, setLocalSyncing] = useState(false);
+  const [tagging, setTagging] = useState(false);
+  const [pickedIds, setPickedIds] = useState<Set<string>>(new Set());
+  const [batchDraft, setBatchDraft] = useState("");
+  const [tagBusy, setTagBusy] = useState(false);
+  const desktop = isDesktopShell();
+  const patchMutation = usePatchArtifact(wsId, projectId);
 
-  const filters: ListArtifactsParams | undefined = useMemo(
-    () =>
-      scope || stage || docType
-        ? {
-            ...(scope ? { scope } : {}),
-            ...(stage ? { stage } : {}),
-            ...(docType ? { doc_type: docType } : {}),
-          }
-        : undefined,
-    [scope, stage, docType],
-  );
+  const filters: ListArtifactsParams | undefined = useMemo(() => {
+    const next: ListArtifactsParams = {
+      ...(scope ? { scope } : {}),
+      ...(stage ? { stage } : {}),
+      ...(docType ? { doc_type: docType } : {}),
+      ...(docClass ? { doc_class: docClass } : {}),
+      ...(search.trim() ? { q: search.trim() } : {}),
+    };
+    return Object.keys(next).length > 0 ? next : undefined;
+  }, [scope, stage, docType, docClass, search]);
 
   const listQuery = useQuery(projectArtifactListOptions(wsId, projectId, filters));
+  const allQuery = useQuery(projectArtifactListOptions(wsId, projectId));
+  const syncConfigQuery = useQuery(archiveSyncConfigOptions(wsId, projectId));
+  const scopeCounts = useMemo(() => {
+    const rows = allQuery.data?.artifacts ?? [];
+    return {
+      all: rows.length,
+      project: rows.filter((row) => row.scope === "project").length,
+      requirement: rows.filter((row) => row.scope === "requirement").length,
+      shared: rows.filter((row) => row.scope === "shared").length,
+    };
+  }, [allQuery.data]);
   const projectQuery = useQuery(projectDetailOptions(wsId, projectId));
   const resourcesQuery = useQuery(projectResourcesOptions(wsId, projectId));
+  const issuesQuery = useQuery(calendarIssuesOptions(wsId));
+  const projectIssues = useMemo(
+    () => (issuesQuery.data ?? []).filter((issue) => issue.project_id === projectId),
+    [issuesQuery.data, projectId],
+  );
   const boundPath = useMemo(() => {
     const boundId = projectQuery.data?.archive_resource_id;
     if (!boundId) return null;
@@ -124,29 +179,70 @@ export function ArchiveTab({
    * 只能由能读档案目录的 CLI / 本地 daemon 产出清单后提交。
    */
   const syncMutation = useSyncProjectArtifacts(projectId);
+  const syncBusy = localSyncing || syncMutation.isPending;
+  const handleSyncSuccess = (result: {
+    skipped_soft_delete?: boolean;
+    created_count: number;
+    updated_count: number;
+    deleted_count: number;
+  }) => {
+    if (result.skipped_soft_delete) {
+      toast.info(t(($) => $.sync.revalidate_noop), {
+        description: t(($) => $.sync.revalidate_hint),
+      });
+      return;
+    }
+    toast.success(
+      t(($) => $.sync.result, {
+        created: result.created_count,
+        updated: result.updated_count,
+        deleted: result.deleted_count,
+      }),
+    );
+  };
   const handleSync = () => {
+    const root = archiveRoot ?? boundPath;
+    if (desktop && root) {
+      setLocalSyncing(true);
+      void collectLocalArchiveSyncItems(root, {
+        conflictPolicy: syncConfigQuery.data?.conflict_policy ?? "path_first",
+      })
+        .then((collected) => {
+          if (collected.error) {
+            toast.error(collected.error);
+            return;
+          }
+          if (collected.items.length === 0) {
+            toast.info(t(($) => $.sync.empty_local));
+            return;
+          }
+          return new Promise<void>((resolve, reject) => {
+            syncMutation.mutate(
+              { artifacts: collected.items },
+              {
+                onSuccess: (result) => {
+                  handleSyncSuccess(result);
+                  resolve();
+                },
+                onError: (error) => {
+                  toast.error(String(error));
+                  reject(error);
+                },
+              },
+            );
+          });
+        })
+        .finally(() => setLocalSyncing(false));
+      return;
+    }
+    if (desktop && !root) {
+      toast.info(t(($) => $.sync.desktop_need_root));
+      return;
+    }
     syncMutation.mutate(
       { artifacts: [] },
       {
-        onSuccess: (result) => {
-          // 空清单 no-op：服务端跳过了软删（skipped_soft_delete=true，
-          // skip_reason 通常为 "empty_manifest"）。此时 deleted_count 恒为 0，
-          // 报绿色的「同步完成」是谎言——用 info 如实说明本次没有任何写入。
-          if (result.skipped_soft_delete) {
-            toast.info(t(($) => $.sync.revalidate_noop), {
-              description: t(($) => $.sync.revalidate_hint),
-            });
-            return;
-          }
-          // 真正发生了 diff（仅当服务端返回非跳过结果时）才报计数。
-          toast.success(
-            t(($) => $.sync.result, {
-              created: result.created_count,
-              updated: result.updated_count,
-              deleted: result.deleted_count,
-            }),
-          );
-        },
+        onSuccess: (result) => handleSyncSuccess(result),
         onError: (error) => {
           toast.error(String(error));
         },
@@ -154,18 +250,7 @@ export function ArchiveTab({
     );
   };
 
-  const artifacts = useMemo(() => {
-    const rows = listQuery.data?.artifacts ?? [];
-    const query = search.trim().toLowerCase();
-    if (!query) return rows;
-    return rows.filter(
-      (a) =>
-        a.rel_path.toLowerCase().includes(query) ||
-        a.doc_type.toLowerCase().includes(query) ||
-        (a.requirement_key ?? "").toLowerCase().includes(query) ||
-        (a.rel_path.split("/").pop() ?? "").toLowerCase().includes(query),
-    );
-  }, [listQuery.data, search]);
+  const artifacts = listQuery.data?.artifacts ?? [];
 
   const unboundCount = useMemo(
     () =>
@@ -180,6 +265,158 @@ export function ArchiveTab({
     [artifacts, selectedId],
   );
 
+  const persistModule = async (artifact: ProjectArtifact, raw: string) => {
+    const next = persistDocModuleValue(artifact.rel_path, raw);
+    const current = artifact.doc_module?.trim() ?? "";
+    if (next === current) return false;
+    const updated = await patchMutation.mutateAsync({
+      artifactId: artifact.id,
+      patch: { doc_module: next },
+    });
+    if ((updated.doc_module ?? "") !== next) {
+      throw new Error(t(($) => $.browser.tag_not_persisted));
+    }
+    const root = archiveRoot ?? boundPath;
+    if (root) {
+      const written = await writebackArtifactFrontmatter({
+        archiveRoot: root,
+        relPath: artifact.rel_path,
+        docModule: next || null,
+      });
+      if (!written.ok && written.reason !== "unsupported") {
+        toast.info(t(($) => $.manage.written_db_only));
+      }
+    }
+    return true;
+  };
+
+  const handleSaveTag = async (artifact: ProjectArtifact, raw: string) => {
+    setTagBusy(true);
+    try {
+      const changed = await persistModule(artifact, raw);
+      if (changed) toast.success(t(($) => $.browser.tag_saved));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t(($) => $.browser.tag_failed));
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
+  const handleBatchTag = async () => {
+    const rows = artifacts.filter((artifact) => pickedIds.has(artifact.id));
+    if (rows.length === 0) return;
+    setTagBusy(true);
+    try {
+      for (const row of rows) {
+        await persistModule(row, batchDraft);
+      }
+      toast.success(t(($) => $.browser.tag_batch_saved, { n: rows.length }));
+      setPickedIds(new Set());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t(($) => $.browser.tag_failed));
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
+  const togglePick = (id: string, next: boolean) => {
+    setPickedIds((current) => {
+      const copy = new Set(current);
+      if (next) copy.add(id);
+      else copy.delete(id);
+      return copy;
+    });
+  };
+
+  const pickMany = (ids: string[], additive: boolean) => {
+    setPickedIds((current) => {
+      const next = additive ? new Set(current) : new Set<string>();
+      for (const id of ids) next.add(id);
+      return next;
+    });
+  };
+
+  const relocateOne = async (artifact: ProjectArtifact, shelf: PlanningShelf) => {
+    const dest = relocateToShelf(artifact.rel_path, shelf);
+    if (artifact.doc_type === shelf && dest === artifact.rel_path) return "skip";
+    if (
+      artifacts.some(
+        (row) => row.id !== artifact.id && row.rel_path === dest && !row.deleted_at,
+      )
+    ) {
+      return "exists";
+    }
+    const root = archiveRoot ?? boundPath;
+    let content: string | undefined;
+    let pointerOnly = false;
+    if (root) {
+      const written = await writeRelocatedArchiveFile({
+        archiveRoot: root,
+        fromPath: artifact.rel_path,
+        toPath: dest,
+        docType: shelf,
+      });
+      if (written.ok) {
+        content = written.content;
+      } else if (written.reason === "exists") {
+        return "exists";
+      } else if (written.reason !== "unsupported" && written.reason !== "not_found") {
+        pointerOnly = true;
+      }
+    }
+    await patchMutation.mutateAsync({
+      artifactId: artifact.id,
+      patch: {
+        doc_type: shelf,
+        rel_path: dest,
+        ...(content ? { content } : {}),
+      },
+    });
+    return pointerOnly ? "pointer" : "ok";
+  };
+
+  const handleRelocate = async (ids: string[], shelf: PlanningShelf) => {
+    const targetIds = ids.length > 0 ? ids : selectedId ? [selectedId] : [];
+    const rows = artifacts.filter((artifact) => targetIds.includes(artifact.id));
+    if (rows.length === 0) {
+      toast.info(t(($) => $.browser.move_need_pick));
+      return;
+    }
+    setTagBusy(true);
+    let moved = 0;
+    let exists = 0;
+    let skipped = 0;
+    let pointer = 0;
+    try {
+      for (const row of rows) {
+        const result = await relocateOne(row, shelf);
+        if (result === "ok") moved += 1;
+        else if (result === "pointer") pointer += 1;
+        else if (result === "exists") exists += 1;
+        else skipped += 1;
+      }
+      if (moved > 0) toast.success(t(($) => $.browser.moved, { n: moved }));
+      if (pointer > 0) toast.info(t(($) => $.browser.move_pointer_only, { n: pointer }));
+      if (exists > 0) toast.error(t(($) => $.browser.move_exists, { n: exists }));
+      if (moved === 0 && pointer === 0 && exists === 0 && skipped > 0) {
+        toast.info(t(($) => $.browser.move_same_shelf));
+      }
+      setPickedIds(new Set());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t(($) => $.browser.move_failed));
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && pickedIds.size > 0) setPickedIds(new Set());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickedIds.size]);
+
   /** f5 navigation group: same requirement (or same non-requirement scope), stage-ordered. */
   const previewGroup = useMemo(
     () => (selected ? previewGroupOf(artifacts, selected) : []),
@@ -192,16 +429,11 @@ export function ArchiveTab({
     setPreviewIndex(Math.max(0, group.findIndex((row) => row.id === artifact.id)));
   };
 
-  const scopeItems = [
-    { value: "project", label: t(($) => $.browser.scope_project) },
-    { value: "requirement", label: t(($) => $.browser.scope_requirement) },
-    { value: "shared", label: t(($) => $.browser.scope_shared) },
-  ];
   const stageItems = [
-    { value: "1", label: t(($) => $.browser.stage_s1) },
-    { value: "2", label: t(($) => $.browser.stage_s2) },
-    { value: "3", label: t(($) => $.browser.stage_s3) },
-    { value: "4", label: t(($) => $.browser.stage_s4) },
+    { value: 1 as ArtifactStage, label: t(($) => $.browser.stage_s1) },
+    { value: 2 as ArtifactStage, label: t(($) => $.browser.stage_s2) },
+    { value: 3 as ArtifactStage, label: t(($) => $.browser.stage_s3) },
+    { value: 4 as ArtifactStage, label: t(($) => $.browser.stage_s4) },
   ];
 
   const docTypeItems = useMemo(() => {
@@ -226,7 +458,10 @@ export function ArchiveTab({
         <TabsContent value="sync" className="min-h-0 overflow-y-auto px-1 pb-6">
           <SyncConsole
             projectId={projectId}
+            archiveRoot={archiveRoot ?? boundPath}
             onImport={() => setImportOpen(true)}
+            onDesktopSync={desktop ? handleSync : undefined}
+            desktopSyncPending={syncBusy}
             onEdit={(artifact) => {
               setEditorSeed(null);
               setEditorArtifact(artifact);
@@ -237,6 +472,7 @@ export function ArchiveTab({
         <TabsContent value="mapping" className="min-h-0 overflow-y-auto px-1 pb-6">
           <ContractMapping
             projectId={projectId}
+            archiveRoot={archiveRoot ?? boundPath}
             onImport={() => setImportOpen(true)}
             onCreate={() => {
               setEditorArtifact(null);
@@ -251,10 +487,28 @@ export function ArchiveTab({
           />
         </TabsContent>
 
-        <TabsContent value="browser" className="flex min-h-0 flex-col gap-3">
-          {/* Toolbar */}
+        <TabsContent value="browser" className="flex min-h-0 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-52 flex-1">
+            <div className="inline-flex rounded-md border border-surface-border p-0.5">
+              {(
+                [
+                  ["matrix", t(($) => $.browser.view_matrix)],
+                  ["list", t(($) => $.browser.view_list)],
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  type="button"
+                  size="xs"
+                  variant={view === value ? "default" : "ghost"}
+                  aria-pressed={view === value}
+                  onClick={() => setView(value)}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+            <div className="relative min-w-48 max-w-sm flex-1">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
@@ -264,44 +518,123 @@ export function ArchiveTab({
                 className="pl-8"
               />
             </div>
-            <Select
-              items={scopeItems}
-              value={scope}
-              onValueChange={(value) => setScope((value as ArtifactScope) ?? null)}
-            >
-              <SelectTrigger aria-label={t(($) => $.browser.scope_all)}>
-                <SelectValue placeholder={t(($) => $.browser.scope_all)} />
-              </SelectTrigger>
-              <SelectContent>
-                {scopeItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              items={stageItems}
-              value={stage ? String(stage) : null}
-              onValueChange={(value) => setStage(value ? (Number(value) as ArtifactStage) : null)}
-            >
-              <SelectTrigger aria-label={t(($) => $.browser.stage_all)}>
-                <SelectValue placeholder={t(($) => $.browser.stage_all)} />
-              </SelectTrigger>
-              <SelectContent>
-                {stageItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex flex-wrap items-center gap-1">
+              {(
+                [
+                  [null, t(($) => $.browser.scope_all), scopeCounts.all],
+                  ["project", t(($) => $.browser.scope_project), scopeCounts.project],
+                  ["requirement", t(($) => $.browser.scope_requirement), scopeCounts.requirement],
+                  ["shared", t(($) => $.browser.scope_shared), scopeCounts.shared],
+                ] as const
+              ).map(([value, label, count]) => (
+                <Button
+                  key={label}
+                  type="button"
+                  size="xs"
+                  variant={scope === value ? "default" : "outline"}
+                  onClick={() => setScope(value)}
+                >
+                  {t(($) => $.browser.scope_count, { label, count })}
+                </Button>
+              ))}
+            </div>
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSync}
+                disabled={syncBusy}
+                aria-label={
+                  desktop
+                    ? t(($) => $.sync.trigger)
+                    : t(($) => $.sync.revalidate)
+                }
+              >
+                <ShieldCheck className={syncBusy ? "animate-pulse" : undefined} />
+                {desktop
+                  ? syncBusy
+                    ? t(($) => $.sync.trigger_pending)
+                    : t(($) => $.sync.trigger)
+                  : syncBusy
+                    ? t(($) => $.sync.revalidate_pending)
+                    : t(($) => $.sync.revalidate)}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  setEditorArtifact(null);
+                  setEditorSeed({ scope: "project", docType: "architecture" });
+                  setEditorOpen(true);
+                }}
+              >
+                <Plus />
+                {t(($) => $.manage.create)}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button type="button" variant="outline" size="sm" />
+                  }
+                >
+                  <MoreHorizontal className="size-3.5" />
+                  {t(($) => $.archive_toolbar.more)}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setImportOpen(true)}>
+                    <FolderSearch />
+                    {t(($) => $.import.action)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setPane("mapping")}>
+                    <Settings2 />
+                    {t(($) => $.archive_toolbar.settings)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setPane("sync")}>
+                    <Link2 />
+                    {t(($) => $.archive_toolbar.sync_relate)}
+                    {unboundCount > 0
+                      ? ` · ${t(($) => $.archive_toolbar.unbound_count, { n: unboundCount })}`
+                      : null}
+                  </DropdownMenuItem>
+                  {onExportFiling ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={onExportFiling}>
+                        <Package />
+                        {t(($) => $.archive_toolbar.export_filing)}
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {stageItems.map((item) => (
+              <Button
+                key={item.value}
+                type="button"
+                size="xs"
+                variant={stage === item.value ? "default" : "outline"}
+                aria-pressed={stage === item.value}
+                onClick={() =>
+                  setStage((current) => (current === item.value ? null : item.value))
+                }
+              >
+                {item.label}
+              </Button>
+            ))}
             <Select
               items={docTypeItems}
               value={docType}
               onValueChange={(value) => setDocType(value ?? null)}
             >
-              <SelectTrigger aria-label={t(($) => $.browser.doc_type_all)}>
+              <SelectTrigger
+                size="sm"
+                className="w-40"
+                aria-label={t(($) => $.browser.doc_type_all)}
+              >
                 <SelectValue placeholder={t(($) => $.browser.doc_type_all)} />
               </SelectTrigger>
               <SelectContent>
@@ -314,8 +647,19 @@ export function ArchiveTab({
             </Select>
             <Button
               type="button"
+              variant={docClass === "planning" ? "default" : "outline"}
+              size="xs"
+              onClick={() =>
+                setDocClass((current) => (current === "planning" ? null : "planning"))
+              }
+              aria-pressed={docClass === "planning"}
+            >
+              {t(($) => $.browser.planning_group)}
+            </Button>
+            <Button
+              type="button"
               variant={missingOnly ? "default" : "outline"}
-              size="sm"
+              size="xs"
               onClick={() => setMissingOnly((v) => !v)}
               aria-pressed={missingOnly}
             >
@@ -324,75 +668,81 @@ export function ArchiveTab({
             </Button>
             <Button
               type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleSync}
-              disabled={syncMutation.isPending}
-              aria-label={t(($) => $.sync.revalidate)}
-            >
-              <ShieldCheck className={syncMutation.isPending ? "animate-pulse" : undefined} />
-              {syncMutation.isPending
-                ? t(($) => $.sync.revalidate_pending)
-                : t(($) => $.sync.revalidate)}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
+              variant={tagging ? "default" : "outline"}
+              size="xs"
               onClick={() => {
-                setEditorArtifact(null);
-                setEditorSeed({ scope: "project", docType: "architecture" });
-                setEditorOpen(true);
+                setTagging((current) => {
+                  if (current) setPickedIds(new Set());
+                  return !current;
+                });
               }}
+              aria-pressed={tagging}
             >
-              <Plus />
-              {t(($) => $.manage.create)}
+              <Tags />
+              {tagging
+                ? t(($) => $.browser.tag_batch_exit)
+                : t(($) => $.browser.tag_batch)}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setImportOpen(true)}
-            >
-              <FolderSearch />
-              {t(($) => $.import.action)}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPane("mapping")}
-            >
-              <Settings2 />
-              {t(($) => $.archive_toolbar.settings)}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPane("sync")}
-            >
-              <Link2 />
-              {t(($) => $.archive_toolbar.sync_relate)}
-              {unboundCount > 0 && (
-                <Badge variant="secondary" className="ml-1 tabular-nums">
-                  {t(($) => $.archive_toolbar.unbound_count, { n: unboundCount })}
-                </Badge>
-              )}
-            </Button>
-            {onExportFiling && (
-              <Button type="button" variant="outline" size="sm" onClick={onExportFiling}>
-                <Package />
-                {t(($) => $.archive_toolbar.export_filing)}
-              </Button>
-            )}
-            <Badge variant="secondary" className="tabular-nums">
+            <Badge variant="secondary" className="ml-auto tabular-nums">
               {listQuery.data?.total ?? 0}
             </Badge>
           </div>
+          {tagging || pickedIds.size > 0 || selected ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-400/10 px-3 py-2">
+              <span className="text-caption text-amber-950 dark:text-amber-50">
+                {pickedIds.size > 0
+                  ? t(($) => $.browser.picked_count, { n: pickedIds.size })
+                  : t(($) => $.browser.tag_batch_hint)}
+              </span>
+              <Input
+                value={batchDraft}
+                onChange={(event) => setBatchDraft(event.target.value)}
+                placeholder={t(($) => $.browser.tag_placeholder)}
+                className="max-w-52"
+                aria-label={t(($) => $.browser.tag_placeholder)}
+              />
+              <Button
+                type="button"
+                size="sm"
+                disabled={pickedIds.size === 0 || tagBusy || !batchDraft.trim()}
+                onClick={() => void handleBatchTag()}
+              >
+                {t(($) => $.browser.tag_batch_apply, { n: pickedIds.size })}
+              </Button>
+              <span className="text-[11px] text-muted-foreground">
+                {t(($) => $.browser.move_to)}
+              </span>
+              {PLANNING_SHELVES.map((shelf) => (
+                <Button
+                  key={shelf}
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  disabled={tagBusy || (pickedIds.size === 0 && !selectedId)}
+                  onClick={() => void handleRelocate([...pickedIds], shelf)}
+                >
+                  {shelf}
+                </Button>
+              ))}
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={pickedIds.size === 0}
+                onClick={() => setPickedIds(new Set())}
+              >
+                {t(($) => $.browser.clear_picks)}
+              </Button>
+            </div>
+          ) : null}
 
-          {/* Body: list view (left) + selection panel (right) */}
-          <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(360px,480px)]">
-            <div className="min-h-0">
+          <div
+            className={cn(
+              "grid min-h-0 flex-1 gap-3",
+              selected && "lg:grid-cols-[minmax(0,1fr)_minmax(260px,320px)]",
+            )}
+          >
+            <div className="min-h-0 overflow-y-auto">
               {listQuery.isPending ? (
                 <QueryLoading rows={6} />
               ) : listQuery.isError ? (
@@ -400,40 +750,44 @@ export function ArchiveTab({
                   onRetry={() => void listQuery.refetch()}
                   message={String(listQuery.error)}
                 />
+              ) : view === "matrix" ? (
+                <ArtifactMatrix
+                  artifacts={artifacts}
+                  issues={projectIssues}
+                  requirementHref={(issueId) => paths.projectRequirement(projectId, issueId)}
+                  selectedId={selectedId}
+                  onSelect={openPreview}
+                  onOpenRequirement={onOpenRequirement}
+                  onCreateMissing={(seed) => {
+                    setEditorArtifact(null);
+                    setEditorSeed(seed);
+                    setEditorOpen(true);
+                  }}
+                  missingOnly={missingOnly}
+                  tagging={tagging || pickedIds.size > 0}
+                  pickedIds={pickedIds}
+                  onTogglePick={togglePick}
+                  onSaveTag={handleSaveTag}
+                  tagBusy={tagBusy}
+                  onPickMany={pickMany}
+                  onRelocate={(ids, shelf) => void handleRelocate(ids, shelf)}
+                />
               ) : (
-                <Tabs value={view} onValueChange={(value) => setView(value as "matrix" | "list")}>
-                  <TabsList className="mb-3">
-                    <TabsTrigger value="matrix">{t(($) => $.browser.view_matrix)}</TabsTrigger>
-                    <TabsTrigger value="list">{t(($) => $.browser.view_list)}</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="matrix">
-                    <ArtifactMatrix
-                      artifacts={artifacts}
-                      selectedId={selectedId}
-                      onSelect={openPreview}
-                      onOpenRequirement={onOpenRequirement}
-                      onCreateMissing={(seed) => {
-                        setEditorArtifact(null);
-                        setEditorSeed(seed);
-                        setEditorOpen(true);
-                      }}
-                      missingOnly={missingOnly}
-                    />
-                  </TabsContent>
-                  <TabsContent value="list">
-                    <ArtifactListTable
-                      artifacts={artifacts}
-                      selectedId={selectedId}
-                      onSelect={openPreview}
-                    />
-                  </TabsContent>
-                </Tabs>
+                <ArtifactListTable
+                  artifacts={artifacts}
+                  selectedId={selectedId}
+                  onSelect={openPreview}
+                  tagging={tagging || pickedIds.size > 0}
+                  pickedIds={pickedIds}
+                  onTogglePick={togglePick}
+                  onSaveTag={handleSaveTag}
+                  tagBusy={tagBusy}
+                />
               )}
             </div>
 
-            {/* Right-hand selection panel (f4 ar-aside). */}
-            <aside className="space-y-2 overflow-y-auto rounded-lg border border-surface-border bg-surface p-3">
-              {selected ? (
+            {selected ? (
+            <aside className="hidden min-h-0 space-y-2 overflow-y-auto rounded-lg border border-surface-border bg-surface p-3 lg:block">
                 <>
                   <button
                     type="button"
@@ -444,6 +798,10 @@ export function ArchiveTab({
                     <span className="min-w-0 flex-1 truncate text-caption font-medium">
                       {artifactDisplayName(selected.rel_path)}
                     </span>
+                    <ArtifactModuleBadge
+                      tag={artifactModuleTag(selected.rel_path, selected.doc_module)}
+                      title={t(($) => $.browser.module)}
+                    />
                   </button>
                   <ArtifactPreviewPane
                     artifact={selected}
@@ -459,6 +817,19 @@ export function ArchiveTab({
                       value={selected.stage ? `S${selected.stage}` : t(($) => $.browser.stage_missing)}
                     />
                     <MetaRow label={t(($) => $.preview.field_doc_type)} value={selected.doc_type} />
+                    {selected.doc_class ? (
+                      <MetaRow label={t(($) => $.mapping.col_class)} value={selected.doc_class} />
+                    ) : null}
+                    <div className="space-y-1">
+                      <div className="text-micro text-muted-foreground">
+                        {t(($) => $.browser.module)}
+                      </div>
+                      <ArtifactModuleField
+                        artifact={selected}
+                        onSave={(value) => handleSaveTag(selected, value)}
+                        busy={tagBusy}
+                      />
+                    </div>
                     <MetaRow label={t(($) => $.preview.field_version)} value={`v${selected.version}`} />
                     <MetaRow label={t(($) => $.preview.field_source)} value={selected.source} />
                     <MetaRow label={t(($) => $.preview.field_blob_sha)} value={selected.blob_sha.slice(0, 12)} />
@@ -530,12 +901,8 @@ export function ArchiveTab({
                     </Button>
                   </div>
                 </>
-              ) : (
-                <p className="py-8 text-center text-caption leading-relaxed text-muted-foreground">
-                  {t(($) => $.browser.select_hint)}
-                </p>
-              )}
             </aside>
+            ) : null}
           </div>
         </TabsContent>
       </Tabs>

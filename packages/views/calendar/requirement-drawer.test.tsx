@@ -199,6 +199,24 @@ describe("RequirementDrawer", () => {
 
     expect(mockApi.getIssue).toHaveBeenCalledWith("req-1");
     expect(mockApi.listChildIssues).toHaveBeenCalledWith("req-1");
+    expect(screen.getByTestId("requirement-workbench")).toHaveAttribute(
+      "data-desktop-chrome",
+      "false",
+    );
+  });
+
+  it("clears the desktop title-bar chrome when running in the Electron shell", async () => {
+    Object.defineProperty(window, "desktopAPI", {
+      configurable: true,
+      value: { pickDirectory: vi.fn() },
+    });
+    renderDrawer(
+      <RequirementDrawer issueId="req-1" onOpenChange={vi.fn()} />,
+    );
+    const panel = await screen.findByTestId("requirement-workbench");
+    expect(panel).toHaveAttribute("data-desktop-chrome", "true");
+    expect(panel.className).toContain("top-12");
+    Reflect.deleteProperty(window, "desktopAPI");
   });
 
   it("renders enabled roster avatars in the drawer header", async () => {

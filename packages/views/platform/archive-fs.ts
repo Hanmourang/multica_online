@@ -34,6 +34,10 @@ interface DesktopArchiveAPI {
     root: string,
     relPath: string,
   ) => Promise<ReadArchiveFileResult>;
+  removeArchiveFile?: (
+    root: string,
+    relPath: string,
+  ) => Promise<WriteArchiveFileResult>;
 }
 
 function readDesktopAPI(): DesktopArchiveAPI | undefined {
@@ -66,4 +70,13 @@ export async function readArchiveFile(
   const api = readDesktopAPI();
   if (!api?.readArchiveFile) return { ok: false, reason: "unsupported" };
   return api.readArchiveFile(root, relPath);
+}
+
+export async function removeArchiveFile(
+  root: string,
+  relPath: string,
+): Promise<WriteArchiveFileResult> {
+  const api = readDesktopAPI();
+  if (!api?.removeArchiveFile) return { ok: false, reason: "unsupported" };
+  return api.removeArchiveFile(root, relPath);
 }

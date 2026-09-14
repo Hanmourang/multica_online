@@ -29,6 +29,8 @@ import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
+import { pageSurfaceChip, usePageSurfaceContext } from "../lib/page-surface-context";
+import { useChatFanout } from "../lib/fanout-agents";
 
 const logger = createLogger("chat.ui");
 const EMPTY_UPLOADS: DraftUpload[] = [];
@@ -175,6 +177,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
+  const extraAgentCount = useChatFanout((state) => state.extraAgentIds.length);
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -207,6 +210,7 @@ export function ChatInput({
   //     later upload.
   // Embedded surfaces (Agent Builder) still pass `editorKeyOverride` to isolate
   // their own composer.
+  const pageSurface = usePageSurfaceContext((state) => state.context);
   const draftKey = draftKeyOverride ?? activeSessionId ?? DRAFT_NEW_SESSION;
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
@@ -589,7 +593,12 @@ export function ChatInput({
           ? t(($) => $.input.placeholder_runtime_required)
         : t(($) => $.input.placeholder_archived)
       : agentName
-        ? t(($) => $.input.placeholder_named, { name: agentName })
+        ? extraAgentCount > 0
+          ? t(($) => $.input.placeholder_named_many, {
+              name: agentName,
+              count: extraAgentCount + 1,
+            })
+          : t(($) => $.input.placeholder_named, { name: agentName })
         : t(($) => $.input.placeholder_default);
 
   const uploadEnabled = !!uploadAllowed && !disabled && !noAgent;
@@ -680,6 +689,13 @@ export function ChatInput({
                 {t(($) => $.input.project_context_unsupported)}
               </span>
             )}
+          </div>
+        )}
+        {pageSurface?.surface === "prototype" && (
+          <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2">
+            <span className="inline-flex max-w-full items-center rounded-full border border-primary/25 bg-primary/8 px-2 py-0.5 text-[10.5px] font-semibold text-primary">
+              {t(($) => $.input.page_prototype_mounted, { name: pageSurfaceChip(pageSurface) })}
+            </span>
           </div>
         )}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">

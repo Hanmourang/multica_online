@@ -331,6 +331,7 @@
     "dialog_description": "Custom runtime definitions are workspace-wide and sync to every connected machine. A machine registers the runtime when the command is available there.",
     "create_dialog_description": "Set up a custom command from {{machine}}. The definition syncs workspace-wide and registers only on machines where that command is available.",
     "learn_more": "View setup guide",
+    "family_docs": "View {{family}} setup guide",
     "close": "Close",
     "add_new": "New custom runtime",
     "list_title": "Runtime backends",

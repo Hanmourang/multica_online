@@ -21,6 +21,31 @@ import (
 // change it without also updating those consumers.
 const openclawNoParseableOutput = "openclaw returned no parseable output"
 
+// extractOpenclawUpstreamError pulls a user-visible provider failure out of
+// OpenClaw's stderr when stdout had no parseable result. Without this the
+// UI only shows "openclaw returned no parseable output" while the real
+// cause — a taken-down model, a rejected key — sits in the daemon log.
+func extractOpenclawUpstreamError(stderr string) string {
+	stderr = sanitizeAgentDiagnostic(stderr)
+	if stderr == "" {
+		return ""
+	}
+	if strings.Contains(stderr, "模型已下架") {
+		return "openclaw: 模型已下架，建议更换新模型"
+	}
+	if strings.Contains(stderr, "无效的api key") || strings.Contains(stderr, "无效的 API key") {
+		return "openclaw: 无效的api key"
+	}
+	lower := strings.ToLower(stderr)
+	if strings.Contains(lower, "model was not found") || strings.Contains(lower, "model_not_found") {
+		return "openclaw: the selected model was not found by the provider"
+	}
+	if strings.Contains(lower, "invalid api key") || (strings.Contains(lower, "unauthorized") && strings.Contains(lower, "api")) {
+		return "openclaw: invalid api key"
+	}
+	return ""
+}
+
 // minOpenclawVersion is the lowest openclaw version that emits its
 // --json result on stdout. PR #2101 swapped the adapter from reading
 // stderr to stdout; older builds wrote JSON to stderr and now appear
@@ -108,7 +133,8 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[openclaw:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
@@ -187,6 +213,12 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		case exitErr != nil && scanResult.status == "completed":
 			scanResult.status = "failed"
 			scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
+		}
+
+		if scanResult.errMsg == openclawNoParseableOutput {
+			if hint := extractOpenclawUpstreamError(stderrBuf.Tail()); hint != "" {
+				scanResult.errMsg = hint
+			}
 		}
 
 		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())

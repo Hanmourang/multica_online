@@ -32,14 +32,8 @@ import {
   handleRowActivationKey,
   type RowActionItem,
 } from "../../common/row-actions-menu";
-import {
-  PickerEmpty,
-  PickerItem,
-  PickerSection,
-  PropertyPicker,
-} from "../../issues/components/pickers/property-picker";
-import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { OfflineBanner } from "./offline-banner";
+import { AgentDropdown } from "./agent-dropdown";
 import { NoAgentBanner } from "./no-agent-banner";
 import { ArchivedAgentBanner } from "./archived-agent-banner";
 import { AgentAccessRevokedBanner } from "./agent-access-revoked-banner";
@@ -87,6 +81,8 @@ import {
   seedAcceptedPendingTask,
 } from "./use-chat-controller";
 import { useChatProjectContextSupport } from "./use-chat-project-context-support";
+import { preparePageSurfaceSend, usePageSurfaceContext } from "../lib/page-surface-context";
+import { fanOutChatMessage, useChatFanout } from "../lib/fanout-agents";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, Attachment, ChatMessage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
@@ -280,6 +276,7 @@ export function ChatWindow() {
   );
 
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
+  const pageSurface = usePageSurfaceContext((state) => state.context);
 
   // Three-state availability — "loading" stays neutral (no banner, no
   // disable) so the input doesn't flash a fake "no agent" state in the
@@ -471,21 +468,19 @@ export function ChatWindow() {
         return false;
       }
 
-      const finalContent = content;
-
       const isNewSession = !activeSessionId;
 
       apiLogger.info("sendChatMessage.start", {
         sessionId: activeSessionId,
         isNewSession,
         agentId: activeAgent.id,
-        contentLength: finalContent.length,
+        contentLength: content.length,
         attachmentCount: attachmentIds?.length ?? 0,
       });
 
       let sessionId: string | null = null;
       try {
-        sessionId = await ensureSession(finalContent);
+        sessionId = await ensureSession(content);
       } catch (err) {
         apiLogger.error("sendChatMessage.ensureSession.error", err);
         const reason = dispatchReasonCode(err);
@@ -509,9 +504,24 @@ export function ChatWindow() {
       // draft is never cleared, before the roundtrip settles — a slow send never
       // reads as "posted but the box is still full", and a rejected one keeps
       // the draft for retry (ChatInput never cleared it).
+      let prepared;
+      try {
+        prepared = await preparePageSurfaceSend(api, content, pageSurface, sessionId);
+      } catch (err) {
+        apiLogger.error("sendChatMessage.pageSurface.error", { sessionId, err });
+        prepared = { content, attachmentIds: [], attachments: [] };
+      }
+      const finalContent = prepared.content;
+      const mergedAttachmentIds = [...(attachmentIds ?? []), ...prepared.attachmentIds];
+      const mergedAttachments = [...draftAttachments, ...prepared.attachments];
+
       let result;
       try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+        result = await api.sendChatMessage(
+          sessionId,
+          finalContent,
+          mergedAttachmentIds.length > 0 ? mergedAttachmentIds : undefined,
+        );
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
         const reason = dispatchReasonCode(err);
@@ -547,7 +557,7 @@ export function ChatWindow() {
         content: finalContent,
         task_id: result.task_id,
         created_at: result.created_at,
-        attachments: draftAttachments,
+        attachments: mergedAttachments,
       };
       // Single door into the message caches (MUL-5711): idempotent by id, so
       // this row and the chat:message echo of the same send converge in either
@@ -587,9 +597,9 @@ export function ChatWindow() {
       // against what we requested so a silent bind failure surfaces to the
       // user — no extra fetch. Skip the check on servers that predate the
       // field (attachment_ids undefined) rather than false-alarm.
-      if (attachmentIds && attachmentIds.length > 0 && result.attachment_ids) {
+      if (mergedAttachmentIds.length > 0 && result.attachment_ids) {
         const boundIds = new Set(result.attachment_ids);
-        const missing = attachmentIds.filter((id) => !boundIds.has(id));
+        const missing = mergedAttachmentIds.filter((id) => !boundIds.has(id));
         if (missing.length > 0) {
           apiLogger.warn("sendChatMessage.attachments missing after send", {
             sessionId,
@@ -601,6 +611,28 @@ export function ChatWindow() {
       }
       qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
       qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+
+      const extraAgentIds = useChatFanout.getState().extraAgentIds;
+      if (extraAgentIds.length > 0) {
+        const fanout = await fanOutChatMessage({
+          extraAgentIds,
+          agents: availableAgents,
+          content,
+          projectId: activeProjectId,
+          pageSurface,
+          api,
+          createSession: (data) => createSession.mutateAsync(data),
+        });
+        if (fanout.failed === 0) {
+          toast.success(t(($) => $.input.fanout_ok, { count: fanout.sent + 1 }));
+        } else if (fanout.sent === 0) {
+          toast.error(t(($) => $.input.fanout_failed));
+        } else {
+          toast.error(
+            t(($) => $.input.fanout_partial, { sent: fanout.sent + 1, failed: fanout.failed }),
+          );
+        }
+      }
       return true;
     },
     [
@@ -615,6 +647,10 @@ export function ChatWindow() {
       cancelChatTask,
       qc,
       setActiveSession,
+      pageSurface,
+      availableAgents,
+      createSession,
+      activeProjectId,
       t,
     ],
   );
@@ -637,40 +673,6 @@ export function ChatWindow() {
       source: "active-input",
     });
   }, [pendingTaskId, activeSessionId, cancelChatTask]);
-
-  const handleSelectAgent = useCallback(
-    (agent: Agent) => {
-      // No-op when clicking the already-active agent — don't clobber the
-      // current session just because the user closed the menu this way.
-      // Compare against activeAgent (what the UI shows), not selectedAgentId
-      // (which may be null / point to an archived agent on first load).
-      if (activeAgent && agent.id === activeAgent.id) return;
-      uiLogger.info("selectAgent", {
-        from: selectedAgentId,
-        to: agent.id,
-        previousSessionId: activeSessionId,
-      });
-      setSelectedAgentId(agent.id);
-      // Preserve an explicitly chosen project while composing an unsent chat,
-      // but never inherit project context from the historical session being
-      // left behind.
-      setSelectedProjectId(currentSession ? null : activeProjectId);
-      // Reset session when switching agent
-      setActiveSession(null);
-      requestInputFocus();
-    },
-    [
-      activeAgent,
-      selectedAgentId,
-      activeSessionId,
-      activeProjectId,
-      currentSession,
-      setSelectedAgentId,
-      setSelectedProjectId,
-      setActiveSession,
-      requestInputFocus,
-    ],
-  );
 
   const handleNewChat = useCallback(() => {
     uiLogger.info("newChat", {
@@ -1023,160 +1025,12 @@ export function ChatWindow() {
             agents={availableAgents}
             activeAgent={activeAgent}
             userId={user?.id}
-            onSelect={handleSelectAgent}
           />
         }
         contextItems={contextItems}
         focusRequest={focusRequest}
       />
     </motion.div>
-  );
-}
-
-/**
- * Agent dropdown: avatar trigger, lists all available agents. Selecting a
- * different agent = switch agent + start a fresh chat (session=null).
- * The current agent is marked with a check and not clickable.
- */
-export function AgentDropdown({
-  agents,
-  activeAgent,
-  userId,
-  onSelect,
-}: {
-  agents: Agent[];
-  activeAgent: Agent | null;
-  userId: string | undefined;
-  onSelect: (agent: Agent) => void;
-}) {
-  const { t } = useT("chat");
-  const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState("");
-  // Split into the user's own agents and everyone else so the menu groups
-  // them — matches the old AgentSelector layout.
-  const { mine, others } = useMemo(() => {
-    const mine: Agent[] = [];
-    const others: Agent[] = [];
-    for (const a of agents) {
-      if (a.owner_id === userId) mine.push(a);
-      else others.push(a);
-    }
-    return { mine, others };
-  }, [agents, userId]);
-
-  const query = filter.trim().toLowerCase();
-  const matches = (name: string) =>
-    !query || name.toLowerCase().includes(query) || matchesPinyin(name, query);
-  const filteredMine = mine.filter((agent) => matches(agent.name));
-  const filteredOthers = others.filter((agent) => matches(agent.name));
-
-  const handlePick = (agent: Agent) => {
-    onSelect(agent);
-    setOpen(false);
-  };
-
-  if (!activeAgent) {
-    return <span className="text-caption text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
-  }
-
-  return (
-    <PropertyPicker
-      open={open}
-      onOpenChange={setOpen}
-      width="w-64"
-      align="start"
-      side="top"
-      searchable
-      searchPlaceholder={t(($) => $.window.agent_filter_placeholder)}
-      onSearchChange={setFilter}
-      triggerRender={
-        <button
-          type="button"
-          className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent"
-        />
-      }
-      trigger={
-        <>
-          <ActorAvatar
-            actorType="agent"
-            actorId={activeAgent.id}
-            size="md"
-            enableHoverCard
-            showStatusDot
-          />
-          <span className="text-caption font-medium max-w-28 truncate">{activeAgent.name}</span>
-          <ChevronDown className="size-3 text-muted-foreground shrink-0" />
-        </>
-      }
-    >
-      {filteredMine.length === 0 && filteredOthers.length === 0 ? (
-        <PickerEmpty />
-      ) : (
-        <>
-          {filteredMine.length > 0 && (
-            <PickerSection label={t(($) => $.window.my_agents)}>
-              {filteredMine.map((agent) => (
-                <AgentPickerItem
-                  key={agent.id}
-                  agent={agent}
-                  isCurrent={agent.id === activeAgent.id}
-                  onSelect={handlePick}
-                />
-              ))}
-            </PickerSection>
-          )}
-          {filteredOthers.length > 0 && (
-            <PickerSection label={t(($) => $.window.others)}>
-              {filteredOthers.map((agent) => (
-                <AgentPickerItem
-                  key={agent.id}
-                  agent={agent}
-                  isCurrent={agent.id === activeAgent.id}
-                  onSelect={handlePick}
-                />
-              ))}
-            </PickerSection>
-          )}
-        </>
-      )}
-    </PropertyPicker>
-  );
-}
-
-function AgentPickerItem({
-  agent,
-  isCurrent,
-  onSelect,
-}: {
-  agent: Agent;
-  isCurrent: boolean;
-  onSelect: (agent: Agent) => void;
-}) {
-  const { t } = useT("chat");
-  const runtimeBound = isAgentRuntimeBound(agent);
-  return (
-    <PickerItem
-      selected={isCurrent}
-      disabled={!runtimeBound}
-      tooltip={
-        runtimeBound ? undefined : t(($) => $.window.agent_needs_runtime_hint)
-      }
-      onClick={() => onSelect(agent)}
-    >
-      <ActorAvatar
-        actorType="agent"
-        actorId={agent.id}
-        size="md"
-        enableHoverCard
-        showStatusDot
-      />
-      <span className="truncate flex-1">{agent.name}</span>
-      {!runtimeBound && (
-        <span className="shrink-0 text-micro text-amber-600 dark:text-amber-400">
-          {t(($) => $.window.agent_needs_runtime)}
-        </span>
-      )}
-    </PickerItem>
   );
 }
 

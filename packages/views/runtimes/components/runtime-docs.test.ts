@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   customRuntimeDocsHref,
   daemonRuntimesDocsHref,
+  protocolFamilyDocsHref,
 } from "./runtime-docs";
 
 describe("runtime docs links", () => {
@@ -19,5 +20,15 @@ describe("runtime docs links", () => {
     expect(customRuntimeDocsHref("zh-Hans")).toBe(
       `https://multica.ai/docs/zh/daemon-runtimes#${encodeURIComponent("自定义运行时配置")}`,
     );
+  });
+
+  it("points Codex at the official CLI setup guide", () => {
+    expect(protocolFamilyDocsHref("codex")).toBe(
+      "https://developers.openai.com/codex/cli/",
+    );
+  });
+
+  it("omits a link for unknown protocol families", () => {
+    expect(protocolFamilyDocsHref("not-a-family")).toBeUndefined();
   });
 });

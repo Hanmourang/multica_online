@@ -38,6 +38,8 @@ import { withOverride } from "../issues/components/role-playbook";
 import { ActorAvatar } from "../common/actor-avatar";
 import { AppLink } from "../navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { cn } from "@multica/ui/lib/utils";
+import { isDesktopShell } from "../platform";
 import { useT } from "../i18n";
 import { findModuleHolder } from "./calendar-helpers";
 import type { RoleAssignment } from "@multica/core/types";
@@ -65,6 +67,7 @@ export function RequirementDrawer({
   const qc = useQueryClient();
   const { t } = useT("calendar");
   const paths = useWorkspacePaths();
+  const desktopChrome = isDesktopShell();
   const { data: issue } = useQuery({
     ...issueDetailOptions(wsId, issueId ?? ""),
     enabled: !!issueId,
@@ -120,19 +123,27 @@ export function RequirementDrawer({
         showOverlay={false}
         showCloseButton={false}
         data-testid="requirement-workbench"
-        className="pointer-events-auto relative z-50 flex flex-col gap-0 overflow-hidden p-0 data-[side=right]:inset-2 data-[side=right]:left-2 data-[side=right]:h-auto data-[side=right]:w-auto data-[side=right]:max-w-none data-[side=right]:rounded-xl data-[side=right]:sm:max-w-none"
+        data-desktop-chrome={desktopChrome ? "true" : "false"}
+        className={cn(
+          "pointer-events-auto z-50 flex flex-col gap-0 overflow-hidden p-0",
+          "data-[side=right]:right-2 data-[side=right]:bottom-2 data-[side=right]:left-2",
+          "data-[side=right]:w-auto data-[side=right]:max-w-none data-[side=right]:rounded-xl data-[side=right]:sm:max-w-none",
+          desktopChrome
+            ? "data-[side=right]:top-12 data-[side=right]:h-[calc(100dvh-3.5rem)]"
+            : "data-[side=right]:top-2 data-[side=right]:h-[calc(100dvh-1rem)]",
+        )}
       >
         {issue ? (
           <div className="relative z-0 flex min-h-0 flex-1 flex-col">
-            <SheetHeader className="relative z-20 shrink-0 border-b px-4 py-3 pr-12">
-              <div className="flex items-start gap-2">
+            <SheetHeader className="relative z-20 shrink-0 border-b px-4 py-2.5 pr-12">
+              <div className="flex items-center gap-3">
                 <Button
                   type="button"
                   size="xs"
                   variant="outline"
                   data-testid="workbench-back"
                   onClick={handleClose}
-                  className="relative z-20 mt-0.5 shrink-0"
+                  className="relative z-20 shrink-0"
                 >
                   <ArrowLeft className="size-3.5" />
                   {t(($) => $.workbench.back)}

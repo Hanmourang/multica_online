@@ -48,10 +48,13 @@ const (
 	codexStderrTailBytes                  = 2048
 	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
 	// defaultCodexFirstTurnNoProgressTimeout caps how long the first turn may
-	// stay completely silent after the app-server reports turn/started. Its only
-	// job is to fail fast instead of waiting out
-	// defaultCodexSemanticInactivityTimeout, so it only has to stay well under
-	// that 10 minute backstop.
+	// stay completely silent after turn/start is accepted. The timer arms as
+	// soon as that RPC returns — not only after the later turn/started
+	// notification — so a host that never emits turn/started (plugin
+	// marketplace clone, websocket reconnect, model-catalog refresh) still
+	// fails fast instead of waiting out the semantic-inactivity backstop.
+	// The timer's only job is to stay well under
+	// defaultCodexSemanticInactivityTimeout.
 	//
 	// 30s turned out to sit inside the normal range rather than above it: two
 	// independent field reports measured the first progress event landing just
@@ -1524,10 +1527,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		defer semanticTimer.Stop()
 
 		firstTurnNoProgressTimeout := codexFirstTurnNoProgressTimeout(semanticInactivityTimeout, opts.FirstTurnNoProgressTimeout)
-		var firstTurnNoProgressTimer *time.Timer
-		var firstTurnNoProgressTimerC <-chan time.Time
-		firstTurnStarted := false
 		firstTurnProgressObserved := false
+		// Arm immediately after turn/start is accepted. Waiting for
+		// status:running left a gap: Codex can sit in plugin-sync or
+		// websocket reconnect without ever emitting turn/started, and the
+		// only remaining timer was the (often multi-hour) semantic one.
+		firstTurnNoProgressTimer := time.NewTimer(firstTurnNoProgressTimeout)
+		firstTurnNoProgressTimerC := firstTurnNoProgressTimer.C
 		stopFirstTurnNoProgressTimer := func() {
 			if firstTurnNoProgressTimer == nil {
 				return
@@ -1557,12 +1563,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				lastSemanticActivity = time.Now()
 				lastSemanticActivityDescription = activity
 				resetTimer(semanticTimer, semanticInactivityTimeout)
-				if activity == "status:running" && !firstTurnStarted {
-					firstTurnStarted = true
+				if activity == "status:running" {
 					firstItemWait.start(time.Now())
-					firstTurnNoProgressTimer = time.NewTimer(firstTurnNoProgressTimeout)
-					firstTurnNoProgressTimerC = firstTurnNoProgressTimer.C
-				} else if firstTurnStarted && !firstTurnProgressObserved && isCodexFirstTurnProgressActivity(activity) {
+				}
+				if !firstTurnProgressObserved && isCodexFirstTurnProgressActivity(activity) {
 					firstTurnProgressObserved = true
 					if activity == "error:terminal" {
 						finishFirstItemWait("turn_failed")
@@ -2013,11 +2017,11 @@ func stopTimer(timer *time.Timer) {
 }
 
 // codexFirstTurnNoProgressTimeout resolves the first-turn watchdog ceiling:
-// how long the first turn may stay silent after turn/started before that one
-// watchdog fails it. This is only the first-turn timer's own duration — NOT
-// the effective first-item wait. The semantic-inactivity timer is armed
-// concurrently (the same first status:running resets it and starts this one),
-// so the real wait is min(this, semanticInactivityTimeout, execution timeout).
+// how long the first turn may stay silent after turn/start is accepted
+// before that one watchdog fails it. This is only the first-turn timer's
+// own duration — NOT the effective first-item wait. The semantic-inactivity
+// timer is armed at the same moment, so the real wait is
+// min(this, semanticInactivityTimeout, execution timeout).
 // Raising the override above the semantic timeout therefore does not extend the
 // wait unless the semantic timeout is raised too; LoadConfig warns when it does
 // not. See the run loop's competing-timer select for the interaction.
@@ -2101,7 +2105,31 @@ func appendCodexKnownStderrHint(msg, stderrTail string) string {
 	if strings.Contains(stderrTail, codexModelCatalogRefreshFailureSignal) {
 		return msg + "; diagnosis: Codex could not load its model catalog, which blocks the first turn. This is usually a transient network failure reaching the Codex service. Check network/proxy connectivity and retry the task, or switch to another runtime while the Codex service is unreachable"
 	}
+	if isCodexUpstreamTransportFailure(stderrTail) {
+		return msg + "; diagnosis: Codex cannot reach the OpenAI/Codex service (connection reset, websocket fallback, or reconnect loop). Check HTTPS_PROXY / system proxy / VPN connectivity; without a working path to api.openai.com this runtime cannot complete a turn"
+	}
 	return msg
+}
+
+// isCodexUpstreamTransportFailure reports whether Codex stderr shows the
+// host never reached the Codex/OpenAI transport — the same class of
+// failure as a TUI session that falls back from WebSockets to HTTPS and
+// then sits in "Reconnecting.. waiting for network".
+func isCodexUpstreamTransportFailure(stderrTail string) bool {
+	lower := strings.ToLower(stderrTail)
+	if strings.Contains(lower, "connection reset by peer") {
+		return true
+	}
+	if strings.Contains(lower, "falling back from websockets") {
+		return true
+	}
+	if strings.Contains(lower, "reconnecting") && strings.Contains(lower, "waiting for network") {
+		return true
+	}
+	if strings.Contains(lower, "stream disconnected before completion") {
+		return true
+	}
+	return false
 }
 
 func detectCodexVersionForDiagnostics(ctx context.Context, runtimeCmd Command, env []string, logger *slog.Logger) string {

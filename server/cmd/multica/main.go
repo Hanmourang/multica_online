@@ -105,6 +105,13 @@ func main() {
 		}
 		return
 	}
+	// Recover daemon-injected task credentials before any command resolves its
+	// API client. Runtimes such as Wukong print mode execute tools in a separate
+	// service process that rebuilds its environment from the login shell, so the
+	// MULTICA_* vars the daemon injected are gone by the time `multica` runs;
+	// this restores them from the daemon-owned sidecar. No-op when the injected
+	// env is intact or when no sidecar is discoverable above cwd.
+	bootstrapDaemonTaskCredentials()
 	cli.CleanupStaleUpdateArtifacts()
 	if err := rootCmd.Execute(); err != nil {
 		if err != errSilent {

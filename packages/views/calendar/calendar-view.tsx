@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * CalendarView — requirement calendar (month / week). Lays top-level
- * requirement blocks across their start_at ~ due_date window (minute
- * granularity floored to UTC days for cells, verbatim in tooltips), colored
- * by module, carrying the derived pipeline status badge + stage progress.
+ * CalendarView — requirement calendar (month / week). Each top-level
+ * requirement occupies a single UTC day (the start_at / start_date cell;
+ * due_date only supplies the tooltip clock). Colored by module, carrying
+ * the derived pipeline status badge + stage progress.
  *
  * Spec: docs/superpowers/specs/2026-09-04-requirement-calendar-design.md §6/§10
  * (prototype frames 1–2). Drag rescheduling lands in Task 9 on top of this
@@ -123,18 +123,16 @@ interface RequirementSpan {
 }
 
 /**
- * A requirement's calendar window: start_at (minute-granularity) wins over
- * the legacy day-granularity start_date; a missing side collapses to a
- * single-day span. Requirements with neither date don't render.
+ * Calendar cells are same-day: start_at wins over start_date, then due_date.
+ * A later due_date must not paint extra cells — stale multi-day rows still
+ * render as one block until the next reschedule writes due_date back.
  */
 function requirementSpan(issue: Issue): RequirementSpan | null {
-  const start = dateOnlyToUTCDate(issue.start_at ?? issue.start_date ?? null);
-  const end = dateOnlyToUTCDate(issue.due_date ?? null);
-  if (!start && !end) return null;
-  const s = start ?? end;
-  const e = end ?? start;
-  if (!s || !e) return null;
-  return { issue, start: s, end: e };
+  const day = dateOnlyToUTCDate(
+    issue.start_at ?? issue.start_date ?? issue.due_date ?? null,
+  );
+  if (!day) return null;
+  return { issue, start: day, end: day };
 }
 
 type Segment = "start" | "mid" | "end";
@@ -211,7 +209,6 @@ export function CalendarView({
   const [anchor, setAnchor] = useState(today);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [resizeId, setResizeId] = useState<string | null>(null);
 
   const days = useMemo(
     () => (zoom === "month" ? monthGridDays(anchor) : weekGridDays(anchor)),
@@ -325,21 +322,14 @@ export function CalendarView({
   };
 
   /**
-   * Drop a dragged requirement onto a day cell: shift its whole window by
-   * the day delta — start_at keeps its minute component, due_date stays a
-   * calendar day (the server column is DATE). The trigger linkage toast is
-   * optimistic; the server still guards the race with its 409 (spec §7.2).
+   * Drop onto a day cell: move start_at (minute kept) and force due_date to
+   * that same UTC day so a stale multi-day row cannot be written back.
+   * Trigger toast is optimistic; the server still 409s after fire (spec §7.2).
    */
   const handleDrop = (day: Date, e: React.DragEvent) => {
     e.preventDefault();
     setDragOverKey(null);
-    const raw = e.dataTransfer.getData("text/plain");
-    const resizing = raw.startsWith("resize:");
-    const id = resizing ? raw.slice("resize:".length) : raw;
-    if (resizing) {
-      handleResizeDue(day, id);
-      return;
-    }
+    const id = e.dataTransfer.getData("text/plain");
     const span = spans.find((s) => s.issue.id === id);
     if (!span) return;
     const offset = Math.round(
@@ -347,12 +337,13 @@ export function CalendarView({
     );
     if (offset === 0) return;
     const issue = span.issue;
+    const nextStart = addDays(span.start, offset);
     const payload: {
       id: string;
       start_at?: string;
       start_date?: string;
       due_date?: string;
-    } = { id };
+    } = { id, due_date: dayKey(nextStart) };
     if (issue.start_at) {
       const instant = new Date(issue.start_at);
       if (!Number.isNaN(instant.getTime())) {
@@ -364,18 +355,9 @@ export function CalendarView({
       const d = dateOnlyToUTCDate(issue.start_date);
       if (d) payload.start_date = dayKey(addDays(d, offset));
     }
-    if (issue.due_date) {
-      const d = dateOnlyToUTCDate(issue.due_date);
-      if (d) payload.due_date = dayKey(addDays(d, offset));
-    }
-    const nextStart = addDays(span.start, offset);
-    const nextEnd = addDays(span.end, offset);
-    const conflict = findRescheduleConflict(issues, issue, nextStart, nextEnd);
+    const conflict = findRescheduleConflict(issues, issue, nextStart, nextStart);
     if (conflict) {
-      const spanDays = Math.round(
-        (span.end.getTime() - span.start.getTime()) / MS_PER_DAY,
-      );
-      const free = suggestFreeWindow(issues, issue, spanDays);
+      const free = suggestFreeWindow(issues, issue, 0);
       toast.error(
         t(($) => $.calendar.reschedule_rejected, {
           n: conflict.number,
@@ -402,42 +384,6 @@ export function CalendarView({
       },
     });
     setDraggingId(null);
-  };
-
-  const handleResizeDue = (day: Date, id: string) => {
-    setResizeId(null);
-    const span = spans.find((s) => s.issue.id === id);
-    if (!span) return;
-    const issue = span.issue;
-    if (RESCHEDULE_LOCKED_STATUSES.has(issue.requirement_status ?? "")) return;
-    const nextDue = startOfDayUTC(day);
-    if (nextDue.getTime() < span.start.getTime()) return;
-    if (issue.due_date && dayKey(nextDue) === issue.due_date) return;
-    const conflict = findRescheduleConflict(issues, issue, span.start, nextDue);
-    if (conflict) {
-      const spanDays = Math.round(
-        (span.end.getTime() - span.start.getTime()) / MS_PER_DAY,
-      );
-      const free = suggestFreeWindow(issues, issue, spanDays);
-      toast.error(
-        t(($) => $.calendar.reschedule_rejected, {
-          n: conflict.number,
-          title: conflict.title,
-          start: free ? dayKey(free.start) : "—",
-          end: free ? dayKey(free.end) : "—",
-        }),
-      );
-      return;
-    }
-    const previousDue = issue.due_date ?? undefined;
-    updateIssue.mutate({ id, due_date: dayKey(nextDue) });
-    toast.success(t(($) => $.calendar.rescheduled), {
-      duration: 5000,
-      action: {
-        label: t(($) => $.calendar.reschedule_undo),
-        onClick: () => updateIssue.mutate({ id, due_date: previousDue }),
-      },
-    });
   };
 
   const dragPreview = useMemo(() => {
@@ -558,9 +504,6 @@ export function CalendarView({
                 setDragOverKey((current) => (current === key ? null : current))
               }
               onDrop={(e) => handleDrop(day, e)}
-              onMouseUp={() => {
-                if (resizeId) handleResizeDue(day, resizeId);
-              }}
               className={cn(
                 "relative flex min-h-[72px] flex-col gap-0.5 border-b border-r border-border/60 px-1 pb-1 pt-0.5",
                 isWeekendUTC(day) && "bg-muted/40",
@@ -608,7 +551,6 @@ export function CalendarView({
                     setDraggingId(null);
                     setDragOverKey(null);
                   }}
-                  onResizeStart={() => setResizeId(span.issue.id)}
                 />
               ))}
             </div>
@@ -647,7 +589,6 @@ function RequirementBlock({
   dimmed,
   onDragBegin,
   onDragEnd,
-  onResizeStart,
 }: {
   span: RequirementSpan;
   day: Date;
@@ -661,7 +602,6 @@ function RequirementBlock({
   dimmed: boolean;
   onDragBegin: () => void;
   onDragEnd: () => void;
-  onResizeStart: () => void;
 }) {
   const { t } = useT("issues");
   const { issue } = span;
@@ -819,20 +759,6 @@ function RequirementBlock({
                 )
               ) : (
                 <span className={cn("shrink-0", tone)}>{icon}</span>
-              )}
-              {segment === "end" && !rescheduleLocked && (
-                <span
-                  data-testid={`req-grip-${issue.id}`}
-                  role="separator"
-                  aria-orientation="vertical"
-                  className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onResizeStart();
-                  }}
-                  onClick={(e) => e.preventDefault()}
-                />
               )}
             </div>
           </AppLink>

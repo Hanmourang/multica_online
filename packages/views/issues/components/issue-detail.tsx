@@ -3174,7 +3174,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div
           ref={attachScrollContainer}
           data-tab-scroll-root={scrollContainerKey}
-          className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+          className={cn(
+            "relative min-h-0 flex-1",
+            detailTab === "exec"
+              ? "flex flex-col overflow-hidden"
+              : "overflow-y-auto [scrollbar-gutter:stable_both-edges]",
+          )}
         >
         {/* Gutters: 32px on desktop / 12px below `md`. Width follows the
             panel between the sidebars — do not re-introduce a max-width cap.
@@ -3184,8 +3189,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             floats — once the reader scrolls to the bottom. */}
         <div
           data-testid="issue-detail-column"
-          className="w-full px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8"
+          className={cn(
+            "w-full px-3 max-md:pb-chat-launcher md:px-8",
+            detailTab === "exec"
+              ? "flex h-full min-h-0 flex-col py-4 md:py-5"
+              : "py-6 md:py-8",
+          )}
         >
+          <div
+            data-testid="issue-detail-body"
+            className={cn(
+              detailTab === "exec" &&
+                "min-h-0 max-h-[28vh] shrink-0 overflow-y-auto pr-1",
+            )}
+          >
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
@@ -3547,10 +3564,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             );
           })()}
 
-          <div className="my-8 border-t" />
+          </div>
 
-          {/* A2/A3：主栏只保留「动态 | 执行日志」一套 Tab。 */}
-          <div>
+          {/* A2/A3：主栏只保留「动态 | 执行日志」一套 Tab。
+              执行日志占满正文下方剩余视口，避免长需求把日志挤成底部空白条。 */}
+          <div
+            data-testid="issue-stream-workspace"
+            className={cn(
+              "flex min-h-0 flex-col",
+              detailTab === "exec" ? "mt-3 flex-1" : "mt-6 border-t pt-3",
+            )}
+          >
             <div className="flex items-center justify-between">
               <div
                 role="tablist"
@@ -3722,12 +3746,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <LocalDirectoryHint projectId={issue?.project_id} />
 
             {detailTab === "exec" ? (
-              <div className="mt-4">
+              <div className="mt-2 min-h-0 flex-1">
                 <ExecutionLogPanel
                   issueId={id}
                   labeledTasks={labeledExecTasks}
                   preferredRunId={preferredRunId}
                   onSelectRun={(runId) => setDetailTab("exec", runId)}
+                  fill
                 />
               </div>
             ) : (

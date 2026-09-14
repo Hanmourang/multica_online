@@ -74,3 +74,11 @@ html[lang|="ja"] {
 [data-slot="sidebar-container"] {
   padding: 0 !important;
 }
+
+/* Fullscreen workbench is portaled to <body> and would otherwise sit under
+   the hiddenInset traffic lights / window toolbar (h-12). Keep system
+   buttons clickable and drop the header below that chrome. */
+[data-slot="sheet-content"][data-testid="requirement-workbench"] {
+  top: 3rem !important;
+  height: calc(100dvh - 3.5rem) !important;
+}

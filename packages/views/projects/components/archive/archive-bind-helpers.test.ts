@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { groupUnboundArtifacts, suggestRequirement } from "./archive-bind-helpers";
+import {
+  groupUnboundArtifacts,
+  HIGH_BIND_CONFIDENCE,
+  rankRequirementMatches,
+  suggestRequirement,
+} from "./archive-bind-helpers";
 import type { Issue, ProjectArtifact } from "@multica/core/types";
 
 function issue(partial: Partial<Issue> & Pick<Issue, "id" | "identifier" | "title">): Issue {
@@ -80,6 +85,18 @@ describe("suggestRequirement", () => {
         issues,
       )?.id,
     ).toBe("i1");
+  });
+
+  it("exposes confidence for batch bind", () => {
+    const match = rankRequirementMatches(
+      artifact({
+        id: "a4",
+        rel_path: "requirements/SIRI-29/s2-plan/plan.md",
+        requirement_key: "SIRI-29",
+      }),
+      issues,
+    )[0];
+    expect(match?.confidence).toBeGreaterThanOrEqual(HIGH_BIND_CONFIDENCE);
   });
 });
 

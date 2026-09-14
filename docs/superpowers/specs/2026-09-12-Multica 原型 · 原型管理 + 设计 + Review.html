@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 原型 · 原型管理 + 设计 + Review（2026-09-12）</title>
+<style>
+/* ===== Multica 设计 token（packages/ui/styles/tokens.css 浅色主题抄录） ===== */
+:root {
+  --app-shell: oklch(0.964435 0.001327 286.375);
+  --page-canvas: oklch(0.988087 0 0);
+  --surface: oklch(1 0 0);
+  --surface-hover: oklch(0.967 0.001 286.375);
+  --surface-selected: oklch(0.95 0.002 286.375);
+  --surface-border: oklch(0.92 0.004 286.32);
+  --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
+  --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+  --foreground: oklch(0.141 0.005 285.823);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --faint-foreground: oklch(0.606 0.016 285.938);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --border: oklch(0.945 0.003 286.32);
+  --destructive: oklch(0.577 0.245 27.325);
+  --brand: oklch(0.55 0.16 255);
+  --success: oklch(0.55 0.16 145);
+  --warning: oklch(0.72 0.15 75);
+  --radius: 0.625rem;
+  --sidebar-accent: oklch(0.935 0.003 286.375);
+  --mod-member: oklch(0.62 0.17 15);
+  --mod-pay: oklch(0.58 0.15 250);
+  --mod-home: oklch(0.6 0.15 300);
+  --mod-order: oklch(0.62 0.14 55);
+  --mod-search: oklch(0.58 0.13 190);
+  --mod-cart: oklch(0.58 0.16 145);
+  --mod-perf: oklch(0.55 0.1 265);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: oklch(0.93 0.004 286.32);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+.proto-nav {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 24px; background: oklch(0.16 0.005 285.823);
+  color: oklch(0.92 0.004 286.32);
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 12px; }
+.proto-nav .logo span { color: var(--brand); }
+.proto-nav a {
+  color: oklch(0.705 0.015 286.067); text-decoration: none;
+  padding: 5px 12px; border-radius: 6px; font-size: 12.5px;
+}
+.proto-nav a:hover, .proto-nav a.on { background: oklch(1 0 0 / 8%); color: #fff; }
+.frame-wrap { max-width: 1480px; margin: 0 auto; padding: 32px 24px 80px; }
+.frame-head { margin-bottom: 14px; }
+.frame-head h2 { font-size: 17px; font-weight: 700; }
+.frame-head p { color: var(--muted-foreground); font-size: 13px; margin-top: 4px; line-height: 1.7; max-width: 1120px; }
+.frame {
+  background: var(--page-canvas); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 0.16), 0 4px 16px rgb(15 23 42 / 0.08);
+  border: 1px solid oklch(0.85 0.005 286.32);
+  margin-bottom: 56px; position: relative;
+}
+.frame-bar {
+  height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+}
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: oklch(0.7 0.19 27); }
+.frame-bar i:nth-child(2) { background: oklch(0.8 0.16 85); }
+.frame-bar i:nth-child(3) { background: oklch(0.7 0.16 145); }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--faint-foreground); }
+
+.anno {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700;
+  box-shadow: 0 0 0 2.5px oklch(0.55 0.16 255 / 20%);
+  position: relative; z-index: 5; flex: none;
+}
+.new-el { outline: 1.5px dashed oklch(0.55 0.16 255 / 55%); outline-offset: 2px; border-radius: 6px; }
+
+.app { display: flex; height: 820px; }
+.sidebar {
+  width: 200px; flex: none; background: var(--app-shell);
+  border-right: 1px solid var(--surface-border);
+  padding: 10px 8px; display: flex; flex-direction: column; gap: 1px;
+  font-size: 12.5px;
+}
+.sidebar .ws { display: flex; align-items: center; gap: 7px; padding: 5px 8px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
+.sidebar .ws .ws-avatar {
+  width: 18px; height: 18px; border-radius: 5px; background: var(--primary);
+  color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px;
+}
+.s-item { display: flex; align-items: center; gap: 8px; padding: 4.5px 8px; border-radius: 6px; color: var(--muted-foreground); }
+.s-item.active { background: var(--sidebar-accent); color: var(--foreground); font-weight: 500; }
+.s-item .badge-n {
+  margin-left: auto; font-size: 10.5px; background: var(--surface-selected);
+  color: var(--muted-foreground); border-radius: 8px; padding: 0 6px; line-height: 16px;
+}
+.s-group { margin-top: 14px; padding: 0 8px 3px; font-size: 11px; color: var(--faint-foreground); }
+.s-dot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--page-canvas); }
+
+.topbar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); font-size: 12.5px; flex: none;
+}
+.crumb { color: var(--muted-foreground); display: flex; gap: 6px; align-items: center; }
+.crumb b { color: var(--foreground); font-weight: 600; }
+.tab-pill { padding: 4px 10px; border-radius: 6px; color: var(--muted-foreground); }
+.tab-pill.active { background: var(--surface-selected); color: var(--foreground); font-weight: 500; }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4.5px 10px;
+  border: 1px solid var(--border); background: var(--surface); border-radius: 6px;
+  font-size: 12px; color: var(--foreground); box-shadow: var(--surface-shadow); cursor: default;
+}
+.btn.primary { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+.btn.danger { color: var(--destructive); border-color: oklch(0.577 0.245 27.325 / 35%); }
+.btn.ghost { box-shadow: none; background: transparent; }
+
+.stage-flow { display: flex; align-items: center; gap: 0; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.st-node { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--faint-foreground); }
+.st-node .dot {
+  width: 19px; height: 19px; border-radius: 50%; flex: none; display: flex; align-items: center;
+  justify-content: center; font-size: 10px; font-weight: 700;
+  background: var(--surface-selected); color: var(--faint-foreground);
+}
+.st-node.done { color: var(--success); }
+.st-node.done .dot { background: oklch(0.55 0.16 145 / 14%); color: var(--success); }
+.st-node.cur { color: var(--brand); font-weight: 650; }
+.st-node.cur .dot { background: var(--brand); color: #fff; box-shadow: 0 0 0 3px oklch(0.55 0.16 255 / 18%); }
+.st-line { flex: 1; height: 1.5px; background: var(--border); margin: 0 8px; min-width: 14px; }
+.st-line.done { background: oklch(0.55 0.16 145 / 45%); }
+
+.avatar {
+  width: 18px; height: 18px; border-radius: 50%; flex: none; font-size: 8.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; color: #fff;
+}
+.avatar.agent { background: oklch(0.45 0.13 280); }
+.avatar.human { background: oklch(0.55 0.12 30); }
+
+.mark {
+  display: inline-flex; align-items: center; gap: 3px; padding: 1.5px 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 650; border: 1px solid var(--border);
+  background: var(--surface); color: var(--faint-foreground); white-space: nowrap; flex: none;
+}
+.mark.ok { border-color: oklch(0.55 0.16 145 / 45%); background: oklch(0.55 0.16 145 / 11%); color: oklch(0.4 0.11 145); }
+.mark.no { border-color: oklch(0.577 0.245 27.325 / 45%); background: oklch(0.577 0.245 27.325 / 9%); color: var(--destructive); }
+.tag-new, .tag-mod, .tag-layer {
+  display: inline-block; padding: 0.5px 5px; border-radius: 4px;
+  font-size: 9px; font-weight: 700; white-space: nowrap;
+}
+.tag-new { background: oklch(0.55 0.16 145 / 14%); color: oklch(0.4 0.11 145); }
+.tag-mod { background: oklch(0.72 0.15 75 / 20%); color: oklch(0.45 0.12 75); }
+.tag-layer.html { background: oklch(0.55 0.16 255 / 12%); color: var(--brand); }
+.tag-layer.sb { background: oklch(0.6 0.15 300 / 14%); color: oklch(0.45 0.15 300); }
+.tag-layer.gn { background: oklch(0.55 0.1 265 / 16%); color: oklch(0.42 0.1 265); }
+
+.chip-filter {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3.5px 9px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+  font-size: 11.5px; color: var(--muted-foreground);
+}
+.chip-filter b { color: var(--foreground); font-weight: 550; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--surface); }
+.seg span, .seg button {
+  padding: 3.5px 12px; font-size: 12px; color: var(--muted-foreground);
+  background: transparent; border: 0; font-family: inherit; cursor: pointer;
+}
+.seg span.active, .seg button.active { background: var(--surface-selected); color: var(--foreground); font-weight: 600; }
+
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px 16px; }
+.stat-c {
+  border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+  padding: 10px 12px; box-shadow: var(--surface-shadow);
+}
+.stat-c .n { font-size: 20px; font-weight: 700; letter-spacing: -0.03em; }
+.stat-c .l { font-size: 11px; color: var(--muted-foreground); margin-top: 2px; }
+
+.tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tbl th {
+  text-align: left; font-size: 10.5px; color: var(--muted-foreground); font-weight: 650;
+  padding: 7px 10px; border-bottom: 1px solid var(--border); background: var(--app-shell);
+}
+.tbl td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.tbl tr:hover td { background: var(--surface-hover); }
+.tbl tr.sel td { background: oklch(0.55 0.16 255 / 6%); }
+
+.layer-bar {
+  display: flex; align-items: center; gap: 8px; padding: 7px 14px;
+  border-bottom: 1px solid var(--border); background: var(--surface); flex: none;
+}
+.hotspot {
+  position: relative; border: 1.5px dashed oklch(0.72 0.02 286); border-radius: 8px;
+  background: var(--surface); padding: 10px 12px; cursor: pointer;
+}
+.hotspot .hid { font-size: 9.5px; color: var(--faint-foreground); font-family: ui-monospace, Menlo, monospace; }
+.hotspot .ht { font-size: 12px; font-weight: 650; margin-top: 2px; }
+.hotspot .hd { font-size: 11px; color: var(--muted-foreground); margin-top: 3px; line-height: 1.5; }
+.hotspot.on {
+  border-color: var(--brand); background: oklch(0.55 0.16 255 / 5%);
+  box-shadow: 0 0 0 3px oklch(0.55 0.16 255 / 14%);
+}
+.hotspot.bad {
+  border-color: oklch(0.577 0.245 27.325 / 50%);
+  background: oklch(0.577 0.245 27.325 / 4%);
+}
+.hotspot.bad.on { box-shadow: 0 0 0 3px oklch(0.577 0.245 27.325 / 16%); }
+.hp-pin { position: absolute; right: 8px; top: 8px; }
+
+.fp-list { display: flex; flex-direction: column; }
+.fp-item {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 11px;
+  border-bottom: 1px solid var(--border); cursor: pointer; font-size: 11.5px; line-height: 1.5;
+}
+.fp-item:hover { background: var(--surface-hover); }
+.fp-item.on { background: oklch(0.55 0.16 255 / 6%); }
+.fp-item.bad { background: oklch(0.577 0.245 27.325 / 4%); }
+
+.token-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px dashed var(--border); font-size: 11.5px;
+}
+.sw { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--border); flex: none; }
+.slider {
+  flex: 1; height: 4px; border-radius: 99px; background: var(--border); position: relative;
+}
+.slider i { position: absolute; top: -4px; width: 12px; height: 12px; border-radius: 50%; background: var(--brand); border: 2px solid #fff; box-shadow: var(--surface-shadow); }
+
+.codebox {
+  background: oklch(0.18 0.01 285); color: oklch(0.86 0.01 286); border-radius: 8px;
+  padding: 9px 11px; font-size: 10.5px; line-height: 1.55; overflow: auto;
+}
+.codebox .ln { color: oklch(0.55 0.02 286); display: inline-block; width: 28px; }
+.codebox .hit { background: oklch(0.55 0.16 255 / 22%); display: block; margin: 0 -11px; padding: 0 11px; }
+.codebox .k { color: oklch(0.75 0.12 255); }
+.codebox .s { color: oklch(0.72 0.14 145); }
+.codebox .c { color: oklch(0.62 0.02 286); }
+
+.sb-chrome { height: 28px; background: oklch(0.22 0.01 285); color: oklch(0.78 0.01 286); display: flex; align-items: center; gap: 8px; padding: 0 10px; font-size: 10.5px; }
+.diff-add { background: oklch(0.55 0.16 145 / 12%); color: oklch(0.38 0.11 145); }
+.diff-del { background: oklch(0.577 0.245 27.325 / 10%); color: var(--destructive); }
+
+.layer-pane { display: none; flex: 1; min-height: 0; }
+.layer-pane.show { display: flex; }
+.empty {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: var(--muted-foreground); font-size: 12.5px; text-align: center; padding: 32px;
+}
+.kv { display: flex; gap: 8px; padding: 4px 0; font-size: 11px; line-height: 1.6; border-bottom: 1px dashed var(--border); }
+.kv.last { border-bottom: none; }
+.kv .k { width: 72px; flex: none; color: var(--faint-foreground); }
+.kv .v { flex: 1; min-width: 0; }
+.ver-row { display: flex; align-items: center; gap: 7px; padding: 3.5px 0; font-size: 10.5px; line-height: 1.5; }
+.rep-item { display: flex; align-items: flex-start; gap: 7px; padding: 3.5px 0; line-height: 1.55; font-size: 11.5px; }
+.rep-item .ic { flex: none; font-weight: 700; width: 13px; }
+.rep-item.pass .ic { color: var(--success); }
+.rep-item.fail .ic { color: var(--destructive); }
+.prompt { border: 1px solid oklch(0.55 0.16 255 / 30%); border-radius: 9px; background: var(--surface); overflow: hidden; }
+.pr-head {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 11.5px; font-weight: 650;
+  color: var(--brand); background: oklch(0.55 0.16 255 / 7%); border-bottom: 1px solid oklch(0.55 0.16 255 / 16%);
+}
+.pr-src { margin-left: auto; font-weight: 400; font-size: 9.5px; color: var(--faint-foreground); }
+.pr-body { padding: 8px 10px; font-size: 10.5px; line-height: 1.75; color: var(--muted-foreground); }
+.pr-body .ins { color: var(--destructive); background: oklch(0.577 0.245 27.325 / 8%); border-radius: 3px; padding: 0 3px; }
+.pr-body .auto { color: var(--faint-foreground); }
+.tri-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; height: 100%; }
+.tri-col > div { padding: 14px 16px; border-right: 1px solid var(--border); overflow: auto; }
+.tri-col > div:last-child { border-right: none; }
+.panel-h { font-size: 12px; font-weight: 650; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+</style>
+</head>
+<body>
+
+<nav class="proto-nav">
+  <div class="logo">Multica <span>原型</span> · 原型管理 + 设计 + Review</div>
+  <a href="#f1">1 · 原型库</a>
+  <a href="#f2">2 · 设计工作台</a>
+  <a href="#f3">3 · Token / 风格</a>
+  <a href="#f4">4 · Review 确认门</a>
+  <a href="#f5">5 · Storybook 对照</a>
+  <a href="#f6">6 · GN Preview 定位</a>
+  <a href="#f7">7 · Contract / AI 工作包</a>
+  <a href="#f8">8 · 三层总览</a>
+  <a href="./2026-09-04-rMultica 原型 · 需求日历 + 角色化流水线.html#f4" style="margin-left:auto;opacity:.7">↩ 日历画面 4</a>
+</nav>
+
+<div class="frame-wrap">
+
+<!-- ============ 画面 1：原型库 ============ -->
+<div class="frame-head" id="f1">
+  <h2>画面 1 · 原型库 — 项目级管理入口</h2>
+  <p>在项目详情新增 <b>「原型」Tab</b>（与档案 / 产品功能并列）。这里管理本项目全部需求的原型版本：路径走业务仓 <span class="mono">docs/prototypes/</span>，权威记录是 <span class="mono">issue_prototype_version</span>（html_path / prompt / marks / status）。每条可进入设计工作台、Review 确认门、或实现态对照（Storybook / GN Preview）。<b>无代码的需求也能进库</b>——这是和纯 Storybook 方案的分界。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 电商中台 / 项目详情 / 原型</span></div>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">M</span> Multica 工作区</div>
+      <div class="s-item">收件箱 <span class="badge-n">3</span></div>
+      <div class="s-item">聊天</div>
+      <div class="s-item">我的任务</div>
+      <div class="s-item">任务</div>
+      <div class="s-item">日历</div>
+      <div class="s-group">项目</div>
+      <div class="s-item active"><span class="s-dot" style="background:var(--brand)"></span> 电商中台</div>
+      <div class="s-item"><span class="s-dot" style="background:var(--success)"></span> 移动端 App</div>
+      <div class="s-group">平台</div>
+      <div class="s-item">自动化</div>
+      <div class="s-item">智能体</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb"><b>电商中台</b> / 原型库</div>
+        <span class="tab-pill">任务概览</span>
+        <span class="tab-pill">档案</span>
+        <span class="tab-pill">产品功能</span>
+        <span class="tab-pill">数据模型</span>
+        <span class="tab-pill">申报就绪度</span>
+        <span class="tab-pill active new-el">原型 <span class="anno" style="margin-left:3px">1</span></span>
+        <div class="topbar-right">
+          <span class="btn">从需求一键生成</span>
+        </div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-c new-el"><div class="n" style="color:var(--warning)">2</div><div class="l">待确认 <span class="anno">2</span></div></div>
+        <div class="stat-c"><div class="n">12</div><div class="l">已确认（可进拆解）</div></div>
+        <div class="stat-c"><div class="n">5</div><div class="l">本周新版本</div></div>
+        <div class="stat-c"><div class="n" style="color:var(--brand)">3</div><div class="l">已接实现对照</div></div>
+      </div>
+      <div style="padding:0 16px 10px;display:flex;gap:8px;align-items:center">
+        <span class="chip-filter">模块 <b>全部</b> ▾</span>
+        <span class="chip-filter">状态 <b>待确认优先</b> ▾</span>
+        <span class="chip-filter">对照层 <b>全部</b> ▾ <span class="anno">3</span></span>
+        <span style="margin-left:auto;font-size:11px;color:var(--faint-foreground)" class="mono">git 事实源 · DB 只存指针</span>
+      </div>
+      <div style="flex:1;overflow:auto;padding:0 16px 16px">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>需求</th><th>模块</th><th>当前版</th><th>功能点</th><th>标记</th><th>对照层</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="sel">
+              <td>
+                <div style="font-weight:650">退款流程异步化改造</div>
+                <div class="mono" style="font-size:10.5px;color:var(--faint-foreground);margin-top:2px">SIRI-29 · docs/prototypes/SIRI-29-refund-async.html</div>
+              </td>
+              <td><span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-pay)"></span>支付</span></td>
+              <td><b class="mono" style="color:var(--brand)">v2</b><div style="font-size:10.5px;color:var(--warning);font-weight:650;margin-top:2px">pending 待确认</div></td>
+              <td>4 · <span class="tag-mod">3 改造</span> <span class="tag-new">1 新增</span></td>
+              <td>✓2 · <b style="color:var(--destructive)">✗1</b> · ○1</td>
+              <td><span class="tag-layer html">HTML</span> <span class="tag-layer sb" style="opacity:.4">SB 未生成</span></td>
+              <td><span class="btn primary" style="padding:3px 8px">打开设计</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div style="font-weight:650">购物车合并结算</div>
+                <div class="mono" style="font-size:10.5px;color:var(--faint-foreground);margin-top:2px">SIRI-26 · docs/prototypes/SIRI-26-cart-merge.html</div>
+              </td>
+              <td><span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-cart)"></span>购物车</span></td>
+              <td><b class="mono">v3</b><div style="font-size:10.5px;color:var(--success);font-weight:650;margin-top:2px">confirmed</div></td>
+              <td>6 · <span class="tag-new">4 新增</span> <span class="tag-mod">2 改造</span></td>
+              <td>✓6</td>
+              <td><span class="tag-layer html">HTML</span> <span class="tag-layer sb">SB</span> <span class="tag-layer gn">GN</span></td>
+              <td><span class="btn" style="padding:3px 8px">对照实现</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div style="font-weight:650">积分获取规则重构</div>
+                <div class="mono" style="font-size:10.5px;color:var(--faint-foreground);margin-top:2px">SIRI-21 · docs/prototypes/SIRI-21-points.html</div>
+              </td>
+              <td><span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-member)"></span>会员</span></td>
+              <td><b class="mono">v1</b><div style="font-size:10.5px;color:var(--success);font-weight:650;margin-top:2px">confirmed</div></td>
+              <td>5 · <span class="tag-mod">5 改造</span></td>
+              <td>✓5</td>
+              <td><span class="tag-layer html">HTML</span> <span class="tag-layer gn">GN</span></td>
+              <td><span class="btn" style="padding:3px 8px">打开设计</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div style="font-weight:650">首页推荐位改版</div>
+                <div class="mono" style="font-size:10.5px;color:var(--faint-foreground);margin-top:2px">SIRI-28 · 尚未生成</div>
+              </td>
+              <td><span style="display:inline-flex;align-items:center;gap:5px"><span class="s-dot" style="background:var(--mod-home)"></span>首页</span></td>
+              <td><span style="color:var(--faint-foreground)">—</span><div style="font-size:10.5px;color:var(--faint-foreground);margin-top:2px">无版本</div></td>
+              <td>—</td>
+              <td>—</td>
+              <td><span class="tag-layer html" style="opacity:.35">待生成</span></td>
+              <td><span class="btn" style="padding:3px 8px">⚡ 一键生成</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="margin-top:10px;font-size:11px;color:var(--faint-foreground);line-height:1.6">
+          对照层列 <span class="anno">3</span>：HTML = 设计态画布已在；SB = Storybook story 已由 GitNexus 发现/生成；GN = Preview 点击定位已接通。三者独立点亮，不互相阻塞。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p>标注：<span class="anno">1</span> 项目详情新增「原型」Tab，与档案/产品功能并列，不塞进 Issues 子页&nbsp; <span class="anno">2</span> 待确认数来自 <span class="mono">issue_prototype_version.status=pending</span> 且存在 ✗/○&nbsp; <span class="anno">3</span> 对照层是实现态能力的点亮状态，不是设计态门槛——SIRI-29 没有 SB 也能进设计工作台。</p>
+</div>
+
+<!-- ============ 画面 2：设计工作台 ============ -->
+<div class="frame-head" id="f2" style="margin-top:24px">
+  <h2>画面 2 · 设计工作台 — 三层切换（HTML 画布 / Storybook / GN Preview）</h2>
+  <p>需求抽屉升格为<b>全屏工作台</b>。左栏渲染层可切换三种底座：<b>设计画布</b>（结构化 HTML，<span class="mono">data-fp</span> 热点）· <b>Storybook</b>（真组件，无代码时诚实空态）· <b>GN Preview</b>（点 UI 定位源码行）。右栏始终是 <b>Feature Contract</b>：稳定 <span class="mono">fp.id</span>、新增/改造、标记、token、codeHints。点热点 ↔ 右栏功能点双向高亮。这是本模块的主界面。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — SIRI-29 原型工作台 · 设计态</span></div>
+  <div class="app" style="height:880px">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">M</span> Multica 工作区</div>
+      <div class="s-item">日历</div>
+      <div class="s-item active"><span class="s-dot" style="background:var(--mod-pay)"></span> SIRI-29</div>
+      <div class="s-group">本需求画面</div>
+      <div class="s-item active" style="font-size:11.5px">退款申请页</div>
+      <div class="s-item" style="font-size:11.5px">进度时间线</div>
+      <div class="s-item" style="font-size:11.5px">失败重试</div>
+      <div class="s-item" style="font-size:11.5px">部分退款分流</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb"><span class="mono">SIRI-29</span> <b>退款流程异步化改造</b></div>
+        <span style="font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.6 0.15 300/12%);color:oklch(0.45 0.15 300);font-weight:650">🎨 原型待确认 · v2</span>
+        <div class="topbar-right">
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--muted-foreground)"><span class="avatar agent">N</span>Nova · 原型师</span>
+          <span class="btn">版本历史</span>
+        </div>
+      </div>
+      <div class="stage-flow">
+        <span class="st-node cur"><span class="dot">1</span>原型</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">2</span>plan + 拆解</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">3</span>执行</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">4</span>验收</span>
+        <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)">barrier：未确认不派发拆解</span>
+      </div>
+      <div class="layer-bar new-el">
+        <span style="font-size:11px;color:var(--faint-foreground);font-weight:650">渲染层</span>
+        <span class="seg" id="layer-seg">
+          <button type="button" class="active" data-layer="html">设计画布 · HTML</button>
+          <button type="button" data-layer="sb">Storybook</button>
+          <button type="button" data-layer="gn">GN Preview</button>
+        </span>
+        <span class="anno">1</span>
+        <span style="margin-left:auto;font-size:10.5px;color:var(--faint-foreground)" class="mono">docs/prototypes/SIRI-29-refund-async.html · contract v2</span>
+      </div>
+      <div style="flex:1;display:flex;min-height:0">
+        <!-- 左：三层渲染 -->
+        <div style="flex:1.35;border-right:1px solid var(--surface-border);display:flex;flex-direction:column;min-width:0;background:oklch(0.98 0.002 286)">
+          <div id="pane-html" class="layer-pane show" style="flex-direction:column;padding:14px;gap:10px;overflow:auto">
+            <div style="font-size:11px;color:var(--muted-foreground);display:flex;align-items:center;gap:8px">
+              画面 <b style="color:var(--foreground)">refund-apply</b> · 4 个 data-fp 热点
+              <span class="anno">2</span>
+              <span style="margin-left:auto" class="mono">[data-fp]</span>
+            </div>
+            <div class="hotspot" data-fp="fp.refund.status" onclick="pickFp('fp.refund.status')">
+              <span class="hp-pin"><span class="mark ok">✓</span></span>
+              <div class="hid">data-fp="fp.refund.status" · kind=new · anno=1</div>
+              <div class="ht">① 异步处理中状态条 + 预计到账时间</div>
+              <div class="hd">提交后立即返回 processing，展示 P99 5min 预计到账。</div>
+            </div>
+            <div class="hotspot" data-fp="fp.refund.timeline" onclick="pickFp('fp.refund.timeline')">
+              <span class="hp-pin"><span class="mark ok">✓</span></span>
+              <div class="hid">data-fp="fp.refund.timeline" · kind=new · anno=2</div>
+              <div class="ht">② 进度时间线四节点</div>
+              <div style="display:flex;gap:4px;margin-top:8px">
+                <span style="flex:1;height:6px;border-radius:3px;background:oklch(0.55 0.16 145/55%)"></span>
+                <span style="flex:1;height:6px;border-radius:3px;background:oklch(0.55 0.16 145/55%)"></span>
+                <span style="flex:1;height:6px;border-radius:3px;background:var(--brand)"></span>
+                <span style="flex:1;height:6px;border-radius:3px;background:var(--border)"></span>
+              </div>
+              <div class="hd">申请 → 审核 → 打款 → 到账；节点变更走现有消息通道。</div>
+            </div>
+            <div class="hotspot bad on" data-fp="fp.refund.retry" onclick="pickFp('fp.refund.retry')">
+              <span class="hp-pin"><span class="mark no">✗ 不符</span></span>
+              <div class="hid">data-fp="fp.refund.retry" · kind=modify · anno=3</div>
+              <div class="ht" style="color:var(--destructive)">③ 失败重试入口 + 客服</div>
+              <div class="hd">当前稿仍是「超时自动升级人工」。修正：上限 3 次，超限置灰并露出客服入口，<b>去掉自动升级</b>。</div>
+            </div>
+            <div class="hotspot" data-fp="fp.refund.split" onclick="pickFp('fp.refund.split')">
+              <span class="hp-pin"><span class="mark">○ 待定</span></span>
+              <div class="hid">data-fp="fp.refund.split" · kind=modify · anno=4</div>
+              <div class="ht">④ 部分退款 / 全额退款分流</div>
+              <div class="hd">对外 API 入口与字段不变。原型未体现对账，转 PM 拆解。</div>
+            </div>
+          </div>
+
+          <div id="pane-sb" class="layer-pane" style="flex-direction:column">
+            <div class="sb-chrome"><span style="opacity:.5">Storybook 9</span><span style="color:#fff;font-weight:650">preview-refundpage--default</span><span style="margin-left:auto;opacity:.55">parameters.featurePointIds[] 空</span></div>
+            <div class="empty">
+              <div style="font-size:15px;font-weight:650;color:var(--foreground)">Storybook 尚未生成</div>
+              <div style="max-width:420px;line-height:1.65">业务仓还没有 <span class="mono">RefundPage</span>。<b>这是诚实空态</b>，不是拿旧退款页冒充。确认原型并完成实现后，GitNexus <span class="mono">discoverViews</span> 会自动出 story。</div>
+              <div style="display:flex;gap:8px;margin-top:6px">
+                <span class="btn">查看 SIRI-26 已有对照（购物车）</span>
+              </div>
+              <div style="font-size:11px;color:var(--faint-foreground)">对应日历选型：无代码先画走 HTML，不把设计态绑死在 CSF。</div>
+            </div>
+          </div>
+
+          <div id="pane-gn" class="layer-pane" style="flex-direction:column">
+            <div class="sb-chrome" style="background:oklch(0.16 0.02 265)"><span style="opacity:.55">GitNexus Preview</span><span style="color:#fff;font-weight:650">payments-service · idle</span><span style="margin-left:auto;opacity:.55">source-locate 未接通</span></div>
+            <div class="empty">
+              <div style="font-size:15px;font-weight:650;color:var(--foreground)">实现态对照尚未点亮</div>
+              <div style="max-width:420px;line-height:1.65">Preview 需要真实 React 源码 + 分析后的 <span class="mono">entity_code_object</span>。当前 <span class="mono">codeHints[]</span> 为空。拆解确认并写出代码后，点「重试」按钮即可回填 <span class="mono">RefundRetry.tsx</span> 行号——见画面 6（SIRI-26 已接通样例）。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右：Contract -->
+        <div style="width:380px;flex:none;display:flex;flex-direction:column;background:var(--page-canvas)">
+          <div style="padding:10px 12px;border-bottom:1px solid var(--border);font-size:12px;font-weight:650;display:flex;align-items:center;gap:6px">
+            Feature Contract <span class="anno">3</span>
+            <span class="mono" style="margin-left:auto;font-weight:400;font-size:10px;color:var(--faint-foreground)">v2.json</span>
+          </div>
+          <div id="fp-detail" style="padding:10px 12px;border-bottom:1px solid var(--border);background:oklch(0.577 0.245 27.325 / 4%)">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <span class="mono" style="font-size:10.5px;color:var(--brand);font-weight:700">fp.refund.retry</span>
+              <span class="tag-mod">改造</span>
+              <span class="mark no">✗</span>
+            </div>
+            <div class="kv"><span class="k">screen</span><span class="v mono">refund-apply</span></div>
+            <div class="kv"><span class="k">selector</span><span class="v mono">[data-fp='fp.refund.retry']</span></div>
+            <div class="kv"><span class="k">tokens</span><span class="v mono">--destructive · --radius</span></div>
+            <div class="kv"><span class="k">codeHints</span><span class="v" style="color:var(--faint-foreground)">[] 实现后由 GN Preview 回填</span></div>
+            <div class="kv last"><span class="k">修正诉求</span><span class="v" style="color:var(--destructive)">上限 3 次；超限置灰 + 客服入口；去掉自动升级人工</span></div>
+          </div>
+          <div style="flex:1;overflow:auto" id="fp-list">
+            <div class="fp-item" data-fp="fp.refund.status" onclick="pickFp('fp.refund.status')">
+              <span style="color:var(--faint-foreground);font-weight:700;width:14px">①</span>
+              <span style="flex:1"><b>异步状态条</b><br><span class="mono" style="font-size:10px;color:var(--faint-foreground)">fp.refund.status</span></span>
+              <span class="tag-new">新增</span><span class="mark ok">✓</span>
+            </div>
+            <div class="fp-item" data-fp="fp.refund.timeline" onclick="pickFp('fp.refund.timeline')">
+              <span style="color:var(--faint-foreground);font-weight:700;width:14px">②</span>
+              <span style="flex:1"><b>进度时间线</b><br><span class="mono" style="font-size:10px;color:var(--faint-foreground)">fp.refund.timeline</span></span>
+              <span class="tag-new">新增</span><span class="mark ok">✓</span>
+            </div>
+            <div class="fp-item on bad" data-fp="fp.refund.retry" onclick="pickFp('fp.refund.retry')">
+              <span style="color:var(--faint-foreground);font-weight:700;width:14px">③</span>
+              <span style="flex:1"><b>失败重试入口</b><br><span class="mono" style="font-size:10px;color:var(--faint-foreground)">fp.refund.retry</span></span>
+              <span class="tag-mod">改造</span><span class="mark no">✗</span>
+            </div>
+            <div class="fp-item" data-fp="fp.refund.split" onclick="pickFp('fp.refund.split')">
+              <span style="color:var(--faint-foreground);font-weight:700;width:14px">④</span>
+              <span style="flex:1"><b>退款分流</b><br><span class="mono" style="font-size:10px;color:var(--faint-foreground)">fp.refund.split</span></span>
+              <span class="tag-mod">改造</span><span class="mark">○</span>
+            </div>
+            <div style="padding:7px 11px;font-size:10.5px;color:var(--brand)">＋ 追加功能点（写入 contract，同步打 data-fp）</div>
+          </div>
+          <div style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:6px;background:var(--surface)">
+            <span class="btn primary">去 Review 确认</span>
+            <span class="btn">↻ 按 ✗ 重生成</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p>标注：<span class="anno">1</span> <b>渲染层三段切换</b>共用右栏 Contract，不维护三套功能点清单。点顶部可预览空态&nbsp; <span class="anno">2</span> 热点必须带稳定 <span class="mono">data-fp / data-kind / data-anno</span>，禁止只靠「第 3 个蓝点」&nbsp; <span class="anno">3</span> Contract 是 AI 唯一入口；HTML 给人看，story / Preview 给实现对齐。</p>
+</div>
+
+<!-- ============ 画面 3：Token ============ -->
+<div class="frame-head" id="f3" style="margin-top:24px">
+  <h2>画面 3 · 风格调整 — Design Token 面板（不自由涂色）</h2>
+  <p>风格只暴露 <span class="mono">packages/ui/styles/tokens.css</span> 的语义变量。原型 HTML 的 <span class="mono">:root</span> <b>引用同一套变量名</b>（产品化后改为注入，不再抄录死值）。组件级微调写入 contract 的 <span class="mono">styleOverrides</span>，<b>确认后</b>才由实现 agent 落到真代码——避免 Storybook Controls 那种「未确认就改实现」。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — SIRI-29 / Token 面板 · 作用于 fp.refund.retry</span></div>
+  <div class="app" style="height:720px">
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb"><span class="mono">SIRI-29</span> / 风格 · 当前作用点 <b class="mono">fp.refund.retry</b></div>
+        <div class="topbar-right">
+          <span class="chip-filter">来源 <b>tokens.css · light</b></span>
+          <span class="btn">重置覆盖</span>
+          <span class="btn primary">写入 contract</span>
+        </div>
+      </div>
+      <div style="flex:1;display:flex;min-height:0">
+        <div style="flex:1;padding:16px;overflow:auto;border-right:1px solid var(--border)">
+          <div class="panel-h">实时预览 <span class="anno">1</span></div>
+          <div class="hotspot bad on" style="min-height:120px">
+            <div class="ht" style="color:var(--destructive)">重试（已 3 次）</div>
+            <div class="hd" style="margin-top:8px">按钮置灰 · 露出客服入口「联系人工」——文案复用现有客服组件，<b>不再自动升级</b>。</div>
+            <div style="margin-top:10px;display:flex;gap:8px">
+              <span class="btn" style="opacity:.45">再试一次</span>
+              <span class="btn primary">联系客服</span>
+            </div>
+          </div>
+          <div style="margin-top:16px;font-size:11.5px;color:var(--muted-foreground);line-height:1.65">
+            预览只改该 <span class="mono">fp.id</span> 的覆盖，不影响 ①②④。确认门通过前，<span class="mono">tokens.css</span> 本体不动。
+          </div>
+        </div>
+        <div style="width:420px;flex:none;padding:14px 16px;overflow:auto;background:var(--surface)">
+          <div class="panel-h">语义 Token <span class="anno">2</span></div>
+          <div class="token-row"><span class="sw" style="background:var(--destructive)"></span><span class="mono" style="width:130px">--destructive</span><span class="slider"><i style="left:62%"></i></span><span class="mono" style="font-size:10px;color:var(--faint-foreground)">oklch 0.577</span></div>
+          <div class="token-row"><span class="sw" style="background:var(--brand)"></span><span class="mono" style="width:130px">--brand</span><span class="slider"><i style="left:48%"></i></span><span class="mono" style="font-size:10px;color:var(--faint-foreground)">oklch 0.55</span></div>
+          <div class="token-row"><span class="sw" style="background:var(--surface);box-shadow:inset 0 0 0 1px var(--border)"></span><span class="mono" style="width:130px">--surface</span><span class="slider"><i style="left:90%"></i></span><span class="mono" style="font-size:10px;color:var(--faint-foreground)">oklch 1</span></div>
+          <div class="token-row"><span class="sw" style="background:var(--border)"></span><span class="mono" style="width:130px">--border</span><span class="slider"><i style="left:80%"></i></span><span class="mono" style="font-size:10px;color:var(--faint-foreground)">oklch 0.945</span></div>
+          <div class="token-row last"><span class="sw" style="background:transparent;border-radius:var(--radius)"></span><span class="mono" style="width:130px">--radius</span><span class="slider"><i style="left:40%"></i></span><span class="mono" style="font-size:10px;color:var(--faint-foreground)">0.625rem</span></div>
+          <div class="panel-h" style="margin-top:16px">本功能点覆盖 <span class="anno">3</span></div>
+          <div class="codebox">
+            <span class="c">// contract.styleOverrides["fp.refund.retry"]</span><br>
+            {<br>
+            &nbsp;&nbsp;<span class="k">"padding"</span>: <span class="s">"8px 12px"</span>,<br>
+            &nbsp;&nbsp;<span class="k">"buttonVariant"</span>: <span class="s">"ghost-disabled"</span>,<br>
+            &nbsp;&nbsp;<span class="k">"cta"</span>: <span class="s">"contact-support"</span><br>
+            }
+          </div>
+          <div style="margin-top:10px;font-size:11px;color:var(--faint-foreground);line-height:1.6">禁止在画布里拖拽改任意 CSS。不在 token 表里的值，只能作为 override 草稿，确认后由 agent 翻译成 Tailwind 语义类。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p>标注：<span class="anno">1</span> 预览作用域 = 当前 <span class="mono">fp.id</span>，不是整页换肤&nbsp; <span class="anno">2</span> 变量名与 <span class="mono">tokens.css</span> 对齐，Web / Desktop 共用&nbsp; <span class="anno">3</span> 覆盖先进 contract，确认门之后才改真源码。</p>
+</div>
+
+<!-- ============ 画面 4：Review ============ -->
+<div class="frame-head" id="f4" style="margin-top:24px">
+  <h2>画面 4 · Review 确认门 — 标记 / 回流 / 目标覆盖（承接日历 f4）</h2>
+  <p>在日历画面 4 上补两件产品化能力：<b>① Contract 完整性门</b>（每个功能点必须有 id / kind / screen，禁止「待定 kind」确认）<b>② 渲染层只读快照</b>（Review 时锁定 HTML 画布，不切 Storybook，避免拿未实现页冒充）。其余沿用：三态标记、✗ 回流〔本轮修正〕、版本 +1、存在未处理 ✗ 禁止确认。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — SIRI-29 Review · 确认门</span></div>
+  <div class="app" style="height:860px">
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb"><span class="mono">SIRI-29</span> <b>Review 确认门</b></div>
+        <span style="font-size:11px;padding:2.5px 8px;border-radius:999px;background:oklch(0.577 0.245 27.325/10%);color:var(--destructive);font-weight:650">⚠ 1 项 ✗ 未处理</span>
+        <div class="topbar-right"><span class="mono" style="font-size:11px;color:var(--faint-foreground)">v2 · 12 分钟前</span></div>
+      </div>
+      <div class="stage-flow">
+        <span class="st-node cur"><span class="dot">1</span>原型</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">2</span>plan + 拆解</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">3</span>执行</span>
+        <span class="st-line"></span>
+        <span class="st-node"><span class="dot">4</span>验收</span>
+      </div>
+      <div style="flex:1;display:flex;min-height:0">
+        <div style="flex:1.15;border-right:1px solid var(--border);overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:8px">
+          <div class="panel-h">实现细节逐项标记 <span class="anno">1</span><span style="margin-left:auto;font-weight:400;font-size:10px;color:var(--faint-foreground)">✓ 2 · ✗ 1 · ○ 1</span></div>
+          <div style="border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--surface)">
+            <div style="display:flex;gap:8px;padding:8px 11px;border-bottom:1px solid var(--border);font-size:11.5px;align-items:center"><span style="width:14px;color:var(--faint-foreground)">①</span><span style="flex:1">退款提交后立即返回「异步处理中」，展示预计到账（P99 5min）</span><span class="mark ok">✓ 符合</span></div>
+            <div style="display:flex;gap:8px;padding:8px 11px;border-bottom:1px solid var(--border);font-size:11.5px;align-items:center"><span style="width:14px;color:var(--faint-foreground)">②</span><span style="flex:1">进度时间线四节点，变更推送复用现有消息通道</span><span class="mark ok">✓ 符合</span></div>
+            <div style="display:flex;gap:8px;padding:8px 11px;border-bottom:1px solid var(--border);font-size:11.5px;align-items:flex-start;background:oklch(0.577 0.245 27.325 / 4%)">
+              <span style="width:14px;color:var(--faint-foreground)">③</span>
+              <span style="flex:1">失败可一键重试；超 15min 自动升级人工
+                <span style="display:block;margin-top:4px;font-size:10.5px;color:var(--destructive);line-height:1.5">修正诉求：上限 3 次，超限置灰 + 客服入口；去掉自动升级人工</span>
+              </span>
+              <span class="mark no">✗ 不符</span>
+            </div>
+            <div style="display:flex;gap:8px;padding:8px 11px;font-size:11.5px;align-items:center"><span style="width:14px;color:var(--faint-foreground)">④</span><span style="flex:1">部分 / 全额分流，对外 API 字段不变</span><span class="mark">○ 待定</span></div>
+          </div>
+          <div style="border:1px solid oklch(0.55 0.16 145/28%);border-radius:9px;background:oklch(0.55 0.16 145/4%);padding:9px 12px">
+            <b style="font-size:11.5px;display:block;margin-bottom:5px;color:oklch(0.42 0.12 145)">目标覆盖对照 <span class="anno">2</span></b>
+            <div class="rep-item pass"><span class="ic">✓</span><span>P99 30min → 5min：异步化 + 时间线支撑</span></div>
+            <div class="rep-item"><span class="ic" style="color:var(--faint-foreground)">○</span><span>对账差异率 0：后端约束，原型不体现 → 转 PM</span></div>
+            <div class="rep-item pass"><span class="ic">✓</span><span>对外 API 不变：入口与字段无改动</span></div>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:9px 12px">
+            <b style="font-size:11.5px;display:block;margin-bottom:5px">Contract 完整性 <span class="anno">3</span></b>
+            <div class="rep-item pass"><span class="ic">✓</span><span>4 个 fp 均有稳定 id / screen / selector</span></div>
+            <div class="rep-item pass"><span class="ic">✓</span><span>kind 已标 new | modify，无待定 kind</span></div>
+            <div class="rep-item fail"><span class="ic">✗</span><span>存在 verdict=no 且将回流重生成 — 当前禁止确认</span></div>
+          </div>
+        </div>
+        <div style="flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px">
+          <div class="prompt">
+            <div class="pr-head">五段提示词 +〔本轮修正〕 <span class="anno">4</span>
+              <span class="pr-src">灰底自动组装 · 红底来自 ✗</span>
+            </div>
+            <div class="pr-body">
+              <span class="auto">〔需求〕</span>退款流程异步化改造<br>
+              <span class="auto">〔目标〕</span>P99 30min → 5min；对账差异率 0；对外 API 不变<br>
+              <span class="auto">〔仓库〕</span><b class="mono">payments-service.git</b><br>
+              <span class="auto">〔产出〕</span>HTML + <b class="mono">SIRI-29-refund-async.v2.contract.json</b>，热点必须带 data-fp<br>
+              <span class="auto">〔风格〕</span>沿用 tokens.css，不引入新组件库<br>
+              <span class="ins">〔本轮修正 · fp.refund.retry〕</span>上限 3 次，超限置灰并露出客服入口；移除「超时自动升级人工」
+            </div>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:8px 11px">
+            <b style="font-size:11.5px;display:block;margin-bottom:4px">版本历史 <span class="anno">5</span></b>
+            <div class="ver-row"><span class="mono" style="font-weight:700;color:var(--brand)">v2</span><span style="flex:1">↻ 按提示词重生成 · 修正 ③</span><span class="mono" style="font-size:10px;color:var(--faint-foreground)">当前</span></div>
+            <div class="ver-row"><span class="mono" style="font-weight:700;color:var(--faint-foreground)">v1</span><span style="flex:1">⚡ 一键生成初版 · ③ 被标 ✗</span><span class="mono" style="font-size:10px;color:var(--faint-foreground)">8 分钟前</span></div>
+            <div style="margin-top:6px;font-size:10.5px;color:var(--faint-foreground);line-height:1.55">HTML 与 contract 同 commit；版本号 ↔ blob_sha。任一侧单独改视为不完整版本。</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding:11px 16px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;background:var(--surface)">
+        <span class="btn primary" style="opacity:.45">✓ 确认原型，进入拆解</span>
+        <span class="btn">↻ 按提示词重新生成（版本 +1）</span>
+        <span class="btn ghost">⏭ 跳过原型</span>
+        <span style="margin-left:auto;font-size:10.5px;color:var(--destructive);font-weight:650">存在 1 项 ✗ → 须重生成或显式忽略</span>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p>标注：<span class="anno">1</span> 三态与日历 f4 一致，✗ 必填修正诉求&nbsp; <span class="anno">2</span> 目标覆盖未体现项转 PM，不阻塞确认（与日历 f4 anno 7 同）&nbsp; <span class="anno">3</span> <b>新增</b>：缺 fp.id / kind 视为不完整，与 ✗ 门并列&nbsp; <span class="anno">4</span> 〔产出〕段强制同时出 HTML + contract&nbsp; <span class="anno">5</span> 版本与 commit 一一对应，回滚成对回滚。</p>
+</div>
+
+<!-- ============ 画面 5：Storybook ============ -->
+<div class="frame-head" id="f5" style="margin-top:24px">
+  <h2>画面 5 · Storybook 对照 — 实现后「跑的就是产品」（SIRI-26 已接通）</h2>
+  <p>对照对象换成<b>已确认且已实现</b>的 SIRI-26 购物车合并。左栏 iframe 直嵌 Storybook 纯渲染（<span class="mono">iframe.html?id=preview-cartmerge--default</span>）；右栏 story 树 + <span class="mono">parameters.featurePointIds</span>。设计态 contract 与实现态 story 用<b>同一组 fp.id</b> 对齐。无代码需求保持画面 2 的空态，不在这里伪造。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — SIRI-26 实现对照 · Storybook ready</span></div>
+  <div class="app" style="height:800px">
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb"><span class="mono">SIRI-26</span> <b>购物车合并结算</b> · 已确认 v3</div>
+        <span class="seg"><span>设计画布</span><span class="active">Storybook</span><span>GN Preview</span></span>
+        <div class="topbar-right">
+          <span class="chip-filter">status <b>ready</b></span>
+          <span class="btn">新窗口打开</span>
+          <span class="btn">重新构建</span>
+        </div>
+      </div>
+      <div style="flex:1;display:flex;min-height:0">
+        <div style="flex:1.3;border-right:1px solid var(--border);display:flex;flex-direction:column;background:#0f1115">
+          <div class="sb-chrome">
+            <span style="opacity:.5">iframe.html</span>
+            <span style="color:#fff">preview-cartmerge--default</span>
+            <span style="margin-left:auto;opacity:.55">viewMode=story · fullscreen</span>
+          </div>
+          <div style="flex:1;padding:18px;display:flex;flex-direction:column;gap:10px">
+            <div style="background:#1a1d24;border-radius:10px;padding:14px;color:#e8e9ed">
+              <div style="font-size:11px;opacity:.5;margin-bottom:8px">CartMerge · 真组件</div>
+              <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:650;margin-bottom:10px"><span>结算（已合并 2 单）</span><span>¥86.40</span></div>
+              <div style="height:36px;border:1px dashed oklch(0.55 0.16 255 / 50%);border-radius:8px;display:flex;align-items:center;padding:0 10px;font-size:12px;color:oklch(0.75 0.08 255)">
+                优惠券叠加 · <span class="mono" style="margin-left:6px;font-size:10px">fp.cart.coupon</span>
+                <span class="anno" style="margin-left:auto">1</span>
+              </div>
+              <div style="margin-top:8px;height:32px;background:oklch(0.85 0.01 286);color:#111;border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:650;font-size:12px">去结算</div>
+            </div>
+            <div style="font-size:10.5px;color:oklch(0.7 0.02 286);padding:0 4px">点虚线区块 → 右栏选中对应 fp，并高亮 story parameters</div>
+          </div>
+        </div>
+        <div style="width:360px;flex:none;display:flex;flex-direction:column;background:var(--page-canvas)">
+          <div style="padding:10px 12px;border-bottom:1px solid var(--border);font-size:12px;font-weight:650">Stories <span class="anno">2</span></div>
+          <div style="padding:8px 10px;font-size:11.5px;line-height:1.8;color:var(--muted-foreground)">
+            <div>Preview / AppShell</div>
+            <div style="padding:2px 8px;margin:4px 0;border-radius:6px;background:var(--surface-selected);color:var(--foreground);font-weight:650">Preview / CartMerge</div>
+            <div style="padding-left:8px">Preview / OrderCreate</div>
+          </div>
+          <div style="padding:10px 12px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-size:12px;font-weight:650">parameters.gitnexus <span class="anno">3</span></div>
+          <div class="codebox" style="margin:10px;flex:1">
+            featurePointIds: [<br>
+            &nbsp;&nbsp;<span class="s">"fp.cart.merge"</span>,<br>
+            &nbsp;&nbsp;<span class="s">"fp.cart.coupon"</span>,<br>
+            &nbsp;&nbsp;<span class="s">"fp.cart.inventory"</span><br>
+            ]<br>
+            <span class="c">// 与 contract v3 同一组 id</span><br>
+            sourcePath: <span class="s">packages/views/cart/CartMerge.tsx</span>
+          </div>
+          <div style="padding:10px 12px;font-size:11px;color:var(--muted-foreground);line-height:1.6;border-top:1px solid var(--border)">
+            设计稿 ③ 文案与 story 不一致时，右栏出「漂移」黄条，要求回设计台改 contract 或回代码改实现——<b>两套真相不允许静默并存</b>。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p>标注：<span class="anno">1</span> 真组件上的虚线是 contract 热点投影，不是再画一层蓝图&nbsp; <span class="anno">2</span> story 树来自 GitNexus <span class="mono">discoverViews</span>（app-shell / route-page / views-dir）&nbsp; <span class="anno">3</span> 补齐选型文档未落地的 <span class="mono">parameters.featurePointIds</span>，让 story 与 fp.id 对齐。</p>
+</div>
+
+<!-- ============ 画面 6：GN Preview ============ -->
+<div class="frame-head" id="f6" style="margin-top:24px">
+  <h2>画面 6 · GN Preview — 点击定位源码并回填 codeHints</h2>
+  <p>复用 GitNexus Preview 已验证的三通道：chips 切 story、iframe 路由上报、点击 <span class="mono">source-locate</span>（fiber <span class="mono">__source</span>）。本模块多做一步：把命中行块<b>写回当前 fp.id 的 codeHints</b>，供拆解 / 验收 / 下一轮 AI 工作包使用。右栏上区是功能点，下区是 <span class="mono">entity_code_object</span> 行切片。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — SIRI-26 · GN Preview · 已点中 fp.cart.inventory</span></div>
+  <div class="app" style="height:800px">
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb"><span class="mono">SIRI-26</span> <b>GN Preview</b></div>
+        <span class="seg"><span>设计画布</span><span>Storybook</span><span class="active">GN Preview</span></span>
+        <div class="topbar-right">
+          <span class="btn">复制源码路径</span>
+          <span class="chip-filter">MCP <b>platform_project_ui_preview</b></span>
+        </div>
+      </div>
+      <div style="flex:1;display:flex;min-height:0">
+        <div style="flex:1.25;border-right:1px solid var(--border);background:#0f1115;display:flex;flex-direction:column">
+          <div class="sb-chrome" style="background:oklch(0.16 0.02 265)">
+            <span style="opacity:.55">postMessage</span>
+            <span style="color:#fff">source-locate · CartInventoryLock.tsx:42</span>
+          </div>
+          <div style="flex:1;padding:18px">
+            <div style="background:#1a1d24;border-radius:10px;padding:14px;color:#e8e9ed">
+              <div style="font-size:11px;opacity:.5;margin-bottom:10px">真产品 UI · 点击库存锁定条</div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="height:34px;border-radius:8px;background:#252830;display:flex;align-items:center;padding:0 10px;font-size:12px">合并结算 · 2 单</div>
+                <div style="height:34px;border-radius:8px;background:#252830;display:flex;align-items:center;padding:0 10px;font-size:12px">优惠券叠加</div>
+                <div style="height:40px;border-radius:8px;background:oklch(0.55 0.16 255 / 18%);border:1.5px solid oklch(0.65 0.14 255);display:flex;align-items:center;padding:0 10px;font-size:12px;font-weight:650">
+                  库存锁定 · 并发校验
+                  <span class="anno" style="margin-left:8px">1</span>
+                  <span class="mono" style="margin-left:auto;font-size:10px;opacity:.7">fp.cart.inventory</span>
+                </div>
+              </div>
+            </div>
+            <div class="codebox" style="margin-top:12px;font-size:10px">
+              { source: <span class="s">'gitnexus-preview'</span>, type: <span class="s">'source-locate'</span>,<br>
+              &nbsp;&nbsp;path: <span class="s">'src/cart/CartInventoryLock.tsx'</span>, line: <span class="k">42</span> }
+            </div>
+          </div>
+        </div>
+        <div style="width:400px;flex:none;display:flex;flex-direction:column">
+          <div style="padding:10px 12px;border-bottom:1px solid var(--border);font-size:12px;font-weight:650">
+            功能点 → codeHints <span class="anno">2</span>
+          </div>
+          <div class="fp-item on" style="cursor:default">
+            <span style="flex:1"><b>库存锁定</b><br><span class="mono" style="font-size:10px;color:var(--faint-foreground)">fp.cart.inventory</span></span>
+            <span class="tag-mod">改造</span>
+          </div>
+          <div style="padding:8px 12px;font-size:11px;line-height:1.65;color:var(--muted-foreground);border-bottom:1px solid var(--border)">
+            已回填 <span class="mono">file: src/cart/CartInventoryLock.tsx</span><br>
+            <span class="mono">L36–L58</span> · object <span class="mono">lockInventory</span> · commit a3f19c2
+          </div>
+          <div style="padding:10px 12px;font-size:12px;font-weight:650;border-bottom:1px solid var(--border)">代码行块 <span class="anno">3</span></div>
+          <div class="codebox" style="margin:10px;flex:1">
+            <span class="ln">36</span><span class="c">// lock inventory before merge</span><br>
+            <span class="ln">41</span>export async function lockInventory() {<br>
+            <span class="hit"><span class="ln">42</span>&nbsp;&nbsp;const n = await stock.reserve(sku, qty)</span>
+            <span class="ln">43</span>&nbsp;&nbsp;<span class="k">if</span> (n &lt; qty) <span class="k">throw</span> new OverSell()<br>
+            <span class="ln">44</span>&nbsp;&nbsp;<span class="k">return</span> n<br>
+          </div>
+          <div style="padding:10px 12px;border-top:1px solid var(--border);font-size:10.5px;color:var(--faint-foreground);line-height:1.55">
+            MCP：<span class="mono">platform_list_project_ui_views</span> · <span class="mono">…/preview/module-code</span> · 写回走 Multica <span class="mono">issue.feature_points[].code_objects</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p>标注：<span class="anno">1</span> 点击真 UI 上报 source-locate（与 GitNexus PreviewPage P9 同桥）&nbsp; <span class="anno">2</span> <b>本模块增量</b>：命中行写回当前 fp.id，而不是只按文件展示&nbsp; <span class="anno">3</span> 行块来自已分析的 <span class="mono">entity_code_object</span>，展开走 <span class="mono">/ontology/objects/:id/code</span>。</p>
+</div>
+
+<!-- ============ 画面 7：Contract / AI ============ -->
+<div class="frame-head" id="f7" style="margin-top:24px">
+  <h2>画面 7 · Contract diff + AI 工作包 — 日常迭代的输入边界</h2>
+  <p>下一轮不管是「按 ✗ 重生成」还是「研发 agent 改代码」，<b>喂给模型的是 contract diff，不是 1500 行 HTML</b>。左栏 v1→v2 只高亮变更的 <span class="mono">fp.refund.retry</span>；右栏是即将下发的工作包：允许改的文件、禁止改的范围、验收断言草稿。漏写 <span class="mono">data-fp</span> 时协议检查红条拦住，不把半成品丢给模型。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — SIRI-29 · contract v1 → v2 · AI 工作包预览</span></div>
+  <div class="app" style="height:780px">
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb"><b>AI 工作包</b> · 将发给 Nova（重生成）或 Rex（实现）</div>
+        <div class="topbar-right">
+          <span class="chip-filter">变更功能点 <b>1</b></span>
+          <span class="btn primary">复制工作包</span>
+        </div>
+      </div>
+      <div style="flex:1;display:flex;min-height:0">
+        <div style="flex:1;border-right:1px solid var(--border);overflow:auto;padding:14px 16px">
+          <div class="panel-h">contract.diff <span class="anno">1</span><span class="mono" style="margin-left:auto;font-weight:400;font-size:10px;color:var(--faint-foreground)">SIRI-29-refund-async.v2.contract.json</span></div>
+          <div class="codebox" style="min-height:280px">
+            <span class="c">// 仅展示变更的 fp，①②④ 折叠</span><br>
+            &nbsp;&nbsp;<span class="k">"id"</span>: <span class="s">"fp.refund.retry"</span>,<br>
+            <span class="diff-del">&nbsp;&nbsp;"detail": "超时 15min 自动升级人工客服",</span><br>
+            <span class="diff-add">&nbsp;&nbsp;"detail": "上限 3 次；超限置灰 + 客服入口；去掉自动升级",</span><br>
+            <span class="diff-del">&nbsp;&nbsp;"mark": { "verdict": "no", "note": "" },</span><br>
+            <span class="diff-add">&nbsp;&nbsp;"mark": { "verdict": "no", "note": "去掉自动升级人工" },</span><br>
+            &nbsp;&nbsp;<span class="k">"kind"</span>: <span class="s">"modify"</span>,<br>
+            &nbsp;&nbsp;<span class="k">"codeHints"</span>: []
+          </div>
+          <div style="margin-top:12px;border:1px solid oklch(0.72 0.15 75 / 35%);border-radius:8px;padding:8px 11px;background:oklch(0.72 0.15 75 / 8%);font-size:11.5px;line-height:1.6;color:oklch(0.42 0.1 75)">
+            协议检查通过：变更项均含 id / screen / selector / kind。若生成器漏写 data-fp，此处变红且「发送」禁用 <span class="anno">2</span>
+          </div>
+        </div>
+        <div style="width:440px;flex:none;overflow:auto;padding:14px 16px;background:var(--surface)">
+          <div class="panel-h">即将下发的上下文 <span class="anno">3</span></div>
+          <div class="prompt">
+            <div class="pr-head">agent pack · 禁止越界</div>
+            <div class="pr-body">
+              本需求只改这些 fp.id：<b class="mono">fp.refund.retry</b><br>
+              kind = modify · screen = refund-apply<br>
+              未实现：codeHints 为空 → 只改 HTML 热点 + contract，<b>不要改业务源码</b><br>
+              selector: <span class="mono">[data-fp='fp.refund.retry']</span><br>
+              tokens: --destructive, --radius<br>
+              验收草稿：重试第 4 次按钮 disabled；可见「联系客服」；无「自动升级」文案<br>
+              禁止改 contract 以外的文件；禁止改 ①②④
+            </div>
+          </div>
+          <div style="margin-top:12px;font-size:11.5px;color:var(--muted-foreground);line-height:1.7">
+            <b style="color:var(--foreground)">实现后同一模板</b>会多出：<br>
+            <span class="mono">file: src/refund/RetryEntry.tsx L18–L40</span><br>
+            允许文件白名单随 codeHints 自动扩，仍不含未列出的模块。
+          </div>
+          <div style="margin-top:14px;display:flex;gap:8px">
+            <span class="btn primary">发给原型师重生成</span>
+            <span class="btn">预览将改的文件</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p>标注：<span class="anno">1</span> 日常迭代 diff 的是 contract，不是整页原型&nbsp; <span class="anno">2</span> 协议检查是硬门：缺稳定 ID 不准下发&nbsp; <span class="anno">3</span> 工作包显式写「只改这些 fp / 禁止改清单外文件」，这是让 AI 知道改动位置的产品形态。</p>
+</div>
+
+<!-- ============ 画面 8：三层总览 ============ -->
+<div class="frame-head" id="f8" style="margin-top:24px">
+  <h2>画面 8 · 三层总览 — 管理 / 设计 / Review 如何共用一套 fp.id</h2>
+  <p>给评审看的架构画面，也是产品内「如何工作」说明。左：设计态（HTML 画布 + Token + 确认门）；中：契约（contract 是唯一真源，写入 <span class="mono">issue_prototype_version</span> / <span class="mono">feature_points</span>）；右：实现态（Storybook + GN Preview，有代码才点亮）。流水线：一键生成 → 标记 → 确认 → 拆解 → 实现 → 点到行 → 下一轮只 diff contract。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 原型模块三层分工</span></div>
+  <div class="app" style="height:700px">
+    <div class="main">
+      <div class="tri-col">
+        <div>
+          <div class="panel-h"><span class="tag-layer html">设计态</span> HTML 结构化画布</div>
+          <div class="kv"><span class="k">入口</span><span class="v">项目「原型」Tab · 需求工作台</span></div>
+          <div class="kv"><span class="k">产物</span><span class="v mono">docs/prototypes/*.html</span></div>
+          <div class="kv"><span class="k">能力</span><span class="v">无代码先画 · 多画面 · data-fp 热点</span></div>
+          <div class="kv"><span class="k">风格</span><span class="v">token 面板，确认后才落地</span></div>
+          <div class="kv last"><span class="k">Review</span><span class="v">三态标记 · ✗ 回流 · 确认门</span></div>
+          <div style="margin-top:14px;padding:9px 11px;border-radius:8px;background:oklch(0.55 0.16 255 / 6%);border:1px solid oklch(0.55 0.16 255 / 22%);font-size:11.5px;line-height:1.65">
+            对应画面 1–4。日历 f4 的「一键生成 + 细节标记」在此产品化，并升格为带稳定 ID 的画布。
+          </div>
+        </div>
+        <div style="background:var(--surface)">
+          <div class="panel-h">契约层 · AI 唯一入口</div>
+          <div class="kv"><span class="k">文件</span><span class="v mono">*.vN.contract.json</span></div>
+          <div class="kv"><span class="k">表</span><span class="v mono">issue_prototype_version.marks</span></div>
+          <div class="kv"><span class="k">下游</span><span class="v mono">issue.feature_points</span></div>
+          <div class="kv"><span class="k">键</span><span class="v mono">fp.id · kind · screen · selector</span></div>
+          <div class="kv last"><span class="k">迭代</span><span class="v">diff contract，不是 diff 整页 HTML</span></div>
+          <div style="margin-top:14px;padding:9px 11px;border-radius:8px;background:oklch(0.55 0.16 145 / 7%);border:1px solid oklch(0.55 0.16 145 / 25%);font-size:11.5px;line-height:1.65">
+            对应画面 7。没有这一层，Storybook 和画布都无法让 AI 稳定对准「③ 重试入口」。
+          </div>
+        </div>
+        <div>
+          <div class="panel-h"><span class="tag-layer sb">实现态</span> Storybook + GN Preview</div>
+          <div class="kv"><span class="k">Storybook</span><span class="v">真组件 · 无代码则空态</span></div>
+          <div class="kv"><span class="k">桥</span><span class="v mono">parameters.featurePointIds</span></div>
+          <div class="kv"><span class="k">Preview</span><span class="v">source-locate → 行块</span></div>
+          <div class="kv"><span class="k">回填</span><span class="v">codeHints 写入同一个 fp.id</span></div>
+          <div class="kv last"><span class="k">复用</span><span class="v">GitNexus runner，不在 Multica 另装一套</span></div>
+          <div style="margin-top:14px;padding:9px 11px;border-radius:8px;background:oklch(0.55 0.1 265 / 8%);border:1px solid oklch(0.55 0.1 265 / 25%);font-size:11.5px;line-height:1.65">
+            对应画面 5–6。只在有代码之后点亮。SIRI-29 设计中走空态；SIRI-26 已实现走真对照。
+          </div>
+        </div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid var(--border);background:var(--surface);font-size:12px;line-height:1.7;color:var(--muted-foreground)">
+        <b style="color:var(--foreground)">端到端</b>：
+        一键生成 HTML+contract → 设计台打点 / 调 token → Review 确认门 → 写入 feature_points → PM 拆解 → 实现 →
+        Storybook 对照 + GN 点到行 → 下一轮只把变更 fp 打成 AI 工作包。
+        <span class="anno">1</span>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="frame-head" style="margin-top:-40px">
+  <p>标注：<span class="anno">1</span> 不要为了统一技术栈把画面 2 做成纯 Storybook，也不要换成无限画布。三层共用 <span class="mono">fp.id</span>，渲染器可以换，契约不能换。</p>
+</div>
+
+</div>
+
+<script>
+(function () {
+  var seg = document.getElementById("layer-seg");
+  if (seg) {
+    seg.addEventListener("click", function (e) {
+      var btn = e.target.closest("button[data-layer]");
+      if (!btn) return;
+      seg.querySelectorAll("button").forEach(function (b) { b.classList.toggle("active", b === btn); });
+      ["html", "sb", "gn"].forEach(function (id) {
+        var pane = document.getElementById("pane-" + id);
+        if (pane) pane.classList.toggle("show", id === btn.getAttribute("data-layer"));
+      });
+    });
+  }
+
+  var details = {
+    "fp.refund.status": {
+      cls: "",
+      html:
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
+        '<span class="mono" style="font-size:10.5px;color:var(--brand);font-weight:700">fp.refund.status</span>' +
+        '<span class="tag-new">新增</span><span class="mark ok">✓</span></div>' +
+        '<div class="kv"><span class="k">screen</span><span class="v mono">refund-apply</span></div>' +
+        '<div class="kv"><span class="k">selector</span><span class="v mono">[data-fp=\'fp.refund.status\']</span></div>' +
+        '<div class="kv"><span class="k">tokens</span><span class="v mono">--brand · --success</span></div>' +
+        '<div class="kv"><span class="k">codeHints</span><span class="v" style="color:var(--faint-foreground)">[]</span></div>' +
+        '<div class="kv last"><span class="k">细节</span><span class="v">提交后立即 processing，展示 P99 5min 预计到账</span></div>'
+    },
+    "fp.refund.timeline": {
+      cls: "",
+      html:
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
+        '<span class="mono" style="font-size:10.5px;color:var(--brand);font-weight:700">fp.refund.timeline</span>' +
+        '<span class="tag-new">新增</span><span class="mark ok">✓</span></div>' +
+        '<div class="kv"><span class="k">screen</span><span class="v mono">refund-apply</span></div>' +
+        '<div class="kv"><span class="k">selector</span><span class="v mono">[data-fp=\'fp.refund.timeline\']</span></div>' +
+        '<div class="kv"><span class="k">tokens</span><span class="v mono">--brand · --border</span></div>' +
+        '<div class="kv last"><span class="k">细节</span><span class="v">四节点时间线，变更推送复用现有消息通道</span></div>'
+    },
+    "fp.refund.retry": {
+      cls: "bad",
+      html:
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
+        '<span class="mono" style="font-size:10.5px;color:var(--brand);font-weight:700">fp.refund.retry</span>' +
+        '<span class="tag-mod">改造</span><span class="mark no">✗</span></div>' +
+        '<div class="kv"><span class="k">screen</span><span class="v mono">refund-apply</span></div>' +
+        '<div class="kv"><span class="k">selector</span><span class="v mono">[data-fp=\'fp.refund.retry\']</span></div>' +
+        '<div class="kv"><span class="k">tokens</span><span class="v mono">--destructive · --radius</span></div>' +
+        '<div class="kv"><span class="k">codeHints</span><span class="v" style="color:var(--faint-foreground)">[] 实现后由 GN Preview 回填</span></div>' +
+        '<div class="kv last"><span class="k">修正诉求</span><span class="v" style="color:var(--destructive)">上限 3 次；超限置灰 + 客服入口；去掉自动升级人工</span></div>'
+    },
+    "fp.refund.split": {
+      cls: "",
+      html:
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
+        '<span class="mono" style="font-size:10.5px;color:var(--brand);font-weight:700">fp.refund.split</span>' +
+        '<span class="tag-mod">改造</span><span class="mark">○</span></div>' +
+        '<div class="kv"><span class="k">screen</span><span class="v mono">refund-apply</span></div>' +
+        '<div class="kv"><span class="k">selector</span><span class="v mono">[data-fp=\'fp.refund.split\']</span></div>' +
+        '<div class="kv last"><span class="k">细节</span><span class="v">部分 / 全额分流，对外 API 字段不变；对账转 PM</span></div>'
+    }
+  };
+
+  window.pickFp = function (id) {
+    document.querySelectorAll("#pane-html .hotspot").forEach(function (el) {
+      el.classList.toggle("on", el.getAttribute("data-fp") === id);
+    });
+    document.querySelectorAll("#fp-list .fp-item").forEach(function (el) {
+      el.classList.toggle("on", el.getAttribute("data-fp") === id);
+    });
+    var box = document.getElementById("fp-detail");
+    var d = details[id];
+    if (box && d) {
+      box.innerHTML = d.html;
+      box.style.background = d.cls === "bad" ? "oklch(0.577 0.245 27.325 / 4%)" : "transparent";
+    }
+  };
+})();
+</script>
+</body>
+</html>

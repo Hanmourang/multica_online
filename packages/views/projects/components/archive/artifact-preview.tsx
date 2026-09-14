@@ -127,8 +127,8 @@ export function ArtifactPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] w-full flex-col gap-0 overflow-hidden sm:max-w-3xl">
-        <DialogHeader className="border-b border-surface-border px-4 py-3">
+      <DialogContent className="flex h-[min(94vh,1080px)] !w-[min(96vw,1440px)] !max-w-[min(96vw,1440px)] flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b border-surface-border px-5 py-3">
           <div className="flex items-center gap-2">
             <DialogTitle className="truncate text-title-sm">
               {fileNameOf(artifact.rel_path)}
@@ -180,17 +180,18 @@ export function ArtifactPreviewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-56 flex-1 overflow-auto bg-surface/50 p-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface/50 p-5">
           <ArtifactPreviewPane
             artifact={artifact}
             projectId={projectId}
             archiveRoots={archiveRoots}
             onArchiveRootChange={onArchiveRootChange}
+            fill
           />
         </div>
 
         {/* Metadata drawer — fixed 8-field grid, matching the prototype. */}
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-surface-border bg-surface-hover/40 px-4 py-3 sm:grid-cols-4">
+        <div className="grid shrink-0 grid-cols-2 gap-x-4 gap-y-2 border-t border-surface-border bg-surface-hover/40 px-5 py-3 sm:grid-cols-4">
           {metaRows.map((row) => (
             <div key={row.key} className="min-w-0">
               <div className="text-caption text-muted-foreground">{row.label}</div>
@@ -201,7 +202,7 @@ export function ArtifactPreviewDialog({
           ))}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-surface-border px-4 py-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-surface-border px-5 py-3">
           <Button
             type="button"
             size="xs"

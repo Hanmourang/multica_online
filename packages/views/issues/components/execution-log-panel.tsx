@@ -25,7 +25,6 @@ import {
   summarizeTaskUsage,
   summarizeTaskUsageAcross,
 } from "../../runtimes/utils";
-import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
 import { pickDefaultRun } from "./issue-detail-tab";
 import type { LabeledTask } from "./use-issue-execution-tasks";
@@ -35,11 +34,13 @@ export function ExecutionLogPanel({
   labeledTasks,
   preferredRunId,
   onSelectRun,
+  fill = false,
 }: {
   issueId: string;
   labeledTasks: LabeledTask[];
   preferredRunId?: string | null;
   onSelectRun?: (runId: string) => void;
+  fill?: boolean;
 }) {
   const { t } = useT("issues");
   const tasks = useMemo(() => labeledTasks.map((item) => item.task), [labeledTasks]);
@@ -57,12 +58,18 @@ export function ExecutionLogPanel({
   const failed = tasks.filter((task) => task.status === "failed").length;
   const usageTotal = summarizeTaskUsageAcross(tasks.map((task) => task.usage));
 
+  const showRail = labeledTasks.length > 1;
+
   return (
     <div
       data-testid="execution-log-panel"
-      className="flex items-start rounded-lg border bg-card"
+      className={cn(
+        "flex rounded-lg border bg-card",
+        fill ? "h-full min-h-0 items-stretch overflow-hidden" : "items-start",
+      )}
     >
-      <aside className="flex w-64 shrink-0 flex-col self-stretch border-r bg-muted/20">
+      {showRail && (
+      <aside className="flex w-52 shrink-0 flex-col self-stretch overflow-y-auto border-r bg-muted/20">
         <div className="flex items-center justify-between px-3 py-2 text-caption font-medium">
           <span>{t(($) => $.execution_log.panel_runs)}</span>
           <span className="font-normal text-muted-foreground">
@@ -72,12 +79,7 @@ export function ExecutionLogPanel({
           </span>
         </div>
         <div className="pb-2">
-          {labeledTasks.length === 0 ? (
-            <p className="px-3 py-6 text-caption text-muted-foreground">
-              {t(($) => $.execution_log.panel_empty)}
-            </p>
-          ) : (
-            labeledTasks.map((item) => (
+          {labeledTasks.map((item) => (
               <RunPickRow
                 key={item.task.id}
                 item={item}
@@ -87,20 +89,23 @@ export function ExecutionLogPanel({
                   onSelectRun?.(item.task.id);
                 }}
               />
-            ))
-          )}
+          ))}
         </div>
       </aside>
-      <div className="min-w-0 flex-1 overflow-visible">
+      )}
+      <div className={cn("min-w-0 flex-1", fill && "flex min-h-0 flex-col overflow-hidden")}>
         {selected ? (
           <SelectedRunTrace
             issueId={selected.task.issue_id || issueId}
             task={selected.task}
             sourceTitle={selected.sourceTitle}
+            fill={fill}
           />
         ) : (
-          <p className="px-4 py-10 text-center text-caption text-muted-foreground">
-            {t(($) => $.execution_log.select_run)}
+          <p className="px-4 py-6 text-center text-caption text-muted-foreground">
+            {labeledTasks.length === 0
+              ? t(($) => $.execution_log.panel_empty)
+              : t(($) => $.execution_log.select_run)}
           </p>
         )}
       </div>
@@ -178,10 +183,12 @@ function SelectedRunTrace({
   issueId,
   task,
   sourceTitle,
+  fill = false,
 }: {
   issueId: string;
   task: AgentTask;
   sourceTitle?: string;
+  fill?: boolean;
 }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
@@ -248,27 +255,22 @@ function SelectedRunTrace({
 
   if (loading && items.length === 0) {
     return (
-      <div className="flex items-center justify-center py-10 text-muted-foreground">
+      <div className="flex items-center justify-center py-6 text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center gap-2 border-b px-3 py-2">
-        <TaskStatusIcon status={task.status} />
-        <span className="min-w-0 truncate text-caption font-medium">
-          {agentName}
-          {sourceTitle ? ` · ${sourceTitle}` : ""}
-        </span>
-        {canRetry && (
+    <div className={cn("flex min-h-0 flex-col", fill && "h-full")}>
+      {canRetry && (
+        <div className="flex shrink-0 items-center justify-end border-b px-3 py-1.5">
           <button
             type="button"
             data-testid="exec-retry"
             disabled={retrying}
             onClick={() => void handleRetry()}
-            className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-1 text-caption text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-caption text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
           >
             {retrying ? (
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -277,15 +279,19 @@ function SelectedRunTrace({
             )}
             {t(($) => $.execution_log.retry_task_tooltip)}
           </button>
-        )}
-      </div>
-      <div>
+        </div>
+      )}
+      <div className={cn(fill && "min-h-0 flex-1 overflow-hidden")}>
         <AgentTranscriptDialog
           open
           onOpenChange={() => undefined}
           task={task}
           items={items}
-          agentName={agentName}
+          agentName={
+            sourceTitle && agentName
+              ? `${agentName} · ${sourceTitle}`
+              : agentName || sourceTitle || ""
+          }
           isLive={live}
           embedded
         />

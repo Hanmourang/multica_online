@@ -2,6 +2,8 @@ export {
   artifactKeys,
   projectArtifactsOptions,
   projectArtifactListOptions,
+  archiveSyncDiagnosticsOptions,
+  archiveSyncConfigOptions,
   projectArtifactDetailOptions,
   projectArtifactContentOptions,
   projectArtifactMatrixOptions,
@@ -14,4 +16,5 @@ export {
   useBindArtifact,
   useCreateArtifact,
   useDeleteArtifact,
+  usePutArchiveSyncConfig,
 } from "./mutations";

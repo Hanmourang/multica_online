@@ -110,14 +110,22 @@ func TestParseFrontmatter(t *testing.T) {
 	dir := t.TempDir()
 	withFM := filepath.Join(dir, "with.md")
 	os.WriteFile(withFM, []byte("---\nmultica_issue_id: abc-123\ndoc_type: plan\n---\n# body\n"), 0o644)
-	issueID, docType := parseFrontmatter(withFM)
-	if issueID != "abc-123" || docType != "plan" {
-		t.Fatalf("frontmatter: got (%q, %q)", issueID, docType)
+	fm := parseFrontmatter(withFM)
+	if fm.IssueID != "abc-123" || fm.DocType != "plan" {
+		t.Fatalf("frontmatter: got (%q, %q)", fm.IssueID, fm.DocType)
+	}
+	os.WriteFile(withFM, []byte("---\ndoc_type: product-design\ndoc_class: prd\n---\n"), 0o644)
+	if got := parseFrontmatter(withFM).DocClass; got != "prd" {
+		t.Fatalf("doc_class: %q", got)
+	}
+	os.WriteFile(withFM, []byte("---\ndoc_type: architecture\ndoc_module: deepseek-harness\n---\n"), 0o644)
+	if got := parseFrontmatter(withFM).DocModule; got != "deepseek-harness" {
+		t.Fatalf("doc_module: %q", got)
 	}
 	without := filepath.Join(dir, "plain.md")
 	os.WriteFile(without, []byte("# no frontmatter\n"), 0o644)
-	if issueID, docType := parseFrontmatter(without); issueID != "" || docType != "" {
-		t.Fatalf("plain file must yield empty frontmatter: (%q, %q)", issueID, docType)
+	if fm := parseFrontmatter(without); fm.IssueID != "" || fm.DocType != "" {
+		t.Fatalf("plain file must yield empty frontmatter: %+v", fm)
 	}
 }
 

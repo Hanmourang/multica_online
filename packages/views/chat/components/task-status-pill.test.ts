@@ -62,8 +62,21 @@ describe("pickStageKeys", () => {
     });
   });
 
-  it("returns thinking for running with no messages", () => {
-    expect(pickStageKeys("running", [], "online")).toEqual({ stageKey: "thinking" });
+  it("returns starting_up for running with no messages", () => {
+    expect(pickStageKeys("running", [], "online")).toEqual({ stageKey: "starting_up" });
+  });
+
+  it("returns offline when running has no messages and the agent is offline", () => {
+    expect(pickStageKeys("running", [], "offline")).toEqual({
+      stageKey: "offline",
+      static: true,
+    });
+  });
+
+  it("returns reconnecting when running has no messages and the agent is unstable", () => {
+    expect(pickStageKeys("running", [], "unstable")).toEqual({
+      stageKey: "reconnecting",
+    });
   });
 });
 

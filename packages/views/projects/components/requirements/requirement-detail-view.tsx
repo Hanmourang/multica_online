@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -25,6 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components
 import { useT } from "../../../i18n";
 import { AppLink } from "../../../navigation";
 import { stageForRequirementStatus } from "../../../calendar/calendar-helpers";
+import { RequirementDrawer } from "../../../calendar/requirement-drawer";
 import { RequirementDynamics } from "../requirement-drill/requirement-dynamics";
 import { ProgressTracker } from "../requirement-drill/progress-tracker";
 import { DeliverablesOverview } from "../requirement-drill/deliverables-overview";
@@ -67,6 +69,7 @@ export function RequirementDetailView({
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const active: Drill = isDrill(drill) ? drill : "dynamics";
+  const [benchOpen, setBenchOpen] = useState(false);
 
   const issueQuery = useQuery(issueDetailOptions(wsId, issueId));
   const modulesQuery = useQuery(projectModulesOptions(wsId, projectId));
@@ -130,12 +133,15 @@ export function RequirementDetailView({
               onDone={() => void issueQuery.refetch()}
             />
           )}
-          <AppLink href={paths.calendarRequirement(issue.id, workbenchStage, "project")}>
-            <Button size="xs" variant="outline">
-              <Workflow className="size-3.5" />
-              {t(($) => $.req_detail.open_workbench)}
-            </Button>
-          </AppLink>
+          <Button
+            size="xs"
+            variant="outline"
+            data-testid="open-requirement-workbench"
+            onClick={() => setBenchOpen(true)}
+          >
+            <Workflow className="size-3.5" />
+            {t(($) => $.req_detail.open_workbench)}
+          </Button>
           <AppLink href={paths.calendarRequirement(issue.id)}>
             <Button size="xs" variant="ghost">
               <CalendarDays className="size-3.5" />
@@ -258,6 +264,12 @@ export function RequirementDetailView({
           </div>
         </TabsContent>
       </Tabs>
+      <RequirementDrawer
+        issueId={benchOpen ? issue.id : null}
+        statusBadge={issue.requirement_status}
+        initialViewedStage={workbenchStage}
+        onOpenChange={(open) => setBenchOpen(open)}
+      />
     </div>
   );
 }

@@ -46,6 +46,8 @@ vi.mock("@multica/core/runtimes", () => ({
     isPending: false,
     mutateAsync: mutationState.updateProfile,
   })),
+  providerDisplayName: (provider: string) =>
+    provider.charAt(0).toUpperCase() + provider.slice(1),
 }));
 
 vi.mock("./delete-runtime-profile-dialog", () => ({
@@ -165,6 +167,21 @@ describe("RuntimeProfilesDialog", () => {
     expect(screen.getByText("claude")).toBeInTheDocument();
   });
 
+  it("links Codex to the official CLI setup guide from the built-in detail", () => {
+    queryState.profiles = [profile()];
+
+    renderDialog();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Supported base protocols/ }),
+    );
+    fireEvent.click(screen.getByRole("option", { name: /codexReference/i }));
+
+    expect(
+      screen.getByRole("link", { name: "View Codex setup guide" }),
+    ).toHaveAttribute("href", "https://developers.openai.com/codex/cli/");
+  });
+
   it("clears built-in detail when the built-in reference section collapses", () => {
     queryState.profiles = [profile()];
 
@@ -179,6 +196,12 @@ describe("RuntimeProfilesDialog", () => {
     expect(
       screen.getByText(/claude is a built-in protocol family/),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "View Claude setup guide" }),
+    ).toHaveAttribute(
+      "href",
+      "https://code.claude.com/docs/en/quickstart",
+    );
 
     fireEvent.click(builtinsToggle);
 
@@ -247,6 +270,9 @@ describe("RuntimeProfilesDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /codex/i }));
     expect(screen.getByText("Step 2 of 2")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "View Codex setup guide" }),
+    ).toHaveAttribute("href", "https://developers.openai.com/codex/cli/");
     fireEvent.change(screen.getByLabelText("Display name"), {
       target: { value: "Composer Agent" },
     });

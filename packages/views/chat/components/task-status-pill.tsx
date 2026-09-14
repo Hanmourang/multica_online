@@ -109,7 +109,18 @@ export function pickStageKeys(
     }
   }
 
-  if (!latest) return { stageKey: "thinking" };
+  // No task message yet: the process is still connecting / handshaking,
+  // not "thinking". Showing thinking here is what made Codex network
+  // hangs look like a 50-minute model think.
+  if (!latest) {
+    if (availability === "offline") {
+      return { stageKey: "offline", static: true };
+    }
+    if (availability === "unstable") {
+      return { stageKey: "reconnecting" };
+    }
+    return { stageKey: "starting_up" };
+  }
   if (latest.type === "thinking") return { stageKey: "thinking" };
   if (latest.type === "text") return { stageKey: "typing" };
   if (latest.type === "tool_use") {

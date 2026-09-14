@@ -478,6 +478,47 @@ func daemonTaskContextMarkerPath() string {
 	}
 }
 
+// bootstrapDaemonTaskCredentials recovers the per-task MULTICA_* credentials
+// from the daemon-owned sidecar (execenv.TaskCredentialsRelPath) when the CLI is
+// running with no MULTICA_TOKEN of its own. This is the recovery channel for
+// runtimes — notably Wukong print mode — that hand tool execution to a separate
+// long-lived service process whose environment is rebuilt from the user's login
+// shell, so every var the daemon injected is gone by the time the agent shells
+// out to `multica`. Without it the CLI (correctly) fails closed and the task can
+// neither read its issue nor comment.
+//
+// It only ever fills gaps: a MULTICA_* var already present in the environment
+// wins, so a normally-injected task is left untouched, and it is a no-op for an
+// ordinary user shell (no sidecar is discoverable above their cwd). It never
+// weakens the fail-closed guard — ReadTaskCredentials trusts only a file owned
+// by execenv.TaskCredentialsManagedBy carrying a task-scoped mat_ token, and if
+// none is found the CLI still refuses to fall back to the user's own config.
+//
+// Deliberately NOT gated on inDaemonManagedExecutionContext(): the sidecar's own
+// managed_by + mat_ validation is a stronger daemon signal than the non-secret
+// marker, and gating on the marker would skip recovery in exactly the case where
+// a confused agent deleted the workdir marker yet the credentials still exist.
+func bootstrapDaemonTaskCredentials() {
+	// If the injected token survived, the environment is intact; there is
+	// nothing to recover and no reason to walk the directory tree.
+	if strings.TrimSpace(os.Getenv("MULTICA_TOKEN")) != "" {
+		return
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	creds, ok := execenv.ReadTaskCredentials(cwd)
+	if !ok {
+		return
+	}
+	for k, v := range creds {
+		if strings.TrimSpace(os.Getenv(k)) == "" {
+			os.Setenv(k, v)
+		}
+	}
+}
+
 func resolveWorkspaceID(cmd *cobra.Command) string {
 	val := cli.FlagOrEnv(cmd, "workspace-id", "MULTICA_WORKSPACE_ID", "")
 	if val != "" {

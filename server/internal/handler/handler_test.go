@@ -63,6 +63,11 @@ func TestMain(m *testing.M) {
 		pool.Close()
 		os.Exit(1)
 	}
+	if err := ensureArtifactDocClassColumn(ctx, pool); err != nil {
+		fmt.Printf("Failed to apply artifact doc_class schema: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
 
 	queries := db.New(pool)
 	hub := realtime.NewHub()
@@ -134,6 +139,35 @@ func ensureProjectTemplateColumn(ctx context.Context, pool *pgxpool.Pool) error 
 	}
 	if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
 		return fmt.Errorf("apply project template schema: %w", err)
+	}
+	return nil
+}
+
+func ensureArtifactDocClassColumn(ctx context.Context, pool *pgxpool.Pool) error {
+	var exists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'project_artifact'
+			  AND column_name = 'doc_class'
+		)
+	`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	sqlBytes, err := os.ReadFile("../migrations/464_artifact_doc_class.up.sql")
+	if err != nil {
+		sqlBytes, err = os.ReadFile("../../migrations/464_artifact_doc_class.up.sql")
+	}
+	if err != nil {
+		return fmt.Errorf("artifact doc_class migration not found: %w", err)
+	}
+	if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+		return fmt.Errorf("apply artifact doc_class schema: %w", err)
 	}
 	return nil
 }

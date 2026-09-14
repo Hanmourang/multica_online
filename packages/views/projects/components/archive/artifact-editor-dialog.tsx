@@ -30,25 +30,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
-import { writeArchiveFile } from "../../../platform/archive-fs";
+import { readArchiveFile, writeArchiveFile } from "../../../platform/archive-fs";
 import { useT } from "../../../i18n";
+import { upsertArchiveFrontmatter } from "./archive-frontmatter";
 import { suggestedRelPath, todayRequirementKey } from "./archive-inspector";
-import { renderArchiveTemplate } from "./archive-templates";
-
-const DOC_TYPES = [
-  "requirement",
-  "design",
-  "test-plan",
-  "acceptance",
-  "report",
-  "architecture",
-  "research",
-  "product-design",
-  "retrospective",
-  "filing-software-copyright",
-  "change-log",
-  "work-plan",
-] as const;
+import type { ArchiveWritebackMode } from "./archive-mapping";
+import { ARCHIVE_CREATE_TYPES, renderArchiveTemplate, resolveArchiveDocChoice } from "./archive-templates";
 
 export interface ArtifactEditorSeed {
   scope?: ArtifactScope;
@@ -92,6 +79,8 @@ export function ArtifactEditorDialog({
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [pathLocked, setPathLocked] = useState(false);
+  const [writebackMode, setWritebackMode] = useState<ArchiveWritebackMode>("frontmatter");
+  const [overrideReason, setOverrideReason] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -105,6 +94,13 @@ export function ArtifactEditorDialog({
       setTitle(artifact.rel_path.split("/").pop() ?? "");
       setContent("");
       setPathLocked(true);
+      setWritebackMode("frontmatter");
+      setOverrideReason("");
+      if (archiveRoot) {
+        void readArchiveFile(archiveRoot, artifact.rel_path).then((result) => {
+          if (result.ok && result.content != null) setContent(result.content);
+        });
+      }
       return;
     }
     const nextScope = seed?.scope ?? "project";
@@ -125,9 +121,11 @@ export function ArtifactEditorDialog({
         docType: nextType,
         stage: nextStage,
         requirementKey: nextKey,
-        filename: seed?.filename ?? `${nextType}.md`,
+        filename: seed?.filename ?? `${resolveArchiveDocChoice(nextType).shelf}.md`,
       }),
     );
+    setWritebackMode("frontmatter");
+    setOverrideReason("");
     setContent(
       renderArchiveTemplate({
         docType: nextType,
@@ -136,7 +134,7 @@ export function ArtifactEditorDialog({
         issueId: seed?.issueId,
       }),
     );
-  }, [artifact, open, seed]);
+  }, [archiveRoot, artifact, open, seed]);
 
   const derivedPath = useMemo(
     () =>
@@ -147,7 +145,7 @@ export function ArtifactEditorDialog({
         requirementKey,
         filename: title.endsWith(".md") || title.endsWith(".html")
           ? title
-          : `${docType}.md`,
+          : `${resolveArchiveDocChoice(docType).shelf}.md`,
       }),
     [scope, docType, stage, requirementKey, title],
   );
@@ -163,6 +161,27 @@ export function ArtifactEditorDialog({
 
   const submit = async () => {
     if (!relPath.trim() || !docType.trim()) return;
+    const choice = resolveArchiveDocChoice(docType);
+    const storedType = choice.shelf;
+    if (writebackMode === "pointer_only" && !overrideReason.trim()) {
+      toast.error(t(($) => $.manage.writeback_reason_required));
+      return;
+    }
+    const mapping = {
+      docType: storedType,
+      docClass: choice.docClass ?? null,
+      issueId: issueId.trim() || null,
+      requirementKey: requirementKey.trim() || null,
+    };
+    let body = content;
+    if (writebackMode === "frontmatter") {
+      const source = body.trim()
+        ? body
+        : editing && archiveRoot
+          ? (await readArchiveFile(archiveRoot, relPath.trim())).content ?? ""
+          : "";
+      if (source) body = upsertArchiveFrontmatter(source, mapping);
+    }
     try {
       if (editing && artifact) {
         await patchMutation.mutateAsync({
@@ -170,27 +189,42 @@ export function ArtifactEditorDialog({
           patch: {
             scope,
             stage,
-            doc_type: docType.trim(),
+            doc_type: storedType,
+            doc_class: choice.docClass ?? null,
             rel_path: relPath.trim(),
-            requirement_key: requirementKey.trim() || null,
-            issue_id: issueId.trim() || null,
-            ...(content.trim() ? { content } : {}),
+            requirement_key: mapping.requirementKey,
+            issue_id: mapping.issueId,
+            ...(body.trim() ? { content: body } : {}),
           },
         });
-        toast.success(t(($) => $.manage.saved));
+        if (archiveRoot && writebackMode === "frontmatter" && body.trim()) {
+          const written = await writeArchiveFile(archiveRoot, relPath.trim(), body);
+          toast.success(
+            written.ok
+              ? t(($) => $.manage.writeback_written)
+              : t(($) => $.manage.written_db_only),
+          );
+        } else {
+          toast.success(
+            writebackMode === "pointer_only"
+              ? t(($) => $.manage.writeback_pointer_only)
+              : t(($) => $.manage.saved),
+          );
+        }
       } else {
         await createMutation.mutateAsync({
           scope,
           stage,
-          doc_type: docType.trim(),
+          doc_type: storedType,
+          doc_class: choice.docClass ?? null,
           rel_path: relPath.trim(),
-          requirement_key: requirementKey.trim() || null,
-          issue_id: issueId.trim() || null,
-          content,
+          requirement_key: mapping.requirementKey,
+          issue_id: mapping.issueId,
+          content: body,
           version: 1,
         });
-        if (archiveRoot && content) {
-          const written = await writeArchiveFile(archiveRoot, relPath.trim(), content);
+        if (archiveRoot && body) {
+          const written = await writeArchiveFile(archiveRoot, relPath.trim(), body);
           if (!written.ok && written.reason !== "unsupported") {
             toast.info(t(($) => $.manage.written_db_only));
           }
@@ -242,7 +276,10 @@ export function ArtifactEditorDialog({
           <label className="space-y-1 text-caption">
             <span className="text-muted-foreground">{t(($) => $.preview.field_doc_type)}</span>
             <Select
-              items={DOC_TYPES.map((value) => ({ value, label: value }))}
+              items={ARCHIVE_CREATE_TYPES.map((item) => ({
+                value: item.value,
+                label: item.label,
+              }))}
               value={docType}
               onValueChange={(value) => value && setDocType(value)}
             >
@@ -250,9 +287,9 @@ export function ArtifactEditorDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {DOC_TYPES.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {value}
+                {ARCHIVE_CREATE_TYPES.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -311,6 +348,50 @@ export function ArtifactEditorDialog({
                 value={requirementKey}
                 onChange={(event) => setRequirementKey(event.target.value)}
                 placeholder="REQ-20260907-01"
+              />
+            </label>
+          )}
+          <label className="space-y-1 text-caption">
+            <span className="text-muted-foreground">{t(($) => $.manage.issue_id)}</span>
+            <Input
+              value={issueId}
+              onChange={(event) => setIssueId(event.target.value)}
+              placeholder="multica_issue_id"
+              className="font-mono"
+            />
+          </label>
+          <label className="space-y-1 text-caption">
+            <span className="text-muted-foreground">{t(($) => $.manage.writeback_mode)}</span>
+            <Select
+              items={[
+                { value: "frontmatter", label: t(($) => $.manage.writeback_frontmatter) },
+                { value: "pointer_only", label: t(($) => $.manage.writeback_pointer) },
+              ]}
+              value={writebackMode}
+              onValueChange={(value) =>
+                value && setWritebackMode(value as ArchiveWritebackMode)
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="frontmatter">
+                  {t(($) => $.manage.writeback_frontmatter)}
+                </SelectItem>
+                <SelectItem value="pointer_only">
+                  {t(($) => $.manage.writeback_pointer)}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          {writebackMode === "pointer_only" && (
+            <label className="space-y-1 text-caption">
+              <span className="text-muted-foreground">{t(($) => $.manage.writeback_reason)}</span>
+              <Input
+                value={overrideReason}
+                onChange={(event) => setOverrideReason(event.target.value)}
+                placeholder={t(($) => $.manage.writeback_reason)}
               />
             </label>
           )}
