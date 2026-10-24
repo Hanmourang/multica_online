@@ -329,3 +329,74 @@ func TestWorkflowGateLoopLimit(t *testing.T) {
 		t.Fatalf("after over-limit loop: instance = %v, want failed", inst["status"])
 	}
 }
+
+// TestWorkflowIssueReverseLookup 需求抽屉反查（计划 §G，对标 CoCo
+// instancesByWorkitem）：带 issue_id 创建实例后 GET /api/issues/{id}/
+// workflow-instances 可查到；无关 issue 互不串扰；不存在 issue → 404。
+func TestWorkflowIssueReverseLookup(t *testing.T) {
+	ensureWorkflowServiceForTest(t)
+	projectID := dbfx.Project(t, "Workflow issue lookup project")
+
+	tpl := workflowCreateTemplate(t, projectID, map[string]any{"name": "反查模板", "nodes": workflowTwoHumanNodes()})
+	tplID := tpl["id"].(string)
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects/"+projectID+"/workflow/templates/"+tplID+"/publish", nil)
+	req = withURLParams(req, "id", projectID, "tid", tplID)
+	testHandler.PublishWorkflowTemplate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("publish: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	issueID := dbfx.Issue(t, "工作流反查需求")
+	otherIssueID := dbfx.Issue(t, "无关需求")
+
+	// 抽屉发起同路径：创建实例带 issue_id → root_issue_id 桥接。
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects/"+projectID+"/workflow-instances", map[string]any{
+		"template_id": tplID,
+		"issue_id":    issueID,
+	})
+	req = withURLParam(req, "id", projectID)
+	testHandler.CreateProjectWorkflowInstance(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create instance with issue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	instID := decodeJSONMap(t, w.Body.String())["id"].(string)
+
+	listByIssue := func(id string) (int, map[string]any, string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("GET", "/api/issues/"+id+"/workflow-instances", nil)
+		req = withURLParam(req, "id", id)
+		testHandler.ListIssueWorkflowInstances(w, req)
+		out := map[string]any{}
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out, w.Body.String()
+	}
+
+	code, out, body := listByIssue(issueID)
+	if code != http.StatusOK {
+		t.Fatalf("reverse lookup: expected 200, got %d: %s", code, body)
+	}
+	rows, _ := out["instances"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("instances len = %v, want 1 (%s)", len(rows), body)
+	}
+	row0 := rows[0].(map[string]any)
+	if row0["id"] != instID || row0["root_issue_id"] != issueID || row0["project_id"] != projectID {
+		t.Fatalf("row identity = %v/%v/%v", row0["id"], row0["root_issue_id"], row0["project_id"])
+	}
+	if counts := out["status_counts"].(map[string]any); counts["running"] != float64(1) {
+		t.Fatalf("status_counts = %v, want running=1", counts)
+	}
+
+	// 无关 issue 不被其他实例串扰；不存在 issue → 404。
+	code, out, body = listByIssue(otherIssueID)
+	rows, _ = out["instances"].([]any)
+	if code != http.StatusOK || len(rows) != 0 {
+		t.Fatalf("other issue: expected 200 empty, got %d %s", code, body)
+	}
+	if code, _, _ := listByIssue("00000000-0000-0000-0000-000000000000"); code != http.StatusNotFound {
+		t.Fatalf("missing issue: expected 404, got %d", code)
+	}
+}

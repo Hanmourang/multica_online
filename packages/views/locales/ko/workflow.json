@@ -109,5 +109,13 @@
     "gate_round": "라운드",
     "message_placeholder": "게이트 의견 작성…",
     "recovery_title": "복구 제안"
+  },
+  "section": {
+    "title": "워크플로",
+    "start": "시작",
+    "empty": "워크플로 인스턴스가 없습니다.",
+    "started": "워크플로가 시작되었습니다.",
+    "start_failed": "워크플로 시작에 실패했습니다.",
+    "view_all": "모든 워크플로 보기"
   }
 }

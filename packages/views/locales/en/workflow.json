@@ -109,5 +109,13 @@
     "gate_round": "Round",
     "message_placeholder": "Write a gate comment…",
     "recovery_title": "Recovery suggestions"
+  },
+  "section": {
+    "title": "Workflows",
+    "start": "Start",
+    "empty": "No workflow instances yet.",
+    "started": "Workflow started",
+    "start_failed": "Failed to start workflow",
+    "view_all": "View all workflows"
   }
 }

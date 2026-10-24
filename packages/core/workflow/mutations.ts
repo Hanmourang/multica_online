@@ -104,11 +104,21 @@ function useInstanceInvalidation(projectId: string | undefined, instanceId?: str
 }
 
 export function useCreateWorkflowInstance(projectId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   const settle = useInstanceInvalidation(projectId);
   return useMutation({
     mutationFn: (data: CreateWorkflowInstanceRequest) =>
       api.createWorkflowInstance(projectId, data),
-    onSettled: settle,
+    onSettled: (_inst, _err, data) => {
+      settle();
+      // 从需求发起（计划 §G）：同步刷新需求抽屉的反查切片。
+      if (data.issue_id) {
+        qc.invalidateQueries({
+          queryKey: workflowKeys.instancesByIssue(wsId, data.issue_id),
+        });
+      }
+    },
   });
 }
 

@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   ListWorkflowInstancesParams,
+  ListWorkflowInstancesResponse,
   WorkflowGateMessagesResponse,
   WorkflowInstanceDetailResponse,
   WorkflowRecoveryDiagnosisResponse,
@@ -31,6 +32,9 @@ export const workflowKeys = {
     [...workflowKeys.project(wsId, projectId), "instances", filters ?? {}] as const,
   instance: (wsId: string, instanceId: string) =>
     [...workflowKeys.all(wsId), "instance", instanceId] as const,
+  // 需求抽屉反查切片（计划 §G，对标 CoCo instancesByWorkitem）。
+  instancesByIssue: (wsId: string, issueId: string) =>
+    [...workflowKeys.all(wsId), "issue", issueId, "instances"] as const,
   recoveryDiagnosis: (wsId: string, instanceId: string) =>
     [...workflowKeys.all(wsId), "instance", instanceId, "recovery-diagnosis"] as const,
   stageTranscript: (wsId: string, stageRunId: string) =>
@@ -58,6 +62,14 @@ export function workflowInstancesOptions(
     queryKey: workflowKeys.instances(wsId, projectId, filters),
     queryFn: () => api.listWorkflowInstances(projectId, filters),
     enabled: Boolean(wsId && projectId),
+  });
+}
+
+export function issueWorkflowInstancesOptions(wsId: string, issueId: string) {
+  return queryOptions<ListWorkflowInstancesResponse>({
+    queryKey: workflowKeys.instancesByIssue(wsId, issueId),
+    queryFn: () => api.listIssueWorkflowInstances(issueId),
+    enabled: Boolean(wsId && issueId),
   });
 }
 

@@ -46,6 +46,9 @@ import type { RoleAssignment } from "@multica/core/types";
 import { QuickConfirmButton } from "../issues/components/quick-confirm-button";
 import { RequirementConfigEditor } from "../issues/components/requirement-config-editor";
 import { needsQuickConfirm } from "../projects/components/requirement-drill/requirement-display";
+import { useFeatureEnabled } from "@multica/core/config";
+import { WORKFLOW_MODULE_FLAG } from "@multica/core/feature-flags";
+import { WorkflowIssueSection } from "../projects/components/workflows";
 
 export function RequirementDrawer({
   issueId,
@@ -102,6 +105,8 @@ export function RequirementDrawer({
   const module = modules.find((m) => m.id === issue?.module_id);
   const repo = resources.find((r) => r.id === issue?.repo_resource_id);
   const holder = issue ? findModuleHolder(peers, issue) : null;
+  // 需求 → 工作流反查块（计划 01 §G）：flag off 时不渲染，与路由同旗。
+  const workflowsEnabled = useFeatureEnabled(WORKFLOW_MODULE_FLAG, false);
 
   const handleClose = () => {
     void qc.invalidateQueries({ queryKey: issueKeys.calendar(wsId) });
@@ -271,6 +276,14 @@ export function RequirementDrawer({
                       })
                     : t(($) => $.workbench.mutex_free)}
                 </p>
+                {issue.project_id && workflowsEnabled && (
+                  <div className="mt-4">
+                    <WorkflowIssueSection
+                      projectId={issue.project_id}
+                      issueId={issue.id}
+                    />
+                  </div>
+                )}
                 {issue.project_id && (
                   <>
                     <h4 className="mb-1 mt-4 font-semibold">

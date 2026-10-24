@@ -109,5 +109,13 @@
     "gate_round": "轮次",
     "message_placeholder": "填写门禁意见…",
     "recovery_title": "失败恢复建议"
+  },
+  "section": {
+    "title": "工作流",
+    "start": "发起",
+    "empty": "暂无工作流实例。",
+    "started": "已发起工作流",
+    "start_failed": "发起工作流失败",
+    "view_all": "查看全部工作流"
   }
 }

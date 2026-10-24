@@ -109,5 +109,13 @@
     "gate_round": "ラウンド",
     "message_placeholder": "ゲートの意見を入力…",
     "recovery_title": "復旧の提案"
+  },
+  "section": {
+    "title": "ワークフロー",
+    "start": "開始",
+    "empty": "ワークフローインスタンスはまだありません。",
+    "started": "ワークフローを開始しました",
+    "start_failed": "ワークフローの開始に失敗しました",
+    "view_all": "すべてのワークフローを表示"
   }
 }

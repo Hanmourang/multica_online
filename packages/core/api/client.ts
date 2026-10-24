@@ -4205,6 +4205,13 @@ export class ApiClient {
     );
   }
 
+  // 需求抽屉反查（计划 §G，对标 CoCo workflow.instancesByWorkitem）。
+  async listIssueWorkflowInstances(
+    issueId: string,
+  ): Promise<ListWorkflowInstancesResponse> {
+    return this.fetch(`/api/issues/${issueId}/workflow-instances`);
+  }
+
   async createWorkflowInstance(
     projectId: string,
     data: CreateWorkflowInstanceRequest,

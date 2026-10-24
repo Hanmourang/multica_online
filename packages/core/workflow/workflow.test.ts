@@ -42,6 +42,16 @@ describe("workflowKeys", () => {
       {},
     ]);
   });
+
+  it("scopes the issue reverse-lookup slice under the workspace (plan §G)", () => {
+    expect(workflowKeys.instancesByIssue("ws1", "i1")).toEqual([
+      "workflow",
+      "ws1",
+      "issue",
+      "i1",
+      "instances",
+    ]);
+  });
 });
 
 describe("query options enabled guards", () => {

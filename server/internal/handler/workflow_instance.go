@@ -171,6 +171,41 @@ func (h *Handler) ListProjectWorkflowInstances(w http.ResponseWriter, r *http.Re
 	})
 }
 
+// ListIssueWorkflowInstances GET /api/issues/{id}/workflow-instances
+// 需求抽屉反查（计划 §G，对标 CoCo workflow.instancesByWorkitem）：workspace
+// 归属以 issue 自身租户为准，天然防跨租；status_counts 在 Go 侧聚合。
+func (h *Handler) ListIssueWorkflowInstances(w http.ResponseWriter, r *http.Request) {
+	issueUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "issue id")
+	if !ok {
+		return
+	}
+	issue, err := h.Queries.GetIssue(r.Context(), issueUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	rows, err := h.Queries.ListWorkflowInstancesByIssue(r.Context(), db.ListWorkflowInstancesByIssueParams{
+		WorkspaceID: issue.WorkspaceID,
+		RootIssueID: issue.ID,
+	})
+	if err != nil {
+		slogWorkflow("list workflow instances by issue", err)
+		writeError(w, http.StatusInternalServerError, "failed to list workflow instances")
+		return
+	}
+	instances := make([]WorkflowInstanceResponse, len(rows))
+	counts := map[string]int64{}
+	for i, inst := range rows {
+		instances[i] = workflowInstanceToResponse(inst)
+		counts[inst.Status]++
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"instances":     instances,
+		"total":         len(rows),
+		"status_counts": counts,
+	})
+}
+
 type createWorkflowInstanceRequest struct {
 	TemplateID       string         `json:"template_id"`
 	IssueID          *string        `json:"issue_id"`

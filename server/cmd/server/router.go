@@ -1951,6 +1951,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/assets/{bindingId}", h.UnbindIssueAsset)
 					}
 					// </router-block:asset>
+					// <router-block:workflow-issue> owned by Agent-W — 01_工作流模块.md §G。
+					// 需求抽屉反查实例（对标 CoCo workflow.instancesByWorkitem）；
+					// 与 workflow-root 块同旗：flag off 不注册 → 404。
+					if featureflags.WorkflowModuleEnabled(context.Background(), h.FeatureFlags) {
+						r.Get("/workflow-instances", h.ListIssueWorkflowInstances)
+					}
+					// </router-block:workflow-issue>
 				})
 			})
 
