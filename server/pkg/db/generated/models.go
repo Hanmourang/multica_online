@@ -880,6 +880,7 @@ type Issue struct {
 	FeaturePoints            []byte             `json:"feature_points"`
 	GraphContext             []byte             `json:"graph_context"`
 	AcceptanceSpec           []byte             `json:"acceptance_spec"`
+	SprintID                 pgtype.UUID        `json:"sprint_id"`
 }
 
 type IssueDependency struct {
@@ -1383,6 +1384,26 @@ type ProjectArtifact struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	Confidence     pgtype.Numeric     `json:"confidence"`
 	OverrideReason pgtype.Text        `json:"override_reason"`
+	DocClass       pgtype.Text        `json:"doc_class"`
+	DocModule      pgtype.Text        `json:"doc_module"`
+}
+
+type ProjectAssetBinding struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	AssetCategory   string             `json:"asset_category"`
+	ResourceID      pgtype.UUID        `json:"resource_id"`
+	ExternalRef     []byte             `json:"external_ref"`
+	AssetName       string             `json:"asset_name"`
+	AssetSubtype    pgtype.Text        `json:"asset_subtype"`
+	Source          string             `json:"source"`
+	Recommended     bool               `json:"recommended"`
+	RecommendReason pgtype.Text        `json:"recommend_reason"`
+	CreatedByType   string             `json:"created_by_type"`
+	CreatedByID     pgtype.UUID        `json:"created_by_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type ProjectGraphSnapshot struct {
@@ -1400,6 +1421,7 @@ type ProjectGraphSnapshot struct {
 	ModuleSummary   []byte             `json:"module_summary"`
 	BusMatrix       []byte             `json:"bus_matrix"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	DataModel       []byte             `json:"data_model"`
 }
 
 type ProjectModule struct {
@@ -1530,6 +1552,24 @@ type SkillToLabel struct {
 	SkillID   pgtype.UUID        `json:"skill_id"`
 	LabelID   pgtype.UUID        `json:"label_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type Sprint struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+	Name          string             `json:"name"`
+	Goal          pgtype.Text        `json:"goal"`
+	Status        string             `json:"status"`
+	StartDate     pgtype.Date        `json:"start_date"`
+	EndDate       pgtype.Date        `json:"end_date"`
+	Capacity      pgtype.Int4        `json:"capacity"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Squad struct {
@@ -1808,6 +1848,85 @@ type WebhookDelivery struct {
 	DispatchAttempts       int32              `json:"dispatch_attempts"`
 	ReasonCode             pgtype.Text        `json:"reason_code"`
 	ReplayIdempotencyKey   pgtype.Text        `json:"replay_idempotency_key"`
+}
+
+type WorkflowGateRun struct {
+	ID            pgtype.UUID        `json:"id"`
+	InstanceID    pgtype.UUID        `json:"instance_id"`
+	StageRunID    pgtype.UUID        `json:"stage_run_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Round         int32              `json:"round"`
+	Mode          string             `json:"mode"`
+	State         string             `json:"state"`
+	Decision      string             `json:"decision"`
+	Generation    int32              `json:"generation"`
+	ParentID      pgtype.UUID        `json:"parent_id"`
+	DecidedByType pgtype.Text        `json:"decided_by_type"`
+	DecidedByID   pgtype.UUID        `json:"decided_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	DecidedAt     pgtype.Timestamptz `json:"decided_at"`
+}
+
+type WorkflowInstance struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	TemplateID       pgtype.UUID        `json:"template_id"`
+	TemplateVersion  int32              `json:"template_version"`
+	RootIssueID      pgtype.UUID        `json:"root_issue_id"`
+	SprintID         pgtype.UUID        `json:"sprint_id"`
+	WorkitemSnapshot []byte             `json:"workitem_snapshot"`
+	Status           string             `json:"status"`
+	StartedByType    string             `json:"started_by_type"`
+	StartedByID      pgtype.UUID        `json:"started_by_id"`
+	TriggeredAt      pgtype.Timestamptz `json:"triggered_at"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowStageRun struct {
+	ID          pgtype.UUID        `json:"id"`
+	InstanceID  pgtype.UUID        `json:"instance_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Seq         int32              `json:"seq"`
+	NodeID      string             `json:"node_id"`
+	Name        string             `json:"name"`
+	Mode        string             `json:"mode"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	Prompt      pgtype.Text        `json:"prompt"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	State       string             `json:"state"`
+	Inputs      []byte             `json:"inputs"`
+	Outputs     []byte             `json:"outputs"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowTemplate struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	Name            string             `json:"name"`
+	Description     pgtype.Text        `json:"description"`
+	Status          string             `json:"status"`
+	Version         int32              `json:"version"`
+	Nodes           []byte             `json:"nodes"`
+	Official        bool               `json:"official"`
+	SourceProjectID pgtype.UUID        `json:"source_project_id"`
+	CreatedByType   string             `json:"created_by_type"`
+	CreatedByID     pgtype.UUID        `json:"created_by_id"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowTemplateShare struct {
+	TemplateID pgtype.UUID        `json:"template_id"`
+	ProjectID  pgtype.UUID        `json:"project_id"`
+	SharedBy   pgtype.UUID        `json:"shared_by"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type Workspace struct {

@@ -221,7 +221,7 @@ INSERT INTO issue (
     COALESCE($26::jsonb, '[]'::jsonb),
     COALESCE($27::jsonb, '{}'::jsonb),
     COALESCE($28::jsonb, '{}'::jsonb)
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id
 `
 
 type CreateIssueParams struct {
@@ -330,6 +330,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
@@ -349,7 +350,7 @@ INSERT INTO issue (
     COALESCE($25::text, 'confirm'),
     COALESCE($26::boolean, true),
     $27::uuid
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id
 `
 
 type CreateIssueWithOriginParams struct {
@@ -456,6 +457,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
@@ -507,7 +509,7 @@ UPDATE issue SET
     END,
     updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id
 `
 
 type DeleteIssueMetadataKeyParams struct {
@@ -564,6 +566,7 @@ func (q *Queries) DeleteIssueMetadataKey(ctx context.Context, arg DeleteIssueMet
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
@@ -578,7 +581,7 @@ SET parent_issue_id = NULL,
 WHERE workspace_id = $1
   AND parent_issue_id = $2
   AND NOT COALESCE(id = ANY($3::uuid[]), false)
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id
 `
 
 type DetachDirectChildIssuesParams struct {
@@ -639,6 +642,7 @@ func (q *Queries) DetachDirectChildIssues(ctx context.Context, arg DetachDirectC
 			&i.FeaturePoints,
 			&i.GraphContext,
 			&i.AcceptanceSpec,
+			&i.SprintID,
 		); err != nil {
 			return nil, err
 		}
@@ -651,7 +655,7 @@ func (q *Queries) DetachDirectChildIssues(ctx context.Context, arg DetachDirectC
 }
 
 const findActiveDuplicateIssue = `-- name: FindActiveDuplicateIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue
 WHERE workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains active.
   AND NOT (status = ANY($2::text[]))
@@ -722,12 +726,13 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
 
 const findRecentAutopilotDuplicateIssue = `-- name: FindRecentAutopilotDuplicateIssue :one
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.module_id, i.avoid_conflict, i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger, i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round, i.root_requirement_id, i.feature_points, i.graph_context, i.acceptance_spec FROM issue i
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.module_id, i.avoid_conflict, i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger, i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round, i.root_requirement_id, i.feature_points, i.graph_context, i.acceptance_spec, i.sprint_id FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains active.
   AND NOT (i.status = ANY($3::text[]))
@@ -809,12 +814,13 @@ func (q *Queries) FindRecentAutopilotDuplicateIssue(ctx context.Context, arg Fin
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue
 WHERE id = $1
 `
 
@@ -864,12 +870,13 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
 
 const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue
 WHERE workspace_id = $1 AND number = $2
 `
 
@@ -924,12 +931,13 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
 
 const getIssueByOrigin = `-- name: GetIssueByOrigin :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue
 WHERE workspace_id = $1
   AND origin_type = $2
   AND origin_id = $3
@@ -993,6 +1001,7 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
@@ -1017,7 +1026,7 @@ func (q *Queries) GetIssueGCStatus(ctx context.Context, id pgtype.UUID) (GetIssu
 }
 
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -1072,12 +1081,13 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue
 WHERE parent_issue_id = $1
 ORDER BY number ASC
 `
@@ -1140,6 +1150,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 			&i.FeaturePoints,
 			&i.GraphContext,
 			&i.AcceptanceSpec,
+			&i.SprintID,
 		); err != nil {
 			return nil, err
 		}
@@ -1152,7 +1163,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 }
 
 const listChildrenByParents = `-- name: ListChildrenByParents :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id = ANY($2::uuid[])
 ORDER BY parent_issue_id, number ASC
@@ -1222,6 +1233,7 @@ func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByP
 			&i.FeaturePoints,
 			&i.GraphContext,
 			&i.AcceptanceSpec,
+			&i.SprintID,
 		); err != nil {
 			return nil, err
 		}
@@ -1316,7 +1328,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
            ELSE '已完成'
        END
            )
-       END, '') AS requirement_status,
+       END, '')::text AS requirement_status,
        -- stage 3 执行进度 N/M（无 stage 3 子任务时为空串，响应层映射为 null）。
        (CASE WHEN COALESCE(prog.stage3_total, 0) > 0
             THEN concat(prog.stage3_done, '/', prog.stage3_total)
@@ -1794,7 +1806,7 @@ func (q *Queries) LockIssueForDelete(ctx context.Context, arg LockIssueForDelete
 }
 
 const lockIssueForDescriptionUpdate = `-- name: LockIssueForDescriptionUpdate :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE
 `
@@ -1854,6 +1866,7 @@ func (q *Queries) LockIssueForDescriptionUpdate(ctx context.Context, arg LockIss
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
@@ -1903,7 +1916,7 @@ SET description = CASE
     updated_at = now()
 WHERE id = $4
   AND workspace_id = $5
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id
 `
 
 type MaterializeIssueChannelMediaMarkdownParams struct {
@@ -1973,6 +1986,7 @@ func (q *Queries) MaterializeIssueChannelMediaMarkdown(ctx context.Context, arg 
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
@@ -1989,7 +2003,7 @@ UPDATE issue SET
     END,
     updated_at = now()
 WHERE id = $3 AND workspace_id = $4
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id
 `
 
 type SetIssueMetadataKeyParams struct {
@@ -2054,6 +2068,7 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
@@ -2061,7 +2076,7 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 const updateIssue = `-- name: UpdateIssue :one
 WITH candidate AS (
     SELECT
-        i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.module_id, i.avoid_conflict, i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger, i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round, i.root_requirement_id, i.feature_points, i.graph_context, i.acceptance_spec,
+        i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.module_id, i.avoid_conflict, i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger, i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round, i.root_requirement_id, i.feature_points, i.graph_context, i.acceptance_spec, i.sprint_id,
         COALESCE($3::text, i.title) AS next_title,
         COALESCE($4::text, i.description) AS next_description,
         COALESCE($5::text, i.status) AS next_status,
@@ -2120,7 +2135,7 @@ WITH candidate AS (
       AND ($2::bigint IS NULL OR i.revision = $2::bigint)
 ), changed AS (
     SELECT
-        candidate.id, candidate.workspace_id, candidate.title, candidate.description, candidate.status, candidate.priority, candidate.assignee_type, candidate.assignee_id, candidate.creator_type, candidate.creator_id, candidate.parent_issue_id, candidate.acceptance_criteria, candidate.context_refs, candidate.position, candidate.due_date, candidate.created_at, candidate.updated_at, candidate.number, candidate.project_id, candidate.origin_type, candidate.origin_id, candidate.first_executed_at, candidate.start_date, candidate.metadata, candidate.stage, candidate.properties, candidate.revision, candidate.last_activity_at, candidate.module_id, candidate.avoid_conflict, candidate.start_at, candidate.goal, candidate.repo_resource_id, candidate.decompose_mode, candidate.auto_trigger, candidate.decomposition_confirmed_at, candidate.triggered_at, candidate.acceptance_round, candidate.root_requirement_id, candidate.feature_points, candidate.graph_context, candidate.acceptance_spec, candidate.next_title, candidate.next_description, candidate.next_status, candidate.next_priority, candidate.next_assignee_type, candidate.next_assignee_id, candidate.next_position, candidate.next_start_date, candidate.next_due_date, candidate.next_parent_issue_id, candidate.next_project_id, candidate.next_stage, candidate.next_module_id, candidate.next_avoid_conflict, candidate.next_start_at, candidate.next_goal, candidate.next_repo_resource_id, candidate.next_decompose_mode, candidate.next_auto_trigger, candidate.next_root_requirement_id,
+        candidate.id, candidate.workspace_id, candidate.title, candidate.description, candidate.status, candidate.priority, candidate.assignee_type, candidate.assignee_id, candidate.creator_type, candidate.creator_id, candidate.parent_issue_id, candidate.acceptance_criteria, candidate.context_refs, candidate.position, candidate.due_date, candidate.created_at, candidate.updated_at, candidate.number, candidate.project_id, candidate.origin_type, candidate.origin_id, candidate.first_executed_at, candidate.start_date, candidate.metadata, candidate.stage, candidate.properties, candidate.revision, candidate.last_activity_at, candidate.module_id, candidate.avoid_conflict, candidate.start_at, candidate.goal, candidate.repo_resource_id, candidate.decompose_mode, candidate.auto_trigger, candidate.decomposition_confirmed_at, candidate.triggered_at, candidate.acceptance_round, candidate.root_requirement_id, candidate.feature_points, candidate.graph_context, candidate.acceptance_spec, candidate.sprint_id, candidate.next_title, candidate.next_description, candidate.next_status, candidate.next_priority, candidate.next_assignee_type, candidate.next_assignee_id, candidate.next_position, candidate.next_start_date, candidate.next_due_date, candidate.next_parent_issue_id, candidate.next_project_id, candidate.next_stage, candidate.next_module_id, candidate.next_avoid_conflict, candidate.next_start_at, candidate.next_goal, candidate.next_repo_resource_id, candidate.next_decompose_mode, candidate.next_auto_trigger, candidate.next_root_requirement_id,
         ROW(
             title, description, status, priority, assignee_type, assignee_id,
             position, start_date, due_date, parent_issue_id, project_id, stage,
@@ -2183,7 +2198,7 @@ WHERE i.id = changed.id
   -- from the same snapshot; EvalPlanQual re-evaluates this target-row predicate
   -- after waiting for the first writer, leaving the stale writer with 0 rows.
   AND ($2::bigint IS NULL OR i.revision = $2::bigint)
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.module_id, i.avoid_conflict, i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger, i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round, i.root_requirement_id, i.feature_points, i.graph_context, i.acceptance_spec
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.module_id, i.avoid_conflict, i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger, i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round, i.root_requirement_id, i.feature_points, i.graph_context, i.acceptance_spec, i.sprint_id
 `
 
 type UpdateIssueParams struct {
@@ -2280,6 +2295,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }
@@ -2300,7 +2316,7 @@ UPDATE issue AS i SET
     END,
     updated_at = now()
 WHERE i.id = $1 AND i.workspace_id = $3
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id
 `
 
 type UpdateIssueStatusParams struct {
@@ -2360,6 +2376,7 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		&i.FeaturePoints,
 		&i.GraphContext,
 		&i.AcceptanceSpec,
+		&i.SprintID,
 	)
 	return i, err
 }

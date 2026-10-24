@@ -102,6 +102,15 @@ const (
 	EventProjectModuleUpdated   = "project_module:updated"
 	EventProjectModuleDeleted   = "project_module:deleted"
 
+	// Asset binding events (资产管理, migration 471). A binding is a business
+	// catalog entry pointing at a project_resource (065) physical pointer;
+	// bind/unbind never mutates the resource itself, so these stay separate from
+	// the project_resource:* events. Front-ends answer both the same way —
+	// re-read the asset page / issue-asset list — by invalidating the assetKeys
+	// query tree (see core/assets/ws-updaters.ts).
+	EventAssetBound   = "asset:bound"
+	EventAssetUnbound = "asset:unbound"
+
 	// Label events
 	EventLabelCreated       = "label:created"
 	EventLabelUpdated       = "label:updated"
@@ -140,6 +149,14 @@ const (
 	EventAutopilotDeleted  = "autopilot:deleted"
 	EventAutopilotRunStart = "autopilot:run_start"
 	EventAutopilotRunDone  = "autopilot:run_done"
+
+	// Workflow events (CoCo 对标 plan 20261024 §00.6 / §01)。
+	// template_changed 驱动模板列表重读；instance_state 是实例状态机的权威增量，
+	// 前端只 setQueryData patch React Query 缓存（不镜像进 Zustand）；gate_decided
+	// 覆盖 loop/exit 决策与 round 迭代。常量由 Agent-F 独占新增，模块只引用。
+	EventWorkflowTemplateChanged = "workflow:template_changed"
+	EventWorkflowInstanceState   = "workflow:instance_state"
+	EventWorkflowGateDecided     = "workflow:gate_decided"
 
 	// Squad events
 	EventSquadCreated = "squad:created"

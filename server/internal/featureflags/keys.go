@@ -23,6 +23,17 @@ const (
 	// gate pinned Task/Run execution: disabling discovery and management must not
 	// mutate an immutable execution manifest that is already in flight.
 	PluginsV1 = "plugins_v1"
+	// WorkflowModule gates the CoCo-对标 workflow engine (plan 20261024 §01): the
+	// Template→Instance→StageRun→GateRun HTTP surface, the 30s waiting-instance
+	// sweep, and the project TAB. Default off for grayscale rollout; route
+	// registration is gated too, so a disabled flag 404s cleanly.
+	WorkflowModule = "workflow_module"
+	// AssetModule gates the CoCo-对标 asset management surface (plan 20261024 §03):
+	// the project_asset_binding catalog layer over project_resource (065), its
+	// bind/unbind/search-candidate HTTP routes, and the project TAB. Default off
+	// for grayscale rollout; route registration is gated so a disabled flag 404s
+	// cleanly and the front-end TAB stays hidden.
+	AssetModule = "asset_module"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -44,6 +55,8 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
+	WorkflowModule,
+	AssetModule,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -56,6 +69,14 @@ func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) boo
 
 func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, PluginsV1, false)
+}
+
+func WorkflowModuleEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, WorkflowModule, false)
+}
+
+func AssetModuleEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, AssetModule, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
