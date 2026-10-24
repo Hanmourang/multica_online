@@ -23,21 +23,21 @@ import (
 // ── 响应形状 ────────────────────────────────────────────────────────────────
 
 type WorkflowInstanceResponse struct {
-	ID              string          `json:"id"`
-	WorkspaceID     string          `json:"workspace_id"`
-	ProjectID       string          `json:"project_id"`
-	TemplateID      string          `json:"template_id"`
-	TemplateVersion int32           `json:"template_version"`
-	RootIssueID     *string         `json:"root_issue_id"`
-	SprintID        *string         `json:"sprint_id"`
+	ID               string          `json:"id"`
+	WorkspaceID      string          `json:"workspace_id"`
+	ProjectID        string          `json:"project_id"`
+	TemplateID       string          `json:"template_id"`
+	TemplateVersion  int32           `json:"template_version"`
+	RootIssueID      *string         `json:"root_issue_id"`
+	SprintID         *string         `json:"sprint_id"`
 	WorkitemSnapshot json.RawMessage `json:"workitem_snapshot"`
-	Status          string          `json:"status"`
-	StartedByType   string          `json:"started_by_type"`
-	StartedByID     string          `json:"started_by_id"`
-	TriggeredAt     string          `json:"triggered_at"`
-	CompletedAt     string          `json:"completed_at"`
-	CreatedAt       string          `json:"created_at"`
-	UpdatedAt       string          `json:"updated_at"`
+	Status           string          `json:"status"`
+	StartedByType    string          `json:"started_by_type"`
+	StartedByID      string          `json:"started_by_id"`
+	TriggeredAt      string          `json:"triggered_at"`
+	CompletedAt      string          `json:"completed_at"`
+	CreatedAt        string          `json:"created_at"`
+	UpdatedAt        string          `json:"updated_at"`
 }
 
 func workflowInstanceToResponse(inst db.WorkflowInstance) WorkflowInstanceResponse {
@@ -165,8 +165,8 @@ func (h *Handler) ListProjectWorkflowInstances(w http.ResponseWriter, r *http.Re
 		counts["cancelled"] = row.CancelledCount
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"instances": instances,
-		"total":     len(instances),
+		"instances":     instances,
+		"total":         len(instances),
 		"status_counts": counts,
 	})
 }
@@ -245,14 +245,14 @@ func (h *Handler) CreateProjectWorkflowInstance(w http.ResponseWriter, r *http.R
 	qtx := h.Queries.WithTx(tx)
 
 	inst, err := qtx.CreateWorkflowInstance(r.Context(), db.CreateWorkflowInstanceParams{
-		WorkspaceID:     project.WorkspaceID,
-		ProjectID:       project.ID,
-		TemplateID:      tpl.ID,
-		TemplateVersion: tpl.Version,
-		RootIssueID:     rootIssue,
+		WorkspaceID:      project.WorkspaceID,
+		ProjectID:        project.ID,
+		TemplateID:       tpl.ID,
+		TemplateVersion:  tpl.Version,
+		RootIssueID:      rootIssue,
 		WorkitemSnapshot: snapshot,
-		StartedByType:   "member",
-		StartedByID:     userUUID,
+		StartedByType:    "member",
+		StartedByID:      userUUID,
 	})
 	if err != nil {
 		slogWorkflow("create workflow instance", err)

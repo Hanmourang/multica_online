@@ -39,16 +39,16 @@ const WorkflowGateLoopLimit = 3
 
 // WorkflowNode 是 workflow_template.nodes JSONB 的元素（§01 A1 注释的节点图 schema）。
 type WorkflowNode struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Mode         string `json:"mode"` // auto | human
-	Stage        int    `json:"stage"`
-	AgentRef     string `json:"agent_ref,omitempty"`
-	Prompt       string `json:"prompt,omitempty"`
-	Next         []string   `json:"next"`
-	GateDocTypes []string   `json:"gate_doc_types"`
-	Inputs       []any      `json:"inputs,omitempty"`
-	Outputs      []any      `json:"outputs,omitempty"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Mode         string   `json:"mode"` // auto | human
+	Stage        int      `json:"stage"`
+	AgentRef     string   `json:"agent_ref,omitempty"`
+	Prompt       string   `json:"prompt,omitempty"`
+	Next         []string `json:"next"`
+	GateDocTypes []string `json:"gate_doc_types"`
+	Inputs       []any    `json:"inputs,omitempty"`
+	Outputs      []any    `json:"outputs,omitempty"`
 }
 
 // ParseWorkflowNodes 反序列化节点图；非法 JSON 直接报错（handler 转 400）。
@@ -622,13 +622,13 @@ func (s *WorkflowService) publishGateDecided(ctx context.Context, gate db.Workfl
 		WorkspaceID: util.UUIDToString(gate.WorkspaceID),
 		ActorType:   "system",
 		Payload: map[string]any{
-			"gate_id":     util.UUIDToString(gate.ID),
-			"instance_id": util.UUIDToString(gate.InstanceID),
+			"gate_id":      util.UUIDToString(gate.ID),
+			"instance_id":  util.UUIDToString(gate.InstanceID),
 			"stage_run_id": util.UUIDToString(gate.StageRunID),
-			"decision":    gate.Decision,
-			"round":       gate.Round,
-			"generation":  gate.Generation,
-			"status":      inst.Status,
+			"decision":     gate.Decision,
+			"round":        gate.Round,
+			"generation":   gate.Generation,
+			"status":       inst.Status,
 		},
 	})
 }
