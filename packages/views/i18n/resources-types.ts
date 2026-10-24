@@ -29,6 +29,9 @@ import type squads from "../locales/en/squads.json";
 import type billing from "../locales/en/billing.json";
 import type archive from "../locales/en/archive.json";
 import type calendar from "../locales/en/calendar.json";
+import type assets from "../locales/en/assets.json";
+import type sprints from "../locales/en/sprints.json";
+import type workflow from "../locales/en/workflow.json";
 
 // Module augmentation enables i18next v26 selector API across the monorepo:
 // `t($ => $.signin.title)` resolves to the value in en/auth.json.
@@ -72,6 +75,9 @@ declare global {
     billing: typeof billing;
     archive: typeof archive;
     calendar: typeof calendar;
+    assets: typeof assets;
+    sprints: typeof sprints;
+    workflow: typeof workflow;
   }
 }
 

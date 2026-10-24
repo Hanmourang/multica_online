@@ -8,7 +8,8 @@
     "dynamics": "动态",
     "deliverables": "交付概览",
     "progress": "进度追踪",
-    "basics": "基础信息"
+    "basics": "基础信息",
+    "assets": "资产"
   },
   "common": {
     "loading": "加载中…",
@@ -980,7 +981,10 @@
     "requirements": "需求管理",
     "tasks": "任务追踪",
     "acceptance": "验收详情",
-    "deliverables": "交付物"
+    "deliverables": "交付物",
+    "assets": "资产管理",
+    "sprints": "迭代",
+    "workflows": "工作流"
   },
   "archive_toolbar": {
     "settings": "档案设置",

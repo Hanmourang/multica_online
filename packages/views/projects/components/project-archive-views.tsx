@@ -6,6 +6,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { ASSET_MODULE_FLAG, SPRINT_MODULE_FLAG } from "@multica/core/feature-flags";
+import { WORKFLOW_MODULE_FLAG } from "@multica/core/feature-flags";
 import { calendarIssuesOptions } from "@multica/core/issues/queries";
 import { projectArtifactListOptions } from "@multica/core/artifacts/queries";
 import { graphModulesOptions } from "@multica/core/graph/queries";
@@ -18,6 +21,9 @@ import {
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
 import { ArchiveTab } from "./archive";
+import { AssetTab } from "./assets";
+import { SprintTab } from "./sprints";
+import { WorkflowTab } from "./workflows";
 import { BusMatrixTab, GraphDataProvider, ProductFeaturesTab } from "./graph";
 import { FilingReadinessTab } from "./filing";
 import { RequirementsManagementTab } from "./requirements/requirements-management-tab";
@@ -138,6 +144,12 @@ export function ProjectArchiveViews({
 }) {
   const { t } = useT("archive");
   const wsId = useWorkspaceId();
+  // 资产管理 TAB 双层门控：feature-flag on 才展示（server 同时门控路由注册）。
+  const assetsEnabled = useFeatureEnabled(ASSET_MODULE_FLAG, false);
+  // 迭代 TAB 同构门控（plan 20261024 §02）：sprint_module flag off 时不留死 TAB。
+  const sprintsEnabled = useFeatureEnabled(SPRINT_MODULE_FLAG, false);
+  // 工作流 TAB 同构双层门控（plan 20261024 §01 F3：flag off 不留死 TAB）。
+  const workflowsEnabled = useFeatureEnabled(WORKFLOW_MODULE_FLAG, false);
   const navigation = useNavigation();
   const urlView = navigation.searchParams.get(VIEW_QUERY_KEY);
   const urlReq = navigation.searchParams.get(REQ_QUERY_KEY);
@@ -243,8 +255,10 @@ export function ProjectArchiveViews({
     };
   }, [issuesQuery.data, artifactsQuery.data, modulesQuery.data, filingQuery.data, projectId]);
 
-  const views: Array<{ value: ProjectView; label: string; badge?: number; alert?: boolean }> = [
+  const allViews: Array<{ value: ProjectView; label: string; badge?: number; alert?: boolean }> = [
     { value: "archive", label: t(($) => $.views.archive), badge: badges.archive, alert: badges.archive > 0 },
+    { value: "assets", label: t(($) => $.views.assets) },
+    { value: "sprints", label: t(($) => $.views.sprints) },
     { value: "features", label: t(($) => $.views.features), badge: modulesQuery.data?.total },
     { value: "data-model", label: t(($) => $.views.data_model) },
     {
@@ -267,7 +281,21 @@ export function ProjectArchiveViews({
       badge: badges.filing,
       alert: badges.filing > 0,
     },
-  ].filter((view) => allowedViews.includes(view.value));
+    { value: "workflows", label: t(($) => $.views.workflows) },
+  ];
+
+  // Template allowed-views × asset feature-flag gate. The asset TAB is hidden
+  // unless `asset_module` is on (server also gates route registration), so a
+  // flag-off rollout leaves no dead TAB behind. Workflow follows the same
+  // double-gate with `workflow_module` (plan 20261024 Agent-W); the sprint
+  // TAB follows the same shape with `sprint_module` (plan 20261024 §02).
+  const views = allViews.filter(
+    (view) =>
+      allowedViews.includes(view.value) &&
+      (view.value !== "assets" || assetsEnabled) &&
+      (view.value !== "workflows" || workflowsEnabled) &&
+      (view.value !== "sprints" || sprintsEnabled),
+  );
 
   const showRequirementDetail =
     activeView === "requirements" && Boolean(urlReq);
@@ -320,6 +348,9 @@ export function ProjectArchiveViews({
                 }}
               />
             )}
+            {activeView === "assets" && <AssetTab projectId={projectId} />}
+            {activeView === "sprints" && <SprintTab projectId={projectId} />}
+            {activeView === "workflows" && <WorkflowTab projectId={projectId} />}
             <GraphViewStack projectId={projectId} activeView={activeView} />
             {activeView === "requirements" &&
               (showRequirementDetail && urlReq ? (

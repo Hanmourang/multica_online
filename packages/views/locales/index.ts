@@ -26,6 +26,9 @@ import enSquads from "./en/squads.json";
 import enBilling from "./en/billing.json";
 import enArchive from "./en/archive.json";
 import enCalendar from "./en/calendar.json";
+import enAssets from "./en/assets.json";
+import enSprints from "./en/sprints.json";
+import enWorkflow from "./en/workflow.json";
 import zhHansCommon from "./zh-Hans/common.json";
 import zhHansAuth from "./zh-Hans/auth.json";
 import zhHansSettings from "./zh-Hans/settings.json";
@@ -53,6 +56,9 @@ import zhHansSquads from "./zh-Hans/squads.json";
 import zhHansBilling from "./zh-Hans/billing.json";
 import zhHansArchive from "./zh-Hans/archive.json";
 import zhHansCalendar from "./zh-Hans/calendar.json";
+import zhHansAssets from "./zh-Hans/assets.json";
+import zhHansSprints from "./zh-Hans/sprints.json";
+import zhHansWorkflow from "./zh-Hans/workflow.json";
 import koCommon from "./ko/common.json";
 import koAuth from "./ko/auth.json";
 import koSettings from "./ko/settings.json";
@@ -80,6 +86,9 @@ import koSquads from "./ko/squads.json";
 import koBilling from "./ko/billing.json";
 import koArchive from "./ko/archive.json";
 import koCalendar from "./ko/calendar.json";
+import koAssets from "./ko/assets.json";
+import koSprints from "./ko/sprints.json";
+import koWorkflow from "./ko/workflow.json";
 import jaCommon from "./ja/common.json";
 import jaAuth from "./ja/auth.json";
 import jaSettings from "./ja/settings.json";
@@ -107,6 +116,9 @@ import jaSquads from "./ja/squads.json";
 import jaBilling from "./ja/billing.json";
 import jaArchive from "./ja/archive.json";
 import jaCalendar from "./ja/calendar.json";
+import jaAssets from "./ja/assets.json";
+import jaSprints from "./ja/sprints.json";
+import jaWorkflow from "./ja/workflow.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -140,6 +152,9 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     billing: enBilling,
     archive: enArchive,
     calendar: enCalendar,
+    assets: enAssets,
+    sprints: enSprints,
+    workflow: enWorkflow,
   },
   "zh-Hans": {
     common: zhHansCommon,
@@ -169,6 +184,9 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     billing: zhHansBilling,
     archive: zhHansArchive,
     calendar: zhHansCalendar,
+    assets: zhHansAssets,
+    sprints: zhHansSprints,
+    workflow: zhHansWorkflow,
   },
   ko: {
     common: koCommon,
@@ -198,6 +216,9 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     billing: koBilling,
     archive: koArchive,
     calendar: koCalendar,
+    assets: koAssets,
+    sprints: koSprints,
+    workflow: koWorkflow,
   },
   ja: {
     common: jaCommon,
@@ -227,5 +248,8 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     billing: jaBilling,
     archive: jaArchive,
     calendar: jaCalendar,
+    assets: jaAssets,
+    sprints: jaSprints,
+    workflow: jaWorkflow,
   },
 };

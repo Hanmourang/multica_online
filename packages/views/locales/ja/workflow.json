@@ -1,0 +1,113 @@
+{
+  "title": "ワークフロー",
+  "subtitle": "テンプレートで Agent 実行をオーケストレーション：自動 / 人手ステージとゲートレビュー。",
+  "tabs": {
+    "runs": "実行",
+    "templates": "テンプレート"
+  },
+  "filters": {
+    "all": "すべて",
+    "mine": "自分が開始"
+  },
+  "statuses": {
+    "waiting": "開始待ち",
+    "running": "実行中",
+    "paused": "一時停止",
+    "done": "完了",
+    "failed": "失敗",
+    "cancelled": "キャンセル済み"
+  },
+  "stage_states": {
+    "pending": "未開始",
+    "running": "実行中",
+    "waiting_gate": "ゲート待ち",
+    "done": "完了",
+    "failed": "失敗",
+    "skipped": "スキップ"
+  },
+  "template_statuses": {
+    "draft": "下書き",
+    "published": "公開済み",
+    "archived": "アーカイブ済み"
+  },
+  "modes": {
+    "auto": "自動",
+    "human": "人手"
+  },
+  "columns": {
+    "status": "ステータス",
+    "template": "テンプレート",
+    "created_at": "作成日",
+    "actions": "操作",
+    "name": "名前",
+    "version": "バージョン",
+    "nodes": "ノード数",
+    "updated_at": "更新日"
+  },
+  "empty": {
+    "instances": "ワークフローインスタンスはまだありません",
+    "templates": "ワークフローテンプレートはまだありません",
+    "no_published_templates": "公開済みのテンプレートがありません。先に「テンプレート」タブで作成・公開してください。"
+  },
+  "actions": {
+    "new_instance": "ワークフロー開始",
+    "new_template": "新規テンプレート",
+    "detail": "詳細",
+    "back": "戻る",
+    "cancel": "キャンセル",
+    "create": "作成",
+    "publish": "公開",
+    "archive": "アーカイブ",
+    "duplicate": "複製",
+    "approve": "承認",
+    "loop_back": "差し戻し",
+    "skip": "スキップ",
+    "rerun": "再実行",
+    "interrupt": "割り込み停止",
+    "decide_exit": "承認（exit）",
+    "decide_loop": "再作業依頼（loop）",
+    "send": "送信"
+  },
+  "instance_actions": {
+    "pause": "一時停止",
+    "resume": "再開",
+    "cancel": "キャンセル",
+    "succeed": "成功扱い",
+    "recover": "復旧"
+  },
+  "badges": {
+    "official": "公式"
+  },
+  "dialog": {
+    "pick_template": "公開済みテンプレートを選んでワークフローインスタンスを開始します。",
+    "template_hint": "テンプレートは自動 / 人手ステージのスナップショットです。ノード JSON はサーバー側で検証されます（1〜50 ノード、id 一意、非巡回）。"
+  },
+  "form": {
+    "name": "名前",
+    "description": "説明",
+    "nodes": "ノード JSON（WorkflowNode 配列）",
+    "nodes_placeholder": "[{\"id\":\"n1\",\"name\":\"要件分析\",\"mode\":\"human\",\"stage\":1,\"next\":[],\"gate_doc_types\":[]}]",
+    "nodes_invalid": "ノードは空でない JSON 配列である必要があります（1〜50 個、id 一意、next 参照の実在、非巡回）。",
+    "nodes_help": "必須。各ノード：id、name、mode（auto|human）、stage 順、next 一覧、gate_doc_types。"
+  },
+  "toast": {
+    "instance_created": "ワークフローを開始しました",
+    "template_created": "テンプレートを作成しました",
+    "published": "テンプレートを公開しました",
+    "archived": "テンプレートをアーカイブしました",
+    "duplicated": "テンプレートを複製しました",
+    "action_ok": "操作を適用しました",
+    "action_failed": "操作に失敗しました——状態が同時に変更された可能性があるため最新に更新しました",
+    "decided": "ゲート判定を送信しました"
+  },
+  "detail": {
+    "started_at": "開始",
+    "stages": "ステージ",
+    "gates": "ゲート",
+    "no_gates": "ゲート実行はまだありません",
+    "gate_waiting": "ゲート判定待ち",
+    "gate_round": "ラウンド",
+    "message_placeholder": "ゲートの意見を入力…",
+    "recovery_title": "復旧の提案"
+  }
+}

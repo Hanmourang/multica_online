@@ -1,0 +1,113 @@
+{
+  "title": "Workflow",
+  "subtitle": "Orchestrate agent runs with templates: auto / human stages gated by review.",
+  "tabs": {
+    "runs": "Runs",
+    "templates": "Templates"
+  },
+  "filters": {
+    "all": "All",
+    "mine": "Started by me"
+  },
+  "statuses": {
+    "waiting": "Waiting",
+    "running": "Running",
+    "paused": "Paused",
+    "done": "Done",
+    "failed": "Failed",
+    "cancelled": "Cancelled"
+  },
+  "stage_states": {
+    "pending": "Pending",
+    "running": "Running",
+    "waiting_gate": "Waiting gate",
+    "done": "Done",
+    "failed": "Failed",
+    "skipped": "Skipped"
+  },
+  "template_statuses": {
+    "draft": "Draft",
+    "published": "Published",
+    "archived": "Archived"
+  },
+  "modes": {
+    "auto": "Auto",
+    "human": "Human"
+  },
+  "columns": {
+    "status": "Status",
+    "template": "Template",
+    "created_at": "Created",
+    "actions": "Actions",
+    "name": "Name",
+    "version": "Version",
+    "nodes": "Nodes",
+    "updated_at": "Updated"
+  },
+  "empty": {
+    "instances": "No workflow instances yet",
+    "templates": "No workflow templates yet",
+    "no_published_templates": "No published template available — create and publish one in the Templates tab first."
+  },
+  "actions": {
+    "new_instance": "Start workflow",
+    "new_template": "New template",
+    "detail": "Details",
+    "back": "Back",
+    "cancel": "Cancel",
+    "create": "Create",
+    "publish": "Publish",
+    "archive": "Archive",
+    "duplicate": "Duplicate",
+    "approve": "Approve",
+    "loop_back": "Loop back",
+    "skip": "Skip",
+    "rerun": "Rerun",
+    "interrupt": "Interrupt",
+    "decide_exit": "Approve (exit)",
+    "decide_loop": "Request rework (loop)",
+    "send": "Send"
+  },
+  "instance_actions": {
+    "pause": "Pause",
+    "resume": "Resume",
+    "cancel": "Cancel",
+    "succeed": "Mark succeeded",
+    "recover": "Recover"
+  },
+  "badges": {
+    "official": "Official"
+  },
+  "dialog": {
+    "pick_template": "Pick a published template to start a workflow instance.",
+    "template_hint": "A template is a snapshot of auto / human stages. Node JSON is validated server-side (1–50 nodes, unique ids, acyclic)."
+  },
+  "form": {
+    "name": "Name",
+    "description": "Description",
+    "nodes": "Nodes JSON (WorkflowNode array)",
+    "nodes_placeholder": "[{\"id\":\"n1\",\"name\":\"Requirement analysis\",\"mode\":\"human\",\"stage\":1,\"next\":[],\"gate_doc_types\":[]}]",
+    "nodes_invalid": "Nodes must be a non-empty JSON array of WorkflowNode objects (1–50 items, unique ids, next references must exist, acyclic).",
+    "nodes_help": "Required. Each node: id, name, mode (auto|human), stage order, next ids, gate_doc_types."
+  },
+  "toast": {
+    "instance_created": "Workflow started",
+    "template_created": "Template created",
+    "published": "Template published",
+    "archived": "Template archived",
+    "duplicated": "Template duplicated",
+    "action_ok": "Action applied",
+    "action_failed": "Action failed — the state may have changed concurrently; refreshed to latest",
+    "decided": "Gate decision submitted"
+  },
+  "detail": {
+    "started_at": "Started",
+    "stages": "Stages",
+    "gates": "Gates",
+    "no_gates": "No gate runs yet",
+    "gate_waiting": "Gate waiting for decision",
+    "gate_round": "Round",
+    "message_placeholder": "Write a gate comment…",
+    "recovery_title": "Recovery suggestions"
+  }
+}

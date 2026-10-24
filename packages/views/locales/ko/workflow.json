@@ -1,0 +1,113 @@
+{
+  "title": "워크플로",
+  "subtitle": "템플릿으로 Agent 실행을 오케스트레이션: 자동 / 사람 단계와 게이트 리뷰.",
+  "tabs": {
+    "runs": "실행",
+    "templates": "템플릿"
+  },
+  "filters": {
+    "all": "전체",
+    "mine": "내가 시작"
+  },
+  "statuses": {
+    "waiting": "대기",
+    "running": "실행 중",
+    "paused": "일시 정지",
+    "done": "완료",
+    "failed": "실패",
+    "cancelled": "취소됨"
+  },
+  "stage_states": {
+    "pending": "대기",
+    "running": "실행 중",
+    "waiting_gate": "게이트 대기",
+    "done": "완료",
+    "failed": "실패",
+    "skipped": "건너뜀"
+  },
+  "template_statuses": {
+    "draft": "초안",
+    "published": "게시됨",
+    "archived": "보관됨"
+  },
+  "modes": {
+    "auto": "자동",
+    "human": "사람"
+  },
+  "columns": {
+    "status": "상태",
+    "template": "템플릿",
+    "created_at": "생성일",
+    "actions": "작업",
+    "name": "이름",
+    "version": "버전",
+    "nodes": "노드",
+    "updated_at": "수정일"
+  },
+  "empty": {
+    "instances": "워크플로 인스턴스가 없습니다",
+    "templates": "워크플로 템플릿이 없습니다",
+    "no_published_templates": "게시된 템플릿이 없습니다. 먼저 템플릿 탭에서 생성 후 게시하세요."
+  },
+  "actions": {
+    "new_instance": "워크플로 시작",
+    "new_template": "새 템플릿",
+    "detail": "상세",
+    "back": "뒤로",
+    "cancel": "취소",
+    "create": "생성",
+    "publish": "게시",
+    "archive": "보관",
+    "duplicate": "복사",
+    "approve": "승인",
+    "loop_back": "반려",
+    "skip": "건너뛰기",
+    "rerun": "재실행",
+    "interrupt": "중단",
+    "decide_exit": "승인 (exit)",
+    "decide_loop": "재작업 요청 (loop)",
+    "send": "전송"
+  },
+  "instance_actions": {
+    "pause": "일시 정지",
+    "resume": "재개",
+    "cancel": "취소",
+    "succeed": "성공 처리",
+    "recover": "복구"
+  },
+  "badges": {
+    "official": "공식"
+  },
+  "dialog": {
+    "pick_template": "게시된 템플릿을 선택하여 워크플로 인스턴스를 시작하세요.",
+    "template_hint": "템플릿은 자동 / 사람 단계의 스냅샷입니다. 노드 JSON은 서버에서 검증됩니다(1–50개 노드, 고유 id, 비순환)."
+  },
+  "form": {
+    "name": "이름",
+    "description": "설명",
+    "nodes": "노드 JSON (WorkflowNode 배열)",
+    "nodes_placeholder": "[{\"id\":\"n1\",\"name\":\"요구사항 분석\",\"mode\":\"human\",\"stage\":1,\"next\":[],\"gate_doc_types\":[]}]",
+    "nodes_invalid": "노드는 비어 있지 않은 JSON 배열이어야 합니다(1–50개, 고유 id, next 참조 존재, 비순환).",
+    "nodes_help": "필수. 각 노드: id, name, mode(auto|human), stage 순서, next 목록, gate_doc_types."
+  },
+  "toast": {
+    "instance_created": "워크플로가 시작되었습니다",
+    "template_created": "템플릿이 생성되었습니다",
+    "published": "템플릿이 게시되었습니다",
+    "archived": "템플릿이 보관되었습니다",
+    "duplicated": "템플릿이 복사되었습니다",
+    "action_ok": "작업이 적용되었습니다",
+    "action_failed": "작업 실패 — 상태가 동시에 변경되었을 수 있으며 최신으로 새로고침했습니다",
+    "decided": "게이트 판정이 제출되었습니다"
+  },
+  "detail": {
+    "started_at": "시각",
+    "stages": "단계",
+    "gates": "게이트",
+    "no_gates": "게이트 실행이 없습니다",
+    "gate_waiting": "게이트 판정 대기",
+    "gate_round": "라운드",
+    "message_placeholder": "게이트 의견 작성…",
+    "recovery_title": "복구 제안"
+  }
+}

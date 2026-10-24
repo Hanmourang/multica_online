@@ -1,0 +1,113 @@
+{
+  "title": "工作流",
+  "subtitle": "用模板编排 Agent 执行：自动 / 人工阶段，配门禁评审。",
+  "tabs": {
+    "runs": "运行",
+    "templates": "模板"
+  },
+  "filters": {
+    "all": "全部",
+    "mine": "我发起的"
+  },
+  "statuses": {
+    "waiting": "待启动",
+    "running": "运行中",
+    "paused": "已暂停",
+    "done": "已完成",
+    "failed": "已失败",
+    "cancelled": "已取消"
+  },
+  "stage_states": {
+    "pending": "未开始",
+    "running": "运行中",
+    "waiting_gate": "待门禁",
+    "done": "已完成",
+    "failed": "已失败",
+    "skipped": "已跳过"
+  },
+  "template_statuses": {
+    "draft": "草稿",
+    "published": "已发布",
+    "archived": "已归档"
+  },
+  "modes": {
+    "auto": "自动",
+    "human": "人工"
+  },
+  "columns": {
+    "status": "状态",
+    "template": "模板",
+    "created_at": "创建时间",
+    "actions": "操作",
+    "name": "名称",
+    "version": "版本",
+    "nodes": "节点数",
+    "updated_at": "更新时间"
+  },
+  "empty": {
+    "instances": "暂无工作流实例",
+    "templates": "暂无工作流模板",
+    "no_published_templates": "没有已发布的模板，请先到「模板」页签创建并发布。"
+  },
+  "actions": {
+    "new_instance": "发起工作流",
+    "new_template": "新建模板",
+    "detail": "详情",
+    "back": "返回",
+    "cancel": "取消",
+    "create": "创建",
+    "publish": "发布",
+    "archive": "归档",
+    "duplicate": "复制",
+    "approve": "通过",
+    "loop_back": "打回返工",
+    "skip": "跳过",
+    "rerun": "重跑",
+    "interrupt": "打断",
+    "decide_exit": "通过（exit）",
+    "decide_loop": "要求返工（loop）",
+    "send": "发送"
+  },
+  "instance_actions": {
+    "pause": "暂停",
+    "resume": "恢复",
+    "cancel": "取消",
+    "succeed": "标记成功",
+    "recover": "恢复运行"
+  },
+  "badges": {
+    "official": "官方"
+  },
+  "dialog": {
+    "pick_template": "选择一个已发布的模板来发起工作流实例。",
+    "template_hint": "模板是自动 / 人工阶段的快照；节点 JSON 由服务端校验（1–50 个节点、id 唯一、无环）。"
+  },
+  "form": {
+    "name": "名称",
+    "description": "描述",
+    "nodes": "节点 JSON（WorkflowNode 数组）",
+    "nodes_placeholder": "[{\"id\":\"n1\",\"name\":\"需求分析\",\"mode\":\"human\",\"stage\":1,\"next\":[],\"gate_doc_types\":[]}]",
+    "nodes_invalid": "节点必须是非空 JSON 数组（1–50 个、id 唯一、next 引用存在、无环）。",
+    "nodes_help": "必填。每个节点：id、name、mode（auto|human）、stage 顺序、next 列表、gate_doc_types。"
+  },
+  "toast": {
+    "instance_created": "工作流已发起",
+    "template_created": "模板已创建",
+    "published": "模板已发布",
+    "archived": "模板已归档",
+    "duplicated": "模板已复制",
+    "action_ok": "操作已生效",
+    "action_failed": "操作失败——状态可能已被并发变更，已刷新为最新",
+    "decided": "门禁裁决已提交"
+  },
+  "detail": {
+    "started_at": "开始时间",
+    "stages": "阶段",
+    "gates": "门禁",
+    "no_gates": "暂无门禁记录",
+    "gate_waiting": "门禁待裁决",
+    "gate_round": "轮次",
+    "message_placeholder": "填写门禁意见…",
+    "recovery_title": "失败恢复建议"
+  }
+}

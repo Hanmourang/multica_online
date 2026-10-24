@@ -8,7 +8,8 @@
     "dynamics": "Dynamics",
     "deliverables": "Deliverables",
     "progress": "Progress",
-    "basics": "Basic info"
+    "basics": "Basic info",
+    "assets": "Assets"
   },
   "common": {
     "loading": "Loading…",
@@ -980,7 +981,10 @@
     "requirements": "Requirements",
     "tasks": "Task tracking",
     "acceptance": "Acceptance",
-    "deliverables": "Deliverables"
+    "deliverables": "Deliverables",
+    "assets": "Assets",
+    "sprints": "Sprints",
+    "workflows": "Workflows"
   },
   "archive_toolbar": {
     "settings": "Archive settings",

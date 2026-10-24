@@ -14,6 +14,7 @@ export type StoredProjectTemplate = (typeof PROJECT_TEMPLATE_STORAGE)[number];
 
 export const PROJECT_VIEWS = [
   "archive",
+  "assets",
   "features",
   "data-model",
   "requirements",
@@ -21,13 +22,18 @@ export const PROJECT_VIEWS = [
   "acceptance",
   "deliverables",
   "filing",
+  // 工作流 TAB（plan 20261024 §01 F3）：可见性另由 workflow_module flag 在
+  // TAB 容器层门控，这里只声明壳层页签集合。
+  "workflows",
+  // 迭代 TAB（plan 20261024 §02）：sprint_module flag 同样在容器层门控。
+  "sprints",
 ] as const;
 export type ProjectView = (typeof PROJECT_VIEWS)[number];
 
 export const PROJECT_TEMPLATE_VIEWS: Record<StoredProjectTemplate, readonly ProjectView[]> = {
-  general: ["archive", "requirements", "tasks", "deliverables"],
-  rd: ["archive", "features", "requirements", "tasks", "acceptance", "deliverables", "filing"],
-  data: ["archive", "data-model", "requirements", "tasks", "acceptance", "deliverables"],
+  general: ["archive", "assets", "requirements", "tasks", "deliverables", "workflows", "sprints"],
+  rd: ["archive", "assets", "features", "requirements", "tasks", "acceptance", "deliverables", "filing", "workflows", "sprints"],
+  data: ["archive", "assets", "data-model", "requirements", "tasks", "acceptance", "deliverables", "workflows", "sprints"],
   full: PROJECT_VIEWS,
 };
 

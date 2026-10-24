@@ -8,7 +8,8 @@
     "dynamics": "활동",
     "deliverables": "산출물",
     "progress": "진행률 추적",
-    "basics": "기본 정보"
+    "basics": "기본 정보",
+    "assets": "자산"
   },
   "common": {
     "loading": "불러오는 중…",
@@ -980,7 +981,10 @@
     "requirements": "요구사항 관리",
     "tasks": "태스크 추적",
     "acceptance": "검수 상세",
-    "deliverables": "산출물"
+    "deliverables": "산출물",
+    "assets": "자산 관리",
+    "sprints": "스프린트",
+    "workflows": "워크플로"
   },
   "archive_toolbar": {
     "settings": "아카이브 설정",
