@@ -449,6 +449,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
+	// 工作流模块（plan 20261024 §01，Agent-W）：状态机服务构造无条件（flag
+	// 关闭时路由不注册、sweep 空转，服务存在但零消费）。TaskService 复用
+	// 同一个实例（auto stage 入队 + 缓存一致性）。
+	h.WorkflowService = service.NewWorkflowService(queries, pool, h.TaskService, bus, opts.FeatureFlags)
 	entitlementClient, entitlementErr := entitlement.New(entitlement.Config{
 		BaseURL:  signupConfig.CloudURL,
 		Observer: opts.BusinessMetrics,
@@ -1939,6 +1943,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/dynamics", h.GetIssueDynamics)
 					r.Get("/deliverables-overview", h.GetIssueDeliverablesOverview)
 					r.Get("/progress", h.GetIssueProgress)
+					// <router-block:asset> owned by Agent-A — see 03_资产管理模块.md §E.
+					// 工作项级资产绑定（对标 CoCo 双形态）：同套 endpoint，作用域降到 issue。
+					if featureflags.AssetModuleEnabled(context.Background(), h.FeatureFlags) {
+						r.Get("/assets", h.ListIssueAssets)
+						r.Post("/assets", h.BindIssueAsset)
+						r.Delete("/assets/{bindingId}", h.UnbindIssueAsset)
+					}
+					// </router-block:asset>
 				})
 			})
 
@@ -2067,8 +2079,97 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// writeback) are registered above; the wildcard below cannot shadow
 					// them because chi trie gives static segments precedence.
 					r.Patch("/filing/items/{itemId}", h.PatchFilingItem)
+					// <router-block:asset> owned by Agent-A — see 03_资产管理模块.md §E.
+					// 资产管理（对标 CoCo /projects/:id/assets）。静态段 page /
+					// search-candidates 先于 {bindingId} 通配注册（chi trie 优先级）；
+					// flag off 时整块不注册 → 干净 404 回滚。
+					if featureflags.AssetModuleEnabled(context.Background(), h.FeatureFlags) {
+						r.Get("/assets/page", h.ListProjectAssets)
+						r.Get("/assets/search-candidates", h.SearchAssetCandidates)
+						r.Post("/assets", h.BindProjectAsset)
+						r.Delete("/assets/{bindingId}", h.UnbindProjectAsset)
+					}
+					// </router-block:asset>
+					// <router-block:sprint> owned by Agent-S — see 02_迭代模块.md §API
+					// 迭代（Sprint）：planned→active→completed CAS 状态机 + issue 纳入/移出。
+					// 静态段 sprints 先于 sprints/{sprintId} 通配注册（chi trie 优先级）；
+					// flag off 时整块不注册 → 干净 404 回滚。
+					if featureflags.SprintModuleEnabled(context.Background(), h.FeatureFlags) {
+						r.Get("/sprints", h.ListSprints)
+						r.Post("/sprints", h.CreateSprint)
+						r.Route("/sprints/{sprintId}", func(r chi.Router) {
+							r.Get("/", h.GetSprint)
+							r.Patch("/", h.UpdateSprint)
+							r.Delete("/", h.DeleteSprint)
+							r.Post("/start", h.StartSprint)
+							r.Post("/complete", h.CompleteSprint)
+							r.Post("/reopen", h.ReopenSprint)
+							r.Post("/issues", h.AssignSprintIssues)
+							r.Delete("/issues", h.RemoveSprintIssues)
+							r.Get("/progress", h.GetSprintProgress)
+						})
+					}
+					// </router-block:sprint>
+					// <router-block:workflow> owned by Agent-W — see 01_工作流模块.md §D.
+					// 工作流（对标 CoCo /projects/:id/workflows）：模板 CRUD/发布/分享 +
+					// 实例列表/创建。静态段 templates 先于 {tid} 通配注册（chi trie）；
+					// flag off 时整块不注册 → 干净 404 回滚。
+					if featureflags.WorkflowModuleEnabled(context.Background(), h.FeatureFlags) {
+						r.Route("/workflow/templates", func(r chi.Router) {
+							r.Get("/", h.ListWorkflowTemplates)
+							r.Post("/", h.CreateWorkflowTemplate)
+							r.Route("/{tid}", func(r chi.Router) {
+								r.Put("/", h.UpdateWorkflowTemplate)
+								r.Post("/publish", h.PublishWorkflowTemplate)
+								r.Post("/archive", h.ArchiveWorkflowTemplate)
+								r.Post("/duplicate", h.DuplicateWorkflowTemplate)
+								r.Post("/share", h.ShareWorkflowTemplate)
+							})
+						})
+						r.Get("/workflow-instances", h.ListProjectWorkflowInstances)
+						r.Post("/workflow-instances", h.CreateProjectWorkflowInstance)
+					}
+					// </router-block:workflow>
 				})
 			})
+
+			// <router-block:workflow-root> owned by Agent-W — 01_工作流模块.md §D。
+			// 实例/阶段/门禁的根作用域路由（跨项目直达）；workspace 归属由
+			// resolveWorkspaceID + SQL workspace_id 过滤双保险；flag off 不注册。
+			if featureflags.WorkflowModuleEnabled(context.Background(), h.FeatureFlags) {
+				r.Route("/api/workflow-instances", func(r chi.Router) {
+					r.Route("/{iid}", func(r chi.Router) {
+						r.Get("/", h.GetWorkflowInstanceDetail)
+						r.Get("/recovery-diagnosis", h.GetWorkflowRecoveryDiagnosis)
+						r.Post("/pause", h.PauseWorkflowInstance)
+						r.Post("/resume", h.ResumeWorkflowInstance)
+						r.Post("/cancel", h.CancelWorkflowInstance)
+						r.Post("/succeed", h.SucceedWorkflowInstance)
+						r.Post("/recover", h.RecoverWorkflowInstance)
+					})
+				})
+				r.Route("/api/workflow", func(r chi.Router) {
+					r.Route("/stage-runs/{sid}", func(r chi.Router) {
+						r.Get("/transcript", h.GetWorkflowStageTranscript)
+						r.Get("/messages", h.GetWorkflowStageMessages)
+						r.Get("/sessions", h.GetWorkflowStageSessions)
+						r.Get("/pending-turns", h.GetWorkflowStagePendingTurns)
+						r.Post("/approve", h.ApproveWorkflowStage)
+						r.Post("/skip", h.SkipWorkflowStage)
+						r.Post("/rerun", h.RerunWorkflowStage)
+						r.Post("/handoff", h.HandoffWorkflowStage)
+						r.Post("/loop-back", h.LoopBackWorkflowStage)
+						r.Post("/interrupt", h.InterruptWorkflowStage)
+						r.Post("/restart-session", h.RestartWorkflowStageSession)
+					})
+					r.Route("/gate-runs/{gid}", func(r chi.Router) {
+						r.Post("/decide", h.DecideWorkflowGate)
+						r.Get("/messages", h.ListWorkflowGateMessages)
+						r.Post("/messages", h.PostWorkflowGateMessage)
+					})
+				})
+			}
+			// </router-block:workflow-root>
 
 			// Agent runs (project-archive §5.5): the projector's write endpoints
 			// (run upsert + batch todo / event writes) plus run-scoped todo /

@@ -291,26 +291,26 @@ func (q *Queries) CreateWorkflowTemplate(ctx context.Context, arg CreateWorkflow
 
 const decideWorkflowGate = `-- name: DecideWorkflowGate :one
 UPDATE workflow_gate_run
-SET decision = $2::text, state = 'decided', decided_at = now(),
-    decided_by_type = $3, decided_by_id = $4
-WHERE id = $1 AND state = 'waiting'
+SET decision = $1::text, state = 'decided', decided_at = now(),
+    decided_by_type = $2, decided_by_id = $3
+WHERE id = $4 AND state = 'waiting'
 RETURNING id, instance_id, stage_run_id, workspace_id, round, mode, state, decision, generation, parent_id, decided_by_type, decided_by_id, created_at, decided_at
 `
 
 type DecideWorkflowGateParams struct {
-	ID            pgtype.UUID `json:"id"`
-	Column2       string      `json:"column_2"`
+	Decision      string      `json:"decision"`
 	DecidedByType pgtype.Text `json:"decided_by_type"`
 	DecidedByID   pgtype.UUID `json:"decided_by_id"`
+	ID            pgtype.UUID `json:"id"`
 }
 
 // 仅 waiting 态可裁决：0 行 = 并发裁决抢先 → handler 409（对照 acceptance round CAS）。
 func (q *Queries) DecideWorkflowGate(ctx context.Context, arg DecideWorkflowGateParams) (WorkflowGateRun, error) {
 	row := q.db.QueryRow(ctx, decideWorkflowGate,
-		arg.ID,
-		arg.Column2,
+		arg.Decision,
 		arg.DecidedByType,
 		arg.DecidedByID,
+		arg.ID,
 	)
 	var i WorkflowGateRun
 	err := row.Scan(
@@ -712,18 +712,17 @@ SELECT wi.id, wi.workspace_id, wi.project_id, wi.template_id, wi.template_versio
 FROM workflow_instance wi
 WHERE wi.workspace_id = $1
   AND wi.project_id = $2
-  AND ($3::text IS NULL OR wi.started_by_id = $4)
-  AND (array_length($5::text[], 1) IS NULL OR wi.status = ANY($5::text[]))
+  AND ($3::uuid IS NULL OR wi.started_by_id = $3)
+  AND (array_length($4::text[], 1) IS NULL OR wi.status = ANY($4::text[]))
 ORDER BY wi.created_at DESC
-LIMIT $6
+LIMIT $5
 `
 
 type ListWorkflowInstancesByProjectParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	ProjectID   pgtype.UUID `json:"project_id"`
-	Column3     string      `json:"column_3"`
-	StartedByID pgtype.UUID `json:"started_by_id"`
-	Column5     []string    `json:"column_5"`
+	Column3     pgtype.UUID `json:"column_3"`
+	Column4     []string    `json:"column_4"`
 	Limit       int32       `json:"limit"`
 }
 
@@ -751,13 +750,13 @@ type ListWorkflowInstancesByProjectRow struct {
 	CancelledCount   int64              `json:"cancelled_count"`
 }
 
+// scope=mine 时传 started_by=$3（uuid），全部时传 NULL；status 数组过滤同理 NULL=不限。
 func (q *Queries) ListWorkflowInstancesByProject(ctx context.Context, arg ListWorkflowInstancesByProjectParams) ([]ListWorkflowInstancesByProjectRow, error) {
 	rows, err := q.db.Query(ctx, listWorkflowInstancesByProject,
 		arg.WorkspaceID,
 		arg.ProjectID,
 		arg.Column3,
-		arg.StartedByID,
-		arg.Column5,
+		arg.Column4,
 		arg.Limit,
 	)
 	if err != nil {

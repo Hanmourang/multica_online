@@ -60,6 +60,7 @@ SELECT * FROM workflow_instance
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListWorkflowInstancesByProject :many
+-- scope=mine 时传 started_by=$3（uuid），全部时传 NULL；status 数组过滤同理 NULL=不限。
 SELECT wi.*,
        (SELECT COUNT(*) FROM workflow_instance c
          WHERE c.workspace_id = wi.workspace_id AND c.project_id = wi.project_id
@@ -82,10 +83,10 @@ SELECT wi.*,
 FROM workflow_instance wi
 WHERE wi.workspace_id = $1
   AND wi.project_id = $2
-  AND ($3::text IS NULL OR wi.started_by_id = $4)
-  AND (array_length($5::text[], 1) IS NULL OR wi.status = ANY($5::text[]))
+  AND ($3::uuid IS NULL OR wi.started_by_id = $3)
+  AND (array_length($4::text[], 1) IS NULL OR wi.status = ANY($4::text[]))
 ORDER BY wi.created_at DESC
-LIMIT $6;
+LIMIT $5;
 
 -- name: ListWorkflowInstancesByIssue :many
 SELECT * FROM workflow_instance
@@ -172,9 +173,9 @@ LIMIT 1;
 -- name: DecideWorkflowGate :one
 -- 仅 waiting 态可裁决：0 行 = 并发裁决抢先 → handler 409（对照 acceptance round CAS）。
 UPDATE workflow_gate_run
-SET decision = $2::text, state = 'decided', decided_at = now(),
-    decided_by_type = $3, decided_by_id = $4
-WHERE id = $1 AND state = 'waiting'
+SET decision = @decision::text, state = 'decided', decided_at = now(),
+    decided_by_type = @decided_by_type, decided_by_id = @decided_by_id
+WHERE id = @id AND state = 'waiting'
 RETURNING *;
 
 -- name: CancelWorkflowGateRun :one

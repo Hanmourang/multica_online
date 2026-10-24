@@ -414,6 +414,52 @@ func (s *WorkflowService) OnTaskDone(ctx context.Context, taskID pgtype.UUID, ok
 	return s.dispatchNextPending(ctx, inst)
 }
 
+// SkipStage 人工跳过阶段：pending/running/waiting_gate→skipped。
+// 副作用 best-effort：running 先 cancel 底层 task，waiting_gate 先撤销 waiting 门；
+// 实例 running 时继续推进下一个 pending stage。
+func (s *WorkflowService) SkipStage(ctx context.Context, inst db.WorkflowInstance, stage db.WorkflowStageRun) error {
+	switch stage.State {
+	case "pending", "running", "waiting_gate":
+	default:
+		return ErrWorkflowConflict
+	}
+	if stage.State == "running" && stage.TaskID.Valid && s.TaskService != nil {
+		if _, err := s.TaskService.CancelTask(ctx, stage.TaskID); err != nil {
+			slog.Warn("workflow skip: cancel stage task failed", "task_id", util.UUIDToString(stage.TaskID), "error", err)
+		}
+	}
+	if g, err := s.Queries.GetWaitingGateByStageRun(ctx, stage.ID); err == nil {
+		if _, cerr := s.Queries.CancelWorkflowGateRun(ctx, g.ID); cerr != nil && !errors.Is(cerr, pgx.ErrNoRows) {
+			slog.Warn("workflow skip: cancel waiting gate failed", "gate_id", util.UUIDToString(g.ID), "error", cerr)
+		}
+	}
+	if err := s.casStage(ctx, stage.ID, stage.State, "skipped", pgtype.UUID{}, nil); err != nil {
+		return err
+	}
+	if inst.Status == "running" {
+		return s.dispatchNextPending(ctx, inst)
+	}
+	return nil
+}
+
+// RerunStage 重跑已结束的阶段：done/failed/skipped→pending 后立即重派。
+// 实例必须在 running（paused/终态下重跑会绕过状态机约束 → ErrWorkflowConflict）。
+func (s *WorkflowService) RerunStage(ctx context.Context, inst db.WorkflowInstance, stage db.WorkflowStageRun) error {
+	if inst.Status != "running" {
+		return ErrWorkflowConflict
+	}
+	switch stage.State {
+	case "done", "failed", "skipped":
+	default:
+		return ErrWorkflowConflict
+	}
+	if err := s.casStage(ctx, stage.ID, stage.State, "pending", pgtype.UUID{}, nil); err != nil {
+		return err
+	}
+	stage.State = "pending"
+	return s.dispatchStage(ctx, inst, stage)
+}
+
 // ── gate 决策（loop / exit 核心） ────────────────────────────────────────────
 
 // DecideGate 裁决 waiting 门：

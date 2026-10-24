@@ -195,6 +195,9 @@ type Handler struct {
 	PluginService          *service.PluginService
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
+	// WorkflowService 编排 CoCo 对标工作流状态机（plan 20261024 §01）。
+	// nil 时工作流路由返回 503；router 在 workflow_module flag 开启时构造并注入。
+	WorkflowService *service.WorkflowService
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
 	// preserves self-hosted behavior without extra reads.
 	Entitlements entitlement.Provider

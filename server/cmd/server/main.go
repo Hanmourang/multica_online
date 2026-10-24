@@ -660,6 +660,10 @@ func main() {
 	// claim until the cache TTL expires.
 	taskSvc, autopilotSvc := backgroundServices(h)
 	registerAutopilotListeners(bus, autopilotSvc)
+	// 工作流模块（plan 20261024 §01，Agent-W）：把 daemon 任务终态桥接进
+	// stage 状态机（EventTaskCompleted/Failed/Cancelled → OnTaskDone，
+	// 内部 goroutine hand-off，对照 SubscribePluginEvents 约束）。nil-safe。
+	service.SubscribeWorkflowTaskEvents(bus, h.WorkflowService)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read
@@ -780,6 +784,12 @@ func main() {
 	// machinery. The job is inert while plugins_v1 is disabled.
 	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
 		slog.Warn("scheduler: failed to register plugin_hook_schedule_dispatch job", "error", err)
+	}
+	// 工作流 30s sweep（plan 20261024 §01 C5）：扫 waiting 实例 → 幂等启动
+	//（MarkWorkflowStarted CAS，多副本重入安全）。workflow_module flag 关闭
+	// 时 SweepWaiting 空转返回零汇总，故注册无条件安全、无需门控。
+	if err := schedulerMgr.Register(scheduler.WorkflowTriggerJob(h.WorkflowService)); err != nil {
+		slog.Warn("scheduler: failed to register workflow_waiting_dispatch job", "error", err)
 	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
