@@ -11,6 +11,13 @@ import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
+import { assetKeys } from "../assets/queries";
+import { sprintKeys } from "../sprints/queries";
+import {
+  onWorkflowInstanceState,
+  onWorkflowGateDecided,
+  onWorkflowTemplateChanged,
+} from "../workflow/ws-updaters";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
@@ -118,6 +125,8 @@ import type {
   ChatSession,
   ChatSessionCreatedPayload,
   InvitationCreatedPayload,
+  WorkflowInstanceStatePayload,
+  WorkflowGateDecidedPayload,
 } from "../types";
 
 const chatWsLogger = createLogger("chat.ws");
@@ -793,6 +802,24 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       },
+      // asset:bound / asset:unbound (migration 471). The binding layer is a
+      // projection over project rows + candidates; both are keyed under the
+      // workspace-wide asset slice, so invalidate it wholesale. WS only drives
+      // React Query invalidation here — never mirrored into a Zustand store.
+      asset: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: assetKeys.all(wsId) });
+      },
+      // sprint:updated / sprint:issues_changed (migration 470, plan §02).
+      // The sprint list carries issue_count and the progress endpoint is a
+      // derived aggregate — both refill on invalidation. Issue membership
+      // changes ALSO broadcast issue:updated per row (handled by the
+      // dedicated issue:updated listener above); this prefix entry only
+      // refreshes the sprint slice. WS never mirrors into a Zustand store.
+      sprint: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: sprintKeys.all(wsId) });
+      },
       squad: () => {
         const wsId = getCurrentWsId();
         if (wsId) {
@@ -1164,6 +1191,26 @@ export function useRealtimeSync(
     const unsubCommentUnresolved = ws.on("comment:unresolved", (p) => {
       const { comment } = p as CommentUnresolvedPayload;
       if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+    });
+
+    // --- Workflow (plan 20261024 §01, Agent-W) ---
+    // workflow:instance_state 携带 {instance_id, status, source}：详情页
+    // 命中缓存就地 patch，列表 invalidate；铁律：只动 React Query。
+    const unsubWorkflowInstanceState = ws.on(
+      "workflow:instance_state",
+      (p) => {
+        const wsId = getCurrentWsId();
+        if (wsId)
+          onWorkflowInstanceState(qc, wsId, p as WorkflowInstanceStatePayload);
+      },
+    );
+    const unsubWorkflowGateDecided = ws.on("workflow:gate_decided", (p) => {
+      const wsId = getCurrentWsId();
+      if (wsId) onWorkflowGateDecided(qc, wsId, p as WorkflowGateDecidedPayload);
+    });
+    const unsubWorkflowTemplateChanged = ws.on("workflow:template_changed", () => {
+      const wsId = getCurrentWsId();
+      if (wsId) onWorkflowTemplateChanged(qc, wsId);
     });
 
     const unsubActivityCreated = ws.on("activity:created", (p) => {
@@ -1704,6 +1751,9 @@ export function useRealtimeSync(
       unsubCommentDeleted();
       unsubCommentResolved();
       unsubCommentUnresolved();
+      unsubWorkflowInstanceState();
+      unsubWorkflowGateDecided();
+      unsubWorkflowTemplateChanged();
       unsubActivityCreated();
       unsubReactionAdded();
       unsubReactionRemoved();

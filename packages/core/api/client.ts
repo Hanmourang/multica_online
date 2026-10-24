@@ -127,6 +127,34 @@ import type {
   ListArchiveSyncDiagnosticsResponse,
   ArchiveSyncConfig,
   PutArchiveSyncConfigRequest,
+  AssetPage,
+  ListAssetsParams,
+  BindAssetRequest,
+  AssetBinding,
+  AssetCandidatesResponse,
+  SearchAssetCandidatesParams,
+  ListSprintsResponse,
+  Sprint,
+  SprintProgress,
+  CreateSprintRequest,
+  UpdateSprintRequest,
+  SprintIssuesRequest,
+  ListWorkflowTemplatesResponse,
+  CreateWorkflowTemplateRequest,
+  UpdateWorkflowTemplateRequest,
+  WorkflowTemplate,
+  ListWorkflowInstancesParams,
+  ListWorkflowInstancesResponse,
+  CreateWorkflowInstanceRequest,
+  WorkflowInstance,
+  WorkflowInstanceDetailResponse,
+  WorkflowRecoveryDiagnosisResponse,
+  WorkflowStageTranscriptResponse,
+  WorkflowStageMessagesResponse,
+  WorkflowStageRun,
+  DecideGateResponse,
+  GateDecision,
+  WorkflowGateMessagesResponse,
   GraphSyncPayload,
   GraphSyncResponse,
   RebridgeGraphResponse,
@@ -1003,6 +1031,7 @@ export class ApiClient {
     if (params?.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.sprint_id) search.set("sprint_id", params.sprint_id);
     if (params?.assignee_filters?.length) {
       search.set("assignee_filters", params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","));
     }
@@ -4088,6 +4117,381 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/artifacts/${artifactId}`, {
       method: "DELETE",
     });
+  }
+
+  // ── 工作流（plan 20261024 §01，Agent-W）────────────────────────────────
+  // 路径与 server/cmd/server/router.go 的 router-block:workflow / -root 两
+  // 块逐一对应；workflow_module flag 关闭时服务端不注册路由 → 全部 404。
+  async listWorkflowTemplates(
+    projectId: string,
+  ): Promise<ListWorkflowTemplatesResponse> {
+    return this.fetch(`/api/projects/${projectId}/workflow/templates`);
+  }
+
+  async createWorkflowTemplate(
+    projectId: string,
+    data: CreateWorkflowTemplateRequest,
+  ): Promise<WorkflowTemplate> {
+    return this.fetch(`/api/projects/${projectId}/workflow/templates`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateWorkflowTemplate(
+    projectId: string,
+    templateId: string,
+    data: UpdateWorkflowTemplateRequest,
+  ): Promise<WorkflowTemplate> {
+    return this.fetch(
+      `/api/projects/${projectId}/workflow/templates/${templateId}`,
+      { method: "PUT", body: JSON.stringify(data) },
+    );
+  }
+
+  async publishWorkflowTemplate(
+    projectId: string,
+    templateId: string,
+  ): Promise<WorkflowTemplate> {
+    return this.fetch(
+      `/api/projects/${projectId}/workflow/templates/${templateId}/publish`,
+      { method: "POST" },
+    );
+  }
+
+  async archiveWorkflowTemplate(
+    projectId: string,
+    templateId: string,
+  ): Promise<WorkflowTemplate> {
+    return this.fetch(
+      `/api/projects/${projectId}/workflow/templates/${templateId}/archive`,
+      { method: "POST" },
+    );
+  }
+
+  async duplicateWorkflowTemplate(
+    projectId: string,
+    templateId: string,
+    name?: string,
+  ): Promise<WorkflowTemplate> {
+    return this.fetch(
+      `/api/projects/${projectId}/workflow/templates/${templateId}/duplicate`,
+      { method: "POST", body: JSON.stringify({ name }) },
+    );
+  }
+
+  async shareWorkflowTemplate(
+    projectId: string,
+    templateId: string,
+    targetProjectId: string,
+  ): Promise<WorkflowTemplate> {
+    return this.fetch(
+      `/api/projects/${projectId}/workflow/templates/${templateId}/share`,
+      { method: "POST", body: JSON.stringify({ project_id: targetProjectId }) },
+    );
+  }
+
+  async listWorkflowInstances(
+    projectId: string,
+    params?: ListWorkflowInstancesParams,
+  ): Promise<ListWorkflowInstancesResponse> {
+    const search = new URLSearchParams();
+    if (params?.scope) search.set("scope", params.scope);
+    if (params?.status?.length) search.set("status", params.status.join(","));
+    if (params?.limit) search.set("limit", String(params.limit));
+    const qs = search.toString();
+    return this.fetch(
+      `/api/projects/${projectId}/workflow-instances${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async createWorkflowInstance(
+    projectId: string,
+    data: CreateWorkflowInstanceRequest,
+  ): Promise<WorkflowInstance> {
+    return this.fetch(`/api/projects/${projectId}/workflow-instances`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getWorkflowInstance(
+    instanceId: string,
+  ): Promise<WorkflowInstanceDetailResponse> {
+    return this.fetch(`/api/workflow-instances/${instanceId}`);
+  }
+
+  async workflowInstanceAction(
+    instanceId: string,
+    action: "pause" | "resume" | "cancel" | "succeed" | "recover",
+  ): Promise<WorkflowInstance> {
+    return this.fetch(`/api/workflow-instances/${instanceId}/${action}`, {
+      method: "POST",
+    });
+  }
+
+  async getWorkflowRecoveryDiagnosis(
+    instanceId: string,
+  ): Promise<WorkflowRecoveryDiagnosisResponse> {
+    return this.fetch(`/api/workflow-instances/${instanceId}/recovery-diagnosis`);
+  }
+
+  async getWorkflowStageTranscript(
+    stageRunId: string,
+  ): Promise<WorkflowStageTranscriptResponse> {
+    return this.fetch(`/api/workflow/stage-runs/${stageRunId}/transcript`);
+  }
+
+  async getWorkflowStageMessages(
+    stageRunId: string,
+  ): Promise<WorkflowStageMessagesResponse> {
+    return this.fetch(`/api/workflow/stage-runs/${stageRunId}/messages`);
+  }
+
+  async approveWorkflowStage(stageRunId: string): Promise<DecideGateResponse> {
+    return this.fetch(`/api/workflow/stage-runs/${stageRunId}/approve`, {
+      method: "POST",
+    });
+  }
+
+  async loopBackWorkflowStage(stageRunId: string): Promise<DecideGateResponse> {
+    return this.fetch(`/api/workflow/stage-runs/${stageRunId}/loop-back`, {
+      method: "POST",
+    });
+  }
+
+  async skipWorkflowStage(stageRunId: string): Promise<WorkflowStageRun> {
+    return this.fetch(`/api/workflow/stage-runs/${stageRunId}/skip`, {
+      method: "POST",
+    });
+  }
+
+  async rerunWorkflowStage(stageRunId: string): Promise<WorkflowStageRun> {
+    return this.fetch(`/api/workflow/stage-runs/${stageRunId}/rerun`, {
+      method: "POST",
+    });
+  }
+
+  async interruptWorkflowStage(stageRunId: string): Promise<WorkflowStageRun> {
+    return this.fetch(`/api/workflow/stage-runs/${stageRunId}/interrupt`, {
+      method: "POST",
+    });
+  }
+
+  async decideWorkflowGate(
+    gateRunId: string,
+    decision: GateDecision,
+  ): Promise<DecideGateResponse> {
+    return this.fetch(`/api/workflow/gate-runs/${gateRunId}/decide`, {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    });
+  }
+
+  async listWorkflowGateMessages(
+    gateRunId: string,
+  ): Promise<WorkflowGateMessagesResponse> {
+    return this.fetch(`/api/workflow/gate-runs/${gateRunId}/messages`);
+  }
+
+  async postWorkflowGateMessage(
+    gateRunId: string,
+    content: string,
+  ): Promise<import("../types").Comment> {
+    return this.fetch(`/api/workflow/gate-runs/${gateRunId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  // Asset management (spec 03_资产管理模块.md; migration 471). Paths mirror
+  // server/cmd/server/router.go asset blocks and handler shapes in
+  // server/internal/handler/project_asset.go. All feature-flag gated server-side:
+  // when asset_module is off these routes are not registered → 404.
+  async listProjectAssets(
+    projectId: string,
+    params?: ListAssetsParams,
+  ): Promise<AssetPage> {
+    const search = new URLSearchParams();
+    if (params?.page) search.set("toPage", String(params.page));
+    if (params?.pageSize) search.set("pageSize", String(params.pageSize));
+    if (params?.category) search.set("category", params.category);
+    if (params?.name) search.set("name", params.name);
+    if (params?.issueId) search.set("issueId", params.issueId);
+    const qs = search.toString();
+    return this.fetch(
+      `/api/projects/${projectId}/assets/page${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async searchAssetCandidates(
+    projectId: string,
+    params?: SearchAssetCandidatesParams,
+  ): Promise<AssetCandidatesResponse> {
+    const search = new URLSearchParams();
+    if (params?.category) search.set("category", params.category);
+    if (params?.q) search.set("q", params.q);
+    if (params?.relatedToMe) search.set("relatedToMe", "true");
+    const qs = search.toString();
+    return this.fetch(
+      `/api/projects/${projectId}/assets/search-candidates${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async bindProjectAsset(
+    projectId: string,
+    data: BindAssetRequest,
+  ): Promise<AssetBinding> {
+    return this.fetch(`/api/projects/${projectId}/assets`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async unbindProjectAsset(
+    projectId: string,
+    bindingId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/assets/${bindingId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Issue-scope variants (CoCo dual-entry): same envelope, scope narrowed to a
+  // work item via the path param.
+  async listIssueAssets(
+    issueId: string,
+    params?: Omit<ListAssetsParams, "issueId">,
+  ): Promise<AssetPage> {
+    const search = new URLSearchParams();
+    if (params?.page) search.set("toPage", String(params.page));
+    if (params?.pageSize) search.set("pageSize", String(params.pageSize));
+    if (params?.category) search.set("category", params.category);
+    if (params?.name) search.set("name", params.name);
+    const qs = search.toString();
+    return this.fetch(`/api/issues/${issueId}/assets${qs ? `?${qs}` : ""}`);
+  }
+
+  async bindIssueAsset(
+    issueId: string,
+    data: BindAssetRequest,
+  ): Promise<AssetBinding> {
+    return this.fetch(`/api/issues/${issueId}/assets`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async unbindIssueAsset(issueId: string, bindingId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/assets/${bindingId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Sprint 迭代管理 (spec 02_迭代模块.md; migration 470)。路径与
+  // server/cmd/server/router.go 的 <router-block:sprint> 对齐；flag 关闭时
+  // 后端整块 404。状态机迁移走 CAS：非法迁移 409。
+  async listProjectSprints(
+    projectId: string,
+    status?: string,
+  ): Promise<ListSprintsResponse> {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+    return this.fetch(`/api/projects/${projectId}/sprints${qs}`);
+  }
+
+  async createProjectSprint(
+    projectId: string,
+    data: CreateSprintRequest,
+  ): Promise<Sprint> {
+    return this.fetch(`/api/projects/${projectId}/sprints`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getProjectSprint(
+    projectId: string,
+    sprintId: string,
+  ): Promise<Sprint> {
+    return this.fetch(`/api/projects/${projectId}/sprints/${sprintId}`);
+  }
+
+  async updateProjectSprint(
+    projectId: string,
+    sprintId: string,
+    data: UpdateSprintRequest,
+  ): Promise<Sprint> {
+    return this.fetch(`/api/projects/${projectId}/sprints/${sprintId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProjectSprint(
+    projectId: string,
+    sprintId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/sprints/${sprintId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async startProjectSprint(
+    projectId: string,
+    sprintId: string,
+  ): Promise<Sprint> {
+    return this.fetch(`/api/projects/${projectId}/sprints/${sprintId}/start`, {
+      method: "POST",
+    });
+  }
+
+  async completeProjectSprint(
+    projectId: string,
+    sprintId: string,
+  ): Promise<Sprint> {
+    return this.fetch(
+      `/api/projects/${projectId}/sprints/${sprintId}/complete`,
+      { method: "POST" },
+    );
+  }
+
+  async reopenProjectSprint(
+    projectId: string,
+    sprintId: string,
+  ): Promise<Sprint> {
+    return this.fetch(
+      `/api/projects/${projectId}/sprints/${sprintId}/reopen`,
+      { method: "POST" },
+    );
+  }
+
+  async assignSprintIssues(
+    projectId: string,
+    sprintId: string,
+    issueIds: string[],
+  ): Promise<{ assigned: number }> {
+    return this.fetch(`/api/projects/${projectId}/sprints/${sprintId}/issues`, {
+      method: "POST",
+      body: JSON.stringify({ issue_ids: issueIds } satisfies SprintIssuesRequest),
+    });
+  }
+
+  async removeSprintIssues(
+    projectId: string,
+    sprintId: string,
+    issueIds: string[],
+  ): Promise<{ removed: number }> {
+    return this.fetch(`/api/projects/${projectId}/sprints/${sprintId}/issues`, {
+      method: "DELETE",
+      body: JSON.stringify({ issue_ids: issueIds } satisfies SprintIssuesRequest),
+    });
+  }
+
+  async getSprintProgress(
+    projectId: string,
+    sprintId: string,
+  ): Promise<SprintProgress> {
+    return this.fetch(`/api/projects/${projectId}/sprints/${sprintId}/progress`);
   }
 
   // Project archive — graph snapshots + ontology + bus matrix (§5.2/§5.3).

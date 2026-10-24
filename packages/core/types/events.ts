@@ -7,6 +7,10 @@ import type { TimelineEntry } from "./activity";
 import type { Workspace, MemberWithUser, Invitation } from "./workspace";
 import type { Project } from "./project";
 import type { Label } from "./label";
+import type {
+  WorkflowInstanceStatePayload,
+  WorkflowGateDecidedPayload,
+} from "./workflow";
 
 // WebSocket event types (matching Go server protocol/events.go)
 export type WSEventType =
@@ -90,7 +94,14 @@ export type WSEventType =
   | "github_installation:deleted"
   | "pull_request:linked"
   | "pull_request:updated"
-  | "pull_request:unlinked";
+  | "pull_request:unlinked"
+  // 工作流模块（plan 20261024 §01，对照 Go protocol/events.go 三常量）。
+  | "workflow:instance_state"
+  | "workflow:gate_decided"
+  | "workflow:template_changed"
+  // 迭代（Sprint）模块（plan 20261024 §02，对照 Go protocol/events.go 两常量）。
+  | "sprint:updated"
+  | "sprint:issues_changed";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -567,6 +578,11 @@ export interface WSEventPayloadMap {
   "comment:deleted": CommentDeletedPayload;
   "comment:resolved": CommentResolvedPayload;
   "comment:unresolved": CommentUnresolvedPayload;
+  // 工作流（Agent-W）：template_changed 载荷仅含 template_id/status/version，
+  // 前端 updater 只按 wsId 整片 invalidate，不做行级 merge。
+  "workflow:instance_state": WorkflowInstanceStatePayload;
+  "workflow:gate_decided": WorkflowGateDecidedPayload;
+  "workflow:template_changed": Record<string, unknown>;
   "reaction:added": ReactionAddedPayload;
   "reaction:removed": ReactionRemovedPayload;
   "agent:status": AgentStatusPayload;

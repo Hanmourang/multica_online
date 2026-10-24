@@ -258,6 +258,61 @@ export type {
   PutArchiveSyncConfigRequest,
 } from "./artifact";
 export type {
+  AssetCategory,
+  AssetSource,
+  AssetExternalRef,
+  AssetBinding,
+  AssetPage,
+  ListAssetsParams,
+  BindAssetRequest,
+  AssetCandidate,
+  SearchAssetCandidatesParams,
+  AssetCandidatesResponse,
+  AssetRecommendReason,
+} from "./asset";
+export { ASSET_CATEGORIES } from "./asset";
+// 工作流模块（plan 20261024 §01，Agent-W 独占块）。
+export type {
+  WorkflowInstanceStatus,
+  WorkflowTemplateStatus,
+  StageMode,
+  StageRunState,
+  GateState,
+  GateDecision,
+  WorkflowNode,
+  WorkflowTemplate,
+  ListWorkflowTemplatesResponse,
+  CreateWorkflowTemplateRequest,
+  UpdateWorkflowTemplateRequest,
+  WorkflowInstance,
+  ListWorkflowInstancesParams,
+  ListWorkflowInstancesResponse,
+  CreateWorkflowInstanceRequest,
+  WorkflowStageRun,
+  WorkflowGateRun,
+  WorkflowInstanceDetailResponse,
+  DecideGateResponse,
+  WorkflowStageTranscriptMessage,
+  WorkflowStageTranscriptResponse,
+  WorkflowStageMessagesResponse,
+  WorkflowGateMessagesResponse,
+  WorkflowRecoverySuggestion,
+  WorkflowRecoveryDiagnosisResponse,
+  WorkflowInstanceStatePayload,
+  WorkflowGateDecidedPayload,
+} from "./workflow";
+// 迭代（Sprint）模块（plan 20261024 §02，Agent-S 独占块）。
+export type {
+  SprintStatus,
+  Sprint,
+  ListSprintsResponse,
+  CreateSprintRequest,
+  UpdateSprintRequest,
+  SprintProgress,
+  SprintIssuesRequest,
+} from "./sprint";
+export { SPRINT_STATUSES } from "./sprint";
+export type {
   FilingTier,
   FilingTrack,
   FilingStatus,
