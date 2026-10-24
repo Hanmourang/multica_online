@@ -314,10 +314,11 @@ func sortWorkflowNodesByStage(nodes []service.WorkflowNode) {
 	sort.SliceStable(nodes, func(i, j int) bool { return nodes[i].Stage < nodes[j].Stage })
 }
 
-// jsonNullIfEmpty：空切片落 DB NULL（stage.inputs/outputs 可空），避免存 "null"。
+// jsonNullIfEmpty：空切片落 "[]"（workflow_stage_run.inputs/outputs 列 NOT NULL，
+// 显式 NULL 会撞 23502；空数组才是合法的 JSONB 空语义）。
 func jsonNullIfEmpty(v []any) []byte {
 	if len(v) == 0 {
-		return nil
+		return []byte("[]")
 	}
 	raw, err := json.Marshal(v)
 	if err != nil {

@@ -241,9 +241,12 @@ func (s *WorkflowService) RecoverInstance(ctx context.Context, inst db.WorkflowI
 // casStage 是 workflow_stage_run 的唯一写口：带期望态 CAS；outputs/taskID 可选覆盖。
 func (s *WorkflowService) casStage(ctx context.Context, stageID pgtype.UUID, expected, next string, taskID pgtype.UUID, outputs []byte) error {
 	_, err := s.Queries.UpdateWorkflowStageRunState(ctx, db.UpdateWorkflowStageRunStateParams{
-		ID:      stageID,
-		State:   next,
-		State_2: expected,
+		ID: stageID,
+		// 注意参数映射：SQL 里 WHERE state=$2 在 SET state=$3 之前，故
+		// State = 期望态（WHERE），State_2 = 新态（SET）——与 instance 版
+		// （Status=新态, Status_2=期望态）恰好相反，改 SQL 时两头都要对。
+		State:   expected,
+		State_2: next,
 		TaskID:  taskID,
 		Outputs: outputs,
 	})
