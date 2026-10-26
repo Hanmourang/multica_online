@@ -546,6 +546,22 @@ type ChatMessage struct {
 	Mentions                      []byte             `json:"mentions"`
 }
 
+type ChatMessageReaction struct {
+	MessageID pgtype.UUID        `json:"message_id"`
+	ActorID   pgtype.UUID        `json:"actor_id"`
+	Emoji     string             `json:"emoji"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChatMessageReply struct {
+	ID            pgtype.UUID        `json:"id"`
+	MessageID     pgtype.UUID        `json:"message_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	AuthorID      pgtype.UUID        `json:"author_id"`
+	Content       string             `json:"content"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChatMessageResourceRef struct {
 	MessageID      pgtype.UUID `json:"message_id"`
 	Position       int32       `json:"position"`
