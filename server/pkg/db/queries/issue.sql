@@ -9,6 +9,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
        i.revision, i.module_id, i.avoid_conflict,
+       i.sprint_id,
        i.start_at,
        -- 需求字段（migration 452）：详情四面板与日历色块都要读，响应层透传。
        i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
@@ -49,7 +50,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
            ELSE '已完成'
        END
            )
-       END, '') AS requirement_status,
+       END, '')::text AS requirement_status,
        -- stage 3 执行进度 N/M（无 stage 3 子任务时为空串，响应层映射为 null）。
        (CASE WHEN COALESCE(prog.stage3_total, 0) > 0
             THEN concat(prog.stage3_done, '/', prog.stage3_total)
@@ -122,6 +123,10 @@ LIMIT $2 OFFSET $3;
 -- name: GetIssue :one
 SELECT * FROM issue
 WHERE id = $1;
+
+-- name: ListIssuesByIDs :many
+SELECT * FROM issue
+WHERE id = ANY($1::uuid[]);
 
 -- name: GetIssueGCStatus :one
 SELECT workspace_id, status, updated_at
@@ -205,7 +210,7 @@ INSERT INTO issue (
     parent_issue_id, position, start_date, due_date, number, project_id,
     stage, last_activity_at, id, module_id, avoid_conflict,
     start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id,
-    feature_points, graph_context, acceptance_spec
+    feature_points, graph_context, acceptance_spec, sprint_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
@@ -218,7 +223,10 @@ INSERT INTO issue (
     -- 拆解确认落列的子任务三要素（spec §8）：NULL = 非拆解产物，回落列默认值。
     COALESCE(sqlc.narg('feature_points')::jsonb, '[]'::jsonb),
     COALESCE(sqlc.narg('graph_context')::jsonb, '{}'::jsonb),
-    COALESCE(sqlc.narg('acceptance_spec')::jsonb, '{}'::jsonb)
+    COALESCE(sqlc.narg('acceptance_spec')::jsonb, '{}'::jsonb),
+    -- 迭代归属（CoCo 对标 02 §F / issue 反向挂接）：省略 = backlog。
+    -- 租户/项目/completed 校验在 service.Create 事务内完成，SQL 只管写入。
+    sqlc.narg('sprint_id')::uuid
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -281,7 +289,10 @@ WITH candidate AS (
         sqlc.narg('repo_resource_id')::uuid AS next_repo_resource_id,
         COALESCE(sqlc.narg('decompose_mode')::text, i.decompose_mode) AS next_decompose_mode,
         COALESCE(sqlc.narg('auto_trigger')::boolean, i.auto_trigger) AS next_auto_trigger,
-        sqlc.narg('root_requirement_id')::uuid AS next_root_requirement_id
+        sqlc.narg('root_requirement_id')::uuid AS next_root_requirement_id,
+        -- sprint_id 与 module_id 同款：裸 narg + handler 预填现值，
+        -- 显式 null = 移出迭代（回 backlog）。
+        sqlc.narg('sprint_id')::uuid AS next_sprint_id
     FROM issue AS i
     WHERE i.id = $1
       AND (sqlc.narg('expected_revision')::bigint IS NULL OR i.revision = sqlc.narg('expected_revision')::bigint)
@@ -292,27 +303,31 @@ WITH candidate AS (
             title, description, status, priority, assignee_type, assignee_id,
             position, start_date, due_date, parent_issue_id, project_id, stage,
             module_id, avoid_conflict,
-            start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id
+            start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id,
+            sprint_id
         ) IS DISTINCT FROM ROW(
             next_title, next_description, next_status, next_priority,
             next_assignee_type, next_assignee_id, next_position, next_start_date,
             next_due_date, next_parent_issue_id, next_project_id, next_stage,
             next_module_id, next_avoid_conflict,
             next_start_at, next_goal, next_repo_resource_id, next_decompose_mode,
-            next_auto_trigger, next_root_requirement_id
+            next_auto_trigger, next_root_requirement_id,
+            next_sprint_id
         ) AS did_change,
         ROW(
             title, description, status, priority, assignee_type, assignee_id,
             start_date, due_date, parent_issue_id, project_id, stage,
             module_id, avoid_conflict,
-            start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id
+            start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id,
+            sprint_id
         ) IS DISTINCT FROM ROW(
             next_title, next_description, next_status, next_priority,
             next_assignee_type, next_assignee_id, next_start_date, next_due_date,
             next_parent_issue_id, next_project_id, next_stage,
             next_module_id, next_avoid_conflict,
             next_start_at, next_goal, next_repo_resource_id, next_decompose_mode,
-            next_auto_trigger, next_root_requirement_id
+            next_auto_trigger, next_root_requirement_id,
+            next_sprint_id
         ) AS did_activity
     FROM candidate
 )
@@ -337,6 +352,7 @@ UPDATE issue AS i SET
     decompose_mode = changed.next_decompose_mode,
     auto_trigger = changed.next_auto_trigger,
     root_requirement_id = changed.next_root_requirement_id,
+    sprint_id = changed.next_sprint_id,
     revision = i.revision + changed.did_change::integer,
     last_activity_at = CASE WHEN changed.did_activity
         THEN GREATEST(COALESCE(i.last_activity_at, i.updated_at), now())
@@ -381,7 +397,8 @@ INSERT INTO issue (
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
     origin_type, origin_id, stage, last_activity_at, id, module_id, avoid_conflict,
-    start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id
+    start_at, goal, repo_resource_id, decompose_mode, auto_trigger, root_requirement_id,
+    sprint_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
@@ -389,7 +406,8 @@ INSERT INTO issue (
     sqlc.narg('start_at')::timestamptz, sqlc.narg('goal')::text, sqlc.narg('repo_resource_id')::uuid,
     COALESCE(sqlc.narg('decompose_mode')::text, 'confirm'),
     COALESCE(sqlc.narg('auto_trigger')::boolean, true),
-    sqlc.narg('root_requirement_id')::uuid
+    sqlc.narg('root_requirement_id')::uuid,
+    sqlc.narg('sprint_id')::uuid
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec
@@ -458,6 +476,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
        i.revision, i.module_id, i.avoid_conflict,
+       i.sprint_id,
        i.start_at,
        i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
        i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round

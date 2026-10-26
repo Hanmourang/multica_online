@@ -34,6 +34,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/mcpserver"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -1176,6 +1177,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("composio integration disabled (COMPOSIO_API_KEY not set)")
 	}
 
+	// plan 101 P2: second per-task MCP overlay source. Wire the read-only
+	// multica-assets facade overlay builder so workflow stage dispatch can
+	// attach the asset MCP server to mcpServers for on-demand pull. Only active
+	// when MULTICA_ASSET_MCP_URL is configured; otherwise the builder returns a
+	// zero overlay and dispatch behaves byte-for-byte as before. Per-task
+	// injection is additionally gated by the workflow_asset_gate feature flag
+	// inside TaskService, so this wiring is safe to leave in place while the
+	// flag is off.
+	if h.TaskService != nil {
+		if assetMCPURL := strings.TrimSpace(os.Getenv("MULTICA_ASSET_MCP_URL")); assetMCPURL != "" {
+			h.TaskService.AssetMCP = mcpserver.NewOverlayBuilder(assetMCPURL)
+			slog.Info("multica-assets MCP overlay enabled", "url", assetMCPURL)
+		}
+	}
+
 	// VCS at-rest encryption: the box encrypts per-workspace access tokens and
 	// webhook secrets for token-based providers (Forgejo / Gitea / GitLab).
 	// Without it, connect/webhook handlers return 503 (so a misconfigured
@@ -1863,6 +1879,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
 
+			// 资产管理（工作区级聚合，左侧栏「资产管理」独立模块）。静态段；flag off
+			// 时不注册（整块 404），与项目 / 工作项级 asset 路由同源门控。解绑复用
+			// 项目级 DELETE /api/projects/{id}/assets/{bindingId}。
+			if featureflags.AssetModuleEnabled(context.Background(), h.FeatureFlags) {
+				r.Get("/api/assets/page", h.ListWorkspaceAssets)
+				// 阶段矩阵 / 需求×资产视图聚合面（migration 473，原型 v2）。
+				r.Get("/api/assets/overview", h.ListAssetOverview)
+			}
+
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
@@ -1898,6 +1923,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/decomposition", h.GetDecomposition)
 					r.Post("/decomposition/confirm", h.ConfirmDecomposition)
 					r.Post("/acceptance/verdict", h.RecordAcceptanceVerdict)
+					r.Post("/acceptance/criteria", h.UpdateAcceptanceCriteria)
 					r.Post("/trigger", h.TriggerRequirement)
 					// 原型（spec 2026-09-04-requirement-calendar-design.md §9）：
 					// 一键生成/重生成 + 版本历史 + 逐项标记 + 确认门。
@@ -2093,7 +2119,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					if featureflags.AssetModuleEnabled(context.Background(), h.FeatureFlags) {
 						r.Get("/assets/page", h.ListProjectAssets)
 						r.Get("/assets/search-candidates", h.SearchAssetCandidates)
+						// 档案 → 资产批量导入（幂等；source='archive' 带 artifact_id 防乒乓）。
+						r.Post("/assets/sync-from-archive", h.SyncAssetsFromArchive)
+						// 存量补齐（一次性运维，幂等只填空）：阶段/角色规则推断 + 档案快照回填。
+						r.Post("/assets/enrich-metadata", h.EnrichAssetMetadata)
+						r.Post("/assets/backfill-snapshots", h.BackfillArtifactSnapshots)
+						// 批量打标：一次事务改一批 binding 的阶段/角色/分类/标签。
+						r.Post("/assets/batch-meta", h.BatchUpdateAssetMeta)
 						r.Post("/assets", h.BindProjectAsset)
+						// 473 meta：阶段/角色/标签打标 + 需求·Bug 关联全量替换。
+						r.Put("/assets/{bindingId}/meta", h.UpdateAssetMeta)
+						// 资产预览复用同一档案正文（五阶段对齐 plan §4.4）：无关联 404。
+						r.Get("/assets/{bindingId}/archive", h.GetAssetLinkedArchive)
 						r.Delete("/assets/{bindingId}", h.UnbindProjectAsset)
 					}
 					// </router-block:asset>
@@ -2156,6 +2193,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					})
 				})
 				r.Route("/api/workflow", func(r chi.Router) {
+					// 工作区级模板画廊 + 编辑器保存/enforce（侧边栏「工作流」入口）。
+					// 与实例/门禁根路由同旗（flag off 不注册 → 404），workspace 归属由
+					// RequireWorkspaceMember + SQL workspace_id 过滤双保险。
+					r.Route("/templates", func(r chi.Router) {
+						r.Get("/", h.ListWorkspaceWorkflowTemplates)
+						r.Put("/{tid}/definition", h.UpdateWorkflowTemplateDefinition)
+						r.Put("/{tid}/enforce", h.SetWorkflowTemplateEnforce)
+						// 测试运行（第一代=零副作用渲染预览，plan 20261025 §C7）
+						r.Post("/{tid}/dry-run", h.DryRunWorkflowTemplate)
+					})
 					r.Route("/stage-runs/{sid}", func(r chi.Router) {
 						r.Get("/transcript", h.GetWorkflowStageTranscript)
 						r.Get("/messages", h.GetWorkflowStageMessages)
@@ -2167,6 +2214,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Post("/handoff", h.HandoffWorkflowStage)
 						r.Post("/loop-back", h.LoopBackWorkflowStage)
 						r.Post("/interrupt", h.InterruptWorkflowStage)
+						r.Post("/recheck", h.RecheckWorkflowStageAdmission)
 						r.Post("/restart-session", h.RestartWorkflowStageSession)
 					})
 					r.Route("/gate-runs/{gid}", func(r chi.Router) {
@@ -2337,6 +2385,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/{sessionId}/draft", h.SaveAgentBuilderDraft)
 			})
 
+			// Platform skills ship with the binary and apply to every agent.
+			// Registered outside /api/skills/{id} so "builtin" is not an id.
+			r.Get("/api/builtin-skills", h.ListBuiltinSkills)
+
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {
 				r.Get("/", h.ListSkills)
@@ -2440,6 +2492,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/chat/sessions", func(r chi.Router) {
 				r.Post("/", h.CreateChatSession)
 				r.Get("/", h.ListChatSessions)
+				// <router-block:chat-conversations> 会话通用化（migration 478）。
+				// flag off 时 /dm、/group 与参与者管理路由一律 404，存量单 Agent Chat 不受影响。
+				if featureflags.ChatConversationsEnabled(context.Background(), h.FeatureFlags) {
+					r.Post("/dm", h.CreateDMChatSession)
+					r.Post("/group", h.CreateGroupChatSession)
+				}
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Patch("/", h.UpdateChatSession)
@@ -2453,6 +2511,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/quick-actions/regenerate", h.RegenerateChatQuickActions)
 					r.Get("/messages", h.ListChatMessages)
 					r.Get("/messages/page", h.ListChatMessagesPage)
+					r.Post("/messages/{messageId}/reactions", h.ToggleChatMessageReaction)
+					r.Post("/messages/{messageId}/replies", h.CreateChatMessageReply)
+					if featureflags.ChatConversationsEnabled(context.Background(), h.FeatureFlags) {
+						r.Get("/participants", h.GetChatParticipants)
+						// Group 成员管理（plan 20261025 §02 §2.2）：静态段 leave 先于
+						// {participantType} 注册；admin 门控与「至少一名人类 admin」不变式
+						// 在 handler 内以会话行 FOR UPDATE 锁保证。
+						r.Post("/participants/leave", h.LeaveGroup)
+						r.Post("/participants", h.AddGroupParticipants)
+						r.Delete("/participants/{participantType}/{participantId}", h.RemoveGroupParticipant)
+						r.Patch("/participants/{participantType}/{participantId}", h.SetGroupParticipantAdmin)
+					}
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Delete("/queued-tasks", h.ClearQueuedChatTasks)
 					r.Post("/queued-tasks/{taskId}/prioritize", h.PrioritizeQueuedChatTask)

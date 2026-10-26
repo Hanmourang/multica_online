@@ -92,6 +92,10 @@ type IssueCreateParams struct {
 	// 任务互斥执行（spec §5）。
 	ModuleID      pgtype.UUID
 	AvoidConflict bool
+	// SprintID 将新建 issue 直接归入项目下的某个迭代（CoCo 对标 02 §F）。
+	// 必须属于解析后的最终项目且状态非 completed，否则分别以
+	// ErrSprintNotFound / ErrSprintCompleted 拒绝整个创建。
+	SprintID pgtype.UUID
 	// 需求日历扩展字段（spec: 2026-09-04-requirement-calendar-design.md §5）。
 	// 仅对顶层需求有意义；子任务创建时置零值即可。
 	StartAt        pgtype.Timestamptz
@@ -177,6 +181,18 @@ var ErrIssueLabelNotFound = errors.New("issue label not found in this workspace"
 // without a project, or whose project differs from the module's, cannot carry
 // that module. Callers translate this into 400 on create / 409 on update.
 var ErrModuleProjectMismatch = errors.New("module must belong to the issue's project")
+
+// ErrSprintNotFound signals that the supplied SprintID does not exist in the
+// issue's workspace or does not belong to the issue's (resolved) project.
+// Existence and project scope collapse into one not-found shape on purpose —
+// same non-leaking semantics as loadSprint in the sprint handler.
+var ErrSprintNotFound = errors.New("sprint not found")
+
+// ErrSprintCompleted signals that the issue was routed into an already
+// completed sprint. Completed iterations are frozen scopes (the membership
+// API rejects the same write with 409), so the whole create is refused and
+// callers translate this to 409.
+var ErrSprintCompleted = errors.New("cannot attach issue to a completed sprint")
 
 // ErrIssueStatusUnavailable signals that the requested custom status was
 // archived between the caller's pre-flight validation and the create
@@ -325,6 +341,21 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			return IssueCreateResult{}, ErrModuleProjectMismatch
 		}
 	}
+	// 迭代与模块同款的项目作用域不变式：迭代属于最终项目（含 parent 回填），
+	// 无项目即无迭代；completed 迭代冻结，不接受新建时直接归入。存在性与
+	// 项目错配统一报 not found，不泄露跨租户/跨项目迭代的存在。
+	if p.SprintID.Valid {
+		sprint, err := qtx.GetSprint(ctx, db.GetSprintParams{
+			ID:          p.SprintID,
+			WorkspaceID: p.WorkspaceID,
+		})
+		if err != nil || !projectID.Valid || sprint.ProjectID != projectID {
+			return IssueCreateResult{}, ErrSprintNotFound
+		}
+		if sprint.Status == "completed" {
+			return IssueCreateResult{}, ErrSprintCompleted
+		}
+	}
 
 	// Validate labels before we increment the issue counter so a stale or
 	// wrong-scope selection fails the create cheaply. The de-duplicated rows
@@ -400,6 +431,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			OriginID:          p.OriginID,
 			Stage:             p.Stage,
 			ModuleID:          p.ModuleID,
+			SprintID:          p.SprintID,
 			AvoidConflict:     pgtype.Bool{Bool: p.AvoidConflict, Valid: true},
 			StartAt:           p.StartAt,
 			Goal:              p.Goal,
@@ -428,6 +460,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			ProjectID:         projectID,
 			Stage:             p.Stage,
 			ModuleID:          p.ModuleID,
+			SprintID:          p.SprintID,
 			AvoidConflict:     pgtype.Bool{Bool: p.AvoidConflict, Valid: true},
 			StartAt:           p.StartAt,
 			Goal:              p.Goal,

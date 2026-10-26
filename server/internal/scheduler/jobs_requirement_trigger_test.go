@@ -30,6 +30,10 @@ func TestTriggerPreflight(t *testing.T) {
 		{"dependency cycle", func(in *triggerPreflightInput) { in.DependencyAcyclic = false }, false, "dependency_cycle"},
 		{"acceptance spec missing", func(in *triggerPreflightInput) { in.AcceptanceSpecPresent = false }, false, "acceptance_spec_missing"},
 		{"module window busy", func(in *triggerPreflightInput) { in.ModuleWindowFree = false }, false, "module_window_busy"},
+		{"workflow gate required but not cleared blocks", func(in *triggerPreflightInput) { in.WorkflowGateRequired = true; in.WorkflowGateSatisfied = false }, false, "workflow_gate_not_satisfied"},
+		{"workflow gate required and cleared passes", func(in *triggerPreflightInput) { in.WorkflowGateRequired = true; in.WorkflowGateSatisfied = true }, true, ""},
+		{"no enforce template is zero-regression", func(in *triggerPreflightInput) { in.WorkflowGateRequired = false; in.WorkflowGateSatisfied = false }, true, ""},
+		{"module busy precedes workflow gate", func(in *triggerPreflightInput) { in.ModuleWindowFree = false; in.WorkflowGateRequired = true }, false, "module_window_busy"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -185,7 +189,7 @@ func TestRequirementTriggerHandlerRowsAffectedAndError(t *testing.T) {
 }
 
 // TestRequirementTriggerHandlerContextCancel 断言 ctx 已取消时错误仍能穿透
-//（manager 的租约心跳/终态写回依赖 handler 如实回传 ctx 错误，而非吞掉）。
+// （manager 的租约心跳/终态写回依赖 handler 如实回传 ctx 错误，而非吞掉）。
 func TestRequirementTriggerHandlerContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

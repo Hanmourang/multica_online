@@ -201,6 +201,45 @@ type ChatMessagePayload struct {
 	Content       string `json:"content"`
 	TaskID        string `json:"task_id,omitempty"`
 	CreatedAt     string `json:"created_at"`
+	// Additive conversation-model fields (plan 20261025 §5.3). Older clients
+	// ignore them; DM/Group renderers use them for author attribution and the
+	// unified kind. Empty/nil degrades to the legacy single-agent behaviour.
+	Kind         string        `json:"kind,omitempty"`
+	AuthorType   string        `json:"author_type,omitempty"`
+	AuthorID     string        `json:"author_id,omitempty"`
+	Mentions     []ChatMention `json:"mentions,omitempty"`
+	HasResources bool          `json:"has_resources,omitempty"`
+}
+
+// ChatMention is a structured mention target on a DM/Group message.
+type ChatMention struct {
+	Type string `json:"type"` // member | agent
+	ID   string `json:"id"`
+}
+
+// ChatResourceRef identifies a workspace issue or document attached to a
+// message. Display metadata is deliberately absent: readers resolve a fresh,
+// permission-filtered snapshot instead of trusting client-provided content.
+type ChatResourceRef struct {
+	Type      string `json:"type"`
+	ID        string `json:"id"`
+	Kind      string `json:"kind,omitempty"`
+	Source    string `json:"source,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
+}
+
+// ChatResourcePayload is the permission-filtered realtime/read projection.
+// Exactly one snapshot field is populated according to Type/Source.
+type ChatResourcePayload struct {
+	Type       string `json:"type"`
+	ID         string `json:"id"`
+	Kind       string `json:"kind,omitempty"`
+	Source     string `json:"source,omitempty"`
+	ProjectID  string `json:"project_id,omitempty"`
+	Access     string `json:"access"`
+	Issue      any    `json:"issue,omitempty"`
+	Artifact   any    `json:"artifact,omitempty"`
+	Attachment any    `json:"attachment,omitempty"`
 }
 
 // Chat message kinds (chat_message.message_kind). Additive: unknown values
@@ -250,6 +289,10 @@ type ChatDonePayload struct {
 	// follow for this turn (render a placeholder). Never true when
 	// QuickActions is already populated.
 	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
+	// Additive author attribution for multi-agent group replies.
+	Kind       string `json:"kind,omitempty"`
+	AuthorType string `json:"author_type,omitempty"`
+	AuthorID   string `json:"author_id,omitempty"`
 }
 
 // Outcome values carried by ChatCancelFinalizedPayload.
@@ -295,6 +338,11 @@ type ChatCancelFinalizedPayload struct {
 // Fires to other devices so their unread counts stay in sync.
 type ChatSessionReadPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
+	// Additive participant-scoped read cursor (plan 20261025 §5.3). Empty
+	// ReaderID degrades to the legacy creator-only mark-read.
+	ReaderID          string `json:"reader_id,omitempty"`
+	LastReadAt        string `json:"last_read_at,omitempty"`
+	LastReadMessageID string `json:"last_read_message_id,omitempty"`
 }
 
 type ChatSessionCreatedPayload struct {

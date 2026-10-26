@@ -281,6 +281,37 @@ func TestPatcherSendsPlainTextOnChatDone(t *testing.T) {
 	}
 }
 
+// TestPatcherRefusesDMAndGroupDespiteValidBinding mirrors
+// TestPatcherSendsPlainTextOnChatDone (which produces one textSent on Lark) and
+// only flips ChatKind. A dm/group session must produce zero Lark sends even with
+// a live binding + installation. plan 20261025 §5.4.
+func TestPatcherRefusesDMAndGroupDespiteValidBinding(t *testing.T) {
+	for _, kind := range []string{"dm", "group"} {
+		t.Run(kind, func(t *testing.T) {
+			p, q, api := newTestPatcher(t)
+			taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
+			evt := events.Event{
+				Type:          protocol.EventChatDone,
+				TaskID:        uuidString(taskID),
+				ChatSessionID: uuidString(q.binding.ChatSessionID),
+				ChatKind:      kind,
+				Payload: protocol.ChatDonePayload{
+					TaskID:        uuidString(taskID),
+					ChatSessionID: uuidString(q.binding.ChatSessionID),
+					Content:       "must stay in multica",
+				},
+			}
+			p.handleEvent(evt)
+			api.mu.Lock()
+			defer api.mu.Unlock()
+			if len(api.textSent) != 0 || len(api.sent) != 0 || len(api.patched) != 0 {
+				t.Fatalf("%s: private conversation egressed to Lark: textSent=%d sent=%d patched=%d",
+					kind, len(api.textSent), len(api.sent), len(api.patched))
+			}
+		})
+	}
+}
+
 // TestPatcherRoutesMarkdownReplyToCard pins the two-path chat reply:
 // when the agent's body contains markdown syntax, the Patcher MUST
 // route to SendMarkdownCard (schema-2.0 interactive card with a

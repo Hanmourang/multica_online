@@ -18,6 +18,7 @@ func TestParseArchiveRelPath_ContractRules(t *testing.T) {
 		wantErr  bool
 	}{
 		{"projects/dsh_desktop/overview/research/x.md", "project", 0, "", "dsh_desktop", false},
+		{"projects/dsh_desktop/overview/iteration/x.md", "project", 0, "", "dsh_desktop", false},
 		{"projects/dsh_desktop/PROJECT.md", "project", 0, "", "dsh_desktop", false},
 		{"projects/dsh_desktop/requirements/REQ-20260811-02/s2-plan/plan.md", "requirement", 2, "REQ-20260811-02", "dsh_desktop", false},
 		{"projects/dsh_desktop/requirements/REQ-20260811-02/s4-acceptance/report-r2.md", "requirement", 4, "REQ-20260811-02", "dsh_desktop", false},
@@ -26,8 +27,11 @@ func TestParseArchiveRelPath_ContractRules(t *testing.T) {
 		{"change_logs/multica/daily_logs/20260907-x.md", "project", 0, "", "multica", false},
 		{"projects/multica/change_logs/daily_logs/20260907-x.md", "project", 0, "", "multica", false},
 		{"change_logs/qoder_backup/plans/old.md", "", 0, "", "", true},
-		// 违规：stage 越界（原型画面 2 ④：s5 拒绝入库）
-		{"projects/p/requirements/REQ-20260811-02/s5-review/x.md", "", 0, "", "", true},
+		// 五阶段对齐 plan §4.7：s5-iteration 接受入库（stage=5）
+		{"projects/p/requirements/REQ-20260811-02/s5-iteration/x.md", "requirement", 5, "REQ-20260811-02", "p", false},
+		// 违规：stage 越界（S0 / S6 仍拒绝）
+		{"projects/p/requirements/REQ-20260811-02/s0-void/x.md", "", 0, "", "", true},
+		{"projects/p/requirements/REQ-20260811-02/s6-beyond/x.md", "", 0, "", "", true},
 		// 违规：非法 requirement_key
 		{"projects/p/requirements/FOO-1/s1-prototype/x.md", "", 0, "", "", true},
 		// 违规：未知 overview 类别
@@ -72,6 +76,9 @@ func TestDocTypeFromName(t *testing.T) {
 		{"projects/p/requirements/REQ-20260811-02/s4-acceptance/report-r2.md", "report"},
 		{"projects/p/requirements/REQ-20260811-02/s1-prototype/prototype-v3.html", "prototype"},
 		{"projects/p/overview/architecture/系统架构.md", "architecture"},
+		{"projects/p/overview/iteration/迭代方案.md", "iteration"},
+		// stage 默认推导含 S5：basename 未命中已知类型时落 iteration
+		{"projects/p/requirements/REQ-20260811-02/s5-iteration/notes.md", "iteration"},
 		{"projects/p/filing/patent/交底书.pdf", "filing-patent"},
 		{"change_logs/multica/daily_logs/20260907-master-plan交付.md", "change-log"},
 		{"change_logs/qoder-plans/团队模块系统性优化.md", "work-plan"},

@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+func TestIsPrivateConversation(t *testing.T) {
+	cases := map[string]struct {
+		kind string
+		want bool
+	}{
+		"agent":   {"agent", false},
+		"empty":   {"", false},
+		"dm":      {"dm", true},
+		"group":   {"group", true},
+		"unknown": {"other", false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := (Event{ChatKind: tc.kind}).IsPrivateConversation(); got != tc.want {
+				t.Fatalf("ChatKind=%q IsPrivateConversation=%v want %v", tc.kind, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPublishDeliversToSubscribers(t *testing.T) {
 	bus := New()
 	var count int32

@@ -161,7 +161,15 @@ type TaskContextForEnv struct {
 	ProjectTitle                  string                  // human-readable project title
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
+	// ProjectIndex is the per-turn open-work snapshot for a chat bound to a
+	// project. It is written to ProjectIndexRelPath and is not part of the
+	// cached brief; the claim already includes the same text in the user message.
+	ProjectIndex string
 	ChatSessionID                 string                  // non-empty for chat tasks
+	// ChatIssueRecord is the authorized snapshot of issues the user attached
+	// to this chat turn. It is per-run data, so it is written to
+	// ChatSharedIssuesRelPath and never rendered into the cached brief.
+	ChatIssueRecord string
 	// ChatChannelType is the IM platform behind a chat session ("slack",
 	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
 	// the brief's copy; what that surface can DELIVER is the separate field

@@ -50,13 +50,13 @@ func TestMain(m *testing.M) {
 
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		fmt.Printf("Skipping tests: could not connect to database: %v\n", err)
-		os.Exit(0)
+		fmt.Printf("Failed to configure test database: %v\n", err)
+		os.Exit(1)
 	}
 	if err := pool.Ping(ctx); err != nil {
-		fmt.Printf("Skipping tests: database not reachable: %v\n", err)
+		fmt.Printf("Test database not reachable: %v\n", err)
 		pool.Close()
-		os.Exit(0)
+		os.Exit(1)
 	}
 	if err := ensureProjectTemplateColumn(ctx, pool); err != nil {
 		fmt.Printf("Failed to apply project template schema: %v\n", err)
@@ -65,6 +65,21 @@ func TestMain(m *testing.M) {
 	}
 	if err := ensureArtifactDocClassColumn(ctx, pool); err != nil {
 		fmt.Printf("Failed to apply artifact doc_class schema: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
+	if err := ensureSprintIterationSchema(ctx, pool); err != nil {
+		fmt.Printf("Failed to apply sprint iteration schema: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
+	if err := ensureChatConversationSchema(ctx, pool); err != nil {
+		fmt.Printf("Failed to apply chat conversation schema: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
+	if err := ensureChatResourceSchema(ctx, pool); err != nil {
+		fmt.Printf("Failed to apply chat resource schema: %v\n", err)
 		pool.Close()
 		os.Exit(1)
 	}
@@ -144,14 +159,90 @@ func ensureProjectTemplateColumn(ctx context.Context, pool *pgxpool.Pool) error 
 }
 
 func ensureArtifactDocClassColumn(ctx context.Context, pool *pgxpool.Pool) error {
+	for _, column := range []string{"doc_class", "doc_module"} {
+		var exists bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public'
+				  AND table_name = 'project_artifact'
+				  AND column_name = $1
+			)
+		`, column).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		migration := "464_artifact_doc_class.up.sql"
+		if column == "doc_module" {
+			migration = "465_artifact_doc_module.up.sql"
+		}
+		sqlBytes, err := os.ReadFile("../migrations/" + migration)
+		if err != nil {
+			sqlBytes, err = os.ReadFile("../../migrations/" + migration)
+		}
+		if err != nil {
+			return fmt.Errorf("artifact %s migration not found: %w", column, err)
+		}
+		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+			return fmt.Errorf("apply artifact %s schema: %w", column, err)
+		}
+	}
+	var bindingTable *string
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.project_asset_binding')`).Scan(&bindingTable); err != nil {
+		return err
+	}
+	if bindingTable == nil {
+		sqlBytes, err := os.ReadFile("../migrations/471_project_asset_binding.up.sql")
+		if err != nil {
+			sqlBytes, err = os.ReadFile("../../migrations/471_project_asset_binding.up.sql")
+		}
+		if err != nil {
+			return fmt.Errorf("project asset binding migration not found: %w", err)
+		}
+		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+			return fmt.Errorf("apply project asset binding schema: %w", err)
+		}
+	}
+	var assetBindingColumn bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = 'project_artifact'
+			  AND column_name = 'asset_binding_id'
+		)
+	`).Scan(&assetBindingColumn); err != nil {
+		return err
+	}
+	if !assetBindingColumn {
+		sqlBytes, err := os.ReadFile("../migrations/474_asset_archive_sync.up.sql")
+		if err != nil {
+			sqlBytes, err = os.ReadFile("../../migrations/474_asset_archive_sync.up.sql")
+		}
+		if err != nil {
+			return fmt.Errorf("artifact asset binding migration not found: %w", err)
+		}
+		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+			return fmt.Errorf("apply artifact asset binding schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// ensureSprintIterationSchema 与上面几个 ensure 同范式：本机开发库可能还没跑
+// migration 470（sprint 表 + issue.sprint_id），handler 测试直接依赖它。幂等：
+// 列存在即跳过；不存在则整包执行 470 up（CREATE IF NOT EXISTS，安全重放）。
+func ensureSprintIterationSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	var exists bool
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM information_schema.columns
 			WHERE table_schema = 'public'
-			  AND table_name = 'project_artifact'
-			  AND column_name = 'doc_class'
+			  AND table_name = 'issue'
+			  AND column_name = 'sprint_id'
 		)
 	`).Scan(&exists); err != nil {
 		return err
@@ -159,15 +250,75 @@ func ensureArtifactDocClassColumn(ctx context.Context, pool *pgxpool.Pool) error
 	if exists {
 		return nil
 	}
-	sqlBytes, err := os.ReadFile("../migrations/464_artifact_doc_class.up.sql")
+	sqlBytes, err := os.ReadFile("../migrations/470_sprint_iteration.up.sql")
 	if err != nil {
-		sqlBytes, err = os.ReadFile("../../migrations/464_artifact_doc_class.up.sql")
+		sqlBytes, err = os.ReadFile("../../migrations/470_sprint_iteration.up.sql")
 	}
 	if err != nil {
-		return fmt.Errorf("artifact doc_class migration not found: %w", err)
+		return fmt.Errorf("sprint iteration migration not found: %w", err)
 	}
 	if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
-		return fmt.Errorf("apply artifact doc_class schema: %w", err)
+		return fmt.Errorf("apply sprint iteration schema: %w", err)
+	}
+	return nil
+}
+
+// ensureChatConversationSchema 与上面几个 ensure 同范式：本机开发库可能还没跑
+// migration 478（chat_session.kind / chat_participant / chat_message 作者列 /
+// chat_group_task_input），会话通用化测试直接依赖它。幂等：kind 列存在即跳过。
+func ensureChatConversationSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	var exists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'chat_session'
+			  AND column_name = 'kind'
+		)
+	`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	sqlBytes, err := os.ReadFile("../migrations/478_chat_conversation_model.up.sql")
+	if err != nil {
+		sqlBytes, err = os.ReadFile("../../migrations/478_chat_conversation_model.up.sql")
+	}
+	if err != nil {
+		return fmt.Errorf("chat conversation migration not found: %w", err)
+	}
+	if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+		return fmt.Errorf("apply chat conversation schema: %w", err)
+	}
+	return nil
+}
+
+func ensureChatResourceSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('chat_message_resource_ref') IS NOT NULL`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	for _, name := range []string{
+		"479_chat_message_resource_ref.up.sql",
+		"480_chat_message_resource_ref_position.up.sql",
+		"481_chat_message_resource_ref_dedup.up.sql",
+		"482_chat_message_resource_ref_target.up.sql",
+	} {
+		sqlBytes, err := os.ReadFile("../migrations/" + name)
+		if err != nil {
+			sqlBytes, err = os.ReadFile("../../migrations/" + name)
+		}
+		if err != nil {
+			return fmt.Errorf("chat resource migration %s not found: %w", name, err)
+		}
+		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+			return fmt.Errorf("apply chat resource migration %s: %w", name, err)
+		}
 	}
 	return nil
 }

@@ -146,7 +146,7 @@ func (h *Handler) loadLatestGraphSnapshot(w http.ResponseWriter, r *http.Request
 		project.ID,
 	).Scan(&row.ID, &row.ProjectID, &row.ScanID, &row.GitSha, &row.GitnexusVersion, &row.Stats, &row.ModuleSummary, &row.BusMatrix, &row.DataModel, &row.CreatedAt)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "no graph snapshot available for this project")
+		writeErrorCode(w, http.StatusNotFound, "graph_snapshot_missing", "no graph snapshot available for this project")
 		return graphSnapshotRow{}, false
 	}
 	return row, true
@@ -309,7 +309,7 @@ func (h *Handler) RebridgeGraphSnapshot(w http.ResponseWriter, r *http.Request) 
 		project.ID,
 	).Scan(&scanID, &communities, &nodeCount)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusNotFound, "no graph snapshot available for this project")
+		writeErrorCode(w, http.StatusNotFound, "graph_snapshot_missing", "no graph snapshot available for this project")
 		return
 	}
 	if err != nil {
@@ -712,7 +712,7 @@ func (h *Handler) GetGraphSnapshotDetail(w http.ResponseWriter, r *http.Request)
 		&resp.GitnexusVersion, &resp.GitSha, &nodes, &edges, &communities, &stats, &createdAt,
 	)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "no graph snapshot available for this project")
+		writeErrorCode(w, http.StatusNotFound, "graph_snapshot_missing", "no graph snapshot available for this project")
 		return
 	}
 	resp.ID = uuidToString(snapshotUUID)
@@ -1369,7 +1369,7 @@ func (h *Handler) GetModuleNeighborhood(w http.ResponseWriter, r *http.Request) 
 		project.ID,
 	).Scan(&snapshotID, &scanID, &gitSha, &stats, &nodesRaw, &edgesRaw)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "no graph snapshot available for this project")
+		writeErrorCode(w, http.StatusNotFound, "graph_snapshot_missing", "no graph snapshot available for this project")
 		return
 	}
 

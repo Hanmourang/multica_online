@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -192,6 +193,9 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = make([]ChatSessionResponse, 0, len(rows))
 		for _, s := range rows {
+			if s.Kind == "dm" || s.Kind == "group" {
+				continue
+			}
 			if _, ok := allowed[uuidToString(s.AgentID)]; !ok {
 				continue
 			}
@@ -207,6 +211,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				UnreadCount: int(s.UnreadCount),
 				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
 				Pinned:      s.PinnedAt.Valid,
+				Kind:        s.Kind,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -222,6 +227,9 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = make([]ChatSessionResponse, 0, len(rows))
 		for _, s := range rows {
+			if s.Kind == "dm" || s.Kind == "group" {
+				continue
+			}
 			if _, ok := allowed[uuidToString(s.AgentID)]; !ok {
 				continue
 			}
@@ -237,10 +245,20 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				UnreadCount: int(s.UnreadCount),
 				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
 				Pinned:      s.PinnedAt.Valid,
+				Kind:        s.Kind,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
 		}
+	}
+	if featureflags.ChatConversationsEnabled(r.Context(), h.FeatureFlags) {
+		conversations, err := h.listConversationSessionsForMember(r.Context(), workspaceID, userID, status == "all")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
+			return
+		}
+		resp = append(resp, conversations...)
+		sortChatSessionResponses(resp)
 	}
 	if err := h.hydrateChatSessionChannelMetadata(r.Context(), resp); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load chat channel metadata")
@@ -326,10 +344,15 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Conversation gate (migration 478, plan 20261025 §4): agent sessions
+	// delegate to gatePublicChatSessionForUser verbatim (zero regression); dm/
+	// group enforce the participant set and never apply the workspace-wide public
+	// projection, so a non-participant (even a workspace owner) gets 404.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
+	session := access.Session
 
 	resp := chatSessionToResponse(session)
 	// hydrateChatSessionChannelMetadata mutates the slice element, so retain a
@@ -372,10 +395,15 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Conversation gate (migration 478, plan 20261025 §4): agent sessions
+	// delegate to gatePublicChatSessionForUser verbatim (zero regression); dm/
+	// group enforce the participant set and never apply the workspace-wide public
+	// projection, so a non-participant (even a workspace owner) gets 404.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
+	session := access.Session
 
 	var (
 		updated db.ChatSession
@@ -390,6 +418,14 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		}
 		if len([]rune(title)) > chatSessionTitleMaxLen {
 			writeError(w, http.StatusBadRequest, "title is too long")
+			return
+		}
+		if session.Kind == "dm" {
+			writeError(w, http.StatusBadRequest, "direct messages cannot be renamed")
+			return
+		}
+		if session.Kind == "group" && (access.Participant == nil || !access.Participant.Admin) {
+			writeError(w, http.StatusForbidden, "only a group admin can rename the group")
 			return
 		}
 		updated, err = h.Queries.UpdateChatSessionTitle(r.Context(), db.UpdateChatSessionTitleParams{
@@ -489,8 +525,20 @@ func (h *Handler) SetChatSessionPinned(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Conversation gate (migration 478, plan 20261025 §4): agent sessions
+	// delegate to gatePublicChatSessionForUser verbatim (zero regression); dm/
+	// group enforce the participant set and never apply the workspace-wide public
+	// projection, so a non-participant (even a workspace owner) gets 404.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
+		return
+	}
+	session := access.Session
+
+	// dm/group pin is viewer-local (chat_participant.pinned_at); never mutate the
+	// shared chat_session.pinned_at that agent sessions sort on. plan §5.2.
+	if session.Kind == "dm" || session.Kind == "group" {
+		h.setConversationPin(w, r, session, userID, req.Pinned)
 		return
 	}
 
@@ -560,6 +608,22 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 
 	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
+		return
+	}
+
+	// dm/group archive is viewer-local (chat_participant.archived_at) and must
+	// skip the agent task-cancel / channel-binding flow below, which is
+	// meaningless for a conversation with no AgentTask and no external binding.
+	// An invalid UUID peeks to no-row and falls through to the ownership gate.
+	if raw, peekErr := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
+		ID:          parseUUID(sessionID),
+		WorkspaceID: parseUUID(workspaceID),
+	}); peekErr == nil && (raw.Kind == "dm" || raw.Kind == "group") {
+		if !h.isChatMember(r.Context(), raw.ID, userID) {
+			writeError(w, http.StatusNotFound, "chat session not found")
+			return
+		}
+		h.setConversationArchived(w, r, raw, userID, req.Archived)
 		return
 	}
 
@@ -804,11 +868,18 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 type SendChatMessageRequest struct {
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
+	// Mentions targets a DM/Group message at participants (plan 20261025 §2.2).
+	// Ignored on the legacy agent path; DM validates type='member' against the
+	// pair, Group validates member/agent against the participant set.
+	Mentions     []protocol.ChatMention     `json:"mentions"`
+	ResourceRefs []protocol.ChatResourceRef `json:"resource_refs"`
 }
 
 type SendChatMessageResponse struct {
-	MessageID     string `json:"message_id"`
-	TaskID        string `json:"task_id"`
+	MessageID string `json:"message_id"`
+	// Empty for dm/group: those sends have no root agent task. omitempty keeps
+	// the zero value off the wire so clients do not reject "" as a bad id.
+	TaskID        string `json:"task_id,omitempty"`
 	SupportsQueue bool   `json:"supports_queue"`
 	Queued        bool   `json:"queued"`
 	// AttachmentIDs are the attachment rows actually bound to this message by
@@ -827,6 +898,12 @@ type SendChatMessageResponse struct {
 	// real created_at. Returning it here means the pill renders 0s from
 	// the start with a stable anchor.
 	CreatedAt string `json:"created_at"`
+	// Kind/Dispatches are additive conversation-model fields (plan 20261025
+	// §2.2). DM sends set Kind='dm', Dispatches=[] (no AgentTask); the legacy
+	// agent path leaves Kind empty so older clients ignore both fields.
+	Kind       string                         `json:"kind,omitempty"`
+	Dispatches []any                          `json:"dispatches,omitempty"`
+	Resources  []protocol.ChatResourcePayload `json:"resources,omitempty"`
 }
 
 func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
@@ -842,10 +919,6 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Content == "" {
-		writeError(w, http.StatusBadRequest, "content is required")
-		return
-	}
 
 	// Pre-validate attachment ids early so invalid input returns 400 before
 	// any state mutation. The actual link runs after CreateChatMessage so we
@@ -855,13 +928,47 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load chat session and re-check the private-agent gate on every send.
-	// The session's creator passed the gate at create time, but their
-	// workspace role (or the agent's owner) may have changed since — keep
-	// stale sessions from being a back-door into a private agent the user
-	// can no longer reach. Agent senders bypass to preserve A2A collaboration.
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	normalizedRefs, err := normalizeChatResourceRefs(req.ResourceRefs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.ResourceRefs = normalizedRefs
+	h.alignChatResourceKinds(r, req.ResourceRefs)
+
+	// Single access gate, then branch on session kind (migration 478,
+	// plan 20261025 §4.1). loadChatSessionForActor re-checks the private-agent
+	// permission for agent sessions and the membership set for dm/group (a
+	// non-participant gets 404 before any content rule), so no branch may skip
+	// it. agent keeps the exact legacy behaviour; dm/group use the participant
+	// conversation flow. Content validation is per-branch because a DM may be
+	// an attachment-only turn while the legacy agent path still requires text.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
+		return
+	}
+	if len(req.ResourceRefs) > 0 && !h.validateChatResourceRefs(r, access.Session.WorkspaceID, req.ResourceRefs) {
+		writeError(w, http.StatusNotFound, "chat resource not found")
+		return
+	}
+	switch access.Session.Kind {
+	case "dm":
+		h.sendDMChatMessage(w, r, access, userID, workspaceID, req, attachmentIDs)
+	case "group":
+		h.sendGroupChatMessage(w, r, access, userID, workspaceID, req, attachmentIDs)
+	default:
+		h.sendAgentChatMessage(w, r, access.Session, userID, workspaceID, req, attachmentIDs)
+	}
+}
+
+// sendAgentChatMessage is the legacy single-agent send path, relocated verbatim
+// under the kind dispatcher (plan 20261025 §4.1). Semantics are unchanged: it
+// re-checks archived status, agent readiness and the INVOKE gate, then enqueues
+// an AgentTask. The caller already ran gatePublicChatSessionForUser via
+// loadChatSessionForActor, so session is the access-verified agent row.
+func (h *Handler) sendAgentChatMessage(w http.ResponseWriter, r *http.Request, session db.ChatSession, userID, workspaceID string, req SendChatMessageRequest, attachmentIDs []pgtype.UUID) {
+	if strings.TrimSpace(req.Content) == "" && len(req.ResourceRefs) == 0 {
+		writeError(w, http.StatusBadRequest, "content or resources are required")
 		return
 	}
 	// Archived sessions are read-only: refuse to enqueue new agent work for
@@ -942,7 +1049,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// creator-only), so they are the task initiator — surfaced to the agent
 	// under `## Task Initiator`. actorType/actorID were resolved above for the
 	// invoke gate.
-	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
+	sent, err := h.TaskService.SendDirectChatMessageWithResources(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID), req.ResourceRefs)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrChatSessionArchived):
@@ -987,8 +1094,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		platform,
 	))
 
-	// Broadcast the user message.
+	// Realtime carries only a loading marker. Each recipient hydrates snapshots
+	// through GET so resource visibility is evaluated in their own request.
 	resolvedSessionID := uuidToString(session.ID)
+	resources := h.groupChatMessageResources(r, session.WorkspaceID, []pgtype.UUID{msg.ID})[uuidToString(msg.ID)]
 	h.publishChat(protocol.EventChatMessage, workspaceID, "member", userID, resolvedSessionID, protocol.ChatMessagePayload{
 		ChatSessionID: resolvedSessionID,
 		MessageID:     uuidToString(msg.ID),
@@ -996,6 +1105,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		Content:       req.Content,
 		TaskID:        uuidToString(task.ID),
 		CreatedAt:     timestampToString(msg.CreatedAt),
+		HasResources:  len(req.ResourceRefs) > 0,
 	})
 
 	// First user message → kick off best-effort LLM auto-titling (MUL-4295).
@@ -1016,6 +1126,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		Queued:        sent.Queued,
 		CreatedAt:     timestampToString(task.CreatedAt),
 		AttachmentIDs: boundAttachmentIDs,
+		Resources:     resources,
 	})
 }
 
@@ -1103,10 +1214,15 @@ func (h *Handler) RegenerateChatQuickActions(w http.ResponseWriter, r *http.Requ
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Conversation gate (migration 478, plan 20261025 §4): agent sessions
+	// delegate to gatePublicChatSessionForUser verbatim (zero regression); dm/
+	// group enforce the participant set and never apply the workspace-wide public
+	// projection, so a non-participant (even a workspace owner) gets 404.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
+	session := access.Session
 	if session.Status != "active" {
 		writeError(w, http.StatusBadRequest, "chat session is archived")
 		return
@@ -1179,10 +1295,15 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Conversation gate (migration 478, plan 20261025 §4): agent sessions
+	// delegate to gatePublicChatSessionForUser verbatim (zero regression); dm/
+	// group enforce the participant set and never apply the workspace-wide public
+	// projection, so a non-participant (even a workspace owner) gets 404.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
+	session := access.Session
 
 	messages, err := h.Queries.ListChatMessages(r.Context(), session.ID)
 	if err != nil {
@@ -1196,11 +1317,17 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 		messageIDs[i] = m.ID
 	}
 	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messageIDs)
+	groupedResources := h.groupChatMessageResources(r, session.WorkspaceID, messageIDs)
+	groupedDispatches := h.groupChatMessageDispatches(r.Context(), messageIDs)
 
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
+		resp[i].Resources = groupedResources[uuidToString(m.ID)]
+		resp[i].HasResources = len(resp[i].Resources) > 0
+		resp[i].Dispatches = groupedDispatches[uuidToString(m.ID)]
 	}
+	h.attachChatMessageFeedback(r.Context(), resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1212,10 +1339,15 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Conversation gate (migration 478, plan 20261025 §4): agent sessions
+	// delegate to gatePublicChatSessionForUser verbatim (zero regression); dm/
+	// group enforce the participant set and never apply the workspace-wide public
+	// projection, so a non-participant (even a workspace owner) gets 404.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
+	session := access.Session
 
 	limit, beforeCreatedAt, beforeID, err := parseChatMessagesPageParams(r)
 	if err != nil {
@@ -1261,11 +1393,17 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 		messageIDs[i] = m.ID
 	}
 	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messageIDs)
+	groupedResources := h.groupChatMessageResources(r, session.WorkspaceID, messageIDs)
+	groupedDispatches := h.groupChatMessageDispatches(r.Context(), messageIDs)
 
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
+		resp[i].Resources = groupedResources[uuidToString(m.ID)]
+		resp[i].HasResources = len(resp[i].Resources) > 0
+		resp[i].Dispatches = groupedDispatches[uuidToString(m.ID)]
 	}
+	h.attachChatMessageFeedback(r.Context(), resp)
 	writeJSON(w, http.StatusOK, ChatMessagesPageResponse{
 		Messages:   resp,
 		Limit:      limit,
@@ -1293,6 +1431,18 @@ type PendingChatTaskResponse struct {
 	WaitReason    string                   `json:"wait_reason,omitempty"`
 	SupportsQueue bool                     `json:"supports_queue"`
 	QueuedTasks   []QueuedChatTaskResponse `json:"queued_tasks,omitempty"`
+	// AgentTasks 只在 group 会话返回：每个 Agent 各自至多一条在途任务，多 Agent
+	// 并行（plan 02 §6）。群聊不提供 prioritize/queue：supports_queue 恒为 false。
+	AgentTasks []GroupPendingAgentTask `json:"agent_tasks,omitempty"`
+}
+
+// GroupPendingAgentTask 是群会话中单个 Agent 的在途任务视图。
+type GroupPendingAgentTask struct {
+	AgentID    string `json:"agent_id"`
+	TaskID     string `json:"task_id"`
+	Status     string `json:"status"`
+	CreatedAt  string `json:"created_at"`
+	WaitReason string `json:"wait_reason,omitempty"`
 }
 
 // waitReasonForStatus gates the stored hold text on the status it describes.
@@ -1330,8 +1480,26 @@ func (h *Handler) MarkChatSessionRead(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Conversation gate (migration 478, plan 20261025 §4): agent sessions
+	// delegate to gatePublicChatSessionForUser verbatim (zero regression); dm/
+	// group enforce the participant set and never apply the workspace-wide public
+	// projection, so a non-participant (even a workspace owner) gets 404.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
+		return
+	}
+	session := access.Session
+
+	// dm/group read advances only the caller's participant cursor (per-member
+	// unread), never the shared session unread_since. plan §5.1.
+	if session.Kind == "dm" || session.Kind == "group" {
+		var body struct {
+			ThroughMessageID string `json:"through_message_id"`
+		}
+		// Body is optional for mark-read; a present-but-invalid JSON is ignored so
+		// the default (latest visible message) still applies.
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		h.markConversationRead(w, r, session, userID, body.ThroughMessageID)
 		return
 	}
 
@@ -1615,8 +1783,56 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Conversation gate (migration 478, plan 20261025 §4): agent sessions
+	// delegate to gatePublicChatSessionForUser verbatim (zero regression); dm/
+	// group enforce the participant set and never apply the workspace-wide public
+	// projection, so a non-participant (even a workspace owner) gets 404.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
+		return
+	}
+	session := access.Session
+
+	// dm/group 不走单任务+队列模型（plan 02 §6）：dm 永无任务；group 按 Agent
+	// 并行派发，逐个暴露 in-flight 任务。状态集合与 ListPendingChatTasksForSession
+	// 保持一致，避免两套 selector 漂移。
+	if session.Kind == "dm" || session.Kind == "group" {
+		resp := PendingChatTaskResponse{SupportsQueue: false}
+		if session.Kind == "group" {
+			rows, err := h.DB.Query(r.Context(), `
+				SELECT agent_id::text, id::text, status, created_at, wait_reason
+				FROM agent_task_queue
+				WHERE chat_session_id = $1
+				  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+				  AND regenerate_quick_actions_for IS NULL
+				ORDER BY created_at ASC, id ASC`, session.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to list pending chat tasks")
+				return
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var agentID, taskID, status string
+				var created pgtype.Timestamptz
+				var waitReason pgtype.Text
+				if err := rows.Scan(&agentID, &taskID, &status, &created, &waitReason); err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to list pending chat tasks")
+					return
+				}
+				resp.AgentTasks = append(resp.AgentTasks, GroupPendingAgentTask{
+					AgentID:    agentID,
+					TaskID:     taskID,
+					Status:     status,
+					CreatedAt:  timestampToString(created),
+					WaitReason: waitReasonForStatus(status, waitReason),
+				})
+			}
+			if err := rows.Err(); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to list pending chat tasks")
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
@@ -1670,10 +1886,15 @@ func (h *Handler) PrioritizeQueuedChatTask(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Conversation gate (migration 478, plan 20261025 §4): agent sessions
+	// delegate to gatePublicChatSessionForUser verbatim (zero regression); dm/
+	// group enforce the participant set and never apply the workspace-wide public
+	// projection, so a non-participant (even a workspace owner) gets 404.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
+	session := access.Session
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start prioritize transaction")
@@ -1742,10 +1963,15 @@ func (h *Handler) ClearQueuedChatTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Conversation gate (migration 478, plan 20261025 §4): agent sessions
+	// delegate to gatePublicChatSessionForUser verbatim (zero regression); dm/
+	// group enforce the participant set and never apply the workspace-wide public
+	// projection, so a non-participant (even a workspace owner) gets 404.
+	access, ok := h.loadChatSessionForActor(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
+	session := access.Session
 	if err := h.TaskService.CancelQueuedChatTasks(r.Context(), session.ID, session.AgentID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clear queued tasks")
 		return
@@ -1927,8 +2153,13 @@ type ChatSessionResponse struct {
 	// older Chat that remains readable and writable in Multica.
 	ChannelSource         *ChatSessionChannelSourceResponse `json:"channel_source,omitempty"`
 	IsCurrentChannelRoute *bool                             `json:"is_current_channel_route,omitempty"`
-	CreatedAt             string                            `json:"created_at"`
-	UpdatedAt             string                            `json:"updated_at"`
+	// Kind is additive (migration 478): "agent"|"dm"|"group". Defaults to
+	// "agent" for legacy rows. AgentID is empty for dm/group.
+	Kind string `json:"kind"`
+	// Participants is populated by conversation list/detail endpoints for dm/group.
+	Participants []ChatParticipantResponse `json:"participants,omitempty"`
+	CreatedAt    string                    `json:"created_at"`
+	UpdatedAt    string                    `json:"updated_at"`
 }
 
 type ChatSessionChannelSourceResponse struct {
@@ -1978,6 +2209,10 @@ type ChatLastMessage struct {
 	// MessageKind is 'message' (default) or 'no_response'. Hidden onboarding
 	// kickoff rows make buildChatLastMessage return nil and are never exposed.
 	MessageKind string `json:"message_kind"`
+	// Author attribution for DM/Group previews. Empty on legacy agent rows,
+	// where role=user still means the session creator.
+	AuthorType string  `json:"author_type,omitempty"`
+	AuthorID   *string `json:"author_id,omitempty"`
 }
 
 // buildChatLastMessage assembles the preview from list-row columns; returns nil
@@ -1993,6 +2228,13 @@ func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure p
 		FailureReason: textToPtr(failure),
 		MessageKind:   normalizeMessageKind(kind),
 	}
+}
+
+type ChatMessageDispatchResponse struct {
+	AgentID string  `json:"agent_id"`
+	TaskID  string  `json:"task_id"`
+	Status  string  `json:"status"`
+	Reason  *string `json:"reason,omitempty"`
 }
 
 type ChatMessageResponse struct {
@@ -2020,6 +2262,43 @@ type ChatMessageResponse struct {
 	// agent can `multica attachment download <id>` rather than guessing
 	// from a markdown URL that may expire.
 	Attachments []AttachmentResponse `json:"attachments,omitempty"`
+	// Additive conversation-model attribution (migration 478). AuthorType is
+	// "member"|"agent"|"system"; AuthorID identifies the specific member/agent
+	// so DM/Group bubbles attribute correctly instead of assuming role=user is
+	// always the viewer.
+	AuthorType   string                         `json:"author_type,omitempty"`
+	AuthorID     *string                        `json:"author_id,omitempty"`
+	Mentions     []protocol.ChatMention         `json:"mentions,omitempty"`
+	Resources    []protocol.ChatResourcePayload `json:"resources,omitempty"`
+	HasResources bool                           `json:"has_resources,omitempty"`
+	Dispatches   []ChatMessageDispatchResponse  `json:"dispatches,omitempty"`
+	Reactions    []ChatMessageReactionResponse  `json:"reactions,omitempty"`
+	Replies      []ChatMessageReplyResponse     `json:"replies,omitempty"`
+}
+
+func (h *Handler) groupChatMessageDispatches(ctx context.Context, messageIDs []pgtype.UUID) map[string][]ChatMessageDispatchResponse {
+	out := make(map[string][]ChatMessageDispatchResponse)
+	if len(messageIDs) == 0 {
+		return out
+	}
+	rows, err := h.Queries.ListChatMessageDispatches(ctx, messageIDs)
+	if err != nil {
+		return out
+	}
+	for _, row := range rows {
+		var reason *string
+		if row.FailureReason.Valid {
+			reason = &row.FailureReason.String
+		} else if row.Error.Valid {
+			reason = &row.Error.String
+		}
+		key := uuidToString(row.MessageID)
+		out[key] = append(out[key], ChatMessageDispatchResponse{
+			AgentID: uuidToString(row.AgentID), TaskID: uuidToString(row.TaskID),
+			Status: row.Status, Reason: reason,
+		})
+	}
+	return out
 }
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
@@ -2032,6 +2311,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		Title:       s.Title,
 		Status:      s.Status,
 		Pinned:      s.PinnedAt.Valid,
+		Kind:        s.Kind,
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
 	}
@@ -2050,6 +2330,9 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 		MessageKind:   normalizeMessageKind(m.MessageKind),
 		QuickActions:  decodeChatQuickActions(m.QuickActions),
 		Attachments:   attachments,
+		AuthorType:    m.AuthorType,
+		AuthorID:      uuidToPtr(m.AuthorID),
+		Mentions:      decodeChatMentions(m.Mentions),
 	}
 }
 
@@ -2086,6 +2369,20 @@ func decodeChatQuickActions(raw []byte) []protocol.ChatQuickAction {
 }
 
 const chatQuickActionResponseLimit = 3
+
+// decodeChatMentions maps the stored chat_message.mentions JSONB into the API
+// shape. Missing / malformed arrays degrade to an empty list so a legacy row is
+// never surfaced as a broken mention set (plan 20261025 §6).
+func decodeChatMentions(raw []byte) []protocol.ChatMention {
+	if len(raw) == 0 {
+		return []protocol.ChatMention{}
+	}
+	var ms []protocol.ChatMention
+	if err := json.Unmarshal(raw, &ms); err != nil || ms == nil {
+		return []protocol.ChatMention{}
+	}
+	return ms
+}
 
 // normalizeMessageKind maps a stored chat_message.message_kind to the value the
 // API exposes. Unknown / empty kinds degrade to 'message' so a future kind

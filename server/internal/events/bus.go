@@ -19,6 +19,26 @@ type Event struct {
 	// without re-deserializing Payload. See MUL-1138 phase 1.
 	TaskID        string
 	ChatSessionID string
+
+	// RecipientUserIDs is an in-process directed-delivery hint (never serialized
+	// to the WS payload). nil preserves the legacy workspace broadcast; a non-nil
+	// slice — even an empty one — means "deliver only to these users", and an
+	// empty slice must drop the event rather than degrade to a workspace broadcast
+	// (fail-closed for DM/Group privacy). See plan 20261025 §5.
+	RecipientUserIDs []string
+	// ChatKind is in-process routing metadata ("agent"/"dm"/"group"), also never
+	// serialized. publishChatAware is the single assignment point; the five
+	// external channel outbound adapters use it to refuse DM/Group egress.
+	ChatKind string
+}
+
+// IsPrivateConversation reports whether this event belongs to an in-app DM or
+// Group session, which must never egress to an external channel (Slack/Lark/
+// DingTalk/WeCom/Telegram). It keys only on ChatKind — RecipientUserIDs is an
+// internal WS routing field and is never an authorization signal for adapters.
+// plan 20261025 §5.4.
+func (e Event) IsPrivateConversation() bool {
+	return e.ChatKind == "dm" || e.ChatKind == "group"
 }
 
 // Handler is a function that processes an event.

@@ -15,7 +15,7 @@ const archiveWorkflowTemplate = `-- name: ArchiveWorkflowTemplate :one
 UPDATE workflow_template
 SET status = 'archived', archived_at = now(), updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at
+RETURNING id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at, definition, enforce
 `
 
 type ArchiveWorkflowTemplateParams struct {
@@ -43,6 +43,8 @@ func (q *Queries) ArchiveWorkflowTemplate(ctx context.Context, arg ArchiveWorkfl
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Definition,
+		&i.Enforce,
 	)
 	return i, err
 }
@@ -74,6 +76,29 @@ func (q *Queries) CancelWorkflowGateRun(ctx context.Context, id pgtype.UUID) (Wo
 		&i.DecidedAt,
 	)
 	return i, err
+}
+
+const countRequirementWorkflowGateCleared = `-- name: CountRequirementWorkflowGateCleared :one
+SELECT COUNT(*) FROM workflow_instance wi
+WHERE wi.workspace_id = $1 AND wi.root_issue_id = $2
+  AND EXISTS (
+    SELECT 1 FROM workflow_gate_run g
+    WHERE g.instance_id = wi.id AND g.state = 'decided' AND g.decision = 'exit'
+  )
+`
+
+type CountRequirementWorkflowGateClearedParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RootIssueID pgtype.UUID `json:"root_issue_id"`
+}
+
+// 需求首门是否已放行：该 issue 作为 root 的实例中，存在至少一个已 decided(exit)
+// 的 human 门即视为「过首门」。scheduler 需求触发门控用（>0 = 已满足）。
+func (q *Queries) CountRequirementWorkflowGateCleared(ctx context.Context, arg CountRequirementWorkflowGateClearedParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRequirementWorkflowGateCleared, arg.WorkspaceID, arg.RootIssueID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createWorkflowGateRun = `-- name: CreateWorkflowGateRun :one
@@ -181,10 +206,10 @@ func (q *Queries) CreateWorkflowInstance(ctx context.Context, arg CreateWorkflow
 const createWorkflowStageRun = `-- name: CreateWorkflowStageRun :one
 INSERT INTO workflow_stage_run (
     instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt,
-    state, inputs, outputs
+    state, inputs, outputs, spec
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10
-) RETURNING id, instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt, task_id, state, inputs, outputs, created_at, updated_at
+    $1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10, $11
+) RETURNING id, instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt, task_id, state, inputs, outputs, created_at, updated_at, spec
 `
 
 type CreateWorkflowStageRunParams struct {
@@ -198,6 +223,7 @@ type CreateWorkflowStageRunParams struct {
 	Prompt      pgtype.Text `json:"prompt"`
 	Inputs      []byte      `json:"inputs"`
 	Outputs     []byte      `json:"outputs"`
+	Spec        []byte      `json:"spec"`
 }
 
 func (q *Queries) CreateWorkflowStageRun(ctx context.Context, arg CreateWorkflowStageRunParams) (WorkflowStageRun, error) {
@@ -212,6 +238,7 @@ func (q *Queries) CreateWorkflowStageRun(ctx context.Context, arg CreateWorkflow
 		arg.Prompt,
 		arg.Inputs,
 		arg.Outputs,
+		arg.Spec,
 	)
 	var i WorkflowStageRun
 	err := row.Scan(
@@ -230,17 +257,18 @@ func (q *Queries) CreateWorkflowStageRun(ctx context.Context, arg CreateWorkflow
 		&i.Outputs,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Spec,
 	)
 	return i, err
 }
 
 const createWorkflowTemplate = `-- name: CreateWorkflowTemplate :one
 INSERT INTO workflow_template (
-    workspace_id, project_id, name, description, status, nodes,
+    workspace_id, project_id, name, description, status, nodes, definition, enforce,
     created_by_type, created_by_id, source_project_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
-) RETURNING id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+) RETURNING id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at, definition, enforce
 `
 
 type CreateWorkflowTemplateParams struct {
@@ -250,6 +278,8 @@ type CreateWorkflowTemplateParams struct {
 	Description     pgtype.Text `json:"description"`
 	Status          string      `json:"status"`
 	Nodes           []byte      `json:"nodes"`
+	Definition      []byte      `json:"definition"`
+	Enforce         bool        `json:"enforce"`
 	CreatedByType   string      `json:"created_by_type"`
 	CreatedByID     pgtype.UUID `json:"created_by_id"`
 	SourceProjectID pgtype.UUID `json:"source_project_id"`
@@ -263,6 +293,8 @@ func (q *Queries) CreateWorkflowTemplate(ctx context.Context, arg CreateWorkflow
 		arg.Description,
 		arg.Status,
 		arg.Nodes,
+		arg.Definition,
+		arg.Enforce,
 		arg.CreatedByType,
 		arg.CreatedByID,
 		arg.SourceProjectID,
@@ -285,6 +317,8 @@ func (q *Queries) CreateWorkflowTemplate(ctx context.Context, arg CreateWorkflow
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Definition,
+		&i.Enforce,
 	)
 	return i, err
 }
@@ -328,6 +362,40 @@ func (q *Queries) DecideWorkflowGate(ctx context.Context, arg DecideWorkflowGate
 		&i.DecidedByID,
 		&i.CreatedAt,
 		&i.DecidedAt,
+	)
+	return i, err
+}
+
+const getEnforcedWorkflowTemplate = `-- name: GetEnforcedWorkflowTemplate :one
+SELECT id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at, definition, enforce FROM workflow_template
+WHERE project_id = $1 AND status = 'published' AND enforce = true
+LIMIT 1
+`
+
+// 需求触发门控：该项目是否有「已发布 + enforce」的强制工作流模板。无则 0 行
+// （pgx.ErrNoRows → scheduler 视为无门控，零回归）。
+func (q *Queries) GetEnforcedWorkflowTemplate(ctx context.Context, projectID pgtype.UUID) (WorkflowTemplate, error) {
+	row := q.db.QueryRow(ctx, getEnforcedWorkflowTemplate, projectID)
+	var i WorkflowTemplate
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.Version,
+		&i.Nodes,
+		&i.Official,
+		&i.SourceProjectID,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.PublishedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Definition,
+		&i.Enforce,
 	)
 	return i, err
 }
@@ -427,7 +495,7 @@ func (q *Queries) GetWorkflowInstance(ctx context.Context, arg GetWorkflowInstan
 }
 
 const getWorkflowStageRun = `-- name: GetWorkflowStageRun :one
-SELECT id, instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt, task_id, state, inputs, outputs, created_at, updated_at FROM workflow_stage_run
+SELECT id, instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt, task_id, state, inputs, outputs, created_at, updated_at, spec FROM workflow_stage_run
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -455,12 +523,13 @@ func (q *Queries) GetWorkflowStageRun(ctx context.Context, arg GetWorkflowStageR
 		&i.Outputs,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Spec,
 	)
 	return i, err
 }
 
 const getWorkflowStageRunByTask = `-- name: GetWorkflowStageRunByTask :one
-SELECT id, instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt, task_id, state, inputs, outputs, created_at, updated_at FROM workflow_stage_run
+SELECT id, instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt, task_id, state, inputs, outputs, created_at, updated_at, spec FROM workflow_stage_run
 WHERE task_id = $1
 `
 
@@ -483,12 +552,13 @@ func (q *Queries) GetWorkflowStageRunByTask(ctx context.Context, taskID pgtype.U
 		&i.Outputs,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Spec,
 	)
 	return i, err
 }
 
 const getWorkflowTemplate = `-- name: GetWorkflowTemplate :one
-SELECT id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at FROM workflow_template
+SELECT id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at, definition, enforce FROM workflow_template
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -517,6 +587,8 @@ func (q *Queries) GetWorkflowTemplate(ctx context.Context, arg GetWorkflowTempla
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Definition,
+		&i.Enforce,
 	)
 	return i, err
 }
@@ -800,7 +872,7 @@ func (q *Queries) ListWorkflowInstancesByProject(ctx context.Context, arg ListWo
 }
 
 const listWorkflowStageRuns = `-- name: ListWorkflowStageRuns :many
-SELECT id, instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt, task_id, state, inputs, outputs, created_at, updated_at FROM workflow_stage_run
+SELECT id, instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt, task_id, state, inputs, outputs, created_at, updated_at, spec FROM workflow_stage_run
 WHERE instance_id = $1
 ORDER BY seq ASC
 `
@@ -830,6 +902,7 @@ func (q *Queries) ListWorkflowStageRuns(ctx context.Context, instanceID pgtype.U
 			&i.Outputs,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Spec,
 		); err != nil {
 			return nil, err
 		}
@@ -873,7 +946,7 @@ func (q *Queries) ListWorkflowTemplateShares(ctx context.Context, templateID pgt
 
 const listWorkflowTemplates = `-- name: ListWorkflowTemplates :many
 
-SELECT id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at FROM workflow_template
+SELECT id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at, definition, enforce FROM workflow_template
 WHERE workspace_id = $1
   AND (project_id = $2 OR project_id IS NULL OR official = true)
   AND status <> 'archived'
@@ -913,6 +986,65 @@ func (q *Queries) ListWorkflowTemplates(ctx context.Context, arg ListWorkflowTem
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Definition,
+			&i.Enforce,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceWorkflowTemplates = `-- name: ListWorkspaceWorkflowTemplates :many
+SELECT id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at, definition, enforce FROM workflow_template
+WHERE workspace_id = $1
+  AND ($2::text IS NULL OR status = $2)
+  AND ($2::text IS NOT NULL OR status <> 'archived')
+  AND ($3::uuid IS NULL OR created_by_id = $3)
+ORDER BY official DESC, updated_at DESC
+`
+
+type ListWorkspaceWorkflowTemplatesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Status      pgtype.Text `json:"status"`
+	CreatedBy   pgtype.UUID `json:"created_by"`
+}
+
+// 工作区级画廊（侧边栏「工作流」入口）：跨项目列出本 workspace 全部模板。
+// $2=status 精确过滤（NULL=全部且排除 archived）；$3=created_by（scope=mine 时传，
+// NULL=不限）。已删除 tab 传 status='archived' 显式命中。
+func (q *Queries) ListWorkspaceWorkflowTemplates(ctx context.Context, arg ListWorkspaceWorkflowTemplatesParams) ([]WorkflowTemplate, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceWorkflowTemplates, arg.WorkspaceID, arg.Status, arg.CreatedBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WorkflowTemplate{}
+	for rows.Next() {
+		var i WorkflowTemplate
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.Name,
+			&i.Description,
+			&i.Status,
+			&i.Version,
+			&i.Nodes,
+			&i.Official,
+			&i.SourceProjectID,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.PublishedAt,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Definition,
+			&i.Enforce,
 		); err != nil {
 			return nil, err
 		}
@@ -959,7 +1091,7 @@ const publishWorkflowTemplate = `-- name: PublishWorkflowTemplate :one
 UPDATE workflow_template
 SET status = 'published', published_at = now(), version = version + 1, updated_at = now()
 WHERE id = $1 AND workspace_id = $2 AND status <> 'archived'
-RETURNING id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at
+RETURNING id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at, definition, enforce
 `
 
 type PublishWorkflowTemplateParams struct {
@@ -987,6 +1119,47 @@ func (q *Queries) PublishWorkflowTemplate(ctx context.Context, arg PublishWorkfl
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Definition,
+		&i.Enforce,
+	)
+	return i, err
+}
+
+const setWorkflowTemplateEnforce = `-- name: SetWorkflowTemplateEnforce :one
+UPDATE workflow_template
+SET enforce = $3, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at, definition, enforce
+`
+
+type SetWorkflowTemplateEnforceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Enforce     bool        `json:"enforce"`
+}
+
+func (q *Queries) SetWorkflowTemplateEnforce(ctx context.Context, arg SetWorkflowTemplateEnforceParams) (WorkflowTemplate, error) {
+	row := q.db.QueryRow(ctx, setWorkflowTemplateEnforce, arg.ID, arg.WorkspaceID, arg.Enforce)
+	var i WorkflowTemplate
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.Version,
+		&i.Nodes,
+		&i.Official,
+		&i.SourceProjectID,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.PublishedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Definition,
+		&i.Enforce,
 	)
 	return i, err
 }
@@ -1060,7 +1233,7 @@ SET state = $3, updated_at = now(),
     task_id = COALESCE($4, task_id),
     outputs = COALESCE($5, outputs)
 WHERE id = $1 AND state = $2
-RETURNING id, instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt, task_id, state, inputs, outputs, created_at, updated_at
+RETURNING id, instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt, task_id, state, inputs, outputs, created_at, updated_at, spec
 `
 
 type UpdateWorkflowStageRunStateParams struct {
@@ -1097,6 +1270,7 @@ func (q *Queries) UpdateWorkflowStageRunState(ctx context.Context, arg UpdateWor
 		&i.Outputs,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Spec,
 	)
 	return i, err
 }
@@ -1105,7 +1279,7 @@ const updateWorkflowTemplate = `-- name: UpdateWorkflowTemplate :one
 UPDATE workflow_template
 SET name = $3, description = $4, nodes = $5, updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at
+RETURNING id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at, definition, enforce
 `
 
 type UpdateWorkflowTemplateParams struct {
@@ -1142,6 +1316,59 @@ func (q *Queries) UpdateWorkflowTemplate(ctx context.Context, arg UpdateWorkflow
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Definition,
+		&i.Enforce,
+	)
+	return i, err
+}
+
+const updateWorkflowTemplateDefinition = `-- name: UpdateWorkflowTemplateDefinition :one
+UPDATE workflow_template
+SET name = $3, description = $4, nodes = $5, definition = $6, updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND status <> 'archived'
+RETURNING id, workspace_id, project_id, name, description, status, version, nodes, official, source_project_id, created_by_type, created_by_id, published_at, archived_at, created_at, updated_at, definition, enforce
+`
+
+type UpdateWorkflowTemplateDefinitionParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Description pgtype.Text `json:"description"`
+	Nodes       []byte      `json:"nodes"`
+	Definition  []byte      `json:"definition"`
+}
+
+// 编辑器保存 CoCo 嵌套原文：一并写入 definition + 展平后的 nodes（引擎编译产物）。
+// enforce 不在这里改（走 SetWorkflowTemplateEnforce），archived 只读。
+func (q *Queries) UpdateWorkflowTemplateDefinition(ctx context.Context, arg UpdateWorkflowTemplateDefinitionParams) (WorkflowTemplate, error) {
+	row := q.db.QueryRow(ctx, updateWorkflowTemplateDefinition,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Description,
+		arg.Nodes,
+		arg.Definition,
+	)
+	var i WorkflowTemplate
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.Version,
+		&i.Nodes,
+		&i.Official,
+		&i.SourceProjectID,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.PublishedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Definition,
+		&i.Enforce,
 	)
 	return i, err
 }

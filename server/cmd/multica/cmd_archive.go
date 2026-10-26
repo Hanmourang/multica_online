@@ -157,7 +157,7 @@ func parseProjectScoped(p *archiveParsedFile, rest []string) error {
 		}
 		cat := rest[1]
 		switch cat {
-		case "research", "product-design", "architecture", "retrospective":
+		case "research", "product-design", "architecture", "retrospective", "iteration":
 		default:
 			return &archiveParseError{"未知 overview 类别 " + cat + "（CONTRACT.md §1 行2）"}
 		}
@@ -179,7 +179,7 @@ func parseProjectScoped(p *archiveParsedFile, rest []string) error {
 			if stage, ok := parseStageDir(rest[2]); ok {
 				p.Stage = &stage
 			} else if strings.HasPrefix(rest[2], "s") {
-				return &archiveParseError{"未知 stage 目录 " + rest[2] + "，stage 必须 ∈ 1..4（CONTRACT.md §1 行4）"}
+				return &archiveParseError{"未知 stage 目录 " + rest[2] + "，stage 必须 ∈ 1..5（CONTRACT.md §1 行4）"}
 			}
 		}
 	case "filing":
@@ -280,7 +280,7 @@ func parseStageDir(seg string) (int32, bool) {
 		return 0, false
 	}
 	n := int(seg[1] - '0')
-	if n < 1 || n > 4 || (len(seg) > 2 && seg[2] != '-') {
+	if n < 1 || n > 5 || (len(seg) > 2 && seg[2] != '-') {
 		return 0, false
 	}
 	return int32(n), true
@@ -328,6 +328,9 @@ func docTypeFromName(p *archiveParsedFile) string {
 			return "design"
 		case 4:
 			return "report"
+		case 5:
+			// 五阶段对齐 plan §4.7：S5 需求迭代默认 doc_type 与后端映射表取值一致。
+			return "iteration"
 		}
 	}
 	return base

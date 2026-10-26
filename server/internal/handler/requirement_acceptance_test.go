@@ -208,3 +208,54 @@ func TestStage3BarrierEnqueuesStage4Tester(t *testing.T) {
 		t.Errorf("stage4 tester queue rows = %d, want 1", queued)
 	}
 }
+
+// TestUpdateAcceptanceCriteriaPersistsCheckedSet 覆盖 plan 20261025 §C-1 勾选回写：
+// checked_criteria 作为纯追加键写进 acceptance_spec，不覆盖既有 assertions；子任务拒绝。
+func TestUpdateAcceptanceCriteriaPersistsCheckedSet(t *testing.T) {
+	proj := newAcceptanceProject(t, "criteria")
+	reqID := newAcceptanceRequirement(t, proj)
+	dbfx.Exec(t, `UPDATE issue SET acceptance_spec = '{"assertions":["合并后金额一致","优惠不重复计算"]}'::jsonb WHERE id = $1`, reqID)
+
+	req := newRequest(http.MethodPost, "/api/issues/"+reqID+"/acceptance/criteria",
+		map[string]any{"checked": []string{"合并后金额一致"}})
+	req = withURLParam(req, "id", reqID)
+	testutil.Call(t, testHandler.UpdateAcceptanceCriteria, req).Want(http.StatusOK)
+
+	var checkedLen, assertLen int
+	dbfx.QueryRow(t, `
+		SELECT jsonb_array_length(COALESCE(acceptance_spec->'checked_criteria', '[]'::jsonb)),
+		       jsonb_array_length(COALESCE(acceptance_spec->'assertions', '[]'::jsonb))
+		FROM issue WHERE id = $1`, reqID).Scan(&checkedLen, &assertLen)
+	if checkedLen != 1 {
+		t.Errorf("checked_criteria len = %d, want 1", checkedLen)
+	}
+	// 纯追加键不得动 assertions（单一验收事实源不变式）。
+	if assertLen != 2 {
+		t.Errorf("assertions 被覆盖: len = %d, want 2", assertLen)
+	}
+
+	// 回写全集两条。
+	req2 := newRequest(http.MethodPost, "/api/issues/"+reqID+"/acceptance/criteria",
+		map[string]any{"checked": []string{"合并后金额一致", "优惠不重复计算"}})
+	req2 = withURLParam(req2, "id", reqID)
+	testutil.Call(t, testHandler.UpdateAcceptanceCriteria, req2).Want(http.StatusOK)
+	dbfx.QueryRow(t,
+		`SELECT jsonb_array_length(acceptance_spec->'checked_criteria') FROM issue WHERE id = $1`, reqID,
+	).Scan(&checkedLen)
+	if checkedLen != 2 {
+		t.Errorf("checked_criteria len = %d, want 2", checkedLen)
+	}
+
+	// 子任务不承载验收语义 → 409。
+	var childID string
+	dbfx.QueryRow(t, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, project_id, parent_issue_id, stage)
+		VALUES ($1, '子任务-验收', 'todo', 'medium', 'member', $2,
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1), $3, $4, 3)
+		RETURNING id`,
+		testWorkspaceID, testUserID, proj, reqID).Scan(&childID)
+	req3 := newRequest(http.MethodPost, "/api/issues/"+childID+"/acceptance/criteria",
+		map[string]any{"checked": []string{}})
+	req3 = withURLParam(req3, "id", childID)
+	testutil.Call(t, testHandler.UpdateAcceptanceCriteria, req3).Want(http.StatusConflict)
+}

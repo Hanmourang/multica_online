@@ -1583,11 +1583,16 @@ WHERE id = (
           WHERE a.id = atq.agent_id
             -- A task's persisted runtime is not authority after an agent rebind.
             AND a.runtime_id = atq.runtime_id
-            -- Private runtimes only execute their owner's agents. Ownerless
-            -- runtime/agent rows remain claimable only so the handler can
-            -- settle them explicitly before daemon delivery; filtering them
+            -- Private runtimes execute their owner's agents. A workspace-visible
+            -- agent already bound to this runtime is also claimable when the
+            -- runtime owner is a current member of the agent's workspace: the
+            -- same machine often re-registers under whoever is logged in, and
+            -- leaving those tasks queued means they never start and never fail.
+            -- Ownerless runtime/agent rows remain claimable only so the handler
+            -- can settle them explicitly before daemon delivery; filtering them
             -- here would leave every task silently queued until the TTL.
             -- Public runtimes remain shareable across agent owners.
+            -- Private agents of a different owner stay excluded.
             AND (
                 r.visibility = 'public'
                 OR (
@@ -1596,6 +1601,16 @@ WHERE id = (
                         r.owner_id IS NULL
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
+                        OR (
+                            a.visibility = 'workspace'
+                            AND r.owner_id IS NOT NULL
+                            AND a.owner_id IS NOT NULL
+                            AND EXISTS (
+                                SELECT 1 FROM member m
+                                WHERE m.workspace_id = a.workspace_id
+                                  AND m.user_id = r.owner_id
+                            )
+                        )
                     )
                 )
             )
@@ -5936,6 +5951,16 @@ WHERE atq.runtime_id = $1
                     r.owner_id IS NULL
                     OR a.owner_id IS NULL
                     OR r.owner_id = a.owner_id
+                    OR (
+                        a.visibility = 'workspace'
+                        AND r.owner_id IS NOT NULL
+                        AND a.owner_id IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1 FROM member m
+                            WHERE m.workspace_id = a.workspace_id
+                              AND m.user_id = r.owner_id
+                        )
+                    )
                 )
             )
         )
@@ -6045,6 +6070,16 @@ WHERE atq.runtime_id = ANY($1::uuid[])
                     r.owner_id IS NULL
                     OR a.owner_id IS NULL
                     OR r.owner_id = a.owner_id
+                    OR (
+                        a.visibility = 'workspace'
+                        AND r.owner_id IS NOT NULL
+                        AND a.owner_id IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1 FROM member m
+                            WHERE m.workspace_id = a.workspace_id
+                              AND m.user_id = r.owner_id
+                        )
+                    )
                 )
             )
         )
@@ -7531,6 +7566,16 @@ WHERE id = (
                         r.owner_id IS NULL
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
+                        OR (
+                            a.visibility = 'workspace'
+                            AND r.owner_id IS NOT NULL
+                            AND a.owner_id IS NOT NULL
+                            AND EXISTS (
+                                SELECT 1 FROM member m
+                                WHERE m.workspace_id = a.workspace_id
+                                  AND m.user_id = r.owner_id
+                            )
+                        )
                     )
                 )
             )
@@ -7650,6 +7695,16 @@ WHERE id IN (
                         r.owner_id IS NULL
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
+                        OR (
+                            a.visibility = 'workspace'
+                            AND r.owner_id IS NOT NULL
+                            AND a.owner_id IS NOT NULL
+                            AND EXISTS (
+                                SELECT 1 FROM member m
+                                WHERE m.workspace_id = a.workspace_id
+                                  AND m.user_id = r.owner_id
+                            )
+                        )
                     )
                 )
             )

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // 档案条目（project_artifact, migration 455）：Git 是唯一事实源，DB 只存
@@ -72,11 +73,14 @@ type projectArtifactRow struct {
 	SyncedAt       pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+	// AssetBindingID 是资产原生档案的反向持链（migration 474）；仅内部用于
+	// 双向联动判定，不进 API 响应（前端另有两类关联解析兼容档案导入行）。
+	AssetBindingID pgtype.UUID
 }
 
 const projectArtifactColumns = `id, workspace_id, project_id, resource_id, issue_id, task_id,
 	scope, stage, doc_type, version, rel_path, requirement_key, blob_sha, attachment_id,
-	size_bytes, source, synced_at, created_at, updated_at, doc_class, doc_module`
+	size_bytes, source, synced_at, created_at, updated_at, doc_class, doc_module, asset_binding_id`
 
 func scanProjectArtifactRow(scan func(dest ...any) error) (projectArtifactRow, error) {
 	var row projectArtifactRow
@@ -84,7 +88,7 @@ func scanProjectArtifactRow(scan func(dest ...any) error) (projectArtifactRow, e
 		&row.ID, &row.WorkspaceID, &row.ProjectID, &row.ResourceID, &row.IssueID, &row.TaskID,
 		&row.Scope, &row.Stage, &row.DocType, &row.Version, &row.RelPath, &row.RequirementKey,
 		&row.BlobSha, &row.AttachmentID, &row.SizeBytes, &row.Source, &row.SyncedAt,
-		&row.CreatedAt, &row.UpdatedAt, &row.DocClass, &row.DocModule,
+		&row.CreatedAt, &row.UpdatedAt, &row.DocClass, &row.DocModule, &row.AssetBindingID,
 	)
 	return row, err
 }
@@ -320,8 +324,8 @@ func (h *Handler) SyncProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 			result.Errors = append(result.Errors, ArtifactSyncErrorEntry{Path: item.RelPath, Reason: "scope must be one of shared/project/requirement"})
 			continue
 		}
-		if item.Stage != nil && (*item.Stage < 1 || *item.Stage > 4) {
-			result.Errors = append(result.Errors, ArtifactSyncErrorEntry{Path: item.RelPath, Reason: "stage must be within 1..4"})
+		if item.Stage != nil && (*item.Stage < 1 || *item.Stage > 5) {
+			result.Errors = append(result.Errors, ArtifactSyncErrorEntry{Path: item.RelPath, Reason: "stage must be within 1..5"})
 			continue
 		}
 		if item.Version < 1 {
@@ -480,13 +484,14 @@ func softDeleteAbsentArtifacts(ctx context.Context, tx pgx.Tx, archiveResourceID
 			SET deleted_at = now(), updated_at = now()
 			WHERE resource_id = $1 AND deleted_at IS NULL
 			  AND source <> 'manual'
+			  AND source <> 'asset' AND asset_binding_id IS NULL
 			  AND NOT (rel_path = ANY($2))
 			RETURNING 1
 		), manual_kept AS (
 			SELECT count(*) AS n
 			FROM project_artifact
 			WHERE resource_id = $1 AND deleted_at IS NULL
-			  AND source = 'manual'
+			  AND (source = 'manual' OR source = 'asset' OR asset_binding_id IS NOT NULL)
 			  AND NOT (rel_path = ANY($2))
 		)
 		SELECT (SELECT count(*) FROM shielded), (SELECT n FROM manual_kept)`,
@@ -559,8 +564,8 @@ func (h *Handler) ListProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 	var stage *int32
 	if stageStr := query.Get("stage"); stageStr != "" {
 		parsed, err := strconv.Atoi(stageStr)
-		if err != nil || parsed < 1 || parsed > 4 {
-			writeError(w, http.StatusBadRequest, "stage must be an integer within 1..4")
+		if err != nil || parsed < 1 || parsed > 5 {
+			writeError(w, http.StatusBadRequest, "stage must be an integer within 1..5")
 			return
 		}
 		s := int32(parsed)
@@ -779,8 +784,8 @@ func (h *Handler) ArchiveDeliverable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "doc_type is required")
 		return
 	}
-	if req.Stage != nil && (*req.Stage < 1 || *req.Stage > 4) {
-		writeError(w, http.StatusBadRequest, "stage must be within 1..4")
+	if req.Stage != nil && (*req.Stage < 1 || *req.Stage > 5) {
+		writeError(w, http.StatusBadRequest, "stage must be within 1..5")
 		return
 	}
 	var reqIssueID pgtype.UUID
@@ -812,7 +817,8 @@ func (h *Handler) ArchiveDeliverable(w http.ResponseWriter, r *http.Request) {
 				).Scan(dest...)
 			})
 			if loadErr == nil && row.ProjectID == project.ID {
-				// Mode A — reclassify the existing row.
+				// Mode A — reclassify the existing row. 资产关联行走五阶段统一
+				// 映射并保留来源徽标，lifecycle 回写与档案 UPDATE 同事务。
 				stage := row.Stage
 				if req.Stage != nil {
 					stage = util.PtrToInt4(req.Stage)
@@ -821,21 +827,88 @@ func (h *Handler) ArchiveDeliverable(w http.ResponseWriter, r *http.Request) {
 				if reqIssueID.Valid {
 					issueID = reqIssueID
 				}
+				nativeLinked := row.AssetBindingID.Valid || row.Source == "asset"
+				var extIDs []pgtype.UUID
+				if !nativeLinked {
+					ids, extErr := findExternalBindingIDsForArtifact(r.Context(), h.DB, row.ID)
+					if extErr != nil {
+						writeError(w, http.StatusInternalServerError, "failed to resolve asset link")
+						return
+					}
+					extIDs = ids
+				}
+				linkedModeA := nativeLinked || len(extIDs) > 0
+				docType := req.DocType
+				if linkedModeA {
+					if p, ok := placementForArchiveStage(stage); ok {
+						// stage 单侧提交时按统一映射补 doc_type，防货架分叉。
+						docType = p.DocType
+					}
+					if _, ok := lifecycleForArchivePlacement(stage, docType); !ok {
+						writeError(w, http.StatusBadRequest, "stage and doc_type do not form a valid asset shelf combination")
+						return
+					}
+				}
 				// TODO(project-archive): enqueue the CLI write that copies the
 				// file into the archive directory (scope/stage/doc_type layout)
 				// and uploads the rendered attachment before this
 				// reclassification becomes user-visible.
+				tx, txErr := h.TxStarter.Begin(r.Context())
+				if txErr != nil {
+					writeError(w, http.StatusInternalServerError, "failed to archive deliverable")
+					return
+				}
+				defer tx.Rollback(r.Context()) //nolint:errcheck
+				updateSQL := `
+					UPDATE project_artifact
+					SET scope = $3, stage = $4, doc_type = $5, issue_id = $6,
+					    synced_at = now(), updated_at = now(), deleted_at = NULL`
+				if !linkedModeA {
+					updateSQL += ", source = 'agent'"
+				}
+				if next := shelfRelPathForMove(row.RelPath, row.DocType, docType); next != "" {
+					updateSQL += ", rel_path = '" + strings.ReplaceAll(next, "'", "''") + "'"
+				}
+				updateSQL += `
+					WHERE id = $1 AND workspace_id = $2
+					RETURNING ` + projectArtifactColumns
 				updated, err := scanProjectArtifactRow(func(dest ...any) error {
-					return h.DB.QueryRow(r.Context(), `
-						UPDATE project_artifact
-						SET scope = $3, stage = $4, doc_type = $5, issue_id = $6,
-						    source = 'agent', synced_at = now(), updated_at = now(), deleted_at = NULL
-						WHERE id = $1 AND workspace_id = $2
-						RETURNING `+projectArtifactColumns,
-						row.ID, project.WorkspaceID, req.Scope, stage, req.DocType, issueID,
+					return tx.QueryRow(r.Context(), updateSQL,
+						row.ID, project.WorkspaceID, req.Scope, stage, docType, issueID,
 					).Scan(dest...)
 				})
 				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to archive deliverable")
+					return
+				}
+				if linkedModeA {
+					lifecycle, _ := lifecycleForArchivePlacement(stage, docType)
+					bindingIDs := extIDs
+					if nativeLinked {
+						bindingIDs = []pgtype.UUID{row.AssetBindingID}
+					}
+					for _, bindingID := range bindingIDs {
+						if !bindingID.Valid {
+							continue
+						}
+						if err := applyLinkedAssetLifecycle(r.Context(), tx, bindingID, project.WorkspaceID, lifecycle); err != nil {
+							writeError(w, http.StatusInternalServerError, "failed to sync asset lifecycle")
+							return
+						}
+					}
+					if err := tx.Commit(r.Context()); err != nil {
+						writeError(w, http.StatusInternalServerError, "failed to archive deliverable")
+						return
+					}
+					for _, bindingID := range bindingIDs {
+						if !bindingID.Valid {
+							continue
+						}
+						h.publish(protocol.EventAssetUpdated, uuidToString(project.WorkspaceID), "member", "", map[string]any{
+							"binding_id": uuidToString(bindingID), "project_id": uuidToString(project.ID),
+						})
+					}
+				} else if err := tx.Commit(r.Context()); err != nil {
 					writeError(w, http.StatusInternalServerError, "failed to archive deliverable")
 					return
 				}
@@ -961,7 +1034,8 @@ func (h *Handler) issueBelongsToProject(ctx context.Context, issueID, projectID 
 }
 
 // PatchProjectArtifactRequest is the body for PATCH .../artifacts/{artifactId}.
-// Only non-nil fields are written; source is always forced to 'manual'.
+// Only non-nil fields are written; non-linked writes stamp source='manual',
+// asset-linked rows keep their provenance (五阶段对齐 plan §4.3).
 type PatchProjectArtifactRequest struct {
 	Scope          *string `json:"scope"`
 	Stage          *int32  `json:"stage"`
@@ -977,14 +1051,16 @@ type PatchProjectArtifactRequest struct {
 // PatchProjectArtifact implements PATCH /api/projects/{id}/artifacts/{artifactId}:
 // partial reclassification of one artifact (scope / stage / doc_type / issue
 // binding). Omitted fields keep their value; an empty issue_id string unbinds.
-// The UPDATE SET clause is built dynamically from the non-nil fields and every
-// write stamps source='manual'. Returns the full updated artifact.
+// 资产关联行（asset_binding_id 或 external_ref.artifact_id 两类）的 stage/doc_type
+// 由服务端按五阶段唯一映射双向校正，档案 UPDATE 与资产 lifecycle 回写在同一
+// 事务内提交或回滚；非关联行维持原动态 SET + source='manual' 规则。
 func (h *Handler) PatchProjectArtifact(w http.ResponseWriter, r *http.Request) {
 	project, ok := h.loadProjectForResource(w, r, chi.URLParam(r, "id"))
 	if !ok {
 		return
 	}
-	if _, ok := requireUserID(w, r); !ok {
+	userID, ok := requireUserID(w, r)
+	if !ok {
 		return
 	}
 	row, ok := h.loadProjectArtifact(w, r, project)
@@ -997,33 +1073,102 @@ func (h *Handler) PatchProjectArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setClauses := make([]string, 0, 6)
-	args := make([]any, 0, 6)
+	// 联动判定必须在事务内锁行后进行，避免并发 PATCH 基于过期值写分叉。
+	ctx := r.Context()
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update project artifact")
+		return
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var linked projectArtifactRow
+	lockErr := tx.QueryRow(ctx,
+		`SELECT `+projectArtifactColumns+` FROM project_artifact WHERE id = $1 FOR UPDATE`,
+		row.ID).Scan(
+		&linked.ID, &linked.WorkspaceID, &linked.ProjectID, &linked.ResourceID,
+		&linked.IssueID, &linked.TaskID, &linked.Scope, &linked.Stage, &linked.DocType,
+		&linked.Version, &linked.RelPath, &linked.RequirementKey, &linked.BlobSha,
+		&linked.AttachmentID, &linked.SizeBytes, &linked.Source, &linked.SyncedAt,
+		&linked.CreatedAt, &linked.UpdatedAt, &linked.DocClass, &linked.DocModule,
+		&linked.AssetBindingID,
+	)
+	if lockErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock project artifact")
+		return
+	}
+	row = linked
+
+	// stage 校验全入口放开到 1..5（五阶段对齐 plan §4.5）。
+	if req.Stage != nil && (*req.Stage < 1 || *req.Stage > 5) {
+		writeError(w, http.StatusBadRequest, "stage must be within 1..5")
+		return
+	}
+
+	// 两类关联服务端统一解析：资产原生行以 asset_binding_id 持链为准（source
+	// 兜底历史数据）；档案导入行经 external_ref.artifact_id 反查 binding 集合。
+	var externalBindingIDs []pgtype.UUID
+	if row.AssetBindingID.Valid {
+		externalBindingIDs = []pgtype.UUID{row.AssetBindingID}
+	}
+	if extIDs, err := findExternalBindingIDsForArtifact(ctx, tx, row.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve asset link")
+		return
+	} else {
+		// 历史 source='asset' 但无 asset_binding_id 持链的行兼容兜底：
+		// external_ref 反查到的 binding 同样纳入联动集合（去重简单拼接即可，
+		// 两类链同时存在时指向同一 binding 的 UPDATE 幂等）。
+		externalBindingIDs = append(externalBindingIDs, extIDs...)
+	}
+	nativeLinked := row.AssetBindingID.Valid || row.Source == "asset"
+	var extPtr *pgtype.UUID
+	if len(externalBindingIDs) > 0 {
+		extPtr = &externalBindingIDs[0]
+	}
+
+	placement := normalizeLinkedArtifactPlacement(row, extPtr, &req, map[bool]string{true: "asset"}[nativeLinked])
+	if placement.Err != "" {
+		writeError(w, http.StatusBadRequest, placement.Err)
+		return
+	}
+
+	args := make([]any, 0, 12)
+	setClauses := make([]string, 0, 12)
+	add := func(fragment string, values ...any) {
+		args = append(args, values...)
+		setClauses = append(setClauses, fragment)
+	}
 	if req.Scope != nil {
 		scope := strings.TrimSpace(*req.Scope)
 		if !isValidArtifactScope(scope) {
 			writeError(w, http.StatusBadRequest, "scope must be one of shared/project/requirement")
 			return
 		}
-		args = append(args, scope)
-		setClauses = append(setClauses, "scope = $"+strconv.Itoa(len(args)))
+		add("scope = $"+strconv.Itoa(len(args)+1), scope)
 	}
-	if req.Stage != nil {
-		if *req.Stage < 1 || *req.Stage > 4 {
-			writeError(w, http.StatusBadRequest, "stage must be within 1..4")
+	switch {
+	case placement.ClearStage != nil && *placement.ClearStage:
+		add("stage = NULL")
+	case placement.Stage != nil:
+		add("stage = $"+strconv.Itoa(len(args)+1), *placement.Stage)
+	case req.Stage != nil:
+		add("stage = $"+strconv.Itoa(len(args)+1), *req.Stage)
+	}
+	switch {
+	case placement.DocType != nil:
+		docType := strings.TrimSpace(*placement.DocType)
+		if docType == "" {
+			writeError(w, http.StatusBadRequest, "doc_type must not be empty")
 			return
 		}
-		args = append(args, *req.Stage)
-		setClauses = append(setClauses, "stage = $"+strconv.Itoa(len(args)))
-	}
-	if req.DocType != nil {
+		add("doc_type = $"+strconv.Itoa(len(args)+1), docType)
+	case req.DocType != nil:
 		docType := strings.TrimSpace(*req.DocType)
 		if docType == "" {
 			writeError(w, http.StatusBadRequest, "doc_type must not be empty")
 			return
 		}
-		args = append(args, docType)
-		setClauses = append(setClauses, "doc_type = $"+strconv.Itoa(len(args)))
+		add("doc_type = $"+strconv.Itoa(len(args)+1), docType)
 	}
 	if req.RelPath != nil {
 		relPath := strings.TrimSpace(*req.RelPath)
@@ -1031,54 +1176,53 @@ func (h *Handler) PatchProjectArtifact(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "rel_path must not be empty")
 			return
 		}
-		args = append(args, relPath)
-		setClauses = append(setClauses, "rel_path = $"+strconv.Itoa(len(args)))
+		add("rel_path = $"+strconv.Itoa(len(args)+1), relPath)
+	} else if placement.DocType != nil {
+		// 关联行仅改阶段时按货架前缀条件挪动路径（防与资产同步乒乓）。
+		if next := shelfRelPathForMove(row.RelPath, row.DocType, strings.TrimSpace(*placement.DocType)); next != "" {
+			add("rel_path = $"+strconv.Itoa(len(args)+1), next)
+		}
 	}
 	if req.RequirementKey != nil {
 		key := strings.TrimSpace(*req.RequirementKey)
 		if key == "" {
-			setClauses = append(setClauses, "requirement_key = NULL")
+			add("requirement_key = NULL")
 		} else {
-			args = append(args, key)
-			setClauses = append(setClauses, "requirement_key = $"+strconv.Itoa(len(args)))
+			add("requirement_key = $"+strconv.Itoa(len(args)+1), key)
 		}
 	}
 	if req.DocClass != nil {
 		class := normalizeDocClass(*req.DocClass, row.DocType, row.RelPath)
 		if class == "" {
-			setClauses = append(setClauses, "doc_class = NULL")
+			add("doc_class = NULL")
 		} else {
-			args = append(args, class)
-			setClauses = append(setClauses, "doc_class = $"+strconv.Itoa(len(args)))
+			add("doc_class = $"+strconv.Itoa(len(args)+1), class)
 		}
 	}
 	if req.DocModule != nil {
 		module := normalizeDocModule(*req.DocModule)
 		if module == "" {
-			setClauses = append(setClauses, "doc_module = NULL")
+			add("doc_module = NULL")
 		} else {
-			args = append(args, module)
-			setClauses = append(setClauses, "doc_module = $"+strconv.Itoa(len(args)))
+			add("doc_module = $"+strconv.Itoa(len(args)+1), module)
 		}
 	}
 	if req.Content != nil {
 		content := []byte(*req.Content)
-		args = append(args, gitBlobSHA(content))
-		setClauses = append(setClauses, "blob_sha = $"+strconv.Itoa(len(args)))
-		args = append(args, int64(len(content)))
-		setClauses = append(setClauses, "size_bytes = $"+strconv.Itoa(len(args)))
+		add("blob_sha = $"+strconv.Itoa(len(args)+1), gitBlobSHA(content))
+		add("size_bytes = $"+strconv.Itoa(len(args)+1), int64(len(content)))
 	}
 	if req.IssueID != nil {
 		issueIDStr := strings.TrimSpace(*req.IssueID)
 		if issueIDStr == "" {
-			setClauses = append(setClauses, "issue_id = NULL")
+			add("issue_id = NULL")
 		} else {
 			issueID, err := util.ParseUUID(issueIDStr)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, "issue_id is not a valid UUID")
 				return
 			}
-			belongs, err := h.issueBelongsToProject(r.Context(), issueID, project.ID)
+			belongs, err := h.issueBelongsToProject(ctx, issueID, project.ID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to validate issue")
 				return
@@ -1087,8 +1231,7 @@ func (h *Handler) PatchProjectArtifact(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "issue does not belong to this project")
 				return
 			}
-			args = append(args, issueID)
-			setClauses = append(setClauses, "issue_id = $"+strconv.Itoa(len(args)))
+			add("issue_id = $"+strconv.Itoa(len(args)+1), issueID)
 		}
 	}
 
@@ -1102,21 +1245,54 @@ func (h *Handler) PatchProjectArtifact(w http.ResponseWriter, r *http.Request) {
 		req.Scope == nil && req.Stage == nil && req.IssueID == nil &&
 		req.DocType == nil && req.RelPath == nil && req.RequirementKey == nil &&
 		req.DocClass == nil && req.Content == nil
-	if !moduleOnly {
-		setClauses = append(setClauses, "source = 'manual'")
+	// 来源规则（plan §4.3）：资产原生关联行保留 'asset'；档案导入关联行与
+	// 非关联行沿用原规则（moduleOnly 不改 source，其余写 'manual'）。
+	if !moduleOnly && !placement.PreserveAssetSource {
+		add("source = 'manual'")
 	}
-	setClauses = append(setClauses, "updated_at = now()")
+	add("updated_at = now()")
 	args = append(args, row.ID, project.WorkspaceID)
 	sql := `UPDATE project_artifact SET ` + strings.Join(setClauses, ", ") +
 		` WHERE id = $` + strconv.Itoa(len(args)-1) +
 		` AND workspace_id = $` + strconv.Itoa(len(args)) +
 		` RETURNING ` + projectArtifactColumns
 	updated, err := scanProjectArtifactRow(func(dest ...any) error {
-		return h.DB.QueryRow(r.Context(), sql, args...).Scan(dest...)
+		return tx.QueryRow(ctx, sql, args...).Scan(dest...)
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update project artifact")
 		return
+	}
+
+	// 反向 lifecycle 回写与档案 UPDATE 同事务：任一失败整体回滚，不广播。
+	if placement.NeedsLifecycleUpdate {
+		lifecycle := ""
+		if placement.Lifecycle != nil {
+			lifecycle = *placement.Lifecycle
+		}
+		for _, bindingID := range externalBindingIDs {
+			if !bindingID.Valid {
+				continue
+			}
+			if err := applyLinkedAssetLifecycle(ctx, tx, bindingID, project.WorkspaceID, lifecycle); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to sync asset lifecycle")
+				return
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update project artifact")
+		return
+	}
+
+	if placement.NeedsLifecycleUpdate {
+		for _, bindingID := range externalBindingIDs {
+			if !bindingID.Valid {
+				continue
+			}
+			h.publish(protocol.EventAssetUpdated, uuidToString(project.WorkspaceID), "member", userID,
+				map[string]any{"binding_id": uuidToString(bindingID), "project_id": uuidToString(project.ID)})
+		}
 	}
 	writeJSON(w, http.StatusOK, projectArtifactToResponse(updated))
 }
@@ -1397,8 +1573,8 @@ func (h *Handler) CreateProjectArtifact(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "scope must be one of shared/project/requirement")
 		return
 	}
-	if req.Stage != nil && (*req.Stage < 1 || *req.Stage > 4) {
-		writeError(w, http.StatusBadRequest, "stage must be within 1..4")
+	if req.Stage != nil && (*req.Stage < 1 || *req.Stage > 5) {
+		writeError(w, http.StatusBadRequest, "stage must be within 1..5")
 		return
 	}
 	if req.Version < 1 {
@@ -1489,6 +1665,19 @@ func (h *Handler) DeleteProjectArtifact(w http.ResponseWriter, r *http.Request) 
 	}
 	row, ok := h.loadProjectArtifact(w, r, project)
 	if !ok {
+		return
+	}
+	// 资产关联档案不得单侧删除（plan §4.4）：删资产走 binding 软删联动，
+	// 避免残余 binding 引用已删档案。
+	if row.AssetBindingID.Valid || row.Source == "asset" {
+		writeErrorCode(w, http.StatusConflict, "asset_linked", "artifact is linked to an asset binding; delete it through the asset side")
+		return
+	}
+	if extIDs, err := findExternalBindingIDsForArtifact(r.Context(), h.DB, row.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve asset link")
+		return
+	} else if len(extIDs) > 0 {
+		writeErrorCode(w, http.StatusConflict, "asset_linked", "artifact is imported as an asset; unlink the asset binding first")
 		return
 	}
 	_, err := h.DB.Exec(r.Context(), `

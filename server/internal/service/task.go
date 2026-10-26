@@ -71,6 +71,11 @@ type TaskService struct {
 	// exactly as before. Wired in router.go after composiointeg.NewService
 	// succeeds; the concrete type is *composio.Service.
 	Composio ComposioOverlayBuilder
+	// AssetMCP 是第二个 per-task MCP overlay 源（plan 101 P2）：把 multica 自有的
+	// 只读资产管理 MCP 门面注入到 mcpServers，让执行 agent 按需拉取资产内容而非批量
+	// 加载。同一 ComposioOverlayBuilder 接缝，仅另名区分语义。Optional：nil 或未配置
+	// 服务 URL 时返回零 overlay，行为与未接入前逐字一致。受 workflow_asset_gate flag 门控。
+	AssetMCP ComposioOverlayBuilder
 	// QuickActions generates chat follow-up suggestions through the
 	// server-internal LLM layer. Optional: nil (or a disabled client) turns the
 	// whole feature off — no pending marker, no pills — which is the expected
@@ -367,31 +372,50 @@ type runtimeMCPOverlayData struct {
 // Enqueue paths call this BEFORE inserting the queued row so the daemon cannot
 // claim a task during the network round-trip to Composio and miss the overlay.
 func (s *TaskService) buildRuntimeMCPOverlay(ctx context.Context, originatorUserID pgtype.UUID, agent db.Agent) runtimeMCPOverlayData {
-	if s == nil || s.Composio == nil {
+	if s == nil {
 		return runtimeMCPOverlayData{}
 	}
-	if !featureflags.ComposioMCPAppsEnabled(ctx, s.FeatureFlags) {
+	var overlay json.RawMessage
+	var apps []runtimeapps.ConnectedApp
+	// 源一：Composio 连接应用（既有路径，逐字保留）。
+	if s.Composio != nil && featureflags.ComposioMCPAppsEnabled(ctx, s.FeatureFlags) {
+		result, err := s.Composio.BuildTaskOverlay(ctx, originatorUserID, agent)
+		if err != nil {
+			slog.Warn("runtime mcp overlay: BuildTaskOverlay failed; task will run without composio overlay",
+				"originator_user_id", util.UUIDToString(originatorUserID),
+				"agent_id", util.UUIDToString(agent.ID),
+				"error", err,
+			)
+		} else if len(result.MCPOverlay) > 0 {
+			overlay = result.MCPOverlay
+			apps = append(apps, result.ConnectedApps...)
+		} else {
+			slog.Debug("runtime mcp overlay: no composio overlay for task",
+				"originator_user_id", util.UUIDToString(originatorUserID),
+				"agent_id", util.UUIDToString(agent.ID),
+			)
+		}
+	}
+	// 源二：multica 只读资产 MCP 门面（plan 101 P2）。flag 关闭或未配 URL 时零影响。
+	if s.AssetMCP != nil && featureflags.WorkflowAssetGateEnabled(ctx, s.FeatureFlags) {
+		result, err := s.AssetMCP.BuildTaskOverlay(ctx, originatorUserID, agent)
+		if err != nil {
+			slog.Warn("runtime mcp overlay: asset MCP overlay build failed; task proceeds without it",
+				"originator_user_id", util.UUIDToString(originatorUserID),
+				"agent_id", util.UUIDToString(agent.ID),
+				"error", err,
+			)
+		} else if len(result.MCPOverlay) > 0 {
+			overlay = mergeMCPServerOverlays(overlay, result.MCPOverlay)
+			apps = append(apps, result.ConnectedApps...)
+		}
+	}
+	if len(overlay) == 0 {
 		return runtimeMCPOverlayData{}
 	}
-	result, err := s.Composio.BuildTaskOverlay(ctx, originatorUserID, agent)
-	if err != nil {
-		slog.Warn("runtime mcp overlay: BuildTaskOverlay failed; task will run without composio overlay",
-			"originator_user_id", util.UUIDToString(originatorUserID),
-			"agent_id", util.UUIDToString(agent.ID),
-			"error", err,
-		)
-		return runtimeMCPOverlayData{}
-	}
-	if len(result.MCPOverlay) == 0 {
-		slog.Debug("runtime mcp overlay: no composio overlay for task",
-			"originator_user_id", util.UUIDToString(originatorUserID),
-			"agent_id", util.UUIDToString(agent.ID),
-		)
-		return runtimeMCPOverlayData{}
-	}
-	data := runtimeMCPOverlayData{Overlay: result.MCPOverlay}
-	if len(result.ConnectedApps) > 0 {
-		raw, err := json.Marshal(result.ConnectedApps)
+	data := runtimeMCPOverlayData{Overlay: overlay}
+	if len(apps) > 0 {
+		raw, err := json.Marshal(apps)
 		if err != nil {
 			slog.Warn("runtime mcp overlay: marshal connected app metadata failed",
 				"originator_user_id", util.UUIDToString(originatorUserID),
@@ -403,6 +427,38 @@ func (s *TaskService) buildRuntimeMCPOverlay(ctx context.Context, originatorUser
 		data.ConnectedApps = raw
 	}
 	return data
+}
+
+// mergeMCPServerOverlays 把两个 {"mcpServers":{...}} 形态的 overlay 取并集（base 优先，
+// 同名 key 不被 extra 覆盖，保证 Composio 既有语义不变）。任一侧为空则直接返回另一侧；
+// 解析失败时保守返回 base（不丢既有 overlay）。
+func mergeMCPServerOverlays(base, extra json.RawMessage) json.RawMessage {
+	if len(base) == 0 {
+		return extra
+	}
+	if len(extra) == 0 {
+		return base
+	}
+	var b, e struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if json.Unmarshal(base, &b) != nil || json.Unmarshal(extra, &e) != nil {
+		return base
+	}
+	merged := make(map[string]json.RawMessage, len(b.MCPServers)+len(e.MCPServers))
+	for k, v := range e.MCPServers {
+		merged[k] = v
+	}
+	for k, v := range b.MCPServers { // base(Composio) 后写，同名优先
+		merged[k] = v
+	}
+	raw, err := json.Marshal(struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}{MCPServers: merged})
+	if err != nil {
+		return base
+	}
+	return raw
 }
 
 // resolveOriginatorFromTriggerComment returns the top-of-chain HUMAN user
@@ -2318,6 +2374,20 @@ func (s *TaskService) SendDirectChatMessage(
 	uploaderType string,
 	uploaderID pgtype.UUID,
 ) (*DirectChatSendResult, error) {
+	return s.SendDirectChatMessageWithResources(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil)
+}
+
+func (s *TaskService) SendDirectChatMessageWithResources(
+	ctx context.Context,
+	session db.ChatSession,
+	agent db.Agent,
+	initiatorUserID pgtype.UUID,
+	content string,
+	attachmentIDs []pgtype.UUID,
+	uploaderType string,
+	uploaderID pgtype.UUID,
+	resourceRefs []protocol.ChatResourceRef,
+) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
 	overlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
@@ -2444,6 +2514,9 @@ func (s *TaskService) SendDirectChatMessage(
 			return fmt.Errorf("create user chat message: %w", err)
 		}
 		out.Message = msg
+		if err := persistChatResourceRefs(ctx, qtx, msg.ID, resourceRefs); err != nil {
+			return fmt.Errorf("link direct chat resources: %w", err)
+		}
 
 		if len(attachmentIDs) > 0 {
 			bound, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{
@@ -3059,9 +3132,16 @@ func chatInputOwnerID(task db.AgentTaskQueue) pgtype.UUID {
 // same transaction, while cancellation commits that status in its prior
 // transaction (#5219). Otherwise the head query still selects the settling task
 // and reanchoring its successor is a no-op.
-func createAssistantChatMessage(ctx context.Context, qtx *db.Queries, params db.CreateChatMessageParams) (db.ChatMessage, error) {
+func createAssistantChatMessage(ctx context.Context, qtx *db.Queries, params db.CreateChatMessageParams, agentID pgtype.UUID) (db.ChatMessage, error) {
 	if params.Role != "assistant" {
 		return db.ChatMessage{}, fmt.Errorf("create assistant chat message: invalid role %q", params.Role)
+	}
+	// G-08（plan 02）：每条 assistant 消息携带产出它的 Agent 身份
+	// （author_type='agent', author_id=task.agent_id）。群历史/输入快照的作者前缀
+	// 与前端归属渲染都以此为唯一真相源；调用方已显式设置时不覆盖。
+	if !params.AuthorType.Valid {
+		params.AuthorType = pgtype.Text{String: "agent", Valid: true}
+		params.AuthorID = agentID
 	}
 	row, err := qtx.CreateChatMessage(ctx, params)
 	if err != nil {
@@ -3098,7 +3178,7 @@ func (s *TaskService) settleQueuedChatInput(
 			Content:       "Stopped.",
 			TaskID:        task.ID,
 			ElapsedMs:     computeChatElapsedMs(task),
-		}); err != nil {
+		}, task.AgentID); err != nil {
 			return nil, fmt.Errorf("create cancelled queued chat message: %w", err)
 		}
 		return nil, nil
@@ -3246,7 +3326,7 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 			Content:       "Stopped.",
 			TaskID:        task.ID,
 			ElapsedMs:     computeChatElapsedMs(task),
-		}); err != nil {
+		}, task.AgentID); err != nil {
 			return fmt.Errorf("create cancelled chat message: %w", err)
 		}
 		return nil
@@ -3404,7 +3484,7 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 			Content:       "Stopped.",
 			TaskID:        claimed.ID,
 			ElapsedMs:     computeChatElapsedMs(claimed),
-		})
+		}, claimed.AgentID)
 		if err != nil {
 			return fmt.Errorf("create cancelled chat message: %w", err)
 		}
@@ -4657,7 +4737,7 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 		params.Content = chatNoResponseFallback
 		params.MessageKind = pgtype.Text{String: protocol.ChatMessageKindNoResponse, Valid: true}
 	}
-	row, err := createAssistantChatMessage(ctx, qtx, params)
+	row, err := createAssistantChatMessage(ctx, qtx, params, task.AgentID)
 	if err != nil {
 		return nil, err
 	}
@@ -5004,7 +5084,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				TaskID:        t.ID,
 				FailureReason: pgtype.Text{String: failureReason, Valid: failureReason != ""},
 				ElapsedMs:     computeChatElapsedMs(t),
-			}); err != nil {
+			}, t.AgentID); err != nil {
 				return fmt.Errorf("write chat failure outcome: %w", err)
 			}
 		}
@@ -6678,7 +6758,7 @@ func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.
 	if err != nil {
 		return nil, nil, err
 	}
-	skills = append(skills, s.BuiltinSkills()...)
+	skills = append(skills, s.BuiltinSkillsFor(skills)...)
 	bundles, refs := BuildAgentSkillBundles(skills)
 	return bundles, refs, nil
 }
@@ -7003,13 +7083,20 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	if workspaceID == "" {
 		return
 	}
-	s.Bus.Publish(events.Event{
+	e := events.Event{
 		Type:        protocol.EventTaskDispatch,
 		WorkspaceID: workspaceID,
 		ActorType:   "system",
 		ActorID:     "",
 		Payload:     payload,
-	})
+	}
+	if task.ChatSessionID.Valid {
+		e.ChatSessionID = util.UUIDToString(task.ChatSessionID)
+		if !s.applyChatAudience(ctx, &e, e.ChatSessionID) {
+			return
+		}
+	}
+	s.Bus.Publish(e)
 }
 
 // taskEvent builds the shared task-lifecycle event contract. Scope hints are
@@ -7048,7 +7135,11 @@ func (s *TaskService) publishTaskEvent(eventType, workspaceID string, task db.Ag
 	if workspaceID == "" {
 		return
 	}
-	s.Bus.Publish(taskEvent(eventType, workspaceID, task, extra...))
+	e := taskEvent(eventType, workspaceID, task, extra...)
+	if task.ChatSessionID.Valid && !s.applyChatAudience(context.Background(), &e, e.ChatSessionID) {
+		return
+	}
+	s.Bus.Publish(e)
 }
 
 func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, task db.AgentTaskQueue, extra ...map[string]any) {
@@ -7137,15 +7228,34 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 		if msg.ElapsedMs.Valid {
 			payload.ElapsedMs = msg.ElapsedMs.Int64
 		}
+		payload.AuthorType = msg.AuthorType
+		if msg.AuthorID.Valid {
+			payload.AuthorID = util.UUIDToString(msg.AuthorID)
+		}
 	}
-	s.Bus.Publish(events.Event{
+	if payload.AuthorType == "" && task.AgentID.Valid {
+		payload.AuthorType = "agent"
+		payload.AuthorID = util.UUIDToString(task.AgentID)
+	}
+	e := events.Event{
 		Type:          protocol.EventChatDone,
 		WorkspaceID:   workspaceID,
 		ActorType:     "system",
 		ActorID:       "",
 		ChatSessionID: util.UUIDToString(task.ChatSessionID),
 		Payload:       payload,
-	})
+	}
+	if task.ChatSessionID.Valid {
+		cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID)
+		if err == nil {
+			payload.Kind = cs.Kind
+			e.Payload = payload
+			if !s.applyChatAudienceSession(ctx, &e, cs) {
+				return
+			}
+		}
+	}
+	s.Bus.Publish(e)
 }
 
 // broadcastIssueUpdated publishes the issue:updated event the frontend's
@@ -7373,6 +7483,7 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
 		"project_id":      util.UUIDToPtr(issue.ProjectID),
 		"module_id":       util.UUIDToPtr(issue.ModuleID),
+		"sprint_id":       util.UUIDToPtr(issue.SprintID),
 		"avoid_conflict":  issue.AvoidConflict,
 		"position":        issue.Position,
 		"stage":           util.Int4ToPtr(issue.Stage),

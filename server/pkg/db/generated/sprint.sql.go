@@ -267,7 +267,8 @@ func (q *Queries) ListSprintIssues(ctx context.Context, arg ListSprintIssuesPara
 
 const listSprints = `-- name: ListSprints :many
 
-SELECT s.id, s.workspace_id, s.project_id, s.name, s.goal, s.status, s.start_date, s.end_date, s.capacity, s.created_by_type, s.created_by_id, s.started_at, s.completed_at, s.created_at, s.updated_at, COUNT(i.id)::int AS issue_count
+SELECT s.id, s.workspace_id, s.project_id, s.name, s.goal, s.status, s.start_date, s.end_date, s.capacity, s.created_by_type, s.created_by_id, s.started_at, s.completed_at, s.created_at, s.updated_at, COUNT(i.id)::int AS issue_count,
+  COUNT(i.id) FILTER (WHERE issue_effective_status(i.workspace_id, i.status) = 'done')::int AS done_count
 FROM sprint s
 LEFT JOIN issue i ON i.sprint_id = s.id
 WHERE s.workspace_id = $1
@@ -300,12 +301,15 @@ type ListSprintsRow struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	IssueCount    int32              `json:"issue_count"`
+	DoneCount     int32              `json:"done_count"`
 }
 
 // 迭代（sprint）查询。CoCo 对标 02_迭代模块.md §B。
 // 状态迁移（start/complete/reopen）全部走 CAS（WHERE 带期望状态），
 // 0 行 = pgx.ErrNoRows，由 handler 转 409，杜绝并发重复启停。
-// 附带每个迭代已纳入的 issue 条数（迭代列表的「任务数」列）。
+// 附带每个迭代已纳入的 issue 条数（迭代列表的「任务数」列）与已完成条数
+// （侧边栏进度环 done/total）。派生口径与 GetSprintProgress 一致：走
+// issue_effective_status 归一自定义状态，不走字面量 'done' 比较。
 func (q *Queries) ListSprints(ctx context.Context, arg ListSprintsParams) ([]ListSprintsRow, error) {
 	rows, err := q.db.Query(ctx, listSprints, arg.WorkspaceID, arg.ProjectID, arg.Status)
 	if err != nil {
@@ -332,6 +336,7 @@ func (q *Queries) ListSprints(ctx context.Context, arg ListSprintsParams) ([]Lis
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.IssueCount,
+			&i.DoneCount,
 		); err != nil {
 			return nil, err
 		}

@@ -262,6 +262,69 @@ func (h *Handler) resolveRepairAssignee(ctx context.Context, qtx *db.Queries, re
 	return req.AssigneeType.String, req.AssigneeID
 }
 
+// updateAcceptanceCriteriaRequest 是「流程把控」验收面板逐条勾选回写的 body（plan 20261025 §C-1）。
+// checked 为当前已勾选的验收条文全文集合（顺序不敏感，前端按条文文本比对）。
+type updateAcceptanceCriteriaRequest struct {
+	Checked []string `json:"checked"`
+}
+
+// UpdateAcceptanceCriteria 处理 POST /api/issues/{id}/acceptance/criteria。
+//
+// 把勾选集写进 issue.acceptance_spec 的 `checked_criteria` 键——纯追加：既有的
+// readAcceptanceSpec / acceptance-tab 只读 assertions/cases，忽略未知键，故不影响
+// 裁决 pass/fail 与 acceptance_round 的既有事实源（单一验收写路径不变式）。
+//
+// 之所以走原生 SQL 而非扩展通用 UpdateIssue：acceptance_spec 是 jsonb 列，但既有
+// issue 更新查询未携带它，动那条被全站复用的 CTE + sqlc 全量再生成回归面过大；这里
+// 只对单行做 jsonb_set，blast radius 限于本端点。子任务不承载验收语义（与 verdict 同守卫）。
+func (h *Handler) UpdateAcceptanceCriteria(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	if issue.ParentIssueID.Valid {
+		writeError(w, http.StatusConflict, "not_a_top_level_requirement")
+		return
+	}
+	var body updateAcceptanceCriteriaRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.Checked == nil {
+		body.Checked = []string{}
+	}
+	checkedJSON, err := json.Marshal(body.Checked)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid checked list")
+		return
+	}
+	ctx := r.Context()
+	if _, err := h.DB.Exec(ctx, `
+		UPDATE issue
+		SET acceptance_spec = jsonb_set(
+		      CASE WHEN jsonb_typeof(acceptance_spec) = 'object'
+		           THEN acceptance_spec
+		           ELSE '{}'::jsonb END,
+		      '{checked_criteria}',
+		      $2::jsonb)
+		WHERE id = $1 AND workspace_id = $3`,
+		issue.ID, checkedJSON, issue.WorkspaceID); err != nil {
+		slog.Error("acceptance criteria check: update failed",
+			"error", err, "issue_id", uuidToString(issue.ID))
+		writeError(w, http.StatusInternalServerError, "failed to save acceptance criteria check")
+		return
+	}
+	refreshed, err := h.Queries.GetIssue(ctx, issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read updated acceptance criteria")
+		return
+	}
+	// 复用既有 EventIssueUpdated 广播，让看板/详情/流程把控面板实时收敛勾选态。
+	h.publishAcceptanceIssueUpdated(ctx, issue, refreshed, "acceptance_criteria_check")
+	writeJSON(w, http.StatusOK, map[string]any{"checked": body.Checked})
+}
+
 // postAcceptanceFailedComment 在验收失败终态时，于需求上发一条 system 评论请求人工仲裁。
 // author_type='system'、author_id=zero UUID（与 postChildDoneComment 同约定）。
 // best-effort：失败仅记录，不影响 verdict 响应（round 已落库，投影已判验收失败）。

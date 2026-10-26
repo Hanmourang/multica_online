@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -346,6 +347,8 @@ func TestClaimTaskByRuntime_ChatProjectContext(t *testing.T) {
 			ProjectID          string                `json:"project_id"`
 			ProjectTitle       string                `json:"project_title"`
 			ProjectDescription string                `json:"project_description"`
+			ProjectIndex       string                `json:"project_index"`
+			ChatMessage        string                `json:"chat_message"`
 			ProjectResources   []ProjectResourceData `json:"project_resources"`
 			Repos              []RepoData            `json:"repos"`
 		} `json:"task"`
@@ -370,5 +373,11 @@ func TestClaimTaskByRuntime_ChatProjectContext(t *testing.T) {
 	}
 	if len(response.Task.Repos) != 1 || response.Task.Repos[0].URL != projectRepoURL || response.Task.Repos[0].Ref != projectRepoRef {
 		t.Fatalf("repos = %+v, want project repo only", response.Task.Repos)
+	}
+	if !strings.Contains(response.Task.ProjectIndex, "Project index for \"Chat claim project\"") ||
+		!strings.Contains(response.Task.ProjectIndex, "github_repo "+projectRepoURL) ||
+		!strings.Contains(response.Task.ChatMessage, response.Task.ProjectIndex) ||
+		!strings.Contains(response.Task.ChatMessage, "Plan the project release") {
+		t.Fatalf("project index was not attached to the chat prompt:\nindex=%q\nmessage=%q", response.Task.ProjectIndex, response.Task.ChatMessage)
 	}
 }

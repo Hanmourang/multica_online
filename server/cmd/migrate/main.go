@@ -298,6 +298,9 @@ var concurrentIndexCleanups = map[string]string{
 	"443_issue_project_status_index":                            "idx_issue_project_status",
 	"445_comment_delegated_failure_unsettled_index":             "idx_comment_delegated_failure_unsettled",
 	"446_issue_properties_bigm_index":                           "idx_issue_properties_bigm",
+	"480_chat_message_resource_ref_position":                    "chat_resource_message_position_uidx",
+	"481_chat_message_resource_ref_dedup":                       "chat_resource_message_ref_uidx",
+	"482_chat_message_resource_ref_target":                      "chat_resource_target_idx",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

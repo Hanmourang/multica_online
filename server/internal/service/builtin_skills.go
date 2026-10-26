@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"path"
 	"strings"
+
+	skillmd "github.com/multica-ai/multica/server/internal/skill"
 )
 
 //go:embed builtin_skills
@@ -23,6 +25,24 @@ const builtinSkillsRoot = "builtin_skills"
 // derives the skill directory from AgentSkillData.Name).
 func (s *TaskService) BuiltinSkills() []AgentSkillData {
 	return loadBuiltinSkills()
+}
+
+// BuiltinSkillsFor returns the embedded skills an agent should still receive
+// after its workspace skills are loaded. A workspace skill with the same name
+// replaces the embedded copy, so the agent does not run the skill twice.
+func (s *TaskService) BuiltinSkillsFor(assigned []AgentSkillData) []AgentSkillData {
+	names := make(map[string]struct{}, len(assigned))
+	for _, skill := range assigned {
+		names[skill.Name] = struct{}{}
+	}
+	var out []AgentSkillData
+	for _, builtin := range s.BuiltinSkills() {
+		if _, ok := names[builtin.Name]; ok {
+			continue
+		}
+		out = append(out, builtin)
+	}
+	return out
 }
 
 func loadBuiltinSkills() []AgentSkillData {
@@ -50,7 +70,8 @@ func loadBuiltinSkill(name string) (AgentSkillData, bool) {
 		// than ship an empty skill.
 		return AgentSkillData{}, false
 	}
-	skill := AgentSkillData{Name: name, Content: string(content)}
+	_, description := skillmd.ParseSkillFrontmatter(string(content))
+	skill := AgentSkillData{Name: name, Description: description, Content: string(content)}
 	// Any other file in the directory becomes a supporting file, preserving
 	// its relative path so subdirectories (e.g. rules/styling.md) survive.
 	_ = fs.WalkDir(builtinSkillsFS, dir, func(p string, d fs.DirEntry, walkErr error) error {

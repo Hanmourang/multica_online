@@ -74,6 +74,9 @@ type IssueResponse struct {
 	// AvoidConflict 勾选后与其他模块的任务互斥执行（spec §5）。
 	ModuleID      *string `json:"module_id"`
 	AvoidConflict bool    `json:"avoid_conflict"`
+	// SprintID 归属的迭代（migration 470，CoCo 对标 02_迭代模块）；
+	// null = backlog（未纳入任何迭代）。
+	SprintID *string `json:"sprint_id"`
 	// Stage groups sub-issues under the same parent into ordered barrier
 	// groups (null = unstaged). See issue_child_done.go for how a closed
 	// stage gates the child-done -> parent wake.
@@ -347,6 +350,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID:            uuidToPtr(i.ParentIssueID),
 		ProjectID:                uuidToPtr(i.ProjectID),
 		ModuleID:                 uuidToPtr(i.ModuleID),
+		SprintID:                 uuidToPtr(i.SprintID),
 		AvoidConflict:            i.AvoidConflict,
 		Position:                 i.Position,
 		Stage:                    int4ToPtr(i.Stage),
@@ -398,6 +402,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		ParentIssueID:            uuidToPtr(i.ParentIssueID),
 		ProjectID:                uuidToPtr(i.ProjectID),
 		ModuleID:                 uuidToPtr(i.ModuleID),
+		SprintID:                 uuidToPtr(i.SprintID),
 		AvoidConflict:            i.AvoidConflict,
 		Position:                 i.Position,
 		Stage:                    int4ToPtr(i.Stage),
@@ -483,6 +488,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		ParentIssueID:            uuidToPtr(i.ParentIssueID),
 		ProjectID:                uuidToPtr(i.ProjectID),
 		ModuleID:                 uuidToPtr(i.ModuleID),
+		SprintID:                 uuidToPtr(i.SprintID),
 		AvoidConflict:            i.AvoidConflict,
 		Position:                 i.Position,
 		Stage:                    int4ToPtr(i.Stage),
@@ -658,11 +664,13 @@ func splitSearchTerms(q string) []string {
 	return terms
 }
 
-// identifierNumberRe matches patterns like "MUL-123" or "ABC-45".
-var identifierNumberRe = regexp.MustCompile(`(?i)^[a-z]+-(\d+)$`)
+// identifierNumberRe matches a displayed issue id: legacy "MUL-123", or the
+// current kind ids "task_13" and "req_7". The number is what search can
+// match; the prefix is not stored on the issue row.
+var identifierNumberRe = regexp.MustCompile(`(?i)^[a-z]+[_-](\d+)$`)
 
 // parseQueryNumber extracts an issue number from the query if it looks like
-// an identifier (e.g. "MUL-123") or a bare number (e.g. "123").
+// an identifier (e.g. "MUL-123", "task_13", "req_7") or a bare number (e.g. "123").
 func parseQueryNumber(q string) (int, bool) {
 	q = strings.TrimSpace(q)
 	// Check for identifier pattern like "MUL-123"
@@ -691,6 +699,10 @@ type searchResult struct {
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 // LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
 func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string) (string, []any) {
+	return buildSearchQueryWithKind(phrase, terms, queryNum, hasNum, includeClosed, terminalStatusKeys, "")
+}
+
+func buildSearchQueryWithKind(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string, kind string) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
@@ -776,6 +788,9 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		// searchable instead of disappearing from the default result set.
 		terminalStatusesParam := nextArg(terminalStatusKeys)
 		whereClause += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
+	}
+	if kindFilter, _ := appendIssueKindFilter(nil, kind); len(kindFilter) > 0 {
+		whereClause += " AND " + kindFilter[0]
 	}
 
 	// --- ORDER BY clause ---
@@ -997,7 +1012,12 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		terminalStatusKeys = resolvedKeys
 	}
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys)
+	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
+	if _, valid := appendIssueKindFilter(nil, kind); !valid {
+		writeError(w, http.StatusBadRequest, "invalid kind, expected requirement|task")
+		return
+	}
+	sqlQuery, args := buildSearchQueryWithKind(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys, kind)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -1130,7 +1150,7 @@ func (h *Handler) QueryIssues(w http.ResponseWriter, r *http.Request) {
 const requirementCalendarColumns = `i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
 	   i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round`
 
-const requirementListExtraColumns = `i.module_id, i.avoid_conflict,
+const requirementListExtraColumns = `i.module_id, i.avoid_conflict, i.sprint_id,
 	   ` + requirementCalendarColumns
 
 const requirementProgressJoin = `LEFT JOIN LATERAL (
@@ -1231,6 +1251,17 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		projectFilter = id
+	}
+	// sprint_id 按迭代归属过滤（CoCo 对标 02_迭代模块.md §E2：迭代内 issue 列表
+	// 复用本接口，不新造列表端点）。仅支持显式归属值；backlog（IS NULL）查询由
+	// 前端在 project 级结果集内客户端过滤 sprint_id==null（前端 types 透传）。
+	var sprintFilter pgtype.UUID
+	if s := r.URL.Query().Get("sprint_id"); s != "" {
+		id, ok := parseUUIDOrBadRequest(w, s, "sprint_id")
+		if !ok {
+			return
+		}
+		sprintFilter = id
 	}
 	// involves_user_id widens the assignee filter to surface issues where the
 	// user is the indirect assignee (their owned agent, or a squad they belong
@@ -1476,6 +1507,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if projectFilter.Valid {
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectFilter)))
 	}
+	if sprintFilter.Valid {
+		where = append(where, fmt.Sprintf("i.sprint_id = %s::uuid", addArg(sprintFilter)))
+	}
 
 	// Table facets must be part of the server window. Applying them after
 	// LIMIT/OFFSET hides matches that live on later pages and makes `total`
@@ -1691,6 +1725,7 @@ LIMIT %s OFFSET %s`, requirementListExtraColumns, requirementStatusProjection, r
 			&row.Revision,
 			&row.ModuleID,
 			&row.AvoidConflict,
+			&row.SprintID,
 			&row.StartAt,
 			&row.Goal,
 			&row.RepoResourceID,
@@ -2956,8 +2991,12 @@ type CreateIssueRequest struct {
 	ProjectID     *string `json:"project_id"`
 	// ModuleID 归属的项目模块（必须属于 issue 所在项目）；AvoidConflict
 	// 勾选后与其他模块的任务互斥执行。创建时随字段一并写入。
-	ModuleID      *string  `json:"module_id"`
-	AvoidConflict *bool    `json:"avoid_conflict"`
+	ModuleID      *string `json:"module_id"`
+	AvoidConflict *bool   `json:"avoid_conflict"`
+	// SprintID 把新 issue 直接归入项目下的某个迭代（CoCo 对标 02 §F 反向
+	// 挂接）。租户/项目/completed 校验在 service.Create 事务内完成，
+	// 分别以 404 / 409 拒绝整个创建。
+	SprintID      *string  `json:"sprint_id"`
 	Stage         *int32   `json:"stage,omitempty"`
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
@@ -3105,6 +3144,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		moduleID = id
 	}
 	avoidConflict := req.AvoidConflict != nil && *req.AvoidConflict
+	var sprintID pgtype.UUID
+	if req.SprintID != nil && *req.SprintID != "" {
+		id, ok := parseUUIDOrBadRequest(w, *req.SprintID, "sprint_id")
+		if !ok {
+			return
+		}
+		sprintID = id
+	}
 	// Project existence and the final parent boundary check are enforced inside
 	// IssueService.Create atomically with the create. The handler preloads a
 	// supplied parent only because the assignee gate must bind any autopilot
@@ -3286,6 +3333,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		OriginID:       originID,
 		Stage:          ptrToInt4(req.Stage),
 		ModuleID:       moduleID,
+		SprintID:       sprintID,
 		AvoidConflict:  avoidConflict,
 		StartAt:        startAt,
 		Goal:           goal,
@@ -3341,6 +3389,15 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "module must belong to the issue's project")
 		return
 	}
+	if errors.Is(err, service.ErrSprintNotFound) {
+		// 不存在/跨租户/项目错配统一 404，与 loadSprint 的不泄露语义一致。
+		writeError(w, http.StatusNotFound, "sprint not found")
+		return
+	}
+	if errors.Is(err, service.ErrSprintCompleted) {
+		writeError(w, http.StatusConflict, "cannot attach issue to a completed sprint")
+		return
+	}
 	if errors.Is(err, service.ErrIssueLabelNotFound) {
 		writeError(w, http.StatusBadRequest, "one or more labels not found in this workspace")
 		return
@@ -3361,6 +3418,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	issue := res.Issue
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
+
+	// 新建即归入迭代时补发迭代侧事件：迭代列表的 issue_count 由
+	// issue.sprint_id JOIN 派生，issue:created 只刷新 issue 缓存，不补这一发
+	// 其他端的迭代进度/成员面板会失真（载荷形状对齐 sprint.go）。
+	if issue.SprintID.Valid {
+		h.publish(protocol.EventSprintIssuesChanged, workspaceID, creatorType, actualCreatorID, map[string]any{
+			"sprint_id": uuidToString(issue.SprintID), "project_id": uuidToString(issue.ProjectID),
+			"action": "assigned", "issue_ids": 1,
+		})
+	}
 
 	resp := issueToResponse(issue, prefix)
 	fillCreated(&resp)
@@ -3403,12 +3470,16 @@ type UpdateIssueRequest struct {
 	DecomposeMode  *string `json:"decompose_mode"`
 	AutoTrigger    *bool   `json:"auto_trigger"`
 	ParentIssueID  *string `json:"parent_issue_id"`
-	ProjectID     *string `json:"project_id"`
+	ProjectID      *string `json:"project_id"`
 	// ModuleID：显式 null = 清空模块；省略 = 不动。AvoidConflict 同理
 	//（省略保持现值）。模块必须属于 issue 所在项目，违反 409。
 	ModuleID      *string `json:"module_id"`
 	AvoidConflict *bool   `json:"avoid_conflict"`
-	Stage         *int32  `json:"stage"`
+	// SprintID：显式 null = 移出迭代（回 backlog）；省略 = 保持现值。
+	// 迭代必须属于 issue 的最终项目（否则 404，与 loadSprint 同款不泄露
+	// 语义）；completed 迭代冻结，不接受新增归属（否则 409）。
+	SprintID *string `json:"sprint_id"`
+	Stage    *int32  `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -3655,6 +3726,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID:     prevIssue.ParentIssueID,
 		ProjectID:         prevIssue.ProjectID,
 		ModuleID:          prevIssue.ModuleID,
+		SprintID:          prevIssue.SprintID,
 		Stage:             prevIssue.Stage,
 		StartAt:           prevIssue.StartAt,
 		Goal:              prevIssue.Goal,
@@ -3894,6 +3966,40 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ModuleID = pgtype.UUID{Valid: false}
 		}
 	}
+	if _, ok := rawFields["sprint_id"]; ok {
+		if req.SprintID != nil && *req.SprintID != "" {
+			sprintUUID, ok := parseUUIDOrBadRequest(w, *req.SprintID, "sprint_id")
+			if !ok {
+				return
+			}
+			// 不存在/跨租户/项目错配统一 404（与 loadSprint 同款不泄露语义）；
+			// completed 迭代是冻结scope，拒绝新入成员（409，对齐 AssignSprintIssues）。
+			sprint, err := h.Queries.GetSprint(r.Context(), db.GetSprintParams{
+				ID:          sprintUUID,
+				WorkspaceID: prevIssue.WorkspaceID,
+			})
+			if err != nil || !params.ProjectID.Valid || sprint.ProjectID != params.ProjectID {
+				writeError(w, http.StatusNotFound, "sprint not found")
+				return
+			}
+			if sprint.Status == "completed" {
+				writeError(w, http.StatusConflict, "cannot attach issue to a completed sprint")
+				return
+			}
+			params.SprintID = sprintUUID
+		} else {
+			params.SprintID = pgtype.UUID{Valid: false} // explicit null = 移出迭代（回 backlog）
+		}
+	} else if _, touched := rawFields["project_id"]; touched && prevIssue.SprintID.Valid {
+		// 换项目而未显式处理迭代：迭代是项目作用域，跨项目后自动清空，
+		// 保持「迭代属于 issue 所在项目」不变式（与上方模块同款）。
+		if sprint, err := h.Queries.GetSprint(r.Context(), db.GetSprintParams{
+			ID:          prevIssue.SprintID,
+			WorkspaceID: prevIssue.WorkspaceID,
+		}); err != nil || !params.ProjectID.Valid || sprint.ProjectID != params.ProjectID {
+			params.SprintID = pgtype.UUID{Valid: false}
+		}
+	}
 	if _, ok := rawFields["avoid_conflict"]; ok && req.AvoidConflict != nil {
 		params.AvoidConflict = pgtype.Bool{Bool: *req.AvoidConflict, Valid: true}
 	}
@@ -4016,6 +4122,24 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
 	})
+	// 迭代归属变更要同步广播到迭代侧：迭代列表的 issue_count 由
+	// issue.sprint_id JOIN 派生，只发 issue:updated 会让其他端迭代 TAB 的
+	// 进度/成员面板失真。新挂与移出（含换迭代、换项目自动清空）各发一发，
+	// 载荷形状对齐 sprint.go 的成员变更事件。
+	if issue.SprintID != prevIssue.SprintID {
+		if issue.SprintID.Valid {
+			h.publish(protocol.EventSprintIssuesChanged, workspaceID, actorType, actorID, map[string]any{
+				"sprint_id": uuidToString(issue.SprintID), "project_id": uuidToString(issue.ProjectID),
+				"action": "assigned", "issue_ids": 1,
+			})
+		}
+		if prevIssue.SprintID.Valid {
+			h.publish(protocol.EventSprintIssuesChanged, workspaceID, actorType, actorID, map[string]any{
+				"sprint_id": uuidToString(prevIssue.SprintID), "project_id": uuidToString(prevIssue.ProjectID),
+				"action": "removed", "issue_ids": 1,
+			})
+		}
+	}
 	if attachmentsChanged {
 		// The full owner snapshot must be admitted before an auxiliary event at
 		// the same revision. Otherwise clients advance only the revision here and

@@ -58,6 +58,9 @@ func TestBuiltinSkillsConformToTemplate(t *testing.T) {
 			if strings.TrimSpace(fm["name"]) == "" {
 				t.Errorf("frontmatter is missing a non-empty name")
 			}
+			if strings.TrimSpace(skill.Description) == "" {
+				t.Errorf("description was not copied out of frontmatter")
+			}
 			desc := strings.TrimSpace(fm["description"])
 			if desc == "" {
 				t.Errorf("frontmatter is missing a description (the only thing an agent sees when deciding to load the skill)")

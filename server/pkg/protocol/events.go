@@ -90,6 +90,10 @@ const (
 	EventChatSessionRead     = "chat:session_read"
 	EventChatSessionDeleted  = "chat:session_deleted"
 	EventChatSessionUpdated  = "chat:session_updated"
+	// EventChatParticipantsChanged signals a DM/Group membership change.
+	// Body-free by design: the only variant a removed member may receive is
+	// removed=true so they can clear local caches, never message content.
+	EventChatParticipantsChanged = "chat:participants_changed"
 
 	// Project events
 	EventProjectCreated         = "project:created"
@@ -110,6 +114,8 @@ const (
 	// query tree (see core/assets/ws-updaters.ts).
 	EventAssetBound   = "asset:bound"
 	EventAssetUnbound = "asset:unbound"
+	// EventAssetUpdated 携 473 meta 变更（阶段/角色/标签/需求关联）。
+	EventAssetUpdated = "asset:updated"
 
 	// Label events
 	EventLabelCreated       = "label:created"
@@ -157,6 +163,13 @@ const (
 	EventWorkflowTemplateChanged = "workflow:template_changed"
 	EventWorkflowInstanceState   = "workflow:instance_state"
 	EventWorkflowGateDecided     = "workflow:gate_decided"
+
+	// Sprint events (CoCo 对标 plan 20261024 §00.6 / §02)。
+	// sprint:updated 覆盖 CRUD 与 planned→active→completed 状态迁移；
+	// sprint:issues_changed 在纳入/移出批量写 sprint_id 后广播，前端只
+	// invalidate React Query（另对每个受影响 issue 补发 issue:updated 同步看板）。
+	EventSprintUpdated       = "sprint:updated"
+	EventSprintIssuesChanged = "sprint:issues_changed"
 
 	// Squad events
 	EventSquadCreated = "squad:created"

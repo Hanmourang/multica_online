@@ -5,6 +5,52 @@ import (
 	"testing"
 )
 
+func TestBuildSearchQueryWithKindFiltersBeforePagination(t *testing.T) {
+	query, _ := buildSearchQueryWithKind("design", []string{"design"}, 0, false, true, nil, "requirement")
+	where := query[strings.Index(query, "FROM issue i"):strings.LastIndex(query, "ORDER BY")]
+	if !strings.Contains(where, requirementKindSQL) {
+		t.Fatalf("expected requirement kind predicate before pagination:\n%s", query)
+	}
+}
+
+func TestParseQueryNumberAcceptsKindIdentifiers(t *testing.T) {
+	cases := []struct {
+		q  string
+		n  int
+		ok bool
+	}{
+		{"task_13", 13, true},
+		{"REQ_7", 7, true},
+		{"MUL-42", 42, true},
+		{"13", 13, true},
+		{"task_", 0, false},
+		{"design", 0, false},
+	}
+	for _, tc := range cases {
+		n, ok := parseQueryNumber(tc.q)
+		if ok != tc.ok || n != tc.n {
+			t.Fatalf("parseQueryNumber(%q) = (%d, %v), want (%d, %v)", tc.q, n, ok, tc.n, tc.ok)
+		}
+	}
+	n, ok := parseQueryNumber("task_13")
+	if !ok {
+		t.Fatal("expected task_13 to carry a number")
+	}
+	query, args := buildSearchQueryWithKind("task_13", []string{"task_13"}, n, ok, true, nil, "task")
+	if !strings.Contains(query, "i.number =") {
+		t.Fatalf("kind identifier search did not match issue number:\n%s", query)
+	}
+	found := false
+	for _, arg := range args {
+		if v, isInt := arg.(int); isInt && v == 13 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected number arg 13, args=%v", args)
+	}
+}
+
 func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, []string{"done", "cancelled"})
 

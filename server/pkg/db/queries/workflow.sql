@@ -8,21 +8,53 @@ WHERE workspace_id = $1
   AND status <> 'archived'
 ORDER BY official DESC, updated_at DESC;
 
+-- name: ListWorkspaceWorkflowTemplates :many
+-- 工作区级画廊（侧边栏「工作流」入口）：跨项目列出本 workspace 全部模板。
+-- $2=status 精确过滤（NULL=全部且排除 archived）；$3=created_by（scope=mine 时传，
+-- NULL=不限）。已删除 tab 传 status='archived' 显式命中。
+SELECT * FROM workflow_template
+WHERE workspace_id = $1
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('status')::text IS NOT NULL OR status <> 'archived')
+  AND (sqlc.narg('created_by')::uuid IS NULL OR created_by_id = sqlc.narg('created_by'))
+ORDER BY official DESC, updated_at DESC;
+
+-- name: GetEnforcedWorkflowTemplate :one
+-- 需求触发门控：该项目是否有「已发布 + enforce」的强制工作流模板。无则 0 行
+-- （pgx.ErrNoRows → scheduler 视为无门控，零回归）。
+SELECT * FROM workflow_template
+WHERE project_id = $1 AND status = 'published' AND enforce = true
+LIMIT 1;
+
 -- name: GetWorkflowTemplate :one
 SELECT * FROM workflow_template
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateWorkflowTemplate :one
 INSERT INTO workflow_template (
-    workspace_id, project_id, name, description, status, nodes,
+    workspace_id, project_id, name, description, status, nodes, definition, enforce,
     created_by_type, created_by_id, source_project_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 ) RETURNING *;
 
 -- name: UpdateWorkflowTemplate :one
 UPDATE workflow_template
 SET name = $3, description = $4, nodes = $5, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
+-- name: UpdateWorkflowTemplateDefinition :one
+-- 编辑器保存 CoCo 嵌套原文：一并写入 definition + 展平后的 nodes（引擎编译产物）。
+-- enforce 不在这里改（走 SetWorkflowTemplateEnforce），archived 只读。
+UPDATE workflow_template
+SET name = $3, description = $4, nodes = $5, definition = $6, updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND status <> 'archived'
+RETURNING *;
+
+-- name: SetWorkflowTemplateEnforce :one
+UPDATE workflow_template
+SET enforce = $3, updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
@@ -93,6 +125,16 @@ SELECT * FROM workflow_instance
 WHERE workspace_id = $1 AND root_issue_id = $2
 ORDER BY created_at DESC;
 
+-- name: CountRequirementWorkflowGateCleared :one
+-- 需求首门是否已放行：该 issue 作为 root 的实例中，存在至少一个已 decided(exit)
+-- 的 human 门即视为「过首门」。scheduler 需求触发门控用（>0 = 已满足）。
+SELECT COUNT(*) FROM workflow_instance wi
+WHERE wi.workspace_id = $1 AND wi.root_issue_id = $2
+  AND EXISTS (
+    SELECT 1 FROM workflow_gate_run g
+    WHERE g.instance_id = wi.id AND g.state = 'decided' AND g.decision = 'exit'
+  );
+
 -- name: MarkWorkflowStarted :one
 -- 幂等锚点：仅 waiting → running（sweep 并发 / 手动启动共用 CAS）。
 UPDATE workflow_instance
@@ -121,9 +163,9 @@ LIMIT 100;
 -- name: CreateWorkflowStageRun :one
 INSERT INTO workflow_stage_run (
     instance_id, workspace_id, seq, node_id, name, mode, agent_id, prompt,
-    state, inputs, outputs
+    state, inputs, outputs, spec
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10, $11
 ) RETURNING *;
 
 -- name: GetWorkflowStageRun :one

@@ -41,6 +41,7 @@ func TestPlanArchiveInit_ContractTree(t *testing.T) {
 		"projects/demo/overview/product-design/PRD.md",
 		"projects/demo/overview/research/MRD.md",
 		"projects/demo/overview/research",
+		"projects/demo/overview/iteration",
 		"projects/demo/filing/patent",
 	}
 	for _, rel := range need {
@@ -144,6 +145,10 @@ func TestArchiveInitReq_WritesRequirement(t *testing.T) {
 		t.Fatalf("issue id not written: %s", got)
 	}
 	if _, err := os.Stat(filepath.Join(root, "requirements", "REQ-20260913-01", "s3-execution")); err != nil {
+		t.Fatal(err)
+	}
+	// 五阶段对齐 plan §4.7：需求初始化目录含 s5-iteration
+	if _, err := os.Stat(filepath.Join(root, "requirements", "REQ-20260913-01", "s5-iteration")); err != nil {
 		t.Fatal(err)
 	}
 }

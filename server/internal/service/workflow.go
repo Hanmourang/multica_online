@@ -49,6 +49,10 @@ type WorkflowNode struct {
 	GateDocTypes []string `json:"gate_doc_types"`
 	Inputs       []any    `json:"inputs,omitempty"`
 	Outputs      []any    `json:"outputs,omitempty"`
+	// Spec 是阶段执行期元数据快照（goal/criteria/inputTpl/outputTpl，plan 20261025 §B1），
+	// 由 Flatten 从 authoring 层编译而来，实例创建时落 workflow_stage_run.spec。
+	// 旧模板为 nil → nodes JSON 逐字不变（omitempty）。
+	Spec *StageSpec `json:"spec,omitempty"`
 }
 
 // ParseWorkflowNodes 反序列化节点图；非法 JSON 直接报错（handler 转 400）。
@@ -143,10 +147,18 @@ type WorkflowService struct {
 	Bus         *events.Bus
 	// FeatureFlags 只影响 sweep 空转开关；nil 视为未启用（sweep inert）。
 	FeatureFlags *featureflag.Service
+	// db 是资产准入/产物落地/blocked 复评所需的原生查询句柄（plan 20261025 §B3）。
+	// project_asset_binding 走"新表用原生 SQL"约定不经 sqlc，故由 TxStarter（实际是
+	// 连接池）类型断言取得；未满足断言（单测 fake）时为 nil，相关能力保守降级。
+	db rawDB
 }
 
 func NewWorkflowService(q *db.Queries, tx TxStarter, taskSvc *TaskService, bus *events.Bus, flags *featureflag.Service) *WorkflowService {
-	return &WorkflowService{Queries: q, TxStarter: tx, TaskService: taskSvc, Bus: bus, FeatureFlags: flags}
+	svc := &WorkflowService{Queries: q, TxStarter: tx, TaskService: taskSvc, Bus: bus, FeatureFlags: flags}
+	if handle, ok := tx.(rawDB); ok {
+		svc.db = handle
+	}
+	return svc
 }
 
 // ── 实例生命周期 ─────────────────────────────────────────────────────────────
@@ -286,6 +298,24 @@ func (s *WorkflowService) dispatchStage(ctx context.Context, inst db.WorkflowIns
 		return nil
 	}
 
+	// 资产准入门禁（plan 101 C5/C7）：flag 开启时，本阶段声明的必检输入若尚未被上游
+	// 产出，则不入队、把阶段置 blocked，等上游产出后由 dispatchNextPending 复评解除。
+	if s.assetGateEnabled(ctx) {
+		missing, merr := s.stageAdmissionMissing(ctx, inst, stage)
+		if merr != nil {
+			return fmt.Errorf("asset admission check: %w", merr)
+		}
+		if len(missing) > 0 {
+			if casErr := s.casStage(ctx, stage.ID, stage.State, "blocked", pgtype.UUID{}, nil); casErr != nil && !errors.Is(casErr, ErrWorkflowConflict) {
+				return casErr
+			}
+			slog.Info("workflow dispatch: stage blocked by asset admission",
+				"stage_id", util.UUIDToString(stage.ID), "missing", missing)
+			s.publishInstanceState(ctx, inst, "stage_blocked")
+			return nil
+		}
+	}
+
 	fail := func(reason string, cause error) error {
 		if casErr := s.casStage(ctx, stage.ID, stage.State, "failed", pgtype.UUID{}, nil); casErr != nil && !errors.Is(casErr, ErrWorkflowConflict) {
 			slog.Error("workflow dispatch: mark stage failed error", "stage_id", util.UUIDToString(stage.ID), "error", casErr)
@@ -315,8 +345,23 @@ func (s *WorkflowService) dispatchStage(ctx context.Context, inst db.WorkflowIns
 	}
 	prompt := stage.Prompt.String
 	if prompt == "" {
-		prompt = fmt.Sprintf("[workflow] 执行阶段「%s」（实例 %s）。", stage.Name, util.UUIDToString(inst.ID))
+		prompt = defaultStagePrompt(stage.Name, util.UUIDToString(inst.ID))
 	}
+	// plan 20261025 §B2：workflow_stage_spec 开启且快照带 spec 时，把阶段目标/达成判定/
+	// 输入输出模板渲染进正文；关闭或 spec 为空时 prompt 逐字不变（零回归）。
+	if s.stageSpecEnabled(ctx) {
+		if spec := parseStageSpec(stage.Spec); spec != nil {
+			merged, warnings := composeSpecPrompt(prompt, spec, stageRenderContext(inst, issue, stage))
+			prompt = merged
+			if len(warnings) > 0 {
+				slog.Warn("workflow dispatch: unresolved stage spec placeholders",
+					"stage_id", util.UUIDToString(stage.ID), "unknown", warnings)
+			}
+		}
+	}
+	// plan 101 P3：workflow_pull_context flag 开启时把大块正文换成按需拉取指针；
+	// 关闭时逐字返回上面的 prompt（零回归）。
+	prompt = s.pullContextPrompt(ctx, prompt, issue, inst, stage)
 	commentID := dbid.NewV7()
 	if _, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		ID:          commentID,
@@ -347,6 +392,17 @@ func (s *WorkflowService) dispatchNextPending(ctx context.Context, inst db.Workf
 		return fmt.Errorf("list stages: %w", err)
 	}
 	for _, st := range stages {
+		if st.State == "blocked" {
+			// 准入门禁复评：上游已产出则解除 blocked→pending 并派发；仍缺件则停止向后推进
+			// （线性引擎不得越过被阻塞的上游阶段）。
+			if s.assetGateEnabled(ctx) && s.canUnblockStage(ctx, inst, st) {
+				if err := s.casStage(ctx, st.ID, "blocked", "pending", pgtype.UUID{}, nil); err == nil {
+					st.State = "pending"
+					return s.dispatchStage(ctx, inst, st)
+				}
+			}
+			return nil
+		}
 		if st.State == "pending" {
 			return s.dispatchStage(ctx, inst, st)
 		}
@@ -358,8 +414,8 @@ func (s *WorkflowService) dispatchNextPending(ctx context.Context, inst db.Workf
 func (s *WorkflowService) finishInstanceIfIdle(ctx context.Context, inst db.WorkflowInstance, stages []db.WorkflowStageRun) error {
 	for _, st := range stages {
 		switch st.State {
-		case "pending", "running", "waiting_gate":
-			return nil // 仍在途
+		case "pending", "running", "waiting_gate", "blocked":
+			return nil // 仍在途（含被准入门禁阻塞的阶段，不得据此收尾 done）
 		}
 	}
 	updated, err := s.Queries.UpdateWorkflowInstanceState(ctx, db.UpdateWorkflowInstanceStateParams{
@@ -414,15 +470,20 @@ func (s *WorkflowService) OnTaskDone(ctx context.Context, taskID pgtype.UUID, ok
 		}
 		return casErr
 	}
+	// plan 20261025 §B3b：auto 阶段完成即把声明产物落地成项目资产绑定（幂等、best-effort），
+	// 下游阶段的「外部资产型」判定与产物追踪面板都依赖这一步。
+	s.landStageOutputs(ctx, inst, stage)
 	return s.dispatchNextPending(ctx, inst)
 }
 
-// SkipStage 人工跳过阶段：pending/running/waiting_gate→skipped。
+// SkipStage 人工跳过阶段：pending/running/waiting_gate/blocked→skipped。
 // 副作用 best-effort：running 先 cancel 底层 task，waiting_gate 先撤销 waiting 门；
 // 实例 running 时继续推进下一个 pending stage。
+// blocked 可跳（plan 20261025 §A1.3）：缺件阶段得有人工“不依此产物继续”的出口，
+// 否则只能无限等补齐。
 func (s *WorkflowService) SkipStage(ctx context.Context, inst db.WorkflowInstance, stage db.WorkflowStageRun) error {
 	switch stage.State {
-	case "pending", "running", "waiting_gate":
+	case "pending", "running", "waiting_gate", "blocked":
 	default:
 		return ErrWorkflowConflict
 	}
@@ -501,8 +562,13 @@ func (s *WorkflowService) DecideGate(ctx context.Context, gateID, workspaceID pg
 		if stage, serr := s.Queries.GetWorkflowStageRun(ctx, db.GetWorkflowStageRunParams{
 			ID: decided.StageRunID, WorkspaceID: workspaceID,
 		}); serr == nil && stage.State == "waiting_gate" {
-			if casErr := s.casStage(ctx, stage.ID, "waiting_gate", "done", pgtype.UUID{}, nil); casErr != nil && !errors.Is(casErr, ErrWorkflowConflict) {
+			casErr := s.casStage(ctx, stage.ID, "waiting_gate", "done", pgtype.UUID{}, nil)
+			if casErr != nil && !errors.Is(casErr, ErrWorkflowConflict) {
 				return decided, inst, casErr
+			}
+			if casErr == nil {
+				// 人工阶段放行即完成：其声明产物同样落地（plan 20261025 §B3b）
+				s.landStageOutputs(ctx, inst, stage)
 			}
 		}
 		if inst.Status == "running" {
@@ -640,10 +706,17 @@ type WorkflowSweepSummary struct {
 	Scanned int
 	Started int
 	Errors  int
+	// Reevaluated 是本轮复评过「含 blocked 阶段」的实例数（plan 20261025 §B3c）。
+	Reevaluated int
 }
 
 func (s WorkflowSweepSummary) ResultMap() map[string]any {
-	return map[string]any{"scanned": s.Scanned, "started": s.Started, "errors": s.Errors}
+	return map[string]any{
+		"scanned":     s.Scanned,
+		"started":     s.Started,
+		"errors":      s.Errors,
+		"reevaluated": s.Reevaluated,
+	}
 }
 
 // SweepWaiting 扫全部 waiting 实例并逐个幂等启动。单实例失败不阻断本轮其余
@@ -670,6 +743,15 @@ func (s *WorkflowService) SweepWaiting(ctx context.Context) (WorkflowSweepSummar
 		}
 		summary.Started++
 	}
+	// plan 20261025 §B3c：blocked 阶段的复评兜底。资产绑定写路径可能漏触发（进程重启、
+	// 并发失败、绑定时实例尚未 running 等），周期复查保证缺件补齐后必然解除、不永久卡死。
+	// flag 关闭时 ReevaluateProjectBlocked 直接 no-op（零回归）。
+	reevaluated, rerr := s.ReevaluateProjectBlocked(ctx, pgtype.UUID{})
+	if rerr != nil {
+		summary.Errors++
+		slog.Warn("workflow sweep: blocked reevaluation failed", "error", rerr)
+	}
+	summary.Reevaluated = reevaluated
 	return summary, nil
 }
 

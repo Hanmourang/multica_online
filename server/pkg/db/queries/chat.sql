@@ -1,3 +1,14 @@
+-- name: CreateChatMessageResourceRef :exec
+INSERT INTO chat_message_resource_ref (
+    message_id, position, resource_type, resource_id,
+    resource_kind, resource_source, project_id
+) VALUES ($1, $2, $3, $4, $5, $6, sqlc.narg('project_id'));
+
+-- name: ListChatMessageResourceRefs :many
+SELECT * FROM chat_message_resource_ref
+WHERE message_id = ANY($1::uuid[])
+ORDER BY message_id, position;
+
 -- name: CreateChatSession :one
 INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, is_agent_intro, project_id, id)
 VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2), $5, sqlc.narg('project_id'), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()))
@@ -18,6 +29,11 @@ WHERE id = $1;
 -- name: GetChatSessionInWorkspace :one
 SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
+
+-- name: GetChatSessionByDMPairKey :one
+-- DM 唯一会话命中：并发/重复创建时按 (workspace, dm_pair_key) 取回既有会话。
+SELECT * FROM chat_session
+WHERE workspace_id = $1 AND kind = 'dm' AND dm_pair_key = $2;
 
 -- name: GetPublicChatSessionInWorkspace :one
 -- A channel command is a durable control-plane record, not a public chat turn.
@@ -47,14 +63,24 @@ SELECT cs.*,
           WHERE m.chat_session_id = cs.id
             AND m.role = 'assistant'
             AND m.created_at > cs.last_read_at)::int AS unread_count,
-       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(NULLIF(lm.content, ''), lm.resource_summary, '')::text AS last_message_content,
        COALESCE(lm.role, '') AS last_message_role,
        lm.created_at AS last_message_at,
        lm.failure_reason AS last_message_failure_reason,
        COALESCE(lm.message_kind, '') AS last_message_kind
 FROM chat_session cs
 LEFT JOIN LATERAL (
-  SELECT content, role, created_at, failure_reason, message_kind
+  SELECT content, role, created_at, failure_reason, message_kind,
+         COALESCE((
+           SELECT CASE
+             WHEN r.resource_type = 'document' THEN '[Document]'
+             WHEN r.resource_kind = 'requirement' THEN '[Requirement]'
+             ELSE '[Task]'
+           END
+           FROM chat_message_resource_ref r
+           WHERE r.message_id = m.id
+           ORDER BY r.position LIMIT 1
+         ), '') AS resource_summary
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
      AND m.message_kind != 'channel_command'
@@ -84,14 +110,24 @@ SELECT cs.*,
                       AND m.role = 'assistant'
                       AND m.created_at > cs.last_read_at)
        END::int AS unread_count,
-       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(NULLIF(lm.content, ''), lm.resource_summary, '')::text AS last_message_content,
        COALESCE(lm.role, '') AS last_message_role,
        lm.created_at AS last_message_at,
        lm.failure_reason AS last_message_failure_reason,
        COALESCE(lm.message_kind, '') AS last_message_kind
 FROM chat_session cs
 LEFT JOIN LATERAL (
-  SELECT content, role, created_at, failure_reason, message_kind
+  SELECT content, role, created_at, failure_reason, message_kind,
+         COALESCE((
+           SELECT CASE
+             WHEN r.resource_type = 'document' THEN '[Document]'
+             WHEN r.resource_kind = 'requirement' THEN '[Requirement]'
+             ELSE '[Task]'
+           END
+           FROM chat_message_resource_ref r
+           WHERE r.message_id = m.id
+           ORDER BY r.position LIMIT 1
+         ), '') AS resource_summary
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
      AND m.message_kind != 'channel_command'
@@ -479,7 +515,7 @@ WHERE id = $1;
 INSERT INTO chat_message (
     chat_session_id, role, content, task_id, failure_reason, elapsed_ms,
     message_kind, quick_actions, channel_media_pending_until, channel_ingested,
-    channel_context_revision, id
+    channel_context_revision, id, author_type, author_id, mentions
 )
 VALUES (
     $1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms),
@@ -495,9 +531,31 @@ VALUES (
          ELSE now() + make_interval(secs => sqlc.narg(channel_media_pending_secs)::float8) END,
     COALESCE(sqlc.narg(channel_ingested)::boolean, FALSE),
     sqlc.narg(channel_context_revision),
-    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
+    -- author_type/author_id/mentions 默认按旧 role 降级：省略时 assistant→agent、
+    -- 其余→member，存量单 Agent 调用点无需改动即保持归因语义（478 会话通用化）。
+    COALESCE(sqlc.narg(author_type)::text,
+             CASE WHEN $2 = 'assistant' THEN 'agent' ELSE 'member' END),
+    sqlc.narg(author_id)::uuid,
+    COALESCE(sqlc.narg(mentions)::jsonb, '[]'::jsonb)
 )
 RETURNING *;
+
+-- name: ListChatMessageDispatches :many
+SELECT i.message_id, q.agent_id, q.id AS task_id, q.status,
+       q.failure_reason, q.error
+FROM chat_group_task_input i
+JOIN agent_task_queue q ON q.id = i.task_id
+WHERE i.is_trigger AND i.message_id = ANY($1::uuid[])
+ORDER BY i.message_id, q.created_at, q.id;
+
+-- name: ListGroupChatInputMessages :many
+-- 群任务不可变输入快照：一个任务的多条输入按 position 升序固化，
+-- 支持一条人类消息并行触发多个 Agent 而不共享续聊上下文。
+SELECT m.* FROM chat_group_task_input i
+JOIN chat_message m ON m.id = i.message_id
+WHERE i.task_id = $1
+ORDER BY i.position ASC;
 
 -- name: TaskHasChannelIngestedMessages :one
 -- Immutable channel provenance for a task's user-message input batch:
@@ -1652,3 +1710,9 @@ WHERE workspace_id = $1
   AND status = 'active'
 ORDER BY created_at ASC
 LIMIT 1;
+
+-- name: ListHumanChatParticipantIDs :many
+-- Current human members of a DM/Group. Task and chat producers use this to
+-- direct realtime; an empty result must fail closed rather than broadcast.
+SELECT participant_id FROM chat_participant
+WHERE chat_session_id = $1 AND participant_type = 'member';

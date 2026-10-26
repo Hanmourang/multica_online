@@ -82,6 +82,12 @@ func (o *Outbound) handleEvent(e events.Event) {
 }
 
 func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
+	// DM/Group are in-app private conversations and must never egress to Slack,
+	// even if a forged or legacy channel_chat_session_binding row exists for the
+	// session id. Checked before any binding lookup / delivery write. plan §5.4.
+	if e.IsPrivateConversation() {
+		return nil
+	}
 	sessionID, err := util.ParseUUID(e.ChatSessionID)
 	if err != nil || !sessionID.Valid {
 		// Issue / autopilot tasks carry no chat_session.

@@ -71,6 +71,11 @@ func (o *Outbound) handleEvent(e events.Event) {
 }
 
 func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
+	// DM/Group private conversations never egress to DingTalk, even with a forged
+	// or legacy binding. Guard before any binding lookup / delivery write. §5.4.
+	if e.IsPrivateConversation() {
+		return nil
+	}
 	taskID, sessionID, ok := taskAndSessionFromEvent(e)
 	if !ok || !sessionID.Valid {
 		// Issue / autopilot tasks carry no chat_session.

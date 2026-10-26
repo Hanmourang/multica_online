@@ -16,10 +16,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -122,7 +124,7 @@ func RequirementTriggerJob(
 
 // SweepSummary 是一轮 sweep 的审计汇总。导出为结构体（而非直接返回
 // map[string]any）是为了让测试能强类型断言各字段，也方便未来加新维度
-//（例如按 stage 拆分入队数）而不破坏 handler 层契约。
+// （例如按 stage 拆分入队数）而不破坏 handler 层契约。
 type SweepSummary struct {
 	// Scanned 是 ListTriggerableRequirements 返回的行数（本轮扫到的到点需求）。
 	Scanned int
@@ -132,7 +134,7 @@ type SweepSummary struct {
 	Enqueued int
 	// Blocked 按原因串汇总被预检 / 已触发 / 错误挡下的需求数。原因串稳定枚举：
 	//   decomposition_not_confirmed / dependency_cycle / acceptance_spec_missing /
-	//   module_window_busy / already_triggered / error
+	//   module_window_busy / workflow_gate_not_satisfied / already_triggered / error
 	Blocked map[string]int
 }
 
@@ -193,7 +195,7 @@ type requirementSweeper interface {
 }
 
 // requirementTriggerHandler 单次 sweep：调 svc.Sweep 拿汇总，映射到 HandlerResult
-//（RowsAffected = triggered 数，Result = 审计 map）。
+// （RowsAffected = triggered 数，Result = 审计 map）。
 func requirementTriggerHandler(svc requirementSweeper) Handler {
 	return func(ctx context.Context, in HandlerInput) (HandlerResult, error) {
 		summary, err := svc.Sweep(ctx)
@@ -264,11 +266,20 @@ func triggerOneRequirement(
 		return false, "", 0, fmt.Errorf("module window check: %w", err)
 	}
 
+	// 需求触发首门强门控（plan 20261024 §4）：项目有 enforce 模板才需要门控；
+	// 无 enforce 模板（ErrNoRows）→ required=false → 行为与既往完全一致。
+	wfRequired, wfSatisfied, err := resolveWorkflowGate(ctx, queries, req)
+	if err != nil {
+		return false, "", 0, fmt.Errorf("workflow gate check: %w", err)
+	}
+
 	pass, reason := triggerPreflight(triggerPreflightInput{
 		DecompositionConfirmed: req.DecompositionConfirmedAt.Valid,
 		DependencyAcyclic:      dependencyGraphAcyclic(groupEdges),
 		AcceptanceSpecPresent:  acceptancePresent,
 		ModuleWindowFree:       windowFree,
+		WorkflowGateRequired:   wfRequired,
+		WorkflowGateSatisfied:  wfSatisfied,
 	})
 	if !pass {
 		// H-3：acceptance_spec_missing 是永久阻断，且此前只落 sys_cron_executions
@@ -443,13 +454,19 @@ type triggerPreflightInput struct {
 	DependencyAcyclic      bool // 组内子任务 blocked_by DAG 无环
 	AcceptanceSpecPresent  bool // 至少一个 stage3 子任务 acceptance_spec 非空
 	ModuleWindowFree       bool // 同模块无「其它 root 需求组」的活动任务
+	// WorkflowGateRequired / WorkflowGateSatisfied 承载「需求触发首门强门控」
+	// （CoCo 对标 plan 20261024 §4）：项目存在 published+enforce 模板时 Required=true；
+	// 该 issue 作为 root 的实例已有首个 decided(exit) 门时 Satisfied=true。
+	// 二者默认 false → 无 enforce 模板的项目行为完全不变（零回归）。
+	WorkflowGateRequired  bool
+	WorkflowGateSatisfied bool
 }
 
 // triggerPreflight 返回是否放行 + 阻断原因（写入 sys_cron_executions.result
 // 供审计，并作为 POST /issues/{id}/trigger 409 的 body 串）。
 //
 // 判定顺序固定 → 原因串稳定，便于前端 / E2E 断言：拆解 → 依赖 → 验收 →
-// 互斥窗口。任一前置失败即短路返回，不会执行下游更贵的检查。
+// 互斥窗口 → 工作流首门。任一前置失败即短路返回，不会执行下游更贵的检查。
 func triggerPreflight(in triggerPreflightInput) (bool, string) {
 	switch {
 	case !in.DecompositionConfirmed:
@@ -460,6 +477,8 @@ func triggerPreflight(in triggerPreflightInput) (bool, string) {
 		return false, "acceptance_spec_missing"
 	case !in.ModuleWindowFree:
 		return false, "module_window_busy"
+	case in.WorkflowGateRequired && !in.WorkflowGateSatisfied:
+		return false, "workflow_gate_not_satisfied"
 	default:
 		return true, ""
 	}
@@ -504,4 +523,29 @@ func dependencyGraphAcyclic(edges [][2]string) bool {
 		}
 	}
 	return true
+}
+
+// resolveWorkflowGate 查「需求触发首门强门控」状态（CoCo 对标 plan 20261024 §4）。
+// 返回 (required, satisfied, err)：
+//   - 需求无项目归属 / 项目无 published+enforce 模板 → required=false（零回归）；
+//   - required=true 时，看该 issue 作为 root 的工作流实例是否已有首个 decided(exit)
+//     门（过首门）→ satisfied。
+func resolveWorkflowGate(ctx context.Context, queries *db.Queries, req db.Issue) (bool, bool, error) {
+	if !req.ProjectID.Valid {
+		return false, false, nil
+	}
+	if _, err := queries.GetEnforcedWorkflowTemplate(ctx, req.ProjectID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	cleared, err := queries.CountRequirementWorkflowGateCleared(ctx, db.CountRequirementWorkflowGateClearedParams{
+		WorkspaceID: req.WorkspaceID,
+		RootIssueID: req.ID,
+	})
+	if err != nil {
+		return true, false, err
+	}
+	return true, cleared > 0, nil
 }

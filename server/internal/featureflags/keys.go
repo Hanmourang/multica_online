@@ -23,6 +23,11 @@ const (
 	// gate pinned Task/Run execution: disabling discovery and management must not
 	// mutate an immutable execution manifest that is already in flight.
 	PluginsV1 = "plugins_v1"
+	// SprintModule gates the CoCo-对标 iteration (Sprint) surface (plan
+	// 20261024 §02): sprint CRUD + CAS 启停 + issue 纳入/移出 HTTP routes and the
+	// project sprints TAB. Default off for grayscale rollout; route registration
+	// is gated too, so a disabled flag 404s cleanly.
+	SprintModule = "sprint_module"
 	// WorkflowModule gates the CoCo-对标 workflow engine (plan 20261024 §01): the
 	// Template→Instance→StageRun→GateRun HTTP surface, the 30s waiting-instance
 	// sweep, and the project TAB. Default off for grayscale rollout; route
@@ -34,6 +39,32 @@ const (
 	// for grayscale rollout; route registration is gated so a disabled flag 404s
 	// cleanly and the front-end TAB stays hidden.
 	AssetModule = "asset_module"
+	// WorkflowAssetGate gates the CoCo-对标 asset admission enforcement (plan 101
+	// C5/C7): dispatchStage refuses to start a stage whose required input assets
+	// are not yet satisfied (upstream product or project binding), moving it to
+	// 'blocked' instead, and the per-task overlay mounts the read-only
+	// multica-assets MCP facade so agents pull context on demand. Default off so
+	// existing workflows behave exactly as before until explicitly enabled.
+	WorkflowAssetGate = "workflow_asset_gate"
+	// WorkflowPullContext gates the push->pull context composer (plan 101 P3):
+	// instead of stuffing large asset bodies into the stage prompt comment, a
+	// dispatched auto stage emits a compact pointer block (issue/project/stage ids
+	// + required-asset checklist + the multica-assets MCP pull hint). Default off
+	// so prompt bytes stay exactly as before until explicitly enabled.
+	WorkflowPullContext = "workflow_pull_context"
+	// WorkflowStageSpec gates the stage-spec runtime consumption (plan 20261025 §B2):
+	// a dispatched auto stage renders its snapshotted spec (goal / criteria /
+	// inputTpl with ${workitem.*} ${inputs.*} ${project.assets} placeholders) into the
+	// prompt instead of emitting the bare prompt only. Default off so prompt bytes
+	// stay exactly as before until explicitly enabled.
+	WorkflowStageSpec = "workflow_stage_spec"
+	// ChatConversations gates the chat-module generalization (plan
+	// 20261025-聊天模块-人与人群聊): the DM/Group conversation kinds, the
+	// /api/chat/sessions/dm and /group routes, participant management routes, and
+	// the unified conversation list. Default off so the existing single-agent
+	// Chat behaves exactly as before; route registration is gated too, so a
+	// disabled flag 404s the new endpoints cleanly and hides the front-end entry.
+	ChatConversations = "chat_conversations"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -55,8 +86,13 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
+	SprintModule,
 	WorkflowModule,
 	AssetModule,
+	WorkflowAssetGate,
+	WorkflowPullContext,
+	WorkflowStageSpec,
+	ChatConversations,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -71,12 +107,36 @@ func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, PluginsV1, false)
 }
 
+func SprintModuleEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, SprintModule, false)
+}
+
 func WorkflowModuleEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, WorkflowModule, false)
 }
 
 func AssetModuleEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, AssetModule, false)
+}
+
+func WorkflowAssetGateEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, WorkflowAssetGate, false)
+}
+
+func WorkflowPullContextEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, WorkflowPullContext, false)
+}
+
+// WorkflowStageSpecEnabled reports whether stage spec (goal/criteria/inputTpl) is
+// consumed at dispatch time. nil flags → off (zero regression).
+func WorkflowStageSpecEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, WorkflowStageSpec, false)
+}
+
+// ChatConversationsEnabled reports whether DM/Group conversation routes and
+// the unified conversation list are on. nil flags → off (zero regression).
+func ChatConversationsEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, ChatConversations, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

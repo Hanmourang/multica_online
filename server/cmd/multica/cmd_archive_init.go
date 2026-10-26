@@ -140,6 +140,7 @@ func planArchiveInit(archiveRoot, key, name string, withPRD, withMRD bool) ([]ar
 		{Rel: base + "/overview/product-design", DirOnly: true},
 		{Rel: base + "/overview/architecture", DirOnly: true},
 		{Rel: base + "/overview/retrospective", DirOnly: true},
+		{Rel: base + "/overview/iteration", DirOnly: true},
 		{Rel: base + "/requirements", DirOnly: true},
 		{Rel: base + "/filing/software-copyright", DirOnly: true},
 		{Rel: base + "/filing/patent", DirOnly: true},
@@ -148,6 +149,7 @@ func planArchiveInit(archiveRoot, key, name string, withPRD, withMRD bool) ([]ar
 		{Rel: base + "/overview/research/.gitkeep", Content: ""},
 		{Rel: base + "/overview/product-design/.gitkeep", Content: ""},
 		{Rel: base + "/overview/retrospective/.gitkeep", Content: ""},
+		{Rel: base + "/overview/iteration/.gitkeep", Content: ""},
 		{Rel: base + "/requirements/.gitkeep", Content: ""},
 		{Rel: base + "/filing/software-copyright/.gitkeep", Content: ""},
 		{Rel: base + "/filing/patent/.gitkeep", Content: ""},
@@ -184,7 +186,7 @@ title: %s
 
 # %s
 
-> 档案根由 `+"`multica archive init`"+` 创建。C2 只认 research / product-design / architecture / retrospective。
+> 档案根由 `+"`multica archive init`"+` 创建。C2 只认 research / product-design / architecture / retrospective / iteration。
 > 下一步：Desktop 绑定本目录，然后 `+"`multica archive sync --project %s`"+`。
 `, key, name, name, key)) + "\n"
 }
@@ -350,7 +352,8 @@ func runArchiveInitReq(cmd *cobra.Command, _ []string) error {
 		title = key
 	}
 	reqRoot := filepath.Join(root, "requirements", key)
-	stages := []string{"s1-prototype", "s2-plan", "s3-execution", "s4-acceptance"}
+	// 五阶段对齐 plan §4.7：存量 s1-s4 slug 不改名，新增 s5-iteration。
+	stages := []string{"s1-prototype", "s2-plan", "s3-execution", "s4-acceptance", "s5-iteration"}
 	for _, s := range stages {
 		if err := os.MkdirAll(filepath.Join(reqRoot, s), 0o755); err != nil {
 			return err

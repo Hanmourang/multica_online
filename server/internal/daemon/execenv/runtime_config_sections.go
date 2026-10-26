@@ -537,10 +537,15 @@ func writeWorkflowHeader(b *strings.Builder) {
 func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("**You are in chat mode.**\n\n")
 	b.WriteString("- Respond conversationally and helpfully to the user's message\n")
-	b.WriteString("- You have full access to the `multica` CLI to look up issues, workspace info, members, agents, etc.\n")
-	b.WriteString("- If asked about issues, use `multica issue list --output json` or `multica issue get <id> --output json`\n")
+	b.WriteString("- When the user message contains a Shared resources issue snapshot, that snapshot is the authorized record for those issues: status, goal, description, acceptance, child issues, and recent comments. The same text is in `.multica/chat/shared-issues.md`. Answer from that record.\n")
+	b.WriteString("- When the user message contains a Shared resources document body, that body is the document. Answer from it. Do not search the filesystem or run CLI help, attachment download, project resource, or chat history to find the same file.\n")
+	b.WriteString("- When the user message contains a Project index, that index is the authorized snapshot of open work in the active project. The same text is in `.multica/project/index.md`. Answer project status and progress questions from it. Do not run `multica issue list` to rediscover those rows.\n")
+	b.WriteString("- Do not run `multica issue list`, `multica issue get`, `multica issue comment list`, or fetch a resource URL to re-read an issue already in that record. Shell exec is often unavailable here (device pairing / exec scope). A rejected command is not missing data.\n")
+	b.WriteString("- Use `multica issue list --output json` or `multica issue get <id> --output json` only for an issue that is not already in the snapshot, and only when the shell actually runs.\n")
+	b.WriteString("- You can use the `multica` CLI for workspace info, members, agents, and for changes the user asked you to make.\n")
 	b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
 	b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
+	b.WriteString("- For projects, tasks, and requirements, read the `multica-requirements` skill first. Use `multica project`, `multica issue`, and `multica requirement`. Do not delete projects, tasks, or requirements from chat.\n")
 	b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
 	b.WriteString("- Keep responses concise and direct\n\n")
 }

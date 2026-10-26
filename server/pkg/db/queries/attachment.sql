@@ -49,6 +49,10 @@ WHERE id = $1 AND workspace_id = $2;
 SELECT * FROM attachment
 WHERE id = $1;
 
+-- name: ListAttachmentsByIDsOnly :many
+SELECT * FROM attachment
+WHERE id = ANY($1::uuid[]);
+
 -- name: ListAttachmentsByCommentIDs :many
 SELECT * FROM attachment
 WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2

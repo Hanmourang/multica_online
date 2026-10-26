@@ -168,6 +168,11 @@ func (o *Outbound) handleEvent(e events.Event) {
 }
 
 func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
+	// DM/Group private conversations never egress to WeCom, even with a forged or
+	// legacy binding. Guard before any state-mutating step. plan 20261025 §5.4.
+	if e.IsPrivateConversation() {
+		return nil
+	}
 	sessionID, err := util.ParseUUID(e.ChatSessionID)
 	if err != nil || !sessionID.Valid {
 		// Issue / autopilot tasks carry no chat_session.
@@ -394,6 +399,12 @@ func chatDoneContent(payload any) string {
 // send failure — the handler is a no-op and the member simply receives the
 // notification through the in-app inbox as usual.
 func (o *Outbound) handleInboxNew(e events.Event) {
+	// A chat_mention from a DM/Group is an in-app private notification and must
+	// never be pushed to the WeCom smart bot, even if the recipient has a live
+	// binding. Guard before the binding lookup. plan 20261025 §5.4.
+	if e.IsPrivateConversation() {
+		return
+	}
 	payload, ok := e.Payload.(map[string]any)
 	if !ok {
 		return

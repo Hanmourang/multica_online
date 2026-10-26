@@ -970,6 +970,14 @@ type replyTarget struct {
 // and must not reach an external conversation, even if its Chat once had a
 // Telegram route.
 func (o *Outbound) resolveTarget(ctx context.Context, e events.Event, _ bool) (*replyTarget, error) {
+	// resolveTarget is the single choke through which every Telegram outbound
+	// (streamed partials, terminal replies, failures, cancels) reaches its binding
+	// query and delivery write. DM/Group private conversations must never egress
+	// to Telegram, even with a forged or legacy binding, so refuse here before any
+	// lookup. plan 20261025 §5.4.
+	if e.IsPrivateConversation() {
+		return nil, nil
+	}
 	taskID, hasTaskID := eventTaskID(e)
 	if !hasTaskID {
 		return nil, nil

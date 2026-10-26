@@ -2038,6 +2038,137 @@ func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 	return resp.AgentID != "" && resp.Agent != nil && resp.Agent.ID == resp.AgentID
 }
 
+// rejectInvalidGroupClaim 是群损坏派发的 fail-closed 出口：取消任务（绝不带着
+// 空或错误的输入运行）并拒绝 claim。取消失败不阻断拒绝——任务会由 stale
+// 回收收敛，但错误的派发绝不能下发。
+func (h *Handler) rejectInvalidGroupClaim(ctx context.Context, task *db.AgentTaskQueue, reason string) *claimBuildFailure {
+	slog.Error("group chat claim: invalid dispatch; cancelling",
+		"task_id", uuidToString(task.ID),
+		"chat_session_id", uuidToString(task.ChatSessionID),
+		"reason", reason)
+	if _, err := h.TaskService.CancelTask(ctx, task.ID); err != nil {
+		slog.Error("group chat claim: cancel after invalid dispatch failed",
+			"task_id", uuidToString(task.ID), "error", err)
+	}
+	return &claimBuildFailure{
+		outcome: "invalid_group_chat_task",
+		status:  http.StatusConflict,
+		message: "invalid group chat dispatch",
+	}
+}
+
+// groupAgentStillParticipant 复查领取任务的 Agent 仍是群参与者（§5：派发后
+// 被移出群的旧任务不再执行）。
+func (h *Handler) groupAgentStillParticipant(ctx context.Context, sessionID, agentID pgtype.UUID) bool {
+	var one int
+	err := h.DB.QueryRow(ctx, `SELECT 1 FROM chat_participant
+		WHERE chat_session_id = $1 AND participant_type = 'agent' AND participant_id = $2`,
+		sessionID, agentID).Scan(&one)
+	return err == nil
+}
+
+// snapshotAuthorNames 批量解析群输入快照的作者显示名：人类一条 ANY 查询、
+// Agent 一条 ANY 查询（§5 禁止逐行 N+1）。
+func (h *Handler) snapshotAuthorNames(ctx context.Context, msgs []db.ChatMessage) map[string]string {
+	names := map[string]string{}
+	var memberIDs, agentIDs []pgtype.UUID
+	seen := map[string]bool{}
+	for _, m := range msgs {
+		if !m.AuthorID.Valid {
+			continue
+		}
+		atype := m.AuthorType
+		if atype == "" && m.Role == "assistant" {
+			atype = "agent"
+		}
+		if atype != "agent" {
+			atype = "member"
+		}
+		key := atype + "/" + uuidToString(m.AuthorID)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if atype == "agent" {
+			agentIDs = append(agentIDs, m.AuthorID)
+		} else {
+			memberIDs = append(memberIDs, m.AuthorID)
+		}
+	}
+	if len(memberIDs) > 0 {
+		rows, err := h.DB.Query(ctx, `SELECT id::text, name FROM "user" WHERE id = ANY($1)`, memberIDs)
+		if err == nil {
+			for rows.Next() {
+				var id, name string
+				if scanErr := rows.Scan(&id, &name); scanErr == nil {
+					names["member/"+id] = name
+				}
+			}
+			rows.Close()
+		}
+	}
+	if len(agentIDs) > 0 {
+		rows, err := h.DB.Query(ctx, `SELECT id::text, name FROM agent WHERE id = ANY($1)`, agentIDs)
+		if err == nil {
+			for rows.Next() {
+				var id, name string
+				if scanErr := rows.Scan(&id, &name); scanErr == nil {
+					names["agent/"+id] = name
+				}
+			}
+			rows.Close()
+		}
+	}
+	return names
+}
+
+// groupAuthorPrefix 给群快照的一行输入加作者前缀（§5：[Member: x] / [Agent: y]），
+// 让 Agent 在多人群里能区分发言者。作者行已被删除等查不到名字的情况降级为
+// 稳定占位，不泄露裸 UUID。
+func groupAuthorPrefix(m db.ChatMessage, names map[string]string) string {
+	label := "Member"
+	atype := m.AuthorType
+	if atype == "" && m.Role == "assistant" {
+		atype = "agent"
+	}
+	if atype == "agent" {
+		label = "Agent"
+	} else {
+		atype = "member"
+	}
+	name := ""
+	if m.AuthorID.Valid {
+		name = names[atype+"/"+uuidToString(m.AuthorID)]
+	}
+	if name == "" {
+		name = "former " + strings.ToLower(label)
+	}
+	return "[" + label + ": " + name + "]"
+}
+
+// privateRuntimeAllowsAgent is the delivery-time twin of the claim SQL fence.
+// A private runtime runs its owner's agents. A workspace-visible agent that is
+// already bound to this runtime may also run when the runtime owner is still a
+// member of the agent's workspace. Ownerless agents stay denied so the caller
+// can fail them with an explicit reason instead of dispatching them.
+func (h *Handler) privateRuntimeAllowsAgent(ctx context.Context, runtime db.AgentRuntime, agent db.Agent) bool {
+	if !agent.OwnerID.Valid {
+		return false
+	}
+	if agent.OwnerID == runtime.OwnerID {
+		return true
+	}
+	if agent.Visibility != "workspace" || agent.RuntimeID != runtime.ID || !runtime.OwnerID.Valid {
+		return false
+	}
+	var one int
+	err := h.DB.QueryRow(ctx, `
+		SELECT 1 FROM member
+		WHERE workspace_id = $1 AND user_id = $2`,
+		agent.WorkspaceID, runtime.OwnerID).Scan(&one)
+	return err == nil
+}
+
 // buildClaimedTaskResponse assembles the full daemon claim payload for a
 // single already-claimed task and computes the exact comment ids embedded in
 // it (deliveredCommentIDs). Shared by the per-runtime handler
@@ -2132,7 +2263,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		)
 	}
 	if runtime.Visibility == "private" && runtime.OwnerID.Valid &&
-		(!agent.OwnerID.Valid || agent.OwnerID != runtime.OwnerID) {
+		!h.privateRuntimeAllowsAgent(r.Context(), runtime, agent) {
 		userMessage := "This private runtime cannot run the assigned agent because the agent and runtime have different owners."
 		if !agent.OwnerID.Valid {
 			userMessage = "This private runtime cannot run the assigned agent because the agent has no owner."
@@ -2248,7 +2379,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
 		}
 		agentSkillCount = len(skills)
-		builtinSkills := h.TaskService.BuiltinSkills()
+		builtinSkills := h.TaskService.BuiltinSkillsFor(skills)
 		builtinSkillCount = len(builtinSkills)
 		skills = append(skills, builtinSkills...)
 		resp.Agent.Skills = skills
@@ -2736,7 +2867,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
-		if !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
+		// 群轮次定义上不是单一 Agent 的续聊：cs.SessionID/WorkDir 指针属于旧单
+		// Agent/DM 语义，群任务即使带着脏的 fresh 标记也绝不据此 resume（plan 02 §5）。
+		if cs.Kind != "group" && !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
 			// Resume chat sessions only when the stored pointer was produced
 			// by the same runtime as the claiming task. When the chat_session
 			// pointer is missing (legacy NULL runtime_id), stale (last task
@@ -2768,12 +2901,38 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// signed + 30-min expiring on the CDN).
 		var unanswered []db.ChatMessage
 		var inputLoadErr error
-		if task.ChatInputTaskID.Valid {
+		switch {
+		case cs.Kind == "group":
+			// 群任务必须读自己的不可变快照（chat_group_task_input），绝不复用
+			// 共享历史选择器。NULL owner、非 fresh 会话、Agent 已被移出群、快照
+			// 缺 trigger——全部是损坏派发：取消任务并拒绝 claim，绝不带着空或错
+			// 误的输入运行（§5 fail-closed）。
+			if !task.ChatInputTaskID.Valid || !task.ForceFreshSession {
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+					h.rejectInvalidGroupClaim(r.Context(), task, "dispatch is not self-owned/fresh")
+			}
+			if !h.groupAgentStillParticipant(r.Context(), cs.ID, task.AgentID) {
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+					h.rejectInvalidGroupClaim(r.Context(), task, "agent is no longer a group participant")
+			}
+			unanswered, inputLoadErr = h.Queries.ListGroupChatInputMessages(r.Context(), task.ChatInputTaskID)
+			if inputLoadErr == nil {
+				var triggerCount int
+				if err := h.DB.QueryRow(r.Context(),
+					`SELECT COUNT(*) FROM chat_group_task_input WHERE task_id = $1 AND is_trigger`,
+					task.ChatInputTaskID).Scan(&triggerCount); err != nil || triggerCount != 1 {
+					return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+						h.rejectInvalidGroupClaim(r.Context(), task, "snapshot is missing its trigger message")
+				}
+			}
+		case task.ChatInputTaskID.Valid:
 			unanswered, inputLoadErr = h.Queries.ListChatInputMessages(r.Context(), task.ChatInputTaskID)
-		} else if msgs, err := h.Queries.ListChatMessagesForLegacyTask(r.Context(), cs.ID); err == nil {
-			unanswered = trailingUserMessages(msgs)
-		} else {
-			inputLoadErr = err
+		default:
+			if msgs, err := h.Queries.ListChatMessagesForLegacyTask(r.Context(), cs.ID); err == nil {
+				unanswered = trailingUserMessages(msgs)
+			} else {
+				inputLoadErr = err
+			}
 		}
 		// A read failure must NOT masquerade as "zero input". Preserve the
 		// just-dispatched task (the stale-dispatched reclaim redelivers it)
@@ -2794,7 +2953,8 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// Input ownership is the claim's fail-closed boundary. Resume-history
 		// reads belong after it: a task that cannot load its input is preserved
 		// for redelivery and must not spend two more queries before returning.
-		if !task.ForceFreshSession {
+		// Group tasks are ForceFreshSession by construction and never resume.
+		if cs.Kind != "group" && !task.ForceFreshSession {
 			contextRevision := pgtype.Int8{}
 			if task.ChannelContextRevision.Valid {
 				contextRevision = task.ChannelContextRevision
@@ -2847,10 +3007,48 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 
-		parts := make([]string, 0, len(unanswered))
+		// 群快照逐行加作者前缀，让 Agent 在多人群里知道每句话出自谁（§5）；
+		// 名字批量解析（两条 ANY 查询），禁止逐行 N+1。
+		var groupNames map[string]string
+		if cs.Kind == "group" && len(unanswered) > 0 {
+			groupNames = h.snapshotAuthorNames(r.Context(), unanswered)
+		}
+		messageIDs := make([]pgtype.UUID, 0, len(unanswered))
 		for _, m := range unanswered {
-			if strings.TrimSpace(m.Content) != "" {
-				parts = append(parts, m.Content)
+			messageIDs = append(messageIDs, m.ID)
+		}
+		resourceRows, err := h.Queries.ListChatMessageResourceRefs(r.Context(), messageIDs)
+		if err != nil {
+			slog.Error("chat claim: load chat resources failed; preserving task for redelivery",
+				"task_id", uuidToString(task.ID), "error", err)
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_chat_input_load",
+				status:  http.StatusInternalServerError,
+				message: "failed to load chat resources",
+			}
+		}
+		resourcesByMessage := make(map[string][]db.ChatMessageResourceRef, len(resourceRows))
+		for _, row := range resourceRows {
+			key := uuidToString(row.MessageID)
+			resourcesByMessage[key] = append(resourcesByMessage[key], row)
+		}
+		parts := make([]string, 0, len(unanswered))
+		records := make([]string, 0, len(unanswered))
+		for _, m := range unanswered {
+			content := m.Content
+			if resourceContext := h.chatResourcePrompt(r, cs.WorkspaceID, resourcesByMessage[uuidToString(m.ID)]); resourceContext != "" {
+				records = append(records, resourceContext)
+				if strings.TrimSpace(content) == "" {
+					content = resourceContext
+				} else {
+					content += "\n\n" + resourceContext
+				}
+			}
+			if cs.Kind == "group" && strings.TrimSpace(content) != "" {
+				content = groupAuthorPrefix(m, groupNames) + " " + content
+			}
+			if strings.TrimSpace(content) != "" {
+				parts = append(parts, content)
 			}
 			if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
 				ChatMessageID: m.ID,
@@ -2866,6 +3064,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		resp.ChatMessage = strings.Join(parts, "\n\n")
+		resp.ChatIssueRecord = strings.Join(records, "\n\n")
 
 		// Fail closed: a task-owned direct task that resolves to no user text
 		// (and is not the agent's proactive intro) must never dispatch an
@@ -2893,6 +3092,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if strings.TrimSpace(resp.ThreadName) == "" && resp.ChatMessage != "" {
 			resp.ThreadName = resp.ChatMessage
 		}
+		h.attachProjectChatIndex(r.Context(), &resp, cs.WorkspaceID, projectCtx)
 	}
 
 	// Autopilot run_only task: resolve workspace from autopilot_run →

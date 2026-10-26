@@ -164,6 +164,28 @@ func TestResolveTargetDeliversChannelTaskReply(t *testing.T) {
 	}
 }
 
+func TestResolveTargetRefusesDMAndGroupDespiteValidBinding(t *testing.T) {
+	// Reuses the channel-origin fixture that resolves a real delivery target
+	// (TestResolveTargetDeliversChannelTaskReply) and only flips ChatKind: a
+	// dm/group session must resolve to no target, so nothing is sent. plan §5.4.
+	for _, kind := range []string{"dm", "group"} {
+		t.Run(kind, func(t *testing.T) {
+			q := newTelegramOutboundQueries()
+			q.channelOrigin = true
+			o := NewOutbound(q, nil, "", nil, nil)
+			e := telegramTestEvent()
+			e.ChatKind = kind
+			target, err := o.resolveTarget(context.Background(), e, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if target != nil {
+				t.Fatalf("%s: target = %+v, want nil (no egress for a private conversation)", kind, target)
+			}
+		})
+	}
+}
+
 func TestResolveTargetIsolatesConcurrentTasksInOneSession(t *testing.T) {
 	q := newTelegramOutboundQueries()
 	q.channelOrigin = true

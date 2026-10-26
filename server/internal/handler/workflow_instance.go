@@ -67,6 +67,10 @@ func workflowInstanceToResponse(inst db.WorkflowInstance) WorkflowInstanceRespon
 // workflowStageRunToResponse 在 workflow_stage.go 使用；gate 响应同理放
 // workflow_gate.go——实例详情组装三张快照时共用。
 func workflowStageRunToResponse(st db.WorkflowStageRun) map[string]any {
+	spec := json.RawMessage(st.Spec)
+	if len(spec) == 0 {
+		spec = json.RawMessage("null")
+	}
 	return map[string]any{
 		"id":          uuidToString(st.ID),
 		"instance_id": uuidToString(st.InstanceID),
@@ -80,8 +84,10 @@ func workflowStageRunToResponse(st db.WorkflowStageRun) map[string]any {
 		"state":       st.State,
 		"inputs":      json.RawMessage(st.Inputs),
 		"outputs":     json.RawMessage(st.Outputs),
-		"created_at":  timestampToString(st.CreatedAt),
-		"updated_at":  timestampToString(st.UpdatedAt),
+		// 阶段执行期快照（goal/criteria/inputTpl/outputTpl）；无则 null。
+		"spec":       spec,
+		"created_at": timestampToString(st.CreatedAt),
+		"updated_at": timestampToString(st.UpdatedAt),
 	}
 }
 
@@ -317,6 +323,7 @@ func (h *Handler) CreateProjectWorkflowInstance(w http.ResponseWriter, r *http.R
 			Prompt:      pgtype.Text{String: node.Prompt, Valid: node.Prompt != ""},
 			Inputs:      inputs,
 			Outputs:     outputs,
+			Spec:        stageSpecOrNull(node.Spec),
 		}); err != nil {
 			slogWorkflow("create workflow stage run", err)
 			writeError(w, http.StatusInternalServerError, "failed to snapshot workflow stages")
@@ -357,6 +364,19 @@ func jsonNullIfEmpty(v []any) []byte {
 	}
 	raw, err := json.Marshal(v)
 	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+// stageSpecOrNull：阶段执行期快照落 workflow_stage_run.spec（可空列，plan 20261025 §B1）。
+// nil / 空对象一律返 NULL，使旧模板（无 goal/criteria/模板字段）的快照与改造前逐字一致。
+func stageSpecOrNull(spec *service.StageSpec) []byte {
+	if spec == nil {
+		return nil
+	}
+	raw, err := json.Marshal(spec)
+	if err != nil || string(raw) == "{}" {
 		return nil
 	}
 	return raw
@@ -406,6 +426,13 @@ func (h *Handler) GetWorkflowInstanceDetail(w http.ResponseWriter, r *http.Reque
 	stageResp := make([]map[string]any, len(stages))
 	for i, st := range stages {
 		stageResp[i] = workflowStageRunToResponse(st)
+		// plan 20261025 §A1.4：blocked 阶段附带缺件清单，UI 才能给出「缺什么 + 去绑定」。
+		// 查失败不阻断详情（退化为仅显示 blocked）。
+		if st.State == "blocked" && h.WorkflowService != nil {
+			if missing, merr := h.WorkflowService.StageAdmissionMissingForView(r.Context(), inst, st); merr == nil && len(missing) > 0 {
+				stageResp[i]["admission_missing"] = missing
+			}
+		}
 	}
 	gateResp := make([]map[string]any, len(gates))
 	for i, g := range gates {

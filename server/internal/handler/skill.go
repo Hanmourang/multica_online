@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -339,6 +340,29 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 }
 
 // --- Skill CRUD ---
+
+type builtinSkillSummary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// ListBuiltinSkills returns the platform skills embedded in this binary.
+// They are not workspace rows: every agent receives them on claim, and the
+// Skills page lists them so that set is visible without a per-agent attach.
+func (h *Handler) ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
+	skills := h.TaskService.BuiltinSkills()
+	resp := make([]builtinSkillSummary, 0, len(skills))
+	for _, s := range skills {
+		resp = append(resp, builtinSkillSummary{
+			ID:          service.BuiltinSkillID(s.Name),
+			Name:        s.Name,
+			Description: s.Description,
+		})
+	}
+	sort.Slice(resp, func(i, j int) bool { return resp[i].Name < resp[j].Name })
+	writeJSON(w, http.StatusOK, resp)
+}
 
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)

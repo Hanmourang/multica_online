@@ -243,3 +243,39 @@ func TestOutbound_IgnoresNonSlackAndEmptyAndRevoked(t *testing.T) {
 		})
 	}
 }
+
+// TestOutbound_RefusesDMAndGroupEgressDespiteValidBinding (plan 20261025 §5.4)
+// proves the private-conversation guard is defense-in-depth, not a side effect
+// of "DM/Group never get a binding": it reuses the exact sealed-channel-task
+// fixture that WOULD post to Slack (see TestOutbound_PostsSealedChannelTaskReply,
+// fs.called==1) and only flips ChatKind. A dm/group session must yield zero
+// outbound sends and zero provenance/delivery writes.
+func TestOutbound_RefusesDMAndGroupEgressDespiteValidBinding(t *testing.T) {
+	for _, kind := range []string{"dm", "group"} {
+		t.Run(kind, func(t *testing.T) {
+			q := &fakeOutboundQueries{
+				task:                db.AgentTaskQueue{ChatInputTaskID: uid(2)},
+				taskChannelIngested: true,
+				binding: db.ChannelChatSessionBinding{
+					InstallationID: uid(1),
+					ChannelChatID:  "C123",
+					Config:         []byte(`{"channel_id":"C123"}`),
+				},
+				inst: db.ChannelInstallation{ID: uid(1), Status: "active", Config: slackInstallConfigJSON()},
+			}
+			fs := &fakeSender{result: channel.SendResult{MessageID: "1.2", MessageIDs: []string{"1.1", "1.2"}}}
+			evt := chatDoneEvent("00000000-0000-0000-0000-000000000001", "should never leave multica")
+			evt.ChatKind = kind
+			newTestOutbound(q, fs).handleEvent(evt)
+			if fs.called != 0 {
+				t.Fatalf("%s: sender called %d, want 0 (private conversation egress)", kind, fs.called)
+			}
+			if q.gotProvenance.ChannelType.Valid || len(q.gotProvenance.MessageIds) != 0 {
+				t.Fatalf("%s: provenance written %+v for a private conversation", kind, q.gotProvenance)
+			}
+			if len(q.recordedOutbound) != 0 {
+				t.Fatalf("%s: recorded %d outbound deliveries, want 0", kind, len(q.recordedOutbound))
+			}
+		})
+	}
+}

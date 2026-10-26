@@ -221,6 +221,15 @@ type AgentToLabel struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type AssetIssueLink struct {
+	AssetBindingID pgtype.UUID        `json:"asset_binding_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	LinkType       string             `json:"link_type"`
+	CreatedByType  string             `json:"created_by_type"`
+	CreatedByID    pgtype.UUID        `json:"created_by_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type Attachment struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
@@ -507,6 +516,13 @@ type ChatDraftRestore struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type ChatGroupTaskInput struct {
+	TaskID    pgtype.UUID `json:"task_id"`
+	MessageID pgtype.UUID `json:"message_id"`
+	Position  int32       `json:"position"`
+	IsTrigger bool        `json:"is_trigger"`
+}
+
 type ChatMessage struct {
 	ID                            pgtype.UUID        `json:"id"`
 	ChatSessionID                 pgtype.UUID        `json:"chat_session_id"`
@@ -525,6 +541,31 @@ type ChatMessage struct {
 	ChannelOutboundInstallationID pgtype.UUID        `json:"channel_outbound_installation_id"`
 	ChannelOutboundChatID         pgtype.Text        `json:"channel_outbound_chat_id"`
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
+	AuthorType                    string             `json:"author_type"`
+	AuthorID                      pgtype.UUID        `json:"author_id"`
+	Mentions                      []byte             `json:"mentions"`
+}
+
+type ChatMessageResourceRef struct {
+	MessageID      pgtype.UUID `json:"message_id"`
+	Position       int32       `json:"position"`
+	ResourceType   string      `json:"resource_type"`
+	ResourceID     pgtype.UUID `json:"resource_id"`
+	ResourceKind   string      `json:"resource_kind"`
+	ResourceSource string      `json:"resource_source"`
+	ProjectID      pgtype.UUID `json:"project_id"`
+}
+
+type ChatParticipant struct {
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	ParticipantType   string             `json:"participant_type"`
+	ParticipantID     pgtype.UUID        `json:"participant_id"`
+	Admin             bool               `json:"admin"`
+	JoinedAt          pgtype.Timestamptz `json:"joined_at"`
+	LastReadAt        pgtype.Timestamptz `json:"last_read_at"`
+	LastReadMessageID pgtype.UUID        `json:"last_read_message_id"`
+	PinnedAt          pgtype.Timestamptz `json:"pinned_at"`
+	ArchivedAt        pgtype.Timestamptz `json:"archived_at"`
 }
 
 type ChatPinnedAgent struct {
@@ -554,6 +595,8 @@ type ChatSession struct {
 	PinnedAt            pgtype.Timestamptz `json:"pinned_at"`
 	ProjectID           pgtype.UUID        `json:"project_id"`
 	ExplicitlyCreatedAt pgtype.Timestamptz `json:"explicitly_created_at"`
+	Kind                string             `json:"kind"`
+	DmPairKey           pgtype.Text        `json:"dm_pair_key"`
 }
 
 type ClientUsageDaily struct {
@@ -1386,6 +1429,7 @@ type ProjectArtifact struct {
 	OverrideReason pgtype.Text        `json:"override_reason"`
 	DocClass       pgtype.Text        `json:"doc_class"`
 	DocModule      pgtype.Text        `json:"doc_module"`
+	AssetBindingID pgtype.UUID        `json:"asset_binding_id"`
 }
 
 type ProjectAssetBinding struct {
@@ -1404,6 +1448,9 @@ type ProjectAssetBinding struct {
 	CreatedByType   string             `json:"created_by_type"`
 	CreatedByID     pgtype.UUID        `json:"created_by_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	LifecycleStage  pgtype.Text        `json:"lifecycle_stage"`
+	AssetRole       pgtype.Text        `json:"asset_role"`
+	Tags            []string           `json:"tags"`
 }
 
 type ProjectGraphSnapshot struct {
@@ -1901,6 +1948,7 @@ type WorkflowStageRun struct {
 	Outputs     []byte             `json:"outputs"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Spec        []byte             `json:"spec"`
 }
 
 type WorkflowTemplate struct {
@@ -1920,6 +1968,8 @@ type WorkflowTemplate struct {
 	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Definition      []byte             `json:"definition"`
+	Enforce         bool               `json:"enforce"`
 }
 
 type WorkflowTemplateShare struct {

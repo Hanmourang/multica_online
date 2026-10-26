@@ -272,3 +272,42 @@ func (h *Handler) HandoffWorkflowStage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RestartWorkflowStageSession(w http.ResponseWriter, r *http.Request) {
 	workflowStageStub(w, r, "workflow_stage_restart_session")
 }
+
+// RecheckWorkflowStageAdmission POST /api/workflow/stage-runs/{sid}/recheck
+// blocked 阶段的「重新校验准入」手动兜底（plan 20261025 §B3c）：立刻走一遍
+// dispatchNextPending 的 blocked→pending 复评分支，返刷新后的阶段快照；
+// 非 blocked 阶段 → 409（无意义操作），实例非 running → 409（状态机约束优先）。
+func (h *Handler) RecheckWorkflowStageAdmission(w http.ResponseWriter, r *http.Request) {
+	if !h.requireWorkflowService(w) {
+		return
+	}
+	stage, ok := h.loadWorkflowStageForRequest(w, r)
+	if !ok {
+		return
+	}
+	if stage.State != "blocked" {
+		writeError(w, http.StatusConflict, "stage_not_blocked")
+		return
+	}
+	inst, ok := h.workflowStageInstance(w, r, stage)
+	if !ok {
+		return
+	}
+	if err := h.WorkflowService.ReevaluateInstance(r.Context(), inst); err != nil {
+		if errors.Is(err, service.ErrWorkflowConflict) {
+			writeError(w, http.StatusConflict, "workflow_state_conflict")
+			return
+		}
+		slogWorkflow("recheck workflow stage admission", err)
+		writeError(w, http.StatusInternalServerError, "failed to recheck workflow stage admission")
+		return
+	}
+	refreshed, err := h.Queries.GetWorkflowStageRun(r.Context(), db.GetWorkflowStageRunParams{
+		ID: stage.ID, WorkspaceID: stage.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read workflow stage")
+		return
+	}
+	writeJSON(w, http.StatusOK, workflowStageRunToResponse(refreshed))
+}

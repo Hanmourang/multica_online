@@ -104,6 +104,21 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		b.SendToUser(recipientID, data)
 	}
 
+	// sendTargeted delivers an event only to e.RecipientUserIDs when the producer
+	// set a non-nil directed audience (DM/Group chat). Returns handled=true when
+	// it took ownership of the fanout — including the fail-closed empty-audience
+	// case, which must drop the event rather than leak it to the workspace.
+	// A nil audience means "legacy workspace broadcast", so handled=false.
+	sendTargeted := func(e events.Event) (handled bool) {
+		if e.RecipientUserIDs == nil {
+			return false
+		}
+		for _, userID := range e.RecipientUserIDs {
+			sendToRecipient(b, e, userID)
+		}
+		return true
+	}
+
 	// inbox:new — extract recipient from nested item
 	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
@@ -180,9 +195,14 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 	// A Chat session is creator-private. Its initial title may be derived from
 	// the creator's first message, so the list-invalidation event must not be
 	// broadcast to every workspace member. ActorID is the creator on every
-	// producer path for this event.
+	// producer path for this agent-kind session. DM/Group sessions carry a
+	// non-nil RecipientUserIDs set (all human participants) and must go to every
+	// one of them, never only the actor.
 	for _, eventType := range []string{protocol.EventChatSessionCreated, protocol.EventChatSessionUpdated} {
 		bus.Subscribe(eventType, func(e events.Event) {
+			if sendTargeted(e) {
+				return
+			}
 			sendToRecipient(b, e, e.ActorID)
 		})
 	}
@@ -219,6 +239,13 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 	bus.SubscribeAll(func(e events.Event) {
 		// Skip personal events — they are handled by type-specific listeners above.
 		if personalEvents[e.Type] {
+			return
+		}
+
+		// DM/Group chat events carry a non-nil directed audience; they must never
+		// fall through to the workspace broadcast. This runs before the broadcast
+		// so an empty audience drops the event (fail-closed) instead of leaking it.
+		if sendTargeted(e) {
 			return
 		}
 

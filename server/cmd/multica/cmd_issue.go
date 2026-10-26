@@ -493,6 +493,7 @@ func init() {
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member, agent, or squad; fuzzy match)")
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
+	issueListCmd.Flags().String("kind", "", "Filter by kind: task or requirement")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" (repeatable, one value per flag). Name is a property name (case-insensitive) or its UUID. Value depends on the type: an option name or id for select and multi_select, true or false for checkbox, a member name, email, or id for actor types, and the value itself for text, url, number, and date (YYYY-MM-DD). Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id, as does a property whose name contains "=" or ends in <, > or ! (the >=, <=, and != spellings are reserved for comparison filters). Repeating a property matches ANY of its values; different properties must ALL match.`)
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return in one page (the server caps a page at 100; use --offset to page through more)")
@@ -524,6 +525,11 @@ func init() {
 	issueCreateCmd.Flags().String("project", "", "Project ID")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
+	issueCreateCmd.Flags().String("goal", "", "Requirement goal")
+	issueCreateCmd.Flags().String("start-at", "", "Planned start time (RFC3339). Setting this on a top-level issue makes it a requirement")
+	issueCreateCmd.Flags().String("repo-resource", "", "Project resource id bound as the requirement git repo")
+	issueCreateCmd.Flags().String("decompose-mode", "", "Requirement decompose mode: auto, confirm, or manual")
+	issueCreateCmd.Flags().Bool("auto-trigger", false, "Trigger the requirement automatically when start-at is reached")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
@@ -542,6 +548,11 @@ func init() {
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
+	issueUpdateCmd.Flags().String("goal", "", "Requirement goal")
+	issueUpdateCmd.Flags().String("start-at", "", "Planned start time (RFC3339). Setting this on a top-level issue makes it a requirement")
+	issueUpdateCmd.Flags().String("repo-resource", "", "Project resource id bound as the requirement git repo")
+	issueUpdateCmd.Flags().String("decompose-mode", "", "Requirement decompose mode: auto, confirm, or manual")
+	issueUpdateCmd.Flags().Bool("auto-trigger", false, "Trigger the requirement automatically when start-at is reached")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
@@ -672,6 +683,14 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		params.Set("project_id", project.ID)
+	}
+	if v, _ := cmd.Flags().GetString("kind"); v != "" {
+		switch v {
+		case "task", "requirement":
+			params.Set("kind", v)
+		default:
+			return fmt.Errorf("invalid --kind %q; valid values: task, requirement", v)
+		}
 	}
 	if mdFlags, _ := cmd.Flags().GetStringSlice("metadata"); len(mdFlags) > 0 {
 		filter, err := buildMetadataFilterQueryParam(mdFlags)
@@ -1225,6 +1244,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
 	}
+	if err := applyRequirementFields(cmd, body); err != nil {
+		return err
+	}
 	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
 		body["allow_duplicate"] = true
 	}
@@ -1325,6 +1347,47 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 	return payload.Error, true
 }
 
+// applyRequirementFields copies the requirement calendar fields onto an issue
+// create/update body. A top-level issue becomes a requirement once start_at,
+// repo_resource_id, or a later decomposition/trigger timestamp is set.
+func applyRequirementFields(cmd *cobra.Command, body map[string]any) error {
+	if cmd.Flags().Lookup("goal") == nil {
+		return nil
+	}
+	if cmd.Flags().Changed("goal") {
+		goal, _ := cmd.Flags().GetString("goal")
+		body["goal"] = goal
+	}
+	if cmd.Flags().Changed("start-at") {
+		startAt, _ := cmd.Flags().GetString("start-at")
+		if strings.TrimSpace(startAt) == "" {
+			return fmt.Errorf("--start-at must be an RFC3339 timestamp")
+		}
+		body["start_at"] = startAt
+	}
+	if cmd.Flags().Changed("repo-resource") {
+		repo, _ := cmd.Flags().GetString("repo-resource")
+		if strings.TrimSpace(repo) == "" {
+			return fmt.Errorf("--repo-resource must be a project resource id")
+		}
+		body["repo_resource_id"] = repo
+	}
+	if cmd.Flags().Changed("decompose-mode") {
+		mode, _ := cmd.Flags().GetString("decompose-mode")
+		switch mode {
+		case "auto", "confirm", "manual":
+			body["decompose_mode"] = mode
+		default:
+			return fmt.Errorf("invalid --decompose-mode %q; valid values: auto, confirm, manual", mode)
+		}
+	}
+	if cmd.Flags().Changed("auto-trigger") {
+		auto, _ := cmd.Flags().GetBool("auto-trigger")
+		body["auto_trigger"] = auto
+	}
+	return nil
+}
+
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	noStart, _ := cmd.Flags().GetBool("no-start")
 	statusChanged := cmd.Flags().Changed("status")
@@ -1399,6 +1462,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("due-date") {
 		v, _ := cmd.Flags().GetString("due-date")
 		body["due_date"] = v
+	}
+	if err := applyRequirementFields(cmd, body); err != nil {
+		return err
 	}
 	if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("assignee-id") {
 		aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)

@@ -121,7 +121,7 @@ RETURNING *;
 -- name: UpdatePrototypeHtmlPath :one
 UPDATE issue_prototype_version
 SET html_path = @html_path,
-    prompt = CASE WHEN @prompt = '' THEN prompt ELSE @prompt END
+    prompt = CASE WHEN @prompt::text = '' THEN prompt ELSE @prompt::text END
 WHERE issue_id = @issue_id AND version = @version
 RETURNING *;
 

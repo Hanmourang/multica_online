@@ -340,13 +340,13 @@ type TaskIssueStatusData struct {
 }
 
 type AgentTaskResponse struct {
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
-	IssueID              string                 `json:"issue_id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
-	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
+	ID              string `json:"id"`
+	AgentID         string `json:"agent_id"`
+	RuntimeID       string `json:"runtime_id"`
+	IssueID         string `json:"issue_id"`
+	WorkspaceID     string `json:"workspace_id"`
+	WorkspaceSlug   string `json:"workspace_slug,omitempty"`
+	IssueIdentifier string `json:"issue_identifier,omitempty"`
 	// 模块调度投影（MUL-模块依赖）：claim 时实时取自 issue，不在任务表落快照，
 	// 编辑模块/勾选即时生效。旧 server 不下发时 daemon 视为无模块（安全退化）。
 	ModuleID      string `json:"module_id,omitempty"`
@@ -354,8 +354,8 @@ type AgentTaskResponse struct {
 	AvoidConflict bool   `json:"avoid_conflict,omitempty"`
 	// 需求组投影（ModuleLocker v2，spec §7.5②）：锁 key 的第二维 + 等待文案的
 	// 持有方需求标题。omitempty 兼容旧 daemon（忽略未知字段，行为退化 v1）。
-	RootRequirementID    string `json:"root_requirement_id,omitempty"`
-	RootRequirementTitle string `json:"root_requirement_title,omitempty"`
+	RootRequirementID    string                 `json:"root_requirement_id,omitempty"`
+	RootRequirementTitle string                 `json:"root_requirement_title,omitempty"`
 	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
 	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
 	// daemon renders as MCP tools for this task. Resolved at claim time so
@@ -406,6 +406,7 @@ type AgentTaskResponse struct {
 	ProjectTitle         string                `json:"project_title,omitempty"`       // for surfacing in agent context
 	ProjectDescription   string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
 	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
+	ProjectIndex         string                `json:"project_index,omitempty"`       // chat-only open-work snapshot; daemon writes .multica/project/index.md. Also prepended to chat_message so an older daemon still delivers it.
 	CreatedAt            string                `json:"created_at"`
 	PriorSessionID       string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
 	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
@@ -457,6 +458,7 @@ type AgentTaskResponse struct {
 	ChatType                 string                 `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat
 	ChatInThread             bool                   `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
 	ChatMessage              string                 `json:"chat_message,omitempty"`                // user message for chat tasks
+	ChatIssueRecord          string                 `json:"chat_issue_record,omitempty"`           // authorized snapshot of attached issues; daemon writes .multica/chat/shared-issues.md
 	ChatMessageAttachments   []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
 	ChatIntro                bool                   `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
 	AutopilotRunID           string                 `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks

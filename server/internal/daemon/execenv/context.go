@@ -14,6 +14,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ChatSharedIssuesRelPath is the workdir copy of issues attached to a chat
+// turn. OpenClaw and similar runtimes can read this file when shell exec is
+// blocked by device pairing. The handler prompt cites the same relative path.
+const ChatSharedIssuesRelPath = ".multica/chat/shared-issues.md"
+
+// ProjectIndexRelPath is the workdir copy of the active project's open-work
+// snapshot. The claim also prepends the same text to the user message, so a
+// runtime that has not picked up this writer still receives the index.
+const ProjectIndexRelPath = ".multica/project/index.md"
+
 // TaskContextMarkerRelPath is a non-secret marker the daemon writes under the
 // task workdir. The CLI uses it as a fallback daemon-task signal when a child
 // sandbox strips all MULTICA_* env vars before invoking `multica`.
@@ -188,6 +198,12 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		// Caller logs warnings; avoid noisy returns for non-fatal context.
 		return fmt.Errorf("write project resources: %w", err)
 	}
+	if err := writeProjectIndex(workDir, ctx, manifest); err != nil {
+		return fmt.Errorf("write project index: %w", err)
+	}
+	if err := writeChatSharedIssues(workDir, ctx, manifest); err != nil {
+		return fmt.Errorf("write chat issue record: %w", err)
+	}
 
 	return nil
 }
@@ -304,6 +320,41 @@ func writeProjectResources(workDir string, ctx TaskContextForEnv, manifest *side
 		if !errors.Is(err, errPathPreExists) {
 			return err
 		}
+	}
+	return nil
+}
+
+// writeChatSharedIssues writes the authorized issue snapshot for a chat turn.
+// An empty record writes nothing, so issue-bound and chat turns without an
+// attached task keep the workdir unchanged.
+func writeProjectIndex(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+	body := strings.TrimSpace(ctx.ProjectIndex)
+	if body == "" {
+		return nil
+	}
+	path := filepath.Join(workDir, filepath.FromSlash(ProjectIndexRelPath))
+	if err := recordMkdirAll(filepath.Dir(path), 0o755, manifest); err != nil {
+		return err
+	}
+	content := []byte(body + "\n")
+	if err := recordWriteFile(path, content, 0o644, manifest); err != nil && !errors.Is(err, errPathPreExists) {
+		return err
+	}
+	return nil
+}
+
+func writeChatSharedIssues(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+	body := strings.TrimSpace(ctx.ChatIssueRecord)
+	if body == "" {
+		return nil
+	}
+	path := filepath.Join(workDir, filepath.FromSlash(ChatSharedIssuesRelPath))
+	if err := recordMkdirAll(filepath.Dir(path), 0o755, manifest); err != nil {
+		return err
+	}
+	content := []byte("# Shared issues\n\nThis file is the authorized record for issues attached to this chat turn. Answer from it. Do not re-read these issues with the multica CLI.\n\n" + body + "\n")
+	if err := recordWriteFile(path, content, 0o644, manifest); err != nil && !errors.Is(err, errPathPreExists) {
+		return err
 	}
 	return nil
 }

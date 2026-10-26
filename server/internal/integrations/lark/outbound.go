@@ -305,6 +305,12 @@ func (p *Patcher) handleEvent(e events.Event) {
 }
 
 func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
+	// DM/Group private conversations never egress to Lark, even with a forged or
+	// legacy binding. Guard before the typing-badge write and every binding
+	// lookup below. plan 20261025 §5.4.
+	if e.IsPrivateConversation() {
+		return nil
+	}
 	taskID, chatSessionID, ok := taskAndSessionFromEvent(e)
 	if !ok {
 		return nil
