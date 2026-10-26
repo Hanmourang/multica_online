@@ -130,7 +130,12 @@ describe("route coverage stays in step with paths.ts", () => {
   const RAW_SECOND_ID = "second-raw-identifier-value";
 
   function buildAll(): string[] {
-    const scoped = paths.workspace(SLUG) as Record<string, (...args: string[]) => string>;
+    // Builders take domain-specific arguments (stages, directions), so the
+    // record is deliberately widened before the uniform probe below.
+    const scoped = paths.workspace(SLUG) as unknown as Record<
+      string,
+      (...args: string[]) => string
+    >;
     const global = {
       login: paths.login,
       newWorkspace: paths.newWorkspace,

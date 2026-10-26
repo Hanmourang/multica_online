@@ -185,7 +185,7 @@ function total(qc: QueryClient, key: readonly unknown[], status: "todo" | "in_pr
 
 describe("applyIssueChange", () => {
   let qc: QueryClient;
-  const issue = () => makeIssue(1);
+  const issue = (overrides: Partial<Issue> = {}) => makeIssue(1, overrides);
 
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
