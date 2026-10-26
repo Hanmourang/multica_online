@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 原型 · 数据模型模块 v3 资产绑定（物理表 / 逻辑表）（2026-09-16）</title>
+<style>
+/* ===== Multica 设计 token（packages/ui/styles/tokens.css 浅色主题抄录） ===== */
+:root {
+  --app-shell: oklch(0.964435 0.001327 286.375);
+  --page-canvas: oklch(0.988087 0 0);
+  --surface: oklch(1 0 0);
+  --surface-hover: oklch(0.967 0.001 286.375);
+  --surface-selected: oklch(0.95 0.002 286.375);
+  --surface-border: oklch(0.92 0.004 286.32);
+  --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
+  --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+  --foreground: oklch(0.141 0.005 285.823);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --faint-foreground: oklch(0.606 0.016 285.938);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --border: oklch(0.945 0.003 286.32);
+  --destructive: oklch(0.577 0.245 27.325);
+  --brand: oklch(0.55 0.16 255);
+  --success: oklch(0.55 0.16 145);
+  --warning: oklch(0.72 0.15 75);
+  --radius: 0.625rem;
+  --sidebar-accent: oklch(0.935 0.003 286.375);
+  --st1: oklch(0.6 0.15 300);
+  --st2: oklch(0.58 0.15 250);
+  --st3: oklch(0.62 0.14 55);
+  --st4: oklch(0.58 0.16 145);
+  --st0: oklch(0.55 0.1 265);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: oklch(0.93 0.004 286.32);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+/* ===== 原型画板框架（非产品 UI） ===== */
+.proto-nav {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 24px; background: oklch(0.16 0.005 285.823);
+  color: oklch(0.92 0.004 286.32);
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 12px; }
+.proto-nav .logo span { color: var(--brand); }
+.proto-nav a {
+  color: oklch(0.705 0.015 286.067); text-decoration: none;
+  padding: 5px 12px; border-radius: 6px; font-size: 12.5px;
+}
+.proto-nav a:hover { background: oklch(1 0 0 / 8%); color: #fff; }
+.frame-wrap { max-width: 1460px; margin: 0 auto; padding: 32px 24px 80px; }
+.frame-head { margin-bottom: 14px; }
+.frame-head h2 { font-size: 17px; font-weight: 700; }
+.frame-head p { color: var(--muted-foreground); font-size: 13px; margin-top: 4px; line-height: 1.7; max-width: 1160px; }
+.frame {
+  background: var(--page-canvas); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 0.16), 0 4px 16px rgb(15 23 42 / 0.08);
+  border: 1px solid oklch(0.85 0.005 286.32);
+  margin-bottom: 56px; position: relative;
+}
+.frame-bar {
+  height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+}
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: oklch(0.7 0.19 27); }
+.frame-bar i:nth-child(2) { background: oklch(0.8 0.16 85); }
+.frame-bar i:nth-child(3) { background: oklch(0.7 0.16 145); }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--faint-foreground); }
+
+/* 标注 */
+.anno {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700;
+  box-shadow: 0 0 0 2.5px oklch(0.55 0.16 255 / 20%);
+  position: relative; z-index: 5; flex: none;
+}
+.new-el { outline: 1.5px dashed oklch(0.55 0.16 255 / 55%); outline-offset: 2px; border-radius: 6px; }
+.anno-legend {
+  max-width: 1460px; margin: -42px auto 56px; padding: 12px 18px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--surface-shadow); display: flex; flex-wrap: wrap; gap: 8px 22px;
+  font-size: 11.5px; color: var(--muted-foreground); line-height: 1.6;
+}
+.anno-legend b { color: var(--foreground); font-weight: 600; }
+.part-head {
+  max-width: 1460px; margin: 8px auto 18px; padding: 0 24px;
+  display: flex; align-items: baseline; gap: 10px;
+  font-size: 15px; font-weight: 750; color: var(--foreground);
+}
+.part-head .rn {
+  font-size: 12px; font-weight: 800; color: #fff; background: var(--primary);
+  border-radius: 6px; padding: 2px 8px;
+}
+.part-head .ds { font-size: 11.5px; font-weight: 500; color: var(--faint-foreground); }
+
+/* ===== 应用外壳 ===== */
+.app { display: flex; height: 800px; }
+.sidebar {
+  width: 212px; flex: none; background: var(--app-shell);
+  border-right: 1px solid var(--surface-border);
+  padding: 10px 8px; display: flex; flex-direction: column; gap: 1px;
+  font-size: 12.5px; overflow: hidden;
+}
+.sidebar .ws { display: flex; align-items: center; gap: 7px; padding: 5px 8px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
+.sidebar .ws .ws-avatar {
+  width: 18px; height: 18px; border-radius: 5px; background: var(--primary);
+  color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px;
+}
+.s-item { display: flex; align-items: center; gap: 8px; padding: 4.5px 8px; border-radius: 6px; color: var(--muted-foreground); }
+.s-item.active { background: var(--sidebar-accent); color: var(--foreground); font-weight: 500; }
+.s-item .badge-n {
+  margin-left: auto; font-size: 10.5px; background: var(--surface-selected);
+  color: var(--muted-foreground); border-radius: 8px; padding: 0 6px; line-height: 16px;
+}
+.s-group { margin-top: 14px; padding: 0 8px 3px; font-size: 11px; color: var(--faint-foreground); }
+.s-dot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--page-canvas); }
+.topbar {
+  height: 46px; flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 0 16px; border-bottom: 1px solid var(--surface-border); font-size: 12.5px;
+}
+.topbar .crumb { color: var(--muted-foreground); }
+.topbar .crumb b { color: var(--foreground); font-weight: 650; }
+.topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.tab-pill {
+  padding: 3.5px 12px; border-radius: 999px; font-size: 12px; color: var(--muted-foreground);
+  border: 1px solid transparent;
+}
+.tab-pill.active { background: var(--surface-selected); color: var(--foreground); font-weight: 600; border-color: var(--surface-border); }
+.btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4.5px 11px; border-radius: 7px;
+  border: 1px solid var(--surface-border); background: var(--surface); font-size: 11.5px;
+  color: var(--foreground); box-shadow: var(--surface-shadow); white-space: nowrap;
+}
+.btn.primary { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+.btn.sm { padding: 3px 9px; font-size: 10.5px; }
+.btn.brand { background: var(--brand); color: #fff; border-color: transparent; }
+.btn.ghost-danger { color: var(--destructive); border-color: oklch(0.577 0.245 27.325 / 35%); }
+
+.ar-toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 9px 16px; border-bottom: 1px solid var(--surface-border);
+  font-size: 11px; color: var(--muted-foreground); background: var(--surface);
+}
+.ar-toolbar .toolbar-right { margin-left: auto; display: flex; gap: 6px; }
+.src-flag {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 6px;
+  background: oklch(0.55 0.16 255 / 8%); border: 1px solid oklch(0.55 0.16 255 / 22%);
+  color: var(--brand); font-size: 10.5px; font-weight: 600;
+}
+.seg { display: inline-flex; border: 1px solid var(--surface-border); border-radius: 7px; overflow: hidden; }
+.seg span { padding: 3.5px 10px; font-size: 10.5px; color: var(--muted-foreground); }
+.seg span.active { background: var(--primary); color: #fff; font-weight: 600; }
+.chip-filter {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--surface-border); background: var(--surface); font-size: 10.5px; color: var(--muted-foreground);
+}
+.chip-filter b { color: var(--foreground); }
+.chip-filter.on { border-color: oklch(0.55 0.16 255 / 40%); background: oklch(0.55 0.16 255 / 8%); color: var(--brand); }
+
+.panel { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; overflow: hidden; }
+.panel-hd {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--surface-border); font-size: 11.5px; font-weight: 700;
+  background: var(--page-canvas);
+}
+.panel-hd .right { margin-left: auto; font-weight: 500; font-size: 10px; color: var(--faint-foreground); }
+.panel-bd { padding: 10px 12px; }
+
+.tbl { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+.tbl th { text-align: left; padding: 5px 8px; color: var(--faint-foreground); font-weight: 600; font-size: 9.5px; border-bottom: 1px solid var(--border); }
+.tbl td { padding: 5.5px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.tbl tr:last-child td { border-bottom: none; }
+.pill { display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; }
+.pill.run { background: oklch(0.55 0.16 145 / 14%); color: oklch(0.4 0.11 145); }
+.pill.wait { background: oklch(0.72 0.15 75 / 20%); color: oklch(0.45 0.12 75); }
+.pill.mute { background: var(--surface-selected); color: var(--faint-foreground); }
+.pill.brand { background: oklch(0.55 0.16 255 / 12%); color: var(--brand); }
+.pill.danger { background: oklch(0.577 0.245 27.325 / 12%); color: var(--destructive); }
+
+/* ===== 画面 1：能力总览 ===== */
+.cap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 16px 18px 6px; }
+.cap-card {
+  background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px;
+  padding: 14px 16px; box-shadow: var(--surface-shadow); position: relative;
+}
+.cap-card .no {
+  position: absolute; top: -9px; left: 12px; background: var(--brand); color: #fff;
+  font-size: 10px; font-weight: 800; border-radius: 8px; padding: 1.5px 8px;
+}
+.cap-card h3 { font-size: 13.5px; font-weight: 750; margin: 4px 0 6px; }
+.cap-card p { font-size: 11px; color: var(--muted-foreground); line-height: 1.7; }
+.cap-card ul { margin: 8px 0 0; padding-left: 16px; font-size: 11px; color: var(--muted-foreground); line-height: 1.8; }
+.cap-card ul b { color: var(--foreground); }
+.flow-strip { margin: 12px 18px 18px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px; }
+.flow-row { display: flex; align-items: stretch; gap: 8px; }
+.flow-node {
+  flex: 1; border: 1px solid var(--surface-border); border-radius: 9px; padding: 8px 10px;
+  background: var(--page-canvas); font-size: 10.5px; line-height: 1.55;
+}
+.flow-node b { display: block; font-size: 11px; margin-bottom: 2px; }
+.flow-node.hot { border-color: oklch(0.6 0.15 300 / 50%); background: oklch(0.6 0.15 300 / 6%); }
+.flow-arrow { align-self: center; color: var(--faint-foreground); font-size: 13px; flex: none; }
+
+/* ===== 总线矩阵（沿用 v2，弹窗背景用） ===== */
+.bm-wrap { padding: 12px 18px 18px; }
+.bm-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.bm { width: 100%; border-collapse: collapse; font-size: 10.5px; min-width: 1180px; }
+.bm th, .bm td { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 0; text-align: center; }
+.bm tr > *:last-child { border-right: none; }
+.bm thead th { background: var(--app-shell); padding: 4px 5px; font-weight: 700; color: var(--muted-foreground); font-size: 9.5px; }
+.bm thead tr.grp th { font-size: 10px; color: var(--foreground); border-bottom: 1px solid var(--border); }
+.bm thead tr.grp th .bk { display: block; font-size: 8.5px; font-weight: 600; color: var(--faint-foreground); letter-spacing: .02em; }
+.bm .rh { text-align: left; padding: 5px 9px; background: var(--page-canvas); font-weight: 650; width: 128px; }
+.bm .ft { text-align: left; padding: 5px 9px; font-weight: 650; width: 110px; }
+.bm .ky { text-align: left; padding: 5px 8px; font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; color: var(--muted-foreground); width: 122px; }
+.bm .cell { height: 31px; cursor: pointer; }
+.bm .cell i { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 31px; font-style: normal; font-weight: 750; font-size: 10px; line-height: 1.2; position: relative; }
+.bm .cell i b { font-size: 8.5px; font-weight: 600; opacity: .8; }
+.cell.r i { background: oklch(0.55 0.16 145 / 11%); color: oklch(0.4 0.11 145); }
+.cell.w i { background: oklch(0.72 0.15 75 / 19%); color: oklch(0.45 0.12 75); }
+.cell.n i { color: var(--faint-foreground); opacity: .4; }
+.cell.hit i { box-shadow: inset 0 0 0 2px var(--brand); }
+.cell.pinned i::after { content: "📌"; position: absolute; top: 1px; right: 2px; font-size: 7px; }
+
+/* ===== 资产绑定弹窗（v3 核心） ===== */
+.modal-mask {
+  position: absolute; inset: 0; background: oklch(0.141 0.005 285.823 / 38%);
+  display: flex; align-items: center; justify-content: center; z-index: 20;
+  backdrop-filter: blur(1.5px);
+}
+.modal {
+  width: 700px; max-height: 88%; overflow: hidden; display: flex; flex-direction: column;
+  background: var(--surface); border-radius: 12px; box-shadow: var(--floating-shadow);
+  border: 1px solid var(--surface-border);
+}
+.modal-hd {
+  padding: 11px 16px 9px; border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: flex-start; gap: 9px;
+}
+.modal-hd .ttl { font-size: 13.5px; font-weight: 750; }
+.modal-hd .sub { font-size: 10.5px; color: var(--muted-foreground); margin-top: 2px; }
+.modal-hd .x { margin-left: auto; color: var(--faint-foreground); font-size: 14px; padding: 2px 6px; }
+.modal-bd { padding: 12px 16px; overflow: auto; }
+.modal-ft {
+  padding: 9px 16px; border-top: 1px solid var(--surface-border);
+  display: flex; gap: 8px; align-items: center; font-size: 10px; color: var(--faint-foreground);
+}
+.modal-ft .sp { margin-left: auto; }
+.mount-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+  border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; font-size: 10.5px;
+  background: var(--surface);
+}
+.mount-row .nm { font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 11px; }
+.mount-row .cols { color: var(--faint-foreground); font-size: 9px; font-family: ui-monospace, Menlo, monospace; }
+.mount-row .grow { flex: 1; min-width: 0; }
+.mount-row .act { color: var(--faint-foreground); font-size: 10px; white-space: nowrap; }
+.mount-row .act b { color: var(--brand); cursor: pointer; }
+.mount-row.is-manual { border-left: 2.5px solid var(--warning); }
+.mount-row.is-ignored { opacity: .55; border-left: 2.5px solid var(--destructive); }
+.mount-row.is-logic { border-left: 2.5px solid var(--st1); }
+.src-tag { font-size: 8.5px; font-weight: 800; padding: 1px 5px; border-radius: 3px; flex: none; }
+.src-tag.auto { background: oklch(0.55 0.16 255 / 12%); color: var(--brand); }
+.src-tag.manual { background: oklch(0.72 0.15 75 / 20%); color: oklch(0.45 0.12 75); }
+.src-tag.ignored { background: oklch(0.577 0.245 27.325 / 12%); color: var(--destructive); }
+.mount-search {
+  display: flex; gap: 6px; align-items: center; border: 1px solid var(--surface-border);
+  border-radius: 8px; padding: 6px 10px; background: var(--page-canvas);
+  font-size: 11px; color: var(--faint-foreground); margin-bottom: 7px;
+}
+.cand-row {
+  display: flex; align-items: center; gap: 8px; padding: 5.5px 9px; font-size: 10.5px;
+  border-bottom: 1px dashed var(--border);
+}
+.cand-row:last-child { border-bottom: none; }
+.cand-row .nm { font-family: ui-monospace, Menlo, monospace; font-weight: 600; }
+.cand-row .why { color: var(--faint-foreground); font-size: 9px; }
+.cand-row .plus { margin-left: auto; color: var(--brand); font-weight: 700; font-size: 10px; white-space: nowrap; }
+.sec-ttl { font-size: 10px; font-weight: 800; color: var(--faint-foreground); letter-spacing: .04em; margin: 10px 0 6px; }
+.sec-ttl:first-child { margin-top: 0; }
+
+/* v3 新增：资产类型 + 数仓分层徽章 */
+.type-tag { font-size: 8.5px; font-weight: 800; padding: 1px 5px; border-radius: 3px; flex: none; letter-spacing: .02em; }
+.type-tag.phys { background: oklch(0.55 0.16 255 / 12%); color: var(--brand); }
+.type-tag.logic { background: oklch(0.6 0.15 300 / 13%); color: oklch(0.48 0.13 300); }
+.layer-tag { font-size: 8px; font-weight: 700; padding: 0.5px 4px; border-radius: 3px; flex: none; font-family: ui-monospace, Menlo, monospace; }
+.layer-tag.biz { background: var(--surface-selected); color: var(--muted-foreground); }
+.layer-tag.ods { background: oklch(0.62 0.14 195 / 15%); color: oklch(0.45 0.11 195); }
+.layer-tag.cdm { background: oklch(0.58 0.16 145 / 14%); color: oklch(0.42 0.12 145); }
+.badge-chg { font-size: 8.5px; font-weight: 800; padding: 1px 5px; border-radius: 3px; letter-spacing: .02em; }
+.badge-chg.add { background: oklch(0.55 0.16 145 / 14%); color: oklch(0.4 0.11 145); }
+.badge-chg.mod { background: oklch(0.55 0.16 255 / 12%); color: var(--brand); }
+.badge-chg.del { background: oklch(0.577 0.245 27.325 / 12%); color: var(--destructive); }
+.badge-chg.same { background: var(--surface-selected); color: var(--faint-foreground); }
+
+/* 绑定区：类型切换 + 分层筛选 */
+.bind-ctl { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 8px; }
+.bind-ctl .seg span { padding: 3px 10px; }
+.layer-chip {
+  display: inline-flex; align-items: center; gap: 3px; padding: 2.5px 8px; border-radius: 999px;
+  border: 1px solid var(--surface-border); background: var(--surface); font-size: 9.5px; color: var(--muted-foreground);
+}
+.layer-chip.on { border-color: oklch(0.62 0.14 195 / 45%); background: oklch(0.62 0.14 195 / 8%); color: oklch(0.45 0.11 195); }
+
+/* 逻辑表组装器 */
+.lt-builder { border: 1px solid oklch(0.6 0.15 300 / 40%); border-radius: 9px; background: oklch(0.6 0.15 300 / 4%); padding: 9px 11px; margin-top: 8px; }
+.lt-builder .lb-ttl { font-size: 10.5px; font-weight: 800; color: oklch(0.48 0.13 300); margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
+.lt-field { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; font-size: 10px; }
+.lt-field .k { width: 86px; flex: none; color: var(--faint-foreground); font-weight: 600; }
+.lt-input {
+  border: 1px solid var(--surface-border); border-radius: 6px; background: var(--surface);
+  padding: 3.5px 8px; font-size: 10.5px; font-family: ui-monospace, Menlo, monospace; color: var(--foreground);
+}
+.dim-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2.5px 7px; border-radius: 5px;
+  background: oklch(0.6 0.15 300 / 12%); color: oklch(0.48 0.13 300);
+  font-size: 9.5px; font-weight: 700; font-family: ui-monospace, Menlo, monospace;
+}
+.dim-chip .rm { opacity: .6; cursor: pointer; font-weight: 800; }
+.dim-add {
+  display: inline-flex; align-items: center; padding: 2.5px 7px; border-radius: 5px;
+  border: 1px dashed oklch(0.6 0.15 300 / 55%); color: oklch(0.48 0.13 300);
+  font-size: 9px; font-weight: 700; cursor: pointer;
+}
+.metric-row {
+  display: flex; align-items: center; gap: 6px; padding: 5px 7px; margin-bottom: 5px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 10px;
+}
+.metric-row .sel {
+  border: 1px solid var(--surface-border); border-radius: 5px; background: var(--page-canvas);
+  padding: 2.5px 6px; font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--foreground);
+  white-space: nowrap;
+}
+.metric-row .arrow { color: var(--faint-foreground); flex: none; }
+.metric-row .alias { color: var(--muted-foreground); font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; }
+.metric-row .rm { margin-left: auto; color: var(--faint-foreground); cursor: pointer; flex: none; }
+.metric-add {
+  display: inline-flex; align-items: center; gap: 3px; font-size: 9.5px; font-weight: 700;
+  color: oklch(0.48 0.13 300); border: 1px dashed oklch(0.6 0.15 300 / 55%); border-radius: 5px;
+  padding: 2.5px 8px; cursor: pointer; background: var(--surface);
+}
+.sql-preview {
+  margin-top: 7px; border: 1px solid var(--surface-border); border-radius: 7px; background: oklch(0.2 0.01 286);
+  color: oklch(0.85 0.02 145); font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  line-height: 1.65; padding: 8px 11px; white-space: pre; overflow-x: auto;
+}
+.sql-preview .kw { color: oklch(0.7 0.14 255); font-weight: 700; }
+.sql-preview .cm { color: oklch(0.6 0.02 286); }
+
+/* ===== 数据视角（沿用 v2） ===== */
+.ver-pick {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px;
+  border: 1px solid oklch(0.55 0.16 255 / 35%); background: oklch(0.55 0.16 255 / 7%);
+  font-size: 10.5px; color: var(--brand); font-weight: 650;
+}
+.ver-pick .mono { font-weight: 700; }
+.ver-vs { color: var(--faint-foreground); font-size: 11px; padding: 0 2px; }
+.diff-stat { display: inline-flex; gap: 0; border-radius: 7px; overflow: hidden; border: 1px solid var(--surface-border); font-size: 10px; font-weight: 750; }
+.diff-stat span { padding: 3.5px 9px; }
+.diff-stat .a { background: oklch(0.55 0.16 145 / 13%); color: oklch(0.4 0.11 145); }
+.diff-stat .m { background: oklch(0.55 0.16 255 / 11%); color: var(--brand); }
+.diff-stat .d { background: oklch(0.577 0.245 27.325 / 11%); color: var(--destructive); }
+.diff-stat .u { background: var(--surface-selected); color: var(--faint-foreground); font-weight: 600; }
+tr.is-del td { opacity: .5; }
+tr.is-del .nm { text-decoration: line-through; }
+tr.is-new td { background: oklch(0.55 0.16 145 / 5%); }
+tr.is-mod td { background: oklch(0.55 0.16 255 / 4%); }
+tr.is-logic td { background: oklch(0.6 0.15 300 / 4%); }
+.col-diff { font-family: ui-monospace, Menlo, monospace; font-size: 9px; display: flex; flex-wrap: wrap; gap: 4px; }
+.col-diff .c { padding: 1px 5px; border-radius: 3px; }
+.col-diff .c.add { background: oklch(0.55 0.16 145 / 13%); color: oklch(0.4 0.11 145); }
+.col-diff .c.del { background: oklch(0.577 0.245 27.325 / 11%); color: var(--destructive); text-decoration: line-through; }
+.col-diff .c.typ { background: oklch(0.72 0.15 75 / 18%); color: oklch(0.45 0.12 75); }
+.risk-strip {
+  display: flex; gap: 8px; align-items: flex-start; padding: 8px 11px; border-radius: 8px;
+  font-size: 10px; line-height: 1.6; margin-bottom: 6px;
+}
+.risk-strip.warn { background: oklch(0.72 0.15 75 / 9%); border: 1px solid oklch(0.72 0.15 75 / 30%); }
+.risk-strip.info { background: oklch(0.6 0.15 300 / 7%); border: 1px solid oklch(0.6 0.15 300 / 28%); }
+
+/* 子 TAB（物理表 / 逻辑表） */
+.sub-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--surface-border); padding: 0 12px; background: var(--surface); }
+.sub-tab {
+  padding: 7px 13px; font-size: 11px; color: var(--muted-foreground); font-weight: 600;
+  border-bottom: 2px solid transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+}
+.sub-tab.active { color: var(--foreground); border-bottom-color: var(--primary); }
+.sub-tab .cnt { font-size: 9px; font-weight: 700; background: var(--surface-selected); border-radius: 7px; padding: 0 5px; color: var(--faint-foreground); }
+.sub-tab.active .cnt { background: oklch(0.55 0.16 255 / 12%); color: var(--brand); }
+
+/* 逻辑表行内展开：指标构成 */
+.metric-spec { padding: 7px 10px 9px; background: oklch(0.6 0.15 300 / 5%); border-top: 1px dashed oklch(0.6 0.15 300 / 35%); }
+.metric-spec .ms-ttl { font-size: 9px; font-weight: 800; color: oklch(0.48 0.13 300); letter-spacing: .04em; margin-bottom: 5px; }
+</style>
+</head>
+<body>
+
+<nav class="proto-nav">
+  <span class="logo">Multica <span>原型</span></span>
+  <a href="#f1">1 · v3 增量总览</a>
+  <a href="#f2">2 · 绑定弹窗 · 物理表</a>
+  <a href="#f3">3 · 绑定弹窗 · 逻辑表组装</a>
+  <a href="#f4">4 · 子 TAB · 物理表清单</a>
+  <a href="#f5">5 · 子 TAB · 逻辑表清单</a>
+</nav>
+
+<div class="frame-wrap">
+<!-- ============ 画面 1：v3 增量总览 ============ -->
+<div class="part-head"><span class="rn">Ⅰ</span>v3 增量总览<span class="ds">在 v2 三视角之上：资产绑定区分物理表 / 逻辑表，数据模型子 TAB 同源拆分</span></div>
+<div class="frame-head" id="f1">
+  <h2>画面 1 · 数据模型模块 v3 增量 —— 物理表 × 逻辑表双轨资产模型</h2>
+  <p>v2 已交付「点格子直接弹挂载 + 三视角版本化」。v3 在此之上回答一个问题：<b>挂到格子里的「数据资产」到底是什么形态？</b>拆为两轨——<b>物理表</b>：真实落库的数据表，含业务库真实表与数仓 <span class="mono">ODS</span>（贴源）/ <span class="mono">CDM</span>（公共维度）分层表；<b>逻辑表</b>：不落数据的<b>虚拟视图</b>，以<b>业务过程（= 矩阵行的维度主键组合）</b>为轴，把多张物理表的指标按口径挂载组装成一张逻辑宽表。绑定弹窗与数据模型子 TAB 同时支持双轨：弹窗内可添加/绑定两类资产；数据视角清单拆「物理表 / 逻辑表」两个子 TAB，逻辑表行可展开指标构成血缘。</p>
+</div>
+<div class="frame" style="height:auto">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 数据模型 v3 · 资产模型语义</span></div>
+  <div class="cap-grid">
+    <div class="cap-card new-el"><span class="no">能力 ①</span>
+      <h3>绑定弹窗：添加 + 绑定双轨资产 <span class="anno" style="vertical-align:2px">f2/f3</span></h3>
+      <p>点击矩阵格子弹出的绑定窗口中，每行资产带<b>类型徽章（物理表 / 逻辑表）</b>与<b>分层徽章（业务库 / ODS / CDM）</b>；「绑定新资产」区按类型切换：物理表态提供分层筛选 + 搜索候选；逻辑表态可选已有逻辑表，或就地展开<b>组装器新建</b>。</p>
+    </div>
+    <div class="cap-card new-el"><span class="no">能力 ②</span>
+      <h3>逻辑表组装器 <span class="anno" style="vertical-align:2px">f3</span></h3>
+      <p>以格子的业务过程为<b>维度主键组合</b>（如 <span class="mono">issue·detail → workspace_id + issue_id</span>），逐行挂载「来源物理表 · 列 → 聚合口径 → JOIN 键」为指标，实时预览生成的 <span class="mono">CREATE VIEW</span>。<b>逻辑表不落数据</b>，定义入增量层，查询时下推到物理表。</p>
+    </div>
+    <div class="cap-card new-el"><span class="no">能力 ③</span>
+      <h3>数据模型子 TAB：物理表 / 逻辑表 <span class="anno" style="vertical-align:2px">f4/f5</span></h3>
+      <p>数据视角清单拆三个子 TAB：<b>全部 / 物理表 / 逻辑表</b>。物理表 TAB 增加「分层」列与筛选；逻辑表 TAB 展示业务过程（维度主键组合）、挂载指标数、来源物理表数，行内可展开指标构成血缘。</p>
+    </div>
+  </div>
+  <div class="flow-strip">
+    <div style="font-size:10px;font-weight:800;color:var(--faint-foreground);letter-spacing:.04em;margin-bottom:8px">语义模型 · 两轨如何汇进同一个矩阵格子</div>
+    <div class="flow-row">
+      <div class="flow-node"><b>物理表（真实落库）</b><span class="layer-tag biz">业务库</span> <span class="mono" style="font-size:9px">issue / project_artifact</span><br><span class="layer-tag ods">ODS</span> <span class="mono" style="font-size:9px">ods_issue_sync_raw</span>　<span class="layer-tag cdm">CDM</span> <span class="mono" style="font-size:9px">cdm_issue_daily_df</span></div>
+      <div class="flow-arrow">── 指标挂载 ──▶</div>
+      <div class="flow-node hot"><b>逻辑表（虚拟视图）</b><span class="mono" style="font-size:9px">lg_issue_detail_view</span><br>维度主键 = 业务过程 <span class="mono" style="font-size:9px">issue·detail</span><br>指标 6 个 ← 来源物理表 3 张</div>
+      <div class="flow-arrow">── 绑定 ──▶</div>
+      <div class="flow-node"><b>矩阵格子</b>需求详情页 × 需求域<br><span class="mono" style="font-size:9px">asset_mount</span> 增量层记录绑定（含类型 / 层 / 读写）</div>
+      <div class="flow-arrow">── 消费 ──▶</div>
+      <div class="flow-node"><b>功能模块 / 页面</b>按业务过程读写逻辑表，<b>无需感知底层多表 JOIN</b>；物理表仍可被直接绑定</div>
+    </div>
+  </div>
+</div>
+<div class="anno-legend">
+  <span><span class="anno">1</span> <b>与 v2 的关系</b>：v3 只扩展「资产形态」维度，矩阵结构、三级行编辑、版本化追踪、360° 全部沿用 v2 不变</span>
+  <span><span class="anno">2</span> <b>逻辑表 ≠ 物化表</b>：定义即视图，不落数据、不占存储；生命周期跟随来源物理表，来源删除时逻辑表标 <span class="mono">stale</span> 告警而非静默失效</span>
+</div>
+
+<div class="part-head"><span class="rn">Ⅱ</span>能力 ①<span class="ds">点格子 → 绑定弹窗：物理表态（添加 / 绑定真实表与 ODS / CDM 分层表）</span></div>
+<!-- ============ 画面 2：绑定弹窗 · 物理表绑定态 ============ -->
+<div class="frame-head" id="f2">
+  <h2>画面 2 · 资产绑定弹窗 v3（物理表态）—— 点格子即弹，双轨清单 + 分层绑定</h2>
+  <p>沿用 v2「单击格子直接弹出」交互（本帧格子 = <b>需求详情页 · 业务过程 <span class="mono">issue·detail</span> × 需求域</b>）。v3 变化点：<b>① 已绑定清单双轨混排</b>——物理表带分层徽章（业务库 / <span class="mono">ODS</span> / <span class="mono">CDM</span>），逻辑表带紫色标识与「指标数 · 来源表数」摘要；<b>② 绑定区新增类型切换</b>——物理表态下提供<b>分层筛选 chips</b>（全部 / 业务库 / ODS / CDM）+ 全库搜索，候选行标注层与推荐理由，一键「绑定为读 / 写」；<b>③ 写路径不变</b>——全部手动绑定仍落 <span class="mono">asset_mount</span> 增量层（新增 <span class="mono">asset_kind</span> / <span class="mono">layer</span> 两列），重扫自动重放。</p>
+</div>
+<div class="frame" style="height:700px">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 数据模型 / 产品视角 / 格子「需求详情页 · issue·detail × 需求域」</span></div>
+  <div style="position:relative;height:666px;background:var(--page-canvas)">
+    <div style="padding:18px;filter:blur(0.5px);opacity:.55">
+      <div class="bm-scroll"><table class="bm"><thead><tr class="grp"><th class="mh" style="padding:6px 9px;text-align:left">产品模块</th><th>页面</th><th>业务过程</th><th>需求域</th><th>项目域</th><th>交付域</th><th>图谱域</th></tr></thead>
+      <tbody>
+        <tr><td class="rh">需求流水线</td><td class="ft">需求看板页</td><td class="ky">issue·board_view</td><td class="cell w"><i>9 表</i></td><td class="cell r"><i>2 表</i></td><td class="cell r"><i>1 表</i></td><td class="cell n"><i>·</i></td></tr>
+        <tr><td class="rh">需求流水线</td><td class="ft">需求详情页</td><td class="ky">issue·detail</td><td class="cell w hit"><i>7 表<b>R5·W3</b></i></td><td class="cell r"><i>3 表</i></td><td class="cell w"><i>4 表</i></td><td class="cell n"><i>·</i></td></tr>
+        <tr><td class="rh">需求流水线</td><td class="ft">需求详情页</td><td class="ky">issue·progress</td><td class="cell r"><i>3 表</i></td><td class="cell n"><i>·</i></td><td class="cell r"><i>2 表</i></td><td class="cell n"><i>·</i></td></tr>
+      </tbody></table></div>
+    </div>
+    <div class="modal-mask">
+      <div class="modal new-el">
+        <div class="modal-hd">
+          <div>
+            <div class="ttl">🗄 资产绑定 · 需求详情页 / 需求追踪 × 需求域 <span class="anno" style="margin-left:4px">1</span></div>
+            <div class="sub">业务过程 <span class="mono">issue·detail</span> · 维度主键组合 <span class="mono">workspace_id + issue_id</span> · 基于版本 <span class="mono">scan b27c</span>（09-14） · 已绑定 5（物理 4 · 逻辑 1）</div>
+          </div>
+          <span class="x">✕</span>
+        </div>
+        <div class="modal-bd">
+          <div class="sec-ttl">已绑定资产 · 5 <span style="font-weight:500">（物理表 4 / 逻辑表 1，图谱自动识别 + 手动绑定双源合并）</span></div>
+          <div class="mount-row">
+            <span class="type-tag phys">物理</span><span class="layer-tag biz">业务库</span>
+            <div class="grow"><span class="nm">issue</span> <span class="pill run">RW</span> <span class="src-tag auto">图谱</span><div class="cols">stage / priority_score / assignee_ai … 21 列触达</div></div>
+            <span class="badge-chg mod">◆ 本期修改</span>
+            <span class="act"><b>改读写</b> · <b>移格</b> · <b>解除</b></span>
+          </div>
+          <div class="mount-row">
+            <span class="type-tag phys">物理</span><span class="layer-tag biz">业务库</span>
+            <div class="grow"><span class="nm">issue_extension</span> <span class="pill wait">R</span> <span class="src-tag auto">图谱</span><div class="cols">issue_id / extra(jsonb) … 3 列</div></div>
+            <span class="badge-chg same">不变</span>
+            <span class="act"><b>改读写</b> · <b>移格</b> · <b>解除</b></span>
+          </div>
+          <div class="mount-row is-manual">
+            <span class="type-tag phys">物理</span><span class="layer-tag ods">ODS</span>
+            <div class="grow"><span class="nm">ods_issue_sync_raw</span> <span class="pill wait">R</span> <span class="src-tag manual">手动</span><div class="cols">贴源层 · issue 全量同步快照 · 每日凌晨回刷</div></div>
+            <span class="badge-chg add">▲ 本期新增</span>
+            <span class="act"><b>改读写</b> · <b>移格</b> · <b>解除</b></span>
+          </div>
+          <div class="mount-row is-manual">
+            <span class="type-tag phys">物理</span><span class="layer-tag cdm">CDM</span>
+            <div class="grow"><span class="nm">cdm_issue_daily_df</span> <span class="pill wait">R</span> <span class="src-tag manual">手动</span><div class="cols">公共维度层 · 需求日粒度全量快照（df = 全量每日）</div></div>
+            <span class="badge-chg add">▲ 本期新增</span>
+            <span class="act"><b>改读写</b> · <b>移格</b> · <b>解除</b></span>
+          </div>
+          <div class="mount-row is-logic">
+            <span class="type-tag logic">逻辑</span><span class="layer-tag" style="background:oklch(0.6 0.15 300 / 12%);color:oklch(0.48 0.13 300)">VIEW</span>
+            <div class="grow"><span class="nm">lg_issue_detail_view</span> <span class="pill wait">R</span> <span class="src-tag manual">手动</span><div class="cols">虚拟视图 · 指标 6 个 ← 来源 3 表（issue / agent_run / deliverable）· 不落数据</div></div>
+            <span class="badge-chg add">▲ 本期新增</span>
+            <span class="act"><b>编辑定义</b> · <b>解除</b></span>
+          </div>
+
+          <div class="sec-ttl">已忽略 · 1 <span style="font-weight:500">（自动识别但人工判误报，可随时恢复）</span></div>
+          <div class="mount-row is-ignored">
+            <span class="type-tag phys">物理</span><span class="layer-tag biz">业务库</span>
+            <span class="src-tag ignored">已忽略</span>
+            <div class="grow"><span class="nm">kv_session_cache</span> <span class="pill mute">R</span><div class="cols">图谱边：detail-panel.tsx → kv read · 判误报：运行时缓存非数据资产</div></div>
+            <span class="act"><b>恢复绑定</b></span>
+          </div>
+
+          <div class="sec-ttl">绑定新资产 <span class="anno" style="margin-left:3px">2</span></div>
+          <div class="bind-ctl">
+            <span class="seg new-el"><span class="active">🟦 物理表</span><span>🟪 逻辑表 <span class="anno" style="margin-left:2px;vertical-align:1px">3</span></span></span>
+            <span class="layer-chip on">全部层</span>
+            <span class="layer-chip"><span class="layer-tag biz">业务库</span> 98</span>
+            <span class="layer-chip"><span class="layer-tag ods">ODS</span> 14</span>
+            <span class="layer-chip"><span class="layer-tag cdm">CDM</span> 14</span>
+          </div>
+          <div class="mount-search">🔍 搜索全库 126 张物理表 …（输入表名 / 中文别名 / 列名）</div>
+          <div style="border:1px solid var(--border);border-radius:8px;padding:2px 4px">
+            <div class="cand-row"><span class="layer-tag ods">ODS</span><span class="nm">ods_agent_run_raw</span><span class="pill wait">R</span><span class="why">贴源层 · 与当前业务过程共现 3 次</span><span class="plus">＋ 绑定为读</span></div>
+            <div class="cand-row"><span class="layer-tag cdm">CDM</span><span class="nm">cdm_workspace_issue_hi</span><span class="pill wait">R</span><span class="why">公共维度层 · 小时级增量（hi）</span><span class="plus">＋ 绑定为读</span></div>
+            <div class="cand-row"><span class="layer-tag biz">业务库</span><span class="nm">issue_dependency</span><span class="pill mute">RW</span><span class="why">同域 · 已被拆解确认面板绑定</span><span class="plus">＋ 绑定 ▾</span></div>
+          </div>
+        </div>
+        <div class="modal-ft">
+          手动绑定写入 <span class="mono">asset_mount</span> 增量层（<span class="mono">asset_kind = physical</span> · <span class="mono">layer = ods / cdm / biz</span>） · 优先级高于图谱识别 · 重扫自动重放
+          <span class="sp"></span>
+          <span class="btn sm">取消</span>
+          <span class="btn sm brand">完成（变更 2 项）</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="anno-legend">
+  <span><span class="anno">1</span> <b>弹窗上下文完整</b>：标题栏带模块 / 页面 / 业务过程 / 数据域四维坐标 + 维度主键组合，绑定动作始终知道「绑到哪」</span>
+  <span><span class="anno">2</span> <b>双轨混排清单</b>：物理表与逻辑表在同一清单展示、同一套操作（改读写 / 移格 / 解除）；逻辑表额外提供「编辑定义」直达组装器</span>
+  <span><span class="anno">3</span> <b>分层推荐</b>：物理表态按层筛选，候选排序 = 同层同域优先 + 共现次数；ODS / CDM 表默认建议「绑定为读」（数仓分层不应用内直写）</span>
+</div>
+
+<div class="part-head"><span class="rn">Ⅲ</span>能力 ②<span class="ds">绑定弹窗 · 逻辑表态：选已有逻辑表，或就地组装新逻辑表（业务过程 = 维度主键组合）</span></div>
+<!-- ============ 画面 3：绑定弹窗 · 逻辑表绑定态 + 组装器 ============ -->
+<div class="frame-head" id="f3">
+  <h2>画面 3 · 资产绑定弹窗 v3（逻辑表态）—— 绑定已有逻辑表 / 就地组装新逻辑表</h2>
+  <p>同一弹窗切到「逻辑表」态：<b>上半段</b>列出本项目已有的逻辑表（可一键绑定到当前格子）；<b>下半段「＋ 新建逻辑表」展开组装器</b>——<b>业务过程自动继承格子坐标</b>（<span class="mono">issue·detail</span>），即维度主键组合 <span class="mono">workspace_id + issue_id</span>（可增删维度列）；随后逐行<b>挂载指标</b>：选来源物理表与列、定聚合口径（原始值 / COUNT / SUM / AVG / MAX / LAST）、定 JOIN 键；右侧实时预览生成的 <span class="mono">CREATE VIEW</span>。保存后：视图定义入 <span class="mono">logical_table_def</span>（含维度主键与指标血缘），绑定关系入 <span class="mono">asset_mount</span>（<span class="mono">asset_kind = logical</span>），<b>逻辑表不落数据</b>，消费方按业务过程查询时下推到来源物理表。</p>
+</div>
+<div class="frame" style="height:760px">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 数据模型 / 产品视角 / 格子「需求详情页 · issue·detail × 需求域」→ 绑定逻辑表</span></div>
+  <div style="position:relative;height:726px;background:var(--page-canvas)">
+    <div style="padding:18px;filter:blur(0.5px);opacity:.55">
+      <div class="bm-scroll"><table class="bm"><thead><tr class="grp"><th class="mh" style="padding:6px 9px;text-align:left">产品模块</th><th>页面</th><th>业务过程</th><th>需求域</th><th>项目域</th><th>交付域</th></tr></thead>
+      <tbody>
+        <tr><td class="rh">需求流水线</td><td class="ft">需求看板页</td><td class="ky">issue·board_view</td><td class="cell w"><i>9 表</i></td><td class="cell r"><i>2 表</i></td><td class="cell r"><i>1 表</i></td></tr>
+        <tr><td class="rh">需求流水线</td><td class="ft">需求详情页</td><td class="ky">issue·detail</td><td class="cell w hit"><i>7 表<b>R5·W3</b></i></td><td class="cell r"><i>3 表</i></td><td class="cell w"><i>4 表</i></td></tr>
+        <tr><td class="rh">需求流水线</td><td class="ft">需求详情页</td><td class="ky">issue·progress</td><td class="cell r"><i>3 表</i></td><td class="cell n"><i>·</i></td><td class="cell r"><i>2 表</i></td></tr>
+      </tbody></table></div>
+    </div>
+    <div class="modal-mask">
+      <div class="modal new-el" style="width:760px">
+        <div class="modal-hd">
+          <div>
+            <div class="ttl">🗄 资产绑定 · 需求详情页 / 需求追踪 × 需求域 —— 逻辑表</div>
+            <div class="sub">业务过程 <span class="mono">issue·detail</span> · 维度主键组合 <span class="mono">workspace_id + issue_id</span> · 已有逻辑表 8 张（本项目）</div>
+          </div>
+          <span class="x">✕</span>
+        </div>
+        <div class="modal-bd">
+          <div class="sec-ttl">绑定新资产 · 逻辑表 <span class="anno" style="margin-left:3px">1</span></div>
+          <div class="bind-ctl">
+            <span class="seg"><span>🟦 物理表</span><span class="active">🟪 逻辑表</span></span>
+            <span class="chip-filter">业务过程 <b>issue·detail 优先</b> ▾</span>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:8px;padding:2px 4px;margin-bottom:8px">
+            <div class="cand-row"><span class="type-tag logic">逻辑</span><span class="nm">lg_req_pipeline_view</span><span class="why">业务过程 issue·pipeline · 指标 9 · 来源 4 表 · 已被 2 页面绑定</span><span class="plus">＋ 绑定为读</span></div>
+            <div class="cand-row"><span class="type-tag logic">逻辑</span><span class="nm">lg_delivery_overview_view</span><span class="why">业务过程 delivery·overview · 指标 7 · 来源 3 表</span><span class="plus">＋ 绑定为读</span></div>
+          </div>
+
+          <div class="lt-builder new-el">
+            <div class="lb-ttl">🟪 新建逻辑表 —— 以业务过程为维度主键组合组装指标 <span class="anno" style="margin-left:2px">2</span></div>
+            <div class="lt-field">
+              <span class="k">逻辑表名</span>
+              <span class="lt-input">lg_issue_detail_view</span>
+              <span style="color:var(--faint-foreground);font-size:9px">命名约定 <span class="mono">lg_{业务过程}_view</span> · 项目内唯一</span>
+            </div>
+            <div class="lt-field">
+              <span class="k">业务过程</span>
+              <span class="lt-input" style="background:var(--surface-selected)">issue·detail</span>
+              <span style="color:var(--faint-foreground);font-size:9px">继承格子坐标，只读 —— 保证「产品动线 = 维度主键」一一对应</span>
+            </div>
+            <div class="lt-field">
+              <span class="k">维度主键组合 <span class="anno" style="vertical-align:1px">3</span></span>
+              <span class="dim-chip">workspace_id <span class="rm">✕</span></span>
+              <span class="dim-chip">issue_id <span class="rm">✕</span></span>
+              <span class="dim-add">＋ 添加维度列</span>
+            </div>
+            <div class="lt-field" style="align-items:flex-start">
+              <span class="k" style="padding-top:5px">指标挂载 · 4</span>
+              <div style="flex:1;min-width:0">
+                <div class="metric-row">
+                  <span class="sel">issue ▾</span><span class="arrow">.</span><span class="sel">priority_score ▾</span>
+                  <span class="arrow">→</span><span class="sel">口径：原始值 ▾</span>
+                  <span class="alias">AS priority_score</span>
+                  <span style="color:var(--faint-foreground);font-size:9px">JOIN <span class="mono">issue_id</span></span>
+                  <span class="rm">✕</span>
+                </div>
+                <div class="metric-row">
+                  <span class="sel">agent_run ▾</span><span class="arrow">.</span><span class="sel">progress_pct ▾</span>
+                  <span class="arrow">→</span><span class="sel">口径：AVG ▾</span>
+                  <span class="alias">AS avg_progress_pct</span>
+                  <span style="color:var(--faint-foreground);font-size:9px">JOIN <span class="mono">issue_id</span></span>
+                  <span class="rm">✕</span>
+                </div>
+                <div class="metric-row">
+                  <span class="sel">project_artifact ▾</span><span class="arrow">.</span><span class="sel">id ▾</span>
+                  <span class="arrow">→</span><span class="sel">口径：COUNT ▾</span>
+                  <span class="alias">AS deliverable_cnt</span>
+                  <span style="color:var(--faint-foreground);font-size:9px">JOIN <span class="mono">issue_id</span></span>
+                  <span class="rm">✕</span>
+                </div>
+                <div class="metric-row">
+                  <span class="sel">ods_issue_sync_raw ▾</span><span class="arrow">.</span><span class="sel">synced_at ▾</span>
+                  <span class="arrow">→</span><span class="sel">口径：LAST ▾</span>
+                  <span class="alias">AS last_synced_at</span>
+                  <span style="color:var(--faint-foreground);font-size:9px">JOIN <span class="mono">issue_id</span> · 跨层引用 ODS</span>
+                  <span class="rm">✕</span>
+                </div>
+                <span class="metric-add">＋ 挂载指标（选物理表 · 列）</span>
+              </div>
+            </div>
+            <div class="lt-field" style="align-items:flex-start;margin-bottom:0">
+              <span class="k" style="padding-top:5px">视图预览 <span class="anno" style="vertical-align:1px">4</span></span>
+              <div class="sql-preview" style="flex:1;min-width:0"><span class="cm">-- 逻辑表不落数据，定义即视图；查询时下推来源物理表</span>
+<span class="kw">CREATE VIEW</span> lg_issue_detail_view <span class="kw">AS</span>
+<span class="kw">SELECT</span> i.workspace_id, i.id <span class="kw">AS</span> issue_id,
+       i.priority_score,
+       <span class="kw">AVG</span>(r.progress_pct) <span class="kw">AS</span> avg_progress_pct,
+       <span class="kw">COUNT</span>(a.id)        <span class="kw">AS</span> deliverable_cnt,
+       <span class="kw">MAX</span>(o.synced_at)     <span class="kw">AS</span> last_synced_at
+<span class="kw">FROM</span> issue i
+<span class="kw">LEFT JOIN</span> agent_run r         <span class="kw">ON</span> r.issue_id = i.id
+<span class="kw">LEFT JOIN</span> project_artifact a  <span class="kw">ON</span> a.issue_id = i.id
+<span class="kw">LEFT JOIN</span> ods_issue_sync_raw o <span class="kw">ON</span> o.issue_id = i.id
+<span class="kw">GROUP BY</span> i.workspace_id, i.id;</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-ft">
+          视图定义入 <span class="mono">logical_table_def</span>（维度主键 + 指标血缘） · 绑定入 <span class="mono">asset_mount</span>（<span class="mono">asset_kind = logical</span>） · <b style="color:oklch(0.48 0.13 300)">逻辑表不落数据</b>
+          <span class="sp"></span>
+          <span class="btn sm">取消</span>
+          <span class="btn sm" style="background:oklch(0.6 0.15 300);color:#fff;border-color:transparent">保存并绑定到本格子</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="anno-legend">
+  <span><span class="anno">1</span> <b>先复用后新建</b>：逻辑表候选按「同业务过程优先 + 已被引用次数」排序，避免同一过程被重复定义多张近似视图</span>
+  <span><span class="anno">2</span> <b>组装器三要素</b>：逻辑表名（项目内唯一）+ 维度主键组合（继承业务过程，可扩列）+ 指标挂载行（来源表 · 列 → 口径 → JOIN 键）</span>
+  <span><span class="anno">3</span> <b>维度主键组合 = 产品动线的数据锚点</b>：业务过程定义了「谁在读这张逻辑表」，维度主键定义了「以什么粒度读」；二者共同决定视图 GROUP BY</span>
+  <span><span class="anno">4</span> <b>SQL 实时预览</b>：组装过程所见即所得；口径非法（如对文本列 SUM）在保存前即时拦截</span>
+</div>
+
+<div class="part-head"><span class="rn">Ⅳ</span>能力 ③<span class="ds">数据模型子 TAB：物理表清单（分层列 + 分层筛选）</span></div>
+<!-- ============ 画面 4：子 TAB · 物理表清单 ============ -->
+<div class="frame-head" id="f4">
+  <h2>画面 4 · 数据视角 v3 · 子 TAB「物理表」—— 分层（业务库 / ODS / CDM）× 版本状态</h2>
+  <p>数据视角清单在 v2 表级能力之上拆三个子 TAB：<b>全部（134）/ 物理表（126）/ 逻辑表（8）</b>。本帧为物理表 TAB：新增<b>「分层」列</b>与工具条<b>分层筛选</b>，业务库真实表与数仓 ODS / CDM 层一眼可分；版本状态、R/W、被引用、列级 diff 摘要全部沿用 v2。ODS / CDM 表行内标注同步频率（日 / 小时），被逻辑表引用的物理表在被引用列额外计数（<span class="mono">N 逻辑表</span>），点击可反查是哪些逻辑视图的来源。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — dsh_desktop / 数据模型 / 数据视角 / 物理表</span></div>
+  <div class="app" style="height:620px">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">H</span> hanmourang</div>
+      <div class="s-item">📥 收件箱 <span class="badge-n">4</span></div>
+      <div class="s-item">✅ 我的任务</div>
+      <div class="s-group">项目</div>
+      <div class="s-item active"><span class="s-dot" style="background:var(--brand)"></span> dsh_desktop</div>
+      <div class="s-item"><span class="s-dot" style="background:var(--st4)"></span> multica</div>
+      <div class="s-group">视图</div>
+      <div class="s-item">📋 看板</div>
+      <div class="s-item">🗂 档案</div>
+      <div class="s-item">🧩 产品功能</div>
+      <div class="s-item active">📊 数据模型</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb">项目 <span>/</span> <b>dsh_desktop</b></div>
+        <span class="tab-pill">看板</span>
+        <span class="tab-pill">档案</span>
+        <span class="tab-pill">产品功能</span>
+        <span class="tab-pill active">数据模型</span>
+        <div class="topbar-right">
+          <span class="ver-pick">🏷 当前 <span class="mono">b27c</span>（09-14）▾ <span class="ver-vs">⇄ 对比</span> <span class="mono">a91f</span>（09-05）▾</span>
+        </div>
+      </div>
+      <div class="ar-toolbar">
+        <span class="seg"><span>产品视角（按行）</span><span class="active">数据视角（按列）</span><span>迭代视角</span></span>
+        <span class="chip-filter">数据域 <b>全部 9</b> ▾</span>
+        <span class="chip-filter on new-el">分层 <b>全部</b> ▾ <span style="color:var(--faint-foreground)">业务库 98 · ODS 14 · CDM 14</span> <span class="anno" style="margin-left:2px">1</span></span>
+        <span class="chip-filter">状态 <b>全部</b> ▾</span>
+        <span class="diff-stat"><span class="a">▲ 新增 7</span><span class="m">◆ 修改 5</span><span class="d">✕ 删除 1</span><span class="u">不变 113</span></span>
+        <div class="toolbar-right">
+          <span class="btn sm">⇪ 导出数据字典（含分层）</span>
+        </div>
+      </div>
+      <div class="sub-tabs new-el">
+        <span class="sub-tab">全部 <span class="cnt">134</span></span>
+        <span class="sub-tab active">🟦 物理表 <span class="cnt">126</span> <span class="anno" style="margin-left:2px">2</span></span>
+        <span class="sub-tab">🟪 逻辑表 <span class="cnt">8</span></span>
+      </div>
+      <div class="bm-wrap" style="overflow:auto">
+        <div class="risk-strip warn">⚠ <b>ODS 层被应用内直写 1 处</b>：<span class="mono">ods_agent_run_raw</span> 出现 W 边 —— 数仓贴源层只应由同步作业写入 <span style="margin-left:auto;color:var(--brand);font-weight:700">查看边 →</span></div>
+        <div class="panel">
+          <div class="panel-hd">🟦 物理表清单 <span class="right">当前 <span class="mono">b27c</span> vs 基线 <span class="mono">a91f</span> · 按变更优先排序</span></div>
+          <table class="tbl">
+            <thead><tr><th>表</th><th>分层</th><th>数据域</th><th>生命周期</th><th>版本状态</th><th>R / W</th><th>被引用（模块 × 页面 · 逻辑表）</th><th>版本变更摘要</th><th></th></tr></thead>
+            <tbody>
+              <tr class="is-new"><td class="mono nm"><b>ods_issue_sync_raw</b></td><td><span class="layer-tag ods">ODS</span></td><td>需求域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg add">▲ 新增</span></td><td>3 / 1</td><td>1 模块 · 1 页面 · <b style="color:oklch(0.48 0.13 300)">1 逻辑表</b></td><td class="mono" style="font-size:9px">贴源同步 · 日频回刷</td><td><span style="color:var(--brand);font-weight:700">360° →</span></td></tr>
+              <tr class="is-new"><td class="mono nm"><b>cdm_issue_daily_df</b></td><td><span class="layer-tag cdm">CDM</span></td><td>需求域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg add">▲ 新增</span></td><td>5 / 0</td><td>1 模块 · 2 页面 · <b style="color:oklch(0.48 0.13 300)">2 逻辑表</b></td><td class="mono" style="font-size:9px">公共维度 · 日粒度全量</td><td><span style="color:var(--brand);font-weight:700">360° →</span></td></tr>
+              <tr class="is-new"><td class="mono nm"><b>cdm_workspace_issue_hi</b></td><td><span class="layer-tag cdm">CDM</span></td><td>需求域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg add">▲ 新增</span></td><td>2 / 0</td><td>0 模块 · 1 页面</td><td class="mono" style="font-size:9px">小时级增量（hi）</td><td><span style="color:var(--brand);font-weight:700">360° →</span></td></tr>
+              <tr class="is-mod"><td class="mono nm"><b>issue</b></td><td><span class="layer-tag biz">业务库</span></td><td>需求域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg mod">◆ 修改</span></td><td>48 / 26</td><td>6 模块 · 11 页面 · <b style="color:oklch(0.48 0.13 300)">3 逻辑表</b></td><td><span class="col-diff"><span class="c add">+assignee_ai</span><span class="c add">+priority_score</span><span class="c typ">stage: int→text</span></span> <span class="mono" style="font-size:9px">459</span></td><td><span style="color:var(--brand);font-weight:700">360° →</span></td></tr>
+              <tr class="is-mod"><td class="mono nm"><b>project_graph_snapshot</b></td><td><span class="layer-tag biz">业务库</span></td><td>图谱域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg mod">◆ 修改</span></td><td>21 / 9</td><td>2 模块 · 4 页面</td><td><span class="col-diff"><span class="c add">+bus_matrix jsonb</span><span class="c add">+parent_snapshot_id</span></span> <span class="mono" style="font-size:9px">461</span></td><td><span style="color:var(--brand);font-weight:700">360° →</span></td></tr>
+              <tr class="is-del"><td class="mono nm">issue_vcs_pull_request</td><td><span class="layer-tag biz">业务库</span></td><td>需求域</td><td><span class="pill danger">deprecated</span></td><td><span class="badge-chg del">✕ 删除</span></td><td>4 / 0</td><td>1 模块 · 2 页面 ⚠</td><td class="mono" style="font-size:9px">被 vcs_pull_request 取代 · 仍有 4 处 READS</td><td><span style="color:var(--brand);font-weight:700">360° →</span></td></tr>
+              <tr><td class="mono nm">project_artifact</td><td><span class="layer-tag biz">业务库</span></td><td>交付域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg same">不变</span></td><td>12 / 7</td><td>3 模块 · 5 页面 · <b style="color:oklch(0.48 0.13 300)">1 逻辑表</b></td><td class="mono" style="font-size:9px;color:var(--faint-foreground)">—</td><td><span style="color:var(--brand);font-weight:700">360° →</span></td></tr>
+              <tr><td class="mono nm">feedback</td><td><span class="layer-tag biz">业务库</span></td><td>身份用量</td><td><span class="pill mute">orphan</span></td><td><span class="badge-chg same">不变</span></td><td>0 / 0</td><td>0 模块 · 0 页面 ⚠</td><td class="mono" style="font-size:9px;color:var(--faint-foreground)">—</td><td><span style="color:var(--brand);font-weight:700">360° →</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="anno-legend">
+  <span><span class="anno">1</span> <b>分层筛选</b>：业务库 / ODS / CDM 三档；「分层」元数据来自本体 <span class="mono">TableObject.layer</span>，未抽取时按命名前缀（<span class="mono">ods_ / cdm_</span>）推断并标注「推断」</span>
+  <span><span class="anno">2</span> <b>子 TAB 计数联动</b>：TAB 徽标数 = 当前版本存活资产数；删除表仅在「全部」与对应 TAB 灰显保留，不计入存活数</span>
+  <span><span class="anno">3</span> <b>被引用列双计数</b>：物理表既被模块 / 页面直接消费，也可被逻辑表引用作来源；点「N 逻辑表」展开反查清单</span>
+</div>
+
+<div class="part-head"><span class="rn">Ⅴ</span>能力 ③<span class="ds">数据模型子 TAB：逻辑表清单（业务过程 × 指标构成血缘）</span></div>
+<!-- ============ 画面 5：子 TAB · 逻辑表清单 ============ -->
+<div class="frame-head" id="f5">
+  <h2>画面 5 · 数据视角 v3 · 子 TAB「逻辑表」—— 业务过程维度主键 × 指标挂载血缘</h2>
+  <p>逻辑表 TAB 的列围绕「逻辑表三要素」展开：<b>业务过程（维度主键组合）</b>、<b>挂载指标数</b>、<b>来源物理表</b>；版本状态同样追踪（新建视图 / 指标增改 / 来源表变更传导 / 下线）。<b>行内可展开指标构成</b>：每个指标的「来源物理表 · 列 → 聚合口径 → JOIN 键」一目了然，来源表的版本变更（如 <span class="mono">issue +priority_score</span>）会向逻辑表传导提示「可增补指标」。逻辑表同样支持 360°：消费它的模块 / 页面与前后端调用链与物理表同构。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — dsh_desktop / 数据模型 / 数据视角 / 逻辑表</span></div>
+  <div class="app" style="height:600px">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">H</span> hanmourang</div>
+      <div class="s-item">📥 收件箱 <span class="badge-n">4</span></div>
+      <div class="s-item">✅ 我的任务</div>
+      <div class="s-group">项目</div>
+      <div class="s-item active"><span class="s-dot" style="background:var(--brand)"></span> dsh_desktop</div>
+      <div class="s-item"><span class="s-dot" style="background:var(--st4)"></span> multica</div>
+      <div class="s-group">视图</div>
+      <div class="s-item">📋 看板</div>
+      <div class="s-item">🗂 档案</div>
+      <div class="s-item">🧩 产品功能</div>
+      <div class="s-item active">📊 数据模型</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb">项目 <span>/</span> <b>dsh_desktop</b></div>
+        <span class="tab-pill">看板</span>
+        <span class="tab-pill">档案</span>
+        <span class="tab-pill">产品功能</span>
+        <span class="tab-pill active">数据模型</span>
+        <div class="topbar-right">
+          <span class="ver-pick">🏷 当前 <span class="mono">b27c</span>（09-14）▾ <span class="ver-vs">⇄ 对比</span> <span class="mono">a91f</span>（09-05）▾</span>
+          <span class="btn sm brand new-el">＋ 新建逻辑表 <span class="anno" style="margin-left:2px">1</span></span>
+        </div>
+      </div>
+      <div class="ar-toolbar">
+        <span class="seg"><span>产品视角（按行）</span><span class="active">数据视角（按列）</span><span>迭代视角</span></span>
+        <span class="chip-filter">业务过程 <b>全部</b> ▾</span>
+        <span class="chip-filter">来源表 <b>全部</b> ▾</span>
+        <span class="chip-filter on">仅看变更 3</span>
+        <div class="toolbar-right">
+          <span class="btn sm">⇪ 导出逻辑表字典</span>
+        </div>
+      </div>
+      <div class="sub-tabs">
+        <span class="sub-tab">全部 <span class="cnt">134</span></span>
+        <span class="sub-tab">🟦 物理表 <span class="cnt">126</span></span>
+        <span class="sub-tab active">🟪 逻辑表 <span class="cnt">8</span> <span class="anno" style="margin-left:2px">2</span></span>
+      </div>
+      <div class="bm-wrap" style="overflow:auto">
+        <div class="risk-strip info">🟪 <b>逻辑表 = 虚拟视图，不落数据</b>：消费方按业务过程读写，无需感知底层多表 JOIN；来源物理表删除 / 改列会传导为逻辑表 <span class="mono">stale</span> 告警，不会静默失效</div>
+        <div class="panel">
+          <div class="panel-hd">🟪 逻辑表清单 <span class="right">当前 <span class="mono">b27c</span> vs 基线 <span class="mono">a91f</span> · 点击行展开指标构成</span></div>
+          <table class="tbl">
+            <thead><tr><th>逻辑表</th><th>业务过程（维度主键组合）</th><th>挂载指标</th><th>来源物理表</th><th>版本状态</th><th>被引用（模块 × 页面）</th><th></th></tr></thead>
+            <tbody>
+              <tr class="is-new is-logic">
+                <td class="mono nm"><b>lg_issue_detail_view</b></td>
+                <td class="mono" style="font-size:9.5px">issue·detail<br><span style="color:var(--faint-foreground)">workspace_id + issue_id</span></td>
+                <td><b>6</b> 指标</td>
+                <td class="mono" style="font-size:9px">issue · agent_run · project_artifact <span class="layer-tag ods" style="margin-left:2px">+ODS</span></td>
+                <td><span class="badge-chg add">▲ 新增</span></td>
+                <td><b>1 模块 · 1 页面</b></td>
+                <td><span style="color:var(--brand);font-weight:700">360° →</span></td>
+              </tr>
+              <tr class="is-logic">
+                <td colspan="7" style="padding:0;border-bottom:1px solid var(--border)">
+                  <div class="metric-spec new-el">
+                    <div class="ms-ttl">指标构成 · 血缘 <span class="anno" style="margin-left:3px">3</span></div>
+                    <div class="col-diff" style="font-size:9.5px;gap:5px">
+                      <span class="c add">priority_score ← issue.priority_score · 原始值</span>
+                      <span class="c add">avg_progress_pct ← agent_run.progress_pct · AVG</span>
+                      <span class="c add">deliverable_cnt ← project_artifact.id · COUNT</span>
+                      <span class="c add">last_synced_at ← ods_issue_sync_raw.synced_at · LAST</span>
+                      <span class="c add">open_subtask_cnt ← issue_subtask.id · COUNT</span>
+                      <span class="c add">stage_text ← issue.stage · 原始值</span>
+                    </div>
+                    <div style="font-size:9px;color:var(--faint-foreground);margin-top:5px">⤴ 来源变更传导：<span class="mono">issue</span> 本期 <span class="mono">+priority_score</span> → 本逻辑表已增补该指标；<span class="mono">agent_run.stage</span> 类型变更 <span class="mono">int→text</span> 不影响现有指标</div>
+                  </div>
+                </td>
+              </tr>
+              <tr class="is-logic">
+                <td class="mono nm"><b>lg_req_pipeline_view</b></td>
+                <td class="mono" style="font-size:9.5px">issue·pipeline<br><span style="color:var(--faint-foreground)">workspace_id + pipeline_stage</span></td>
+                <td><b>9</b> 指标</td>
+                <td class="mono" style="font-size:9px">issue · issue_stage_log · agent_run · deliverable</td>
+                <td><span class="badge-chg mod">◆ 修改</span></td>
+                <td><b>2 模块 · 3 页面</b></td>
+                <td><span style="color:var(--brand);font-weight:700">360° →</span></td>
+              </tr>
+              <tr class="is-logic">
+                <td class="mono nm"><b>lg_delivery_overview_view</b></td>
+                <td class="mono" style="font-size:9.5px">delivery·overview<br><span style="color:var(--faint-foreground)">workspace_id + issue_id + artifact_type</span></td>
+                <td><b>7</b> 指标</td>
+                <td class="mono" style="font-size:9px">project_artifact · attachment · filing_item</td>
+                <td><span class="badge-chg same">不变</span></td>
+                <td><b>2 模块 · 2 页面</b></td>
+                <td><span style="color:var(--brand);font-weight:700">360° →</span></td>
+              </tr>
+              <tr class="is-logic">
+                <td class="mono nm"><b>lg_agent_run_cost_view</b></td>
+                <td class="mono" style="font-size:9.5px">agent_run·cost<br><span style="color:var(--faint-foreground)">workspace_id + agent_id + day</span></td>
+                <td><b>5</b> 指标</td>
+                <td class="mono" style="font-size:9px">agent_run · usage_counter <span class="layer-tag cdm" style="margin-left:2px">+CDM</span></td>
+                <td><span class="badge-chg mod">◆ 修改</span></td>
+                <td><b>1 模块 · 2 页面</b></td>
+                <td><span style="color:var(--brand);font-weight:700">360° →</span></td>
+              </tr>
+              <tr class="is-del">
+                <td class="mono nm">lg_legacy_import_view</td>
+                <td class="mono" style="font-size:9.5px">legacy·import<br><span style="color:var(--faint-foreground)">workspace_id + batch_id</span></td>
+                <td><b>3</b> 指标</td>
+                <td class="mono" style="font-size:9px">legacy_scan_cache（已删除 ⛔）</td>
+                <td><span class="badge-chg del">✕ 下线</span></td>
+                <td><b>0 模块 · 0 页面</b></td>
+                <td><span style="color:var(--brand);font-weight:700">360° →</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="anno-legend">
+  <span><span class="anno">1</span> <b>全局新建入口</b>：顶栏「＋ 新建逻辑表」打开同一组装器，但业务过程需手选（矩阵格子入口则自动继承坐标）</span>
+  <span><span class="anno">2</span> <b>逻辑表也进版本化</b>：新增 / 指标变更 / 来源传导 / 下线四态进 OntologyChangelog，迭代视角与物理表同时间线展示</span>
+  <span><span class="anno">3</span> <b>血缘展开</b>：指标级血缘（来源表 · 列 · 口径 · JOIN 键）行内可见；来源表删除时逻辑表不静默失效，标 <span class="mono">stale</span> 并给改判入口</span>
+</div>
+
+</div>
+</body>
+</html>

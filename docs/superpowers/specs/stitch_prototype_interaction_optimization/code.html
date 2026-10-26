@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Multica 原型 · 数据模型模块 v3.1 资产绑定（物理表 / 逻辑表 双轨工作台）（2026-09-17）</title>
+<style>
+/* ===== Multica 设计 token（精修 Slate/Neutral 高级配色） ===== */
+:root {
+  --app-shell: #f8fafc;
+  --page-canvas: #f1f5f9;
+  --surface: #ffffff;
+  --surface-hover: #f8fafc;
+  --surface-selected: #e2e8f0;
+  --surface-border: #e2e8f0;
+  --surface-shadow: 0 1px 3px 0 rgb(15 23 42 / 0.06), 0 1px 2px -1px rgb(15 23 42 / 0.06);
+  --floating-shadow: 0 20px 30px -10px rgb(15 23 42 / 0.12), 0 10px 15px -3px rgb(15 23 42 / 0.08);
+  --foreground: #0f172a;
+  --muted-foreground: #64748b;
+  --faint-foreground: #94a3b8;
+  --primary: #0f172a;
+  --primary-foreground: #ffffff;
+  --border: #e2e8f0;
+  --destructive: #ef4444;
+  --brand: #2563eb;
+  --brand-light: #eff6ff;
+  --purple-brand: #7c3aed;
+  --purple-light: #faf5ff;
+  --teal-brand: #0d9488;
+  --teal-light: #f0fdfa;
+  --amber-brand: #d97706;
+  --amber-light: #fffbeb;
+  --success: #10b981;
+  --success-light: #ecfdf5;
+  --radius: 0.625rem;
+  --sidebar-accent: #e2e8f0;
+  --st1: #7c3aed;
+  --st2: #2563eb;
+  --st3: #d97706;
+  --st4: #10b981;
+  --st0: #64748b;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: #cbd5e1;
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+/* ===== 原型画板框架 ===== */
+.proto-nav {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 24px; background: #0f172a;
+  color: #f1f5f9;
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 12px; }
+.proto-nav .logo span { color: #60a5fa; }
+.proto-nav .tag {
+  background: rgba(124, 58, 237, 0.25); color: #c4b5fd;
+  font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; margin-right: 8px;
+}
+.proto-nav a {
+  color: #94a3b8; text-decoration: none;
+  padding: 5px 12px; border-radius: 6px; font-size: 12.5px;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.proto-nav a:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+.proto-nav a.highlight {
+  background: rgba(124, 58, 237, 0.25); color: #fff; border: 1px solid rgba(124, 58, 237, 0.45);
+}
+.frame-wrap { max-width: 1540px; margin: 0 auto; padding: 32px 24px 80px; }
+.frame-head { margin-bottom: 14px; }
+.frame-head h2 { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; color: #0f172a; }
+.frame-head h2 .up-badge {
+  font-size: 11px; font-weight: 800; background: var(--purple-brand); color: #fff;
+  padding: 2px 8px; border-radius: 4px; letter-spacing: .02em;
+}
+.frame-head p { color: #475569; font-size: 13px; margin-top: 4px; line-height: 1.7; max-width: 1260px; }
+.frame {
+  background: var(--page-canvas); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 20px 45px -12px rgb(15 23 42 / 0.18), 0 4px 16px rgb(15 23 42 / 0.08);
+  border: 1px solid #cbd5e1;
+  margin-bottom: 56px; position: relative;
+}
+.frame-bar {
+  height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+}
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: #f87171; }
+.frame-bar i:nth-child(2) { background: #fbbf24; }
+.frame-bar i:nth-child(3) { background: #34d399; }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--muted-foreground); font-weight: 500; }
+
+/* 标注系统 */
+.anno {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700;
+  box-shadow: 0 0 0 2.5px rgba(37, 99, 235, 0.2);
+  position: relative; z-index: 5; flex: none;
+}
+.anno.purple {
+  background: var(--purple-brand);
+  box-shadow: 0 0 0 2.5px rgba(124, 58, 237, 0.25);
+}
+.anno.teal {
+  background: var(--teal-brand);
+  box-shadow: 0 0 0 2.5px rgba(13, 148, 136, 0.25);
+}
+.new-el { outline: 1.5px dashed rgba(37, 99, 235, 0.55); outline-offset: 2px; border-radius: 6px; }
+.new-purple { outline: 1.5px dashed rgba(124, 58, 237, 0.65); outline-offset: 2px; border-radius: 8px; }
+.anno-legend {
+  max-width: 1540px; margin: -42px auto 56px; padding: 12px 18px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--surface-shadow); display: flex; flex-wrap: wrap; gap: 8px 22px;
+  font-size: 11.5px; color: var(--muted-foreground); line-height: 1.6;
+}
+.anno-legend b { color: var(--foreground); font-weight: 600; }
+.part-head {
+  max-width: 1540px; margin: 8px auto 18px; padding: 0 24px;
+  display: flex; align-items: baseline; gap: 10px;
+  font-size: 15px; font-weight: 750; color: var(--foreground);
+}
+.part-head .rn {
+  font-size: 12px; font-weight: 800; color: #fff; background: var(--primary);
+  border-radius: 6px; padding: 2px 8px;
+}
+.part-head .ds { font-size: 11.5px; font-weight: 500; color: var(--muted-foreground); }
+
+/* 应用公共组件 */
+.app { display: flex; height: 800px; }
+.sidebar {
+  width: 212px; flex: none; background: var(--app-shell);
+  border-right: 1px solid var(--surface-border);
+  padding: 10px 8px; display: flex; flex-direction: column; gap: 1px;
+  font-size: 12.5px; overflow: hidden;
+}
+.sidebar .ws { display: flex; align-items: center; gap: 7px; padding: 5px 8px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
+.sidebar .ws .ws-avatar {
+  width: 18px; height: 18px; border-radius: 5px; background: var(--primary);
+  color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px;
+}
+.s-item { display: flex; align-items: center; gap: 8px; padding: 4.5px 8px; border-radius: 6px; color: var(--muted-foreground); }
+.s-item.active { background: var(--sidebar-accent); color: var(--foreground); font-weight: 600; }
+.s-item .badge-n {
+  margin-left: auto; font-size: 10.5px; background: var(--surface-selected);
+  color: var(--muted-foreground); border-radius: 8px; padding: 0 6px; line-height: 16px;
+}
+.s-group { margin-top: 14px; padding: 0 8px 3px; font-size: 11px; color: var(--faint-foreground); }
+.s-dot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--page-canvas); }
+.topbar {
+  height: 46px; flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 0 16px; border-bottom: 1px solid var(--surface-border); font-size: 12.5px; background: #fff;
+}
+.topbar .crumb { color: var(--muted-foreground); }
+.topbar .crumb b { color: var(--foreground); font-weight: 650; }
+.topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.tab-pill {
+  padding: 3.5px 12px; border-radius: 999px; font-size: 12px; color: var(--muted-foreground);
+  border: 1px solid transparent;
+}
+.tab-pill.active { background: var(--surface-selected); color: var(--foreground); font-weight: 600; border-color: var(--surface-border); }
+.btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4.5px 11px; border-radius: 7px;
+  border: 1px solid var(--surface-border); background: var(--surface); font-size: 11.5px;
+  color: var(--foreground); box-shadow: var(--surface-shadow); white-space: nowrap; cursor: pointer;
+  transition: all .15s ease;
+}
+.btn:hover { background: var(--surface-hover); border-color: #cbd5e1; }
+.btn.primary { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+.btn.sm { padding: 3.5px 9px; font-size: 10.5px; }
+.btn.brand { background: var(--brand); color: #fff; border-color: transparent; }
+.btn.brand:hover { background: #1d4ed8; }
+.btn.purple { background: var(--purple-brand); color: #fff; border-color: transparent; }
+.btn.purple:hover { background: #6d28d9; }
+.btn.teal { background: var(--teal-brand); color: #fff; border-color: transparent; }
+.btn.ghost-danger { color: var(--destructive); border-color: rgba(239, 68, 68, 0.35); }
+
+.ar-toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 9px 16px; border-bottom: 1px solid var(--surface-border);
+  font-size: 11px; color: var(--muted-foreground); background: var(--surface);
+}
+.ar-toolbar .toolbar-right { margin-left: auto; display: flex; gap: 6px; }
+.seg { display: inline-flex; border: 1px solid var(--surface-border); border-radius: 7px; overflow: hidden; background: #fff; }
+.seg span { padding: 3.5px 10px; font-size: 10.5px; color: var(--muted-foreground); cursor: pointer; }
+.seg span.active { background: var(--primary); color: #fff; font-weight: 600; }
+.chip-filter {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--surface-border); background: var(--surface); font-size: 10.5px; color: var(--muted-foreground);
+}
+.chip-filter b { color: var(--foreground); }
+.chip-filter.on { border-color: rgba(37, 99, 235, 0.4); background: var(--brand-light); color: var(--brand); font-weight: 600; }
+
+.panel { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; overflow: hidden; }
+.panel-hd {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--surface-border); font-size: 11.5px; font-weight: 700;
+  background: var(--page-canvas);
+}
+.panel-hd .right { margin-left: auto; font-weight: 500; font-size: 10px; color: var(--muted-foreground); }
+
+.tbl { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+.tbl th { text-align: left; padding: 5px 8px; color: var(--muted-foreground); font-weight: 600; font-size: 9.5px; border-bottom: 1px solid var(--border); }
+.tbl td { padding: 5.5px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.tbl tr:last-child td { border-bottom: none; }
+.pill { display: inline-flex; align-items: center; padding: 1.5px 6.5px; border-radius: 4px; font-size: 9px; font-weight: 700; }
+.pill.run { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.pill.wait { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.pill.mute { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+.pill.brand { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.pill.purple { background: #faf5ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+.pill.teal { background: #f0fdfa; color: #0d9488; border: 1px solid #99f6e4; }
+.pill.danger { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+
+/* 资产类型与数仓分层标签 */
+.type-tag { font-size: 8.5px; font-weight: 800; padding: 1px 5px; border-radius: 3px; flex: none; letter-spacing: .02em; }
+.type-tag.phys { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.type-tag.logic { background: #faf5ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+.layer-tag { font-size: 8px; font-weight: 700; padding: 1px 4px; border-radius: 3px; flex: none; font-family: ui-monospace, Menlo, monospace; }
+.layer-tag.biz { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+.layer-tag.ods { background: #f0fdfa; color: #0f766e; border: 1px solid #99f6e4; }
+.layer-tag.cdm { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.badge-chg { font-size: 8.5px; font-weight: 800; padding: 1.5px 5.5px; border-radius: 3px; letter-spacing: .02em; }
+.badge-chg.add { background: #ecfdf5; color: #059669; }
+.badge-chg.mod { background: #eff6ff; color: #2563eb; }
+.badge-chg.del { background: #fef2f2; color: #dc2626; }
+.badge-chg.same { background: #f1f5f9; color: #64748b; }
+
+/* ===== 画面 1 样式 ===== */
+.cap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 16px 18px 6px; }
+.cap-card {
+  background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px;
+  padding: 14px 16px; box-shadow: var(--surface-shadow); position: relative;
+}
+.cap-card .no {
+  position: absolute; top: -9px; left: 12px; background: var(--brand); color: #fff;
+  font-size: 10px; font-weight: 800; border-radius: 8px; padding: 1.5px 8px;
+}
+.cap-card .no.purple { background: var(--purple-brand); }
+.cap-card h3 { font-size: 13.5px; font-weight: 750; margin: 4px 0 6px; }
+.cap-card p { font-size: 11px; color: var(--muted-foreground); line-height: 1.7; }
+.flow-strip { margin: 12px 18px 18px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px; }
+.flow-row { display: flex; align-items: stretch; gap: 8px; }
+.flow-node {
+  flex: 1; border: 1px solid var(--surface-border); border-radius: 9px; padding: 8px 10px;
+  background: var(--page-canvas); font-size: 10.5px; line-height: 1.55;
+}
+.flow-node b { display: block; font-size: 11px; margin-bottom: 2px; }
+.flow-node.hot { border-color: rgba(124, 58, 237, 0.45); background: #faf5ff; }
+.flow-arrow { align-self: center; color: var(--faint-foreground); font-size: 13px; flex: none; }
+
+/* ===== 总线矩阵 ===== */
+.bm-wrap { padding: 12px 18px 18px; }
+.bm-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.bm { width: 100%; border-collapse: collapse; font-size: 10.5px; min-width: 1180px; }
+.bm th, .bm td { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 0; text-align: center; }
+.bm tr > *:last-child { border-right: none; }
+.bm thead th { background: var(--app-shell); padding: 5px 6px; font-weight: 700; color: var(--muted-foreground); font-size: 9.5px; }
+.bm thead tr.grp th { font-size: 10px; color: var(--foreground); border-bottom: 1px solid var(--border); }
+.bm .rh { text-align: left; padding: 5px 9px; background: var(--page-canvas); font-weight: 650; width: 128px; }
+.bm .ft { text-align: left; padding: 5px 9px; font-weight: 650; width: 110px; }
+.bm .ky { text-align: left; padding: 5px 8px; font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; color: var(--muted-foreground); width: 122px; }
+.bm .cell { height: 32px; cursor: pointer; }
+.bm .cell i { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 32px; font-style: normal; font-weight: 750; font-size: 10px; line-height: 1.2; position: relative; }
+.bm .cell i b { font-size: 8.5px; font-weight: 600; opacity: .8; }
+.cell.r i { background: rgba(16, 185, 129, 0.09); color: #047857; }
+.cell.w i { background: rgba(245, 158, 11, 0.12); color: #b45309; }
+.cell.n i { color: var(--faint-foreground); opacity: .4; }
+.cell.hit { box-shadow: inset 0 0 0 2px var(--brand); background: #eff6ff; }
+.bm-dual-row { display: flex; gap: 3px; margin-top: 1px; }
+.bm-dual-pill { font-size: 8px; font-weight: 700; padding: 0 4px; border-radius: 3px; }
+.bm-dual-pill.phys { background: #dbeafe; color: #1e40af; }
+.bm-dual-pill.logic { background: #ede9fe; color: #6d28d9; }
+
+/* ========================================================== */
+/* ===== 画面 2 (彻底修复重构)：三阶段全景平铺与导向工作流 ===== */
+/* ========================================================== */
+.f2-container { padding: 18px 20px 24px; display: flex; flex-direction: column; gap: 16px; background: #f8fafc; }
+.f2-context-banner {
+  background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;
+  padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.f2-context-info { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.f2-badge-ctx {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 6px;
+  background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; font-size: 11px; font-weight: 700;
+}
+.f2-stepper-flow {
+  display: flex; align-items: center; gap: 8px; background: #f1f5f9; padding: 4px 6px; border-radius: 24px;
+}
+.f2-step-indicator {
+  display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px;
+  font-size: 11px; font-weight: 650; color: #64748b; background: transparent;
+}
+.f2-step-indicator.active {
+  background: #ffffff; color: #0f172a; box-shadow: 0 1px 3px rgba(0,0,0,0.08); font-weight: 750;
+}
+.f2-step-indicator .num {
+  width: 17px; height: 17px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; background: #cbd5e1; color: #fff;
+}
+.f2-step-indicator.active .num { background: #2563eb; color: #fff; }
+
+/* 3 阶段卡片平铺网格 */
+.f2-stages-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch;
+}
+.stage-card {
+  background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.03);
+  transition: all .2s ease; position: relative;
+}
+.stage-card:hover { border-color: #cbd5e1; box-shadow: 0 10px 20px -3px rgba(15, 23, 42, 0.08); }
+.stage-card.focus-stage {
+  border: 1.5px solid #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12), 0 12px 24px -4px rgba(15, 23, 42, 0.08);
+}
+.stage-card-hd {
+  padding: 12px 16px 10px; border-bottom: 1px solid #f1f5f9; background: #fafafa;
+  display: flex; align-items: flex-start; justify-content: space-between;
+}
+.stage-card.focus-stage .stage-card-hd { background: #eff6ff; border-bottom-color: #dbeafe; }
+.stage-title { font-size: 12.5px; font-weight: 750; color: #0f172a; display: flex; align-items: center; gap: 7px; }
+.stage-badge {
+  font-size: 9.5px; font-weight: 800; padding: 2px 7px; border-radius: 12px; letter-spacing: .02em;
+}
+.stage-badge.done { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.stage-badge.current { background: #2563eb; color: #ffffff; }
+.stage-badge.pending { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+
+.stage-desc { font-size: 11px; color: #64748b; margin-top: 3px; line-height: 1.5; }
+.stage-card-bd { padding: 14px 16px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.stage-card-ft {
+  padding: 10px 16px; border-top: 1px solid #f1f5f9; background: #fafbfc;
+  display: flex; align-items: center; justify-content: space-between; font-size: 11px;
+}
+
+/* 阶段 1 专用元素 */
+.health-strip {
+  padding: 8px 10px; border-radius: 8px; font-size: 11px; line-height: 1.5;
+  display: flex; align-items: center; gap: 8px;
+}
+.health-strip.pass { background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d; }
+.health-strip.warn { background: #fffbeb; border: 1px solid #fef08a; color: #a16207; }
+.exist-asset-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 7px; font-size: 11px;
+}
+.exist-asset-row:hover { background: #f1f5f9; }
+
+/* 阶段 2 专用元素 */
+.search-input-box {
+  display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 7px;
+  border: 1px solid #cbd5e1; background: #ffffff; font-size: 11px;
+}
+.search-input-box input { border: none; outline: none; background: transparent; width: 100%; font-size: 11px; color: #0f172a; }
+.layer-filter-row { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 2px; }
+.layer-filter-btn {
+  padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 600; cursor: pointer;
+  border: 1px solid #e2e8f0; background: #ffffff; color: #475569; white-space: nowrap;
+}
+.layer-filter-btn.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+.candidate-table-wrap {
+  border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; max-height: 250px; overflow-y: auto;
+}
+.cand-pick-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; font-size: 11px;
+  border-bottom: 1px solid #f1f5f9; background: #ffffff;
+}
+.cand-pick-row:last-child { border-bottom: none; }
+.cand-pick-row:hover { background: #f8fafc; }
+.cand-pick-row.picked { background: #eff6ff; }
+
+/* 阶段 3 专用元素 */
+.perm-matrix-card {
+  border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; background: #f8fafc;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.perm-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 8px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 11px;
+}
+.gran-chip {
+  padding: 2px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.gran-chip.pk { background: #ede9fe; color: #6d28d9; border: 1px solid #ddd6fe; }
+.gran-chip.col { background: #f1f5f9; color: #475569; }
+
+/* ========================================================== */
+/* ===== 画面 3：双栏导向式逻辑表组装器全新样式 ===== */
+/* ========================================================== */
+.lt-modal-wide {
+  width: 1160px; max-width: 95vw; height: 860px; max-height: 94%;
+  background: var(--surface); border-radius: 14px; box-shadow: var(--floating-shadow);
+  border: 1px solid #cbd5e1; display: flex; flex-direction: column; overflow: hidden;
+}
+.lt-header {
+  padding: 12px 20px; border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; justify-content: space-between; background: var(--surface); flex: none;
+}
+.lt-title-group { display: flex; align-items: center; gap: 12px; }
+.lt-tag {
+  background: #faf5ff; color: #7c3aed; border: 1px solid #ddd6fe;
+  font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;
+}
+.lt-name-input {
+  border: 1px solid var(--surface-border); border-radius: 7px; padding: 5px 10px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; font-weight: 700; color: var(--foreground);
+  background: var(--page-canvas); outline: none; width: 230px;
+}
+.wizard-steps { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.w-step {
+  display: flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 20px;
+  background: var(--page-canvas); color: var(--muted-foreground); font-weight: 600;
+}
+.w-step.done { background: #ecfdf5; color: #047857; }
+.w-step.active {
+  background: var(--purple-brand); color: #fff; font-weight: 700;
+  box-shadow: 0 2px 6px rgba(124, 58, 237, 0.3);
+}
+.w-step .sn {
+  width: 15px; height: 15px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; font-size: 9.5px; background: rgba(0,0,0,0.1);
+}
+.w-step.active .sn { background: #fff; color: var(--purple-brand); font-weight: 800; }
+.w-arrow { color: var(--faint-foreground); font-size: 10px; }
+
+.lt-body-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 380px 1fr; background: var(--page-canvas); }
+.lt-col-left {
+  background: var(--surface); border-right: 1px solid var(--surface-border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.lt-col-hd {
+  padding: 12px 16px 8px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; font-weight: 700;
+}
+.lt-col-bd { padding: 12px 16px; overflow-y: auto; flex: 1; }
+.source-search {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 7px;
+  border: 1px solid var(--surface-border); background: var(--page-canvas); font-size: 11px;
+  color: var(--muted-foreground); margin-bottom: 12px;
+}
+.tree-table-card {
+  border: 1px solid var(--surface-border); border-radius: 8px; margin-bottom: 10px;
+  overflow: hidden; background: var(--surface); box-shadow: var(--surface-shadow);
+}
+.tree-table-hd {
+  padding: 8px 10px; background: var(--page-canvas); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700;
+}
+.tree-col-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 10.5px;
+  border-bottom: 1px solid var(--border); transition: background .15s;
+}
+.tree-col-row:last-child { border-bottom: none; }
+.tree-col-row:hover { background: var(--surface-hover); }
+.tree-col-row.selected { background: #faf5ff; }
+.tree-col-row input[type="checkbox"] { accent-color: var(--purple-brand); }
+.col-dtype { margin-left: auto; font-size: 9.5px; color: var(--faint-foreground); font-family: ui-monospace, Menlo, monospace; }
+
+.lt-col-right { display: flex; flex-direction: column; overflow: hidden; background: var(--page-canvas); }
+.dim-banner {
+  padding: 10px 18px; background: var(--surface); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 12px; font-size: 11px; flex-wrap: wrap;
+}
+.dim-banner-ttl { font-weight: 700; color: var(--muted-foreground); display: flex; align-items: center; gap: 5px; }
+.dim-pill-item {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px;
+  background: #faf5ff; color: #7c3aed; font-family: ui-monospace, Menlo, monospace;
+  font-size: 10px; font-weight: 700; border: 1px solid #ddd6fe;
+}
+.metrics-stage { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+.stage-hd { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; font-weight: 700; margin-bottom: 4px; }
+.stage-hd .cnt-tag { font-size: 10px; color: var(--muted-foreground); font-weight: 500; }
+.metric-flow-card {
+  display: grid; grid-template-columns: 24px 190px 30px 120px 180px 1fr 30px;
+  align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid var(--surface-border);
+  border-radius: 8px; background: var(--surface); box-shadow: var(--surface-shadow); font-size: 11px;
+}
+.drag-handle { color: var(--faint-foreground); cursor: grab; text-align: center; }
+.metric-src { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; }
+.metric-src b { color: var(--foreground); display: block; }
+.metric-src span { font-size: 9px; color: var(--muted-foreground); }
+.metric-op-select {
+  border: 1px solid var(--surface-border); border-radius: 6px; padding: 4px 6px;
+  font-size: 10.5px; font-weight: 700; background: var(--page-canvas); color: var(--foreground);
+}
+.metric-alias-input {
+  border: 1px solid var(--surface-border); border-radius: 6px; padding: 4px 8px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; font-weight: 600; width: 100%;
+}
+.join-edge-tag {
+  font-size: 9.5px; font-family: ui-monospace, Menlo, monospace; color: #047857;
+  background: #ecfdf5; border: 1px solid #a7f3d0;
+  padding: 3px 7px; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.metric-rm-btn { color: var(--faint-foreground); cursor: pointer; text-align: center; }
+.metric-rm-btn:hover { color: var(--destructive); }
+
+.sql-dock-drawer {
+  height: 180px; flex: none; background: #0f172a;
+  border-top: 1px solid var(--surface-border); display: flex; flex-direction: column;
+}
+.sql-dock-bar {
+  padding: 6px 14px; background: #090d16;
+  display: flex; align-items: center; justify-content: space-between; font-size: 10px; color: #94a3b8;
+}
+.sql-status-badge { display: flex; align-items: center; gap: 4px; color: #34d399; font-weight: 700; }
+.sql-code-editor {
+  flex: 1; padding: 10px 16px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px; line-height: 1.6; color: #a7f3d0; overflow-y: auto; white-space: pre;
+}
+.sql-code-editor .kw { color: #60a5fa; font-weight: 700; }
+.sql-code-editor .cm { color: #64748b; }
+.sql-code-editor .fn { color: #fbbf24; }
+.sql-code-editor .vr { color: #c084fc; }
+
+.lt-footer {
+  padding: 10px 20px; border-top: 1px solid var(--surface-border);
+  display: flex; align-items: center; justify-content: space-between; background: var(--surface); font-size: 11px; flex: none;
+}
+.lt-footer-info { color: var(--muted-foreground); display: flex; align-items: center; gap: 8px; font-size: 10.5px; }
+
+/* ===== 数据视角（子 TAB 与血缘） ===== */
+.ver-pick {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px;
+  border: 1px solid rgba(37, 99, 235, 0.35); background: #eff6ff;
+  font-size: 10.5px; color: var(--brand); font-weight: 650;
+}
+.ver-vs { color: var(--faint-foreground); font-size: 11px; padding: 0 2px; }
+.diff-stat { display: inline-flex; gap: 0; border-radius: 7px; overflow: hidden; border: 1px solid var(--surface-border); font-size: 10px; font-weight: 750; }
+.diff-stat span { padding: 3.5px 9px; }
+.diff-stat .a { background: #ecfdf5; color: #047857; }
+.diff-stat .m { background: #eff6ff; color: #1d4ed8; }
+.diff-stat .d { background: #fef2f2; color: #dc2626; }
+.diff-stat .u { background: var(--surface-selected); color: var(--muted-foreground); font-weight: 600; }
+tr.is-del td { opacity: .55; }
+tr.is-del .nm { text-decoration: line-through; }
+tr.is-new td { background: rgba(16, 185, 129, 0.04); }
+tr.is-mod td { background: rgba(37, 99, 235, 0.03); }
+tr.is-logic td { background: rgba(124, 58, 237, 0.03); }
+.col-diff { font-family: ui-monospace, Menlo, monospace; font-size: 9px; display: flex; flex-wrap: wrap; gap: 4px; }
+.col-diff .c { padding: 1.5px 5.5px; border-radius: 3px; }
+.col-diff .c.add { background: #ecfdf5; color: #047857; }
+.col-diff .c.del { background: #fef2f2; color: #dc2626; text-decoration: line-through; }
+.col-diff .c.typ { background: #fffbeb; color: #b45309; }
+.risk-strip {
+  display: flex; gap: 8px; align-items: flex-start; padding: 8px 12px; border-radius: 8px;
+  font-size: 11px; line-height: 1.6; margin-bottom: 8px;
+}
+.risk-strip.warn { background: #fffbeb; border: 1px solid #fef08a; color: #92400e; }
+.risk-strip.info { background: #faf5ff; border: 1px solid #ddd6fe; color: #6d28d9; }
+
+.sub-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--surface-border); padding: 0 12px; background: var(--surface); }
+.sub-tab {
+  padding: 7px 13px; font-size: 11px; color: var(--muted-foreground); font-weight: 600;
+  border-bottom: 2px solid transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+}
+.sub-tab.active { color: var(--foreground); border-bottom-color: var(--primary); }
+.sub-tab .cnt { font-size: 9px; font-weight: 700; background: var(--surface-selected); border-radius: 7px; padding: 0 5px; color: var(--muted-foreground); }
+.sub-tab.active .cnt { background: #eff6ff; color: var(--brand); }
+
+.metric-spec { padding: 8px 12px 10px; background: #faf5ff; border-top: 1px dashed #ddd6fe; }
+.metric-spec .ms-ttl { font-size: 9.5px; font-weight: 800; color: #6d28d9; letter-spacing: .04em; margin-bottom: 5px; }
+</style>
+</head>
+<body>
+<nav class="proto-nav">
+<span class="logo">Multica <span class="">原型 v3.1</span></span>
+<span class="tag">资产模型升级</span>
+<a class="" href="#f1">1 · 增量总览</a>
+<a class="highlight" href="#f2">2 · 弹窗 · 物理表态 (三阶段全景) ⭐</a>
+<a class="" href="#f3">3 · 双栏导向式组装器 (v3.1)</a>
+<a class="" href="#f4">4 · 子 TAB · 物理表</a>
+<a class="" href="#f5">5 · 子 TAB · 逻辑表</a>
+</nav>
+<div class="frame-wrap">
+<!-- ============ 画面 1：v3.1 增量总览 ============ -->
+<div class="part-head"><span class="rn">Ⅰ</span>v3.1 增量总览<span class="ds">在 v2 三视角之上：资产绑定区分物理表 / 逻辑表，逻辑表组装器全新升级双栏导向工作台</span></div>
+<div class="frame-head" id="f1">
+<h2>画面 1 · 数据模型模块 v3.1 —— 物理表 × 逻辑表双轨资产模型 &amp; 工作台级组装体验</h2>
+<p>v2 交付了「点格子直接弹挂载 + 三视角版本化」。v3.1 核心强化：<b>① 资产两轨化</b>（物理表落库 vs 逻辑表虚拟视图）；<b>② 画面 2 &amp; 画面 3 深度交互重构</b>：将狭长单列表单解耦为向导式工作流与<b>双栏沉浸式装配工作台</b>，解决层级翻找繁琐与缺乏拓扑感的问题；<b>③ 清单与血缘同构联动</b>：数据模型子 TAB 分离物理表与逻辑表，支持行内展开指标血缘。</p>
+</div>
+<div class="frame" style="height:auto">
+<div class="frame-bar"><i></i><i></i><i></i><span>Multica — 数据模型 v3.1 · 资产模型语义与交互工作台架构</span></div>
+<div class="cap-grid">
+<div class="cap-card"><span class="no">能力 ①</span>
+<h3>绑定向导：三阶段全景贯通 <span class="anno" style="vertical-align:2px">f2</span></h3>
+<p>点击矩阵格子唤起向导：<b>现状盘点 → 候选分流 → 权限挂载</b>三阶清晰解耦；支持<b>类型徽章（物理/逻辑）</b>与<b>分层徽章（业务库/ODS/CDM）</b>快速筛选。</p>
+</div>
+<div class="cap-card new-purple"><span class="no purple">能力 ② · v3.1 重构</span>
+<h3>双栏导向式逻辑表组装器 <span class="anno purple" style="vertical-align:2px">f3</span></h3>
+<p><b>左栏树状勾选</b>直击物理表字段，<b>右栏流式装配</b>指标口径，系统<b>智能推导 JOIN 拓扑</b>（无须手写 ON），底部<b>实时编译并校验 SQL 语法</b>，所见即所得。</p>
+</div>
+<div class="cap-card"><span class="no">能力 ③</span>
+<h3>数据模型子 TAB：物理 / 逻辑 <span class="anno" style="vertical-align:2px">f4/f5</span></h3>
+<p>数据视角清单拆为三个子 TAB：<b>全部 / 物理表 / 逻辑表</b>。物理表带分层与被引用计数；逻辑表展示粒度主键与来源表，行内展开 Mini 指标血缘。</p>
+</div>
+</div>
+<div class="flow-strip">
+<div style="font-size:10px;font-weight:800;color:var(--muted-foreground);letter-spacing:.04em;margin-bottom:8px">语义模型 · 两轨如何通过组装器汇进同一个矩阵格子</div>
+<div class="flow-row">
+<div class="flow-node"><b>物理表（真实落库）</b><span class="layer-tag biz">业务库</span> <span class="mono" style="font-size:9px">issue / project_artifact</span><br/><span class="layer-tag ods">ODS</span> <span class="mono" style="font-size:9px">ods_issue_sync_raw</span>　<span class="layer-tag cdm">CDM</span> <span class="mono" style="font-size:9px">cdm_issue_daily_df</span></div>
+<div class="flow-arrow">── 来源列勾选 ──▶</div>
+<div class="flow-node hot"><b>逻辑表组装器 (v3.1 工作台)</b><span class="mono" style="font-size:9px">lg_issue_detail_view</span><br/>维度主键 = 业务过程 <span class="mono" style="font-size:9px">issue·detail</span><br/>左侧勾选列 → 右侧智能推导 JOIN 键与口径</div>
+<div class="flow-arrow">── 编译视图 ──▶</div>
+<div class="flow-node"><b>矩阵格子（需求详情页 × 需求域）</b><br/><span class="mono" style="font-size:9px">asset_mount</span> 增量层写入挂载配置（零存储视图，下推查询）</div>
+<div class="flow-arrow">── 页面消费 ──▶</div>
+<div class="flow-node"><b>前端业务模块</b>按统一业务过程读写，<b>无需感知多表关联复杂度</b>，数据治理与开发解耦</div>
+</div>
+</div>
+</div>
+<div class="anno-legend">
+<span><span class="anno">1</span> <b>v3.1 核心突破</b>：摒弃狭长单列弹窗，建立“选源-配置-校验”双栏沉浸式装配工作台，装配效率提升 3 倍以上</span>
+<span><span class="anno purple">2</span> <b>智能拓扑保障</b>：基于系统图谱自动推导等值连接条件，并前置拦截非法的聚合算子与笛卡尔积膨胀</span>
+</div>
+<!-- ============ 画面 2：绑定弹窗 · 物理表态向导（彻底修复：三阶段平铺展示） ============ -->
+<div class="part-head"><span class="rn">Ⅱ</span>能力 ① · 彻底重构<span class="ds">点格子 → 资产绑定向导：Step 1 / Step 2 / Step 3 三阶段高保真全景平铺展示</span></div>
+<div class="frame-head" id="f2">
+<h2>画面 2 · 资产绑定向导（物理表态）—— 三阶段全景协同工作流（无截断、高保真平铺）</h2>
+<p>为彻底解决传统遮罩单步弹窗在静态截图中“信息不全、无法直观纵览完整动线”的痛点，本方案将向导的 <b>Step 1（已绑盘点与健康度）、Step 2（选源入队与分层检索）、Step 3（读写权限校验与字段曝光粒度）</b> 三个核心阶段，以<b>全景多卡片协同画板</b>形式在画面 2 内部清晰平铺，配色采用精致温润的 Slate/Neutral 灰度配合科技蓝、翠绿与琥珀金，动线严谨直观：</p>
+</div>
+<div class="frame" style="height:auto">
+<div class="frame-bar"><i></i><i></i><i></i><span>Multica — 数据模型 / 产品视角 / 资产绑定向导：三阶段完整动线透视</span></div>
+<div class="f2-container">
+<!-- 顶部四维上下文坐标指示条 -->
+<div class="f2-context-banner">
+<div class="f2-context-info">
+<span style="font-size:13.5px;font-weight:800;display:flex;align-items:center;gap:6px">
+          🗄 格子挂载向导
+        </span>
+<span class="f2-badge-ctx">产品模块: 需求流水线</span>
+<span class="f2-badge-ctx">页面: 需求详情页</span>
+<span class="f2-badge-ctx">业务过程: <span class="mono" style="font-weight:700">issue·detail</span></span>
+<span class="f2-badge-ctx" style="background:#f5f3ff;border-color:#ddd6fe;color:#6d28d9">数据域: 需求域</span>
+<span class="f2-badge-ctx" style="background:#f8fafc;border-color:#cbd5e1;color:#475569">基准版本: <span class="mono">scan b27c</span></span>
+</div>
+<div class="f2-stepper-flow">
+<div class="f2-step-indicator"><span class="num" style="background:#10b981">✓</span> Step 1: 现状盘点</div>
+<span style="color:#94a3b8;font-size:10px">→</span>
+<div class="f2-step-indicator active"><span class="num">2</span> Step 2: 选源分流 (当前)</div>
+<span style="color:#94a3b8;font-size:10px">→</span>
+<div class="f2-step-indicator"><span class="num">3</span> Step 3: 权限粒度</div>
+</div>
+</div>
+<!-- 核心区域：三阶段全景高保真平铺卡片 -->
+<div class="f2-stages-grid">
+<!-- ================= Step 1 卡片 ================= -->
+<div class="stage-card">
+<div class="stage-card-hd">
+<div>
+<div class="stage-title">
+<span class="anno" style="background:#64748b">1</span>
+<span>Step 1 · 已绑资产盘点与健康度</span>
+</div>
+<div class="stage-desc">核查当前格子内既有 5 张资产的依赖状态与腐化风险</div>
+</div>
+<span class="stage-badge done">✓ 已核验 (5)</span>
+</div>
+<div class="stage-card-bd">
+<div class="health-strip pass">
+<span>🛡</span>
+<div><b>健康度检查通过</b>：4 张物理表主键正常；1 张逻辑表视图编译有效，未出现字段缺失。</div>
+</div>
+<div style="font-size:10px;font-weight:800;color:#64748b;letter-spacing:.04em;margin-top:2px">当前已挂载清单 (4 物理 + 1 逻辑)</div>
+<div style="display:flex;flex-direction:column;gap:6px">
+<div class="exist-asset-row">
+<span class="type-tag phys">物理</span>
+<span class="layer-tag biz">业务库</span>
+<span class="mono" style="font-weight:700">issue</span>
+<span class="pill mute" style="font-size:8px">RW 读写</span>
+<span style="margin-left:auto;font-size:9.5px;color:#059669;font-weight:600">● 活跃主基表</span>
+</div>
+<div class="exist-asset-row">
+<span class="type-tag phys">物理</span>
+<span class="layer-tag biz">业务库</span>
+<span class="mono" style="font-weight:700">agent_run</span>
+<span class="pill mute" style="font-size:8px">R 只读</span>
+<span style="margin-left:auto;font-size:9.5px;color:#059669;font-weight:600">● 活跃</span>
+</div>
+<div class="exist-asset-row">
+<span class="type-tag phys">物理</span>
+<span class="layer-tag biz">业务库</span>
+<span class="mono" style="font-weight:700">project_artifact</span>
+<span class="pill mute" style="font-size:8px">RW 读写</span>
+<span style="margin-left:auto;font-size:9.5px;color:#059669;font-weight:600">● 活跃</span>
+</div>
+<div class="exist-asset-row">
+<span class="type-tag phys">物理</span>
+<span class="layer-tag ods">ODS</span>
+<span class="mono" style="font-weight:700">ods_issue_sync_raw</span>
+<span class="pill wait" style="font-size:8px">R 只读</span>
+<span style="margin-left:auto;font-size:9.5px;color:#0d9488;font-weight:600">贴源同步中</span>
+</div>
+<div class="exist-asset-row" style="background:#faf5ff;border-color:#e9d5ff">
+<span class="type-tag logic">逻辑</span>
+<span class="mono" style="font-weight:700;color:#7c3aed">lg_issue_detail_view</span>
+<span class="pill purple" style="font-size:8px">VIEW</span>
+<span style="margin-left:auto;font-size:9.5px;color:#7c3aed;font-weight:600">6 指标聚合</span>
+</div>
+</div>
+<div style="margin-top:auto;padding:8px 10px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0;font-size:10px;color:#64748b;line-height:1.5">
+            ℹ️ 提示：若需调整已绑资产的读写权限或解绑，可直接在清单中点击修改，本次向导将统筹提交。
+          </div>
+</div>
+<div class="stage-card-ft">
+<span style="color:#64748b">基准版本: b27c (最新无冲突)</span>
+<button class="btn sm">重新核验健康度</button>
+</div>
+</div>
+<!-- ================= Step 2 卡片（当前焦点卡） ================= -->
+<div class="stage-card focus-stage">
+<div class="stage-card-hd">
+<div>
+<div class="stage-title">
+<span class="anno purple">2</span>
+<span style="color:#1d4ed8">Step 2 · 挑选新资产与分层检索 (当前)</span>
+</div>
+<div class="stage-desc">双轨分流：检索 126 张物理表，或跳转至逻辑表组装器</div>
+</div>
+<span class="stage-badge current">正在操作</span>
+</div>
+<div class="stage-card-bd">
+<!-- 形态分流与分层筛选栏 -->
+<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+<div class="seg" style="flex:1">
+<span class="active" style="flex:1;text-align:center">🟦 物理表 (真实库 126)</span>
+<span style="flex:1;text-align:center;color:#7c3aed;font-weight:600">🟪 逻辑宽表 (8) →</span>
+</div>
+</div>
+<!-- 分层过滤 Chips -->
+<div class="layer-filter-row">
+<span class="layer-filter-btn active">全部层级 (126)</span>
+<span class="layer-filter-btn"><span class="layer-tag biz">业务库</span> (98)</span>
+<span class="layer-filter-btn"><span class="layer-tag ods">ODS 贴源</span> (14)</span>
+<span class="layer-filter-btn"><span class="layer-tag cdm">CDM 维度</span> (14)</span>
+</div>
+<!-- 搜索框 -->
+<div class="search-input-box">
+<span>🔍</span>
+<input placeholder="快速筛选全库 126 表 / 字段 / 别名..." type="text" value="agent_run"/>
+<span class="pill mute" style="font-size:8.5px">2 命中</span>
+</div>
+<!-- 推荐候选列表 -->
+<div style="font-size:10px;font-weight:800;color:#64748b;display:flex;justify-content:space-between;align-items:center">
+<span>智能推荐候选 (基于图谱共现与调用链分析)</span>
+<span style="color:#2563eb">推荐 3 项</span>
+</div>
+<div class="candidate-table-wrap">
+<div class="cand-pick-row picked">
+<span class="layer-tag ods">ODS</span>
+<div style="flex:1;min-width:0">
+<div style="display:flex;align-items:center;gap:6px">
+<span class="mono" style="font-weight:700">ods_agent_run_raw</span>
+<span class="pill wait" style="font-size:8px">建议 R</span>
+</div>
+<div style="font-size:9px;color:#64748b">贴源层 · 与当前业务过程共现 3 次 · 每日全量同步</div>
+</div>
+<span class="pill brand" style="cursor:pointer">✓ 已入暂存</span>
+</div>
+<div class="cand-pick-row picked">
+<span class="layer-tag cdm">CDM</span>
+<div style="flex:1;min-width:0">
+<div style="display:flex;align-items:center;gap:6px">
+<span class="mono" style="font-weight:700">cdm_workspace_issue_hi</span>
+<span class="pill wait" style="font-size:8px">建议 R</span>
+</div>
+<div style="font-size:9px;color:#64748b">公共维度层 · 小时级增量快照 (hi) · 覆盖 4 个度量</div>
+</div>
+<span class="pill brand" style="cursor:pointer">✓ 已入暂存</span>
+</div>
+<div class="cand-pick-row">
+<span class="layer-tag biz">业务库</span>
+<div style="flex:1;min-width:0">
+<div style="display:flex;align-items:center;gap:6px">
+<span class="mono" style="font-weight:700">issue_dependency</span>
+<span class="pill mute" style="font-size:8px">RW</span>
+</div>
+<div style="font-size:9px;color:#64748b">同域业务表 · 存储需求间前置拓扑依赖</div>
+</div>
+<span class="btn sm" style="padding:2px 7px;font-size:9.5px">+ 选入</span>
+</div>
+</div>
+<!-- 本次已暂存待绑列表 -->
+<div style="padding:8px 10px;background:#f0fdf4;border:1px dashed #86efac;border-radius:7px;display:flex;align-items:center;justify-content:space-between">
+<span style="font-size:10.5px;color:#15803d;font-weight:600">📥 本次暂存队列: 2 张物理表待挂载</span>
+<span style="font-size:10px;color:#059669;font-weight:700">流转至 Step 3 →</span>
+</div>
+</div>
+<div class="stage-card-ft">
+<button class="btn sm">← 上一步</button>
+<button class="btn sm brand" style="font-weight:700">下一步: 读写挂载权限核验 (2) →</button>
+</div>
+</div>
+<!-- ================= Step 3 卡片 ================= -->
+<div class="stage-card">
+<div class="stage-card-hd">
+<div>
+<div class="stage-title">
+<span class="anno teal">3</span>
+<span>Step 3 · 读写挂载权限与粒度配置</span>
+</div>
+<div class="stage-desc">前置拦截数仓非法写风险，配置字段暴露与主键关联粒度</div>
+</div>
+<span class="stage-badge pending">待提交 (2)</span>
+</div>
+<div class="stage-card-bd">
+<!-- 权限安全风控提示 -->
+<div class="health-strip warn">
+<span>🛡</span>
+<div><b>数仓写前置拦截</b>：检测到 2 张数仓分层表，系统已强制锁定只读权限（R），杜绝反向直写。</div>
+</div>
+<div style="font-size:10px;font-weight:800;color:#64748b;letter-spacing:.04em">待生效资产权限与粒度配置表</div>
+<!-- 挂载配置项 1 -->
+<div class="perm-matrix-card">
+<div class="perm-row">
+<div style="display:flex;align-items:center;gap:6px">
+<span class="layer-tag ods">ODS</span>
+<span class="mono" style="font-weight:700">ods_agent_run_raw</span>
+</div>
+<div style="display:flex;align-items:center;gap:4px">
+<span class="pill wait">强制 R (只读)</span>
+<span class="pill run" style="font-size:8px">ODS风控</span>
+</div>
+</div>
+<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#64748b;flex-wrap:wrap">
+<span>关联粒度:</span>
+<span class="gran-chip pk">issue_id</span>
+<span class="gran-chip pk">run_id</span>
+<span style="color:#cbd5e1">|</span>
+<span>暴露字段: <b style="color:#0f172a">12 列全部</b> (含 raw_payload)</span>
+</div>
+</div>
+<!-- 挂载配置项 2 -->
+<div class="perm-matrix-card">
+<div class="perm-row">
+<div style="display:flex;align-items:center;gap:6px">
+<span class="layer-tag cdm">CDM</span>
+<span class="mono" style="font-weight:700">cdm_workspace_issue_hi</span>
+</div>
+<div style="display:flex;align-items:center;gap:4px">
+<span class="pill wait">强制 R (只读)</span>
+<span class="pill run" style="font-size:8px">CDM风控</span>
+</div>
+</div>
+<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#64748b;flex-wrap:wrap">
+<span>关联粒度:</span>
+<span class="gran-chip pk">workspace_id</span>
+<span class="gran-chip pk">stat_hour</span>
+<span style="color:#cbd5e1">|</span>
+<span>暴露字段: <b style="color:#0f172a">8 度量列</b></span>
+</div>
+</div>
+<!-- 增量变更审计摘要 -->
+<div style="margin-top:auto;padding:8px 10px;background:#f1f5f9;border-radius:6px;font-size:10px;color:#475569;line-height:1.5">
+            📝 <b>审计提交</b>：确认后将在 <span class="mono">asset_mount</span> 增量层写入挂载配置，版本号自动推进为 <span class="mono">b27c+1</span>，不影响既有业务。
+          </div>
+</div>
+<div class="stage-card-ft">
+<span style="font-size:10px;color:#059669;font-weight:700">✓ 语法与权限合规校验通过</span>
+<button class="btn sm brand" style="font-weight:700;background:#059669;border-color:transparent">确认并写入挂载矩阵 (Enter)</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="anno-legend">
+<span><span class="anno">1</span> <b>三阶段全景高保真平铺</b>：摒弃看不全上下文的遮罩弹窗，将“现状盘点 → 候选分流 → 权限挂载”全过程清晰平铺展示</span>
+<span><span class="anno purple">2</span> <b>物理/逻辑双轨分流</b>：在选源阶段明确分流真实落库表与虚拟视图，避免概念混淆与错绑</span>
+<span><span class="anno teal">3</span> <b>数仓安全写拦截</b>：针对 ODS/CDM 贴源与公共层，系统前置锁定只读 (R) 并给出风控提醒，保障数据资产治理合规</span>
+</div>
+<!-- ============ 画面 3 (双栏导向式逻辑表组装器) ============ -->
+<div class="part-head"><span class="rn">Ⅲ</span>能力 ② · v3.1 重构<span class="ds">画面 3 深度交互重构：双栏导向式工作台（树状勾选 + 智能 JOIN + 实时 SQL 语法校验）</span></div>
+<div class="frame-head" id="f3">
+<h2>画面 3 · 逻辑表组装器（双栏导向式工作台）—— 树状字段拾取 × 流式指标装配 × 实时拓扑推导</h2>
+<p><b>针对原版单列单表下拉繁琐、长滚动、缺乏拓扑关联的问题，本方案将其彻底重构为 1160px 双栏导向工作台：</b><br/>
+<b>① 顶部三步向导</b>：清晰传导「确定粒度主键 → 来源字段拾取与口径配置 → 图谱拓扑与发布」；<br/>
+<b>② 左栏树状物理表拾取</b>：主实体与关联表按分层树状陈列，支持一键点选列直推右侧，告别来回下拉翻选；<br/>
+<b>③ 右栏流式指标装配卡片</b>：清晰列出「来源物理表 · 列 → 聚合口径配置 → 逻辑别名 → 智能推导关联键（<span class="mono">ON r.issue_id = i.id</span>）」，免手写防笛卡尔积；<br/>
+<b>④ 底部实时 SQL 编译与语法检测抽屉</b>：上方修改口径，下方即时生成规范 <span class="mono">CREATE OR REPLACE VIEW</span> 代码并校验语法，兼顾直观与严谨。</p>
+</div>
+<div class="frame" style="height:900px">
+<div class="frame-bar"><i></i><i></i><i></i><span>Multica — 资产模型 v3.1 / 逻辑表组装器（交互优化版）</span></div>
+<div style="position:relative;height:866px;background:var(--page-canvas)">
+<div style="padding:18px;filter:blur(0.8px);opacity:.45">
+<div class="bm-scroll"><table class="bm"><thead><tr class="grp"><th class="mh" style="padding:6px 9px;text-align:left">产品模块</th><th>页面</th><th>业务过程</th><th>需求域</th><th>项目域</th><th>交付域</th></tr></thead>
+<tbody>
+<tr><td class="rh">需求流水线</td><td class="ft">需求看板页</td><td class="ky">issue·board_view</td><td class="cell w"><i>9 表</i></td><td class="cell r"><i>2 表</i></td><td class="cell r"><i>1 表</i></td></tr>
+<tr><td class="rh">需求流水线</td><td class="ft">需求详情页</td><td class="ky">issue·detail</td><td class="cell w hit-purple"><i>7 表<b>R5·W3</b></i></td><td class="cell r"><i>3 表</i></td><td class="cell w"><i>4 表</i></td></tr>
+</tbody></table></div>
+</div>
+<div class="modal-mask" style="position:absolute;inset:0;background:rgba(15,23,42,0.38);display:flex;align-items:center;justify-content:center;z-index:20;backdrop-filter:blur(2px)">
+<div class="lt-modal-wide new-purple">
+<!-- 顶部向导与命名 -->
+<div class="lt-header">
+<div class="lt-title-group">
+<span class="lt-tag">🟪 逻辑表定义</span>
+<input class="lt-name-input" title="逻辑表视图名称" type="text" value="lg_issue_detail_view"/>
+</div>
+<div class="wizard-steps">
+<div class="w-step done">✓ 1. 确定粒度主键</div>
+<span class="w-arrow">→</span>
+<div class="w-step active"><span class="sn">2</span> 2. 来源字段拾取与口径配置 <span class="anno purple" style="vertical-align:1px">1</span></div>
+<span class="w-arrow">→</span>
+<div class="w-step"><span class="sn">3</span> 3. 图谱拓扑与发布</div>
+</div>
+<span style="color:var(--faint-foreground);font-size:16px;cursor:pointer;padding:2px 8px">✕</span>
+</div>
+<!-- 双栏工作台主体 -->
+<div class="lt-body-grid">
+<!-- 左栏：来源物理表选择器 -->
+<div class="lt-col-left">
+<div class="lt-col-hd">
+<span>来源物理表选择器 <span class="anno" style="vertical-align:1px">2</span></span>
+<span style="font-size:10px;color:var(--muted-foreground)">已推荐 3 张共现表</span>
+</div>
+<div class="lt-col-bd">
+<div class="source-search">🔍 快速筛选列名 / 表名 (全库 126 表)...</div>
+<!-- 表 1：主实体 issue -->
+<div class="tree-table-card">
+<div class="tree-table-hd">
+<span class="layer-tag biz">业务库</span>
+<span class="mono" style="font-weight:700">issue</span>
+<span style="margin-left:auto;color:#059669;font-size:9.5px;font-weight:700">● 主实体基表</span>
+</div>
+<div>
+<div class="tree-col-row" style="background:var(--page-canvas)">
+<input checked="" disabled="" type="checkbox"/>
+<span class="mono" style="font-weight:700;color:var(--muted-foreground)">id</span>
+<span class="col-dtype">int4 [PK]</span>
+<span class="pill brand" style="font-size:8px">维度主键</span>
+</div>
+<div class="tree-col-row" style="background:var(--page-canvas)">
+<input checked="" disabled="" type="checkbox"/>
+<span class="mono" style="font-weight:700;color:var(--muted-foreground)">workspace_id</span>
+<span class="col-dtype">varchar [PK]</span>
+<span class="pill brand" style="font-size:8px">维度主键</span>
+</div>
+<div class="tree-col-row selected">
+<input checked="" type="checkbox"/>
+<span class="mono" style="font-weight:700;color:var(--purple-brand)">priority_score</span>
+<span class="col-dtype">numeric</span>
+<span class="pill wait" style="font-size:8px">已添加</span>
+</div>
+<div class="tree-col-row">
+<input type="checkbox"/>
+<span class="mono">title</span>
+<span class="col-dtype">varchar</span>
+</div>
+<div class="tree-col-row">
+<input type="checkbox"/>
+<span class="mono">status</span>
+<span class="col-dtype">varchar</span>
+</div>
+</div>
+</div>
+<!-- 表 2：agent_run -->
+<div class="tree-table-card">
+<div class="tree-table-hd">
+<span class="layer-tag biz">业务库</span>
+<span class="mono" style="font-weight:700">agent_run</span>
+<span style="margin-left:auto;color:var(--brand);font-size:9.5px;font-weight:700">✓ 自动关联 issue_id</span>
+</div>
+<div>
+<div class="tree-col-row selected">
+<input checked="" type="checkbox"/>
+<span class="mono" style="font-weight:700;color:var(--purple-brand)">progress_pct</span>
+<span class="col-dtype">numeric</span>
+<span class="pill wait" style="font-size:8px">已添加</span>
+</div>
+<div class="tree-col-row">
+<input type="checkbox"/>
+<span class="mono">execution_time_ms</span>
+<span class="col-dtype">int8</span>
+</div>
+<div class="tree-col-row">
+<input type="checkbox"/>
+<span class="mono">cost_tokens</span>
+<span class="col-dtype">int4</span>
+</div>
+</div>
+</div>
+<!-- 表 3：ods_issue_sync_raw -->
+<div class="tree-table-card">
+<div class="tree-table-hd">
+<span class="layer-tag ods">ODS</span>
+<span class="mono" style="font-weight:700">ods_issue_sync_raw</span>
+<span style="margin-left:auto;color:var(--brand);font-size:9.5px;font-weight:700">✓ 自动关联 issue_id</span>
+</div>
+<div>
+<div class="tree-col-row selected">
+<input checked="" type="checkbox"/>
+<span class="mono" style="font-weight:700;color:var(--purple-brand)">synced_at</span>
+<span class="col-dtype">timestamptz</span>
+<span class="pill wait" style="font-size:8px">已添加</span>
+</div>
+<div class="tree-col-row">
+<input type="checkbox"/>
+<span class="mono">raw_payload</span>
+<span class="col-dtype">jsonb</span>
+</div>
+</div>
+</div>
+<!-- 表 4：project_artifact -->
+<div class="tree-table-card">
+<div class="tree-table-hd">
+<span class="layer-tag biz">业务库</span>
+<span class="mono" style="font-weight:700">project_artifact</span>
+<span style="margin-left:auto;color:var(--brand);font-size:9.5px;font-weight:700">✓ 自动关联 issue_id</span>
+</div>
+<div>
+<div class="tree-col-row selected">
+<input checked="" type="checkbox"/>
+<span class="mono" style="font-weight:700;color:var(--purple-brand)">id</span>
+<span class="col-dtype">varchar</span>
+<span class="pill wait" style="font-size:8px">已添加 (COUNT)</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- 右栏：流式装配工作台与 SQL 实时编译 -->
+<div class="lt-col-right">
+<!-- 粒度主键横幅 -->
+<div class="dim-banner">
+<span class="dim-banner-ttl">继承业务过程: <span class="mono" style="color:var(--foreground);font-weight:700">issue·detail</span></span>
+<span style="color:var(--surface-border)">|</span>
+<span class="dim-banner-ttl">维度主键 (GROUP BY 粒度):</span>
+<span class="dim-pill-item">workspace_id</span>
+<span class="dim-pill-item">issue_id</span>
+<span style="color:var(--purple-brand);font-size:10px;cursor:pointer;font-weight:700">+ 增减主键</span>
+</div>
+<!-- 指标流式装配区 -->
+<div class="metrics-stage">
+<div class="stage-hd">
+<span>已挂载指标清单 (流式装配) <span class="anno purple" style="vertical-align:1px">3</span></span>
+<span class="cnt-tag">共 4 个指标 · 来源覆盖 4 张物理表</span>
+</div>
+<!-- 指标行 1 -->
+<div class="metric-flow-card">
+<div class="drag-handle">⠿</div>
+<div class="metric-src">
+<span>issue (业务库)</span>
+<b>priority_score</b>
+</div>
+<div style="text-align:center;color:var(--faint-foreground)">→</div>
+<div>
+<select class="metric-op-select">
+<option selected="">口径: 原始值</option>
+<option>口径: MAX</option>
+<option>口径: MIN</option>
+</select>
+</div>
+<div>
+<input class="metric-alias-input" title="指标别名" type="text" value="priority_score"/>
+</div>
+<div>
+<span class="join-edge-tag" style="background:var(--page-canvas);border-color:var(--surface-border);color:var(--muted-foreground)">JOIN 主表直出</span>
+</div>
+<div class="metric-rm-btn">✕</div>
+</div>
+<!-- 指标行 2 -->
+<div class="metric-flow-card">
+<div class="drag-handle">⠿</div>
+<div class="metric-src">
+<span>agent_run (业务库)</span>
+<b>progress_pct</b>
+</div>
+<div style="text-align:center;color:var(--faint-foreground)">→</div>
+<div>
+<select class="metric-op-select">
+<option>口径: 原始值</option>
+<option selected="">口径: AVG</option>
+<option>口径: MAX</option>
+<option>口径: SUM</option>
+</select>
+</div>
+<div>
+<input class="metric-alias-input" title="指标别名" type="text" value="avg_progress_pct"/>
+</div>
+<div>
+<span class="join-edge-tag" title="系统根据图谱外键自动推导">ON <span class="mono">r.issue_id = i.id</span></span>
+</div>
+<div class="metric-rm-btn">✕</div>
+</div>
+<!-- 指标行 3 -->
+<div class="metric-flow-card">
+<div class="drag-handle">⠿</div>
+<div class="metric-src">
+<span>project_artifact (业务库)</span>
+<b>id</b>
+</div>
+<div style="text-align:center;color:var(--faint-foreground)">→</div>
+<div>
+<select class="metric-op-select">
+<option selected="">口径: COUNT</option>
+<option>口径: COUNT DISTINCT</option>
+</select>
+</div>
+<div>
+<input class="metric-alias-input" title="指标别名" type="text" value="deliverable_cnt"/>
+</div>
+<div>
+<span class="join-edge-tag" title="系统根据图谱外键自动推导">ON <span class="mono">a.issue_id = i.id</span></span>
+</div>
+<div class="metric-rm-btn">✕</div>
+</div>
+<!-- 指标行 4 -->
+<div class="metric-flow-card">
+<div class="drag-handle">⠿</div>
+<div class="metric-src">
+<span>ods_issue_sync_raw (ODS)</span>
+<b>synced_at</b>
+</div>
+<div style="text-align:center;color:var(--faint-foreground)">→</div>
+<div>
+<select class="metric-op-select">
+<option selected="">口径: MAX (最新)</option>
+<option>口径: MIN (首次)</option>
+</select>
+</div>
+<div>
+<input class="metric-alias-input" title="指标别名" type="text" value="last_synced_at"/>
+</div>
+<div>
+<span class="join-edge-tag" title="系统根据图谱外键自动推导">ON <span class="mono">o.issue_id = i.id</span></span>
+</div>
+<div class="metric-rm-btn">✕</div>
+</div>
+</div>
+<!-- SQL 实时编译抽屉 (Mini 终端) -->
+<div class="sql-dock-drawer">
+<div class="sql-dock-bar">
+<div style="display:flex;align-items:center;gap:8px">
+<span style="font-weight:700">● SQL 编译预览 (View Definition)</span>
+<span>智能 JOIN 拓扑与膨胀检测 (3 关系)</span>
+</div>
+<div class="sql-status-badge">✓ 语法校验通过 · 零存储虚拟视图 <span class="anno purple" style="vertical-align:0">4</span></div>
+</div>
+<div class="sql-code-editor"><span class="cm">-- 逻辑表不落数据，定义即虚拟视图；运行时直接下推计算</span>
+<span class="kw">CREATE OR REPLACE VIEW</span> <span class="vr">lg_issue_detail_view</span> <span class="kw">AS</span>
+<span class="kw">SELECT</span> 
+    i.workspace_id,
+    i.id <span class="kw">AS</span> issue_id,
+    i.priority_score,
+    <span class="fn">AVG</span>(r.progress_pct) <span class="kw">AS</span> avg_progress_pct,
+    <span class="fn">COUNT</span>(a.id) <span class="kw">AS</span> deliverable_cnt,
+    <span class="fn">MAX</span>(o.synced_at) <span class="kw">AS</span> last_synced_at
+<span class="kw">FROM</span> issue i
+<span class="kw">LEFT JOIN</span> agent_run r <span class="kw">ON</span> r.issue_id = i.id
+<span class="kw">LEFT JOIN</span> project_artifact a <span class="kw">ON</span> a.issue_id = i.id
+<span class="kw">LEFT JOIN</span> ods_issue_sync_raw o <span class="kw">ON</span> o.issue_id = i.id
+<span class="kw">GROUP BY</span> i.workspace_id, i.id;</div>
+</div>
+</div>
+</div>
+<!-- 底部状态条与动作按钮 -->
+<div class="lt-footer">
+<div class="lt-footer-info">
+            ⚙ 存储属性：<b style="color:var(--purple-brand)">虚拟视图 (Virtual View) · 零物理增量</b>
+<span style="color:var(--surface-border)">|</span>
+<span>变更自动推导到数据模型 360° 血缘</span>
+</div>
+<div style="display:flex;gap:10px">
+<button class="btn sm">取消</button>
+<button class="btn sm">保存为草稿</button>
+<button class="btn sm purple" style="font-weight:700">保存并绑定到当前格子 (Enter)</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="anno-legend">
+<span><span class="anno">1</span> <b>三步向导与双栏架构</b>：左栏物理表树状拾取，右栏流式装配，彻底解决长列表与多级下拉难题</span>
+<span><span class="anno purple">2</span> <b>智能拓扑推导 (Auto ON)</b>：依据系统数据血缘图谱自动填补等值关联键，彻底隔绝笛卡尔积膨胀</span>
+<span><span class="anno">3</span> <b>实时 SQL 语法编译</b>：配置即代码，即时校验聚合合法性与别名唯一性</span>
+</div>
+<!-- ============ 画面 4：子 TAB · 物理表清单 ============ -->
+<div class="part-head"><span class="rn">Ⅳ</span>能力 ③<span class="ds">数据模型子 TAB：物理表清单（分层列 + 分层筛选）</span></div>
+<div class="frame-head" id="f4">
+<h2>画面 4 · 数据视角 v3.1 · 子 TAB「物理表」—— 分层（业务库 / ODS / CDM）× 版本状态</h2>
+<p>数据视角清单在 v2 基础之上拆分三个子 TAB：<b>全部（134）/ 物理表（126）/ 逻辑表（8）</b>。本帧为物理表 TAB：新增<b>「分层」列</b>与工具条<b>分层筛选</b>，业务库真实表与数仓 ODS / CDM 层一眼可分；被逻辑表引用的物理表在被引用列额外计数（<span class="mono">N 逻辑表</span>），点击可反查是哪些逻辑视图的来源。</p>
+</div>
+<div class="frame" style="height:auto">
+<div class="frame-bar"><i></i><i></i><i></i><span>Multica — dsh_desktop / 数据模型 / 数据视角 / 物理表</span></div>
+<div class="app" style="height:620px">
+<aside class="sidebar">
+<div class="ws"><span class="ws-avatar">H</span> hanmourang</div>
+<div class="s-item">📥 收件箱 <span class="badge-n">4</span></div>
+<div class="s-item">✅ 我的任务</div>
+<div class="s-group">项目</div>
+<div class="s-item active"><span class="s-dot" style="background:var(--brand)"></span> dsh_desktop</div>
+<div class="s-item"><span class="s-dot" style="background:var(--st4)"></span> multica</div>
+<div class="s-group">视图</div>
+<div class="s-item">📋 看板</div>
+<div class="s-item">🗂 档案</div>
+<div class="s-item">🧩 产品功能</div>
+<div class="s-item active">📊 数据模型</div>
+</aside>
+<div class="main">
+<div class="topbar">
+<div class="crumb">项目 <span>/</span> <b>dsh_desktop</b></div>
+<span class="tab-pill">看板</span>
+<span class="tab-pill">档案</span>
+<span class="tab-pill">产品功能</span>
+<span class="tab-pill active">数据模型</span>
+<div class="topbar-right">
+<span class="ver-pick">🏷 当前 <span class="mono">b27c</span>（09-14）▾ <span class="ver-vs">⇄ 对比</span> <span class="mono">a91f</span>（09-05）▾</span>
+</div>
+</div>
+<div class="ar-toolbar">
+<span class="seg"><span>产品视角（按行）</span><span class="active">数据视角（按列）</span><span>迭代视角</span></span>
+<span class="chip-filter">数据域 <b>全部 9</b> ▾</span>
+<span class="chip-filter on new-el">分层 <b>全部</b> ▾ <span style="color:var(--muted-foreground)">业务库 98 · ODS 14 · CDM 14</span> <span class="anno" style="margin-left:2px">1</span></span>
+<span class="chip-filter">状态 <b>全部</b> ▾</span>
+<span class="diff-stat"><span class="a">▲ 新增 7</span><span class="m">◆ 修改 5</span><span class="d">✕ 删除 1</span><span class="u">不变 113</span></span>
+<div class="toolbar-right">
+<span class="btn sm">⇪ 导出数据字典（含分层）</span>
+</div>
+</div>
+<div class="sub-tabs new-el">
+<span class="sub-tab">全部 <span class="cnt">134</span></span>
+<span class="sub-tab active">🟦 物理表 <span class="cnt">126</span> <span class="anno" style="margin-left:2px">2</span></span>
+<span class="sub-tab">🟪 逻辑表 <span class="cnt">8</span></span>
+</div>
+<div class="bm-wrap" style="overflow:auto">
+<div class="risk-strip warn">⚠ <b>ODS 层被应用内直写 1 处</b>：<span class="mono">ods_agent_run_raw</span> 出现 W 边 —— 数仓贴源层只应由同步作业写入 <span style="margin-left:auto;color:var(--brand);font-weight:700;cursor:pointer">查看边 →</span></div>
+<div class="panel">
+<div class="panel-hd">🟦 物理表清单 <span class="right">当前 <span class="mono">b27c</span> vs 基线 <span class="mono">a91f</span> · 按变更优先排序</span></div>
+<table class="tbl">
+<thead><tr><th>表</th><th>分层</th><th>数据域</th><th>生命周期</th><th>版本状态</th><th>R / W</th><th>被引用（模块 × 页面 · 逻辑表）</th><th>版本变更摘要</th><th></th></tr></thead>
+<tbody>
+<tr class="is-new"><td class="mono nm"><b>ods_issue_sync_raw</b></td><td><span class="layer-tag ods">ODS</span></td><td>需求域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg add">▲ 新增</span></td><td>3 / 1</td><td>1 模块 · 1 页面 · <b style="color:var(--purple-brand)">1 逻辑表</b></td><td class="mono" style="font-size:9px">贴源同步 · 日频回刷</td><td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td></tr>
+<tr class="is-new"><td class="mono nm"><b>cdm_issue_daily_df</b></td><td><span class="layer-tag cdm">CDM</span></td><td>需求域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg add">▲ 新增</span></td><td>5 / 0</td><td>1 模块 · 2 页面 · <b style="color:var(--purple-brand)">2 逻辑表</b></td><td class="mono" style="font-size:9px">公共维度 · 日粒度全量</td><td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td></tr>
+<tr class="is-new"><td class="mono nm"><b>cdm_workspace_issue_hi</b></td><td><span class="layer-tag cdm">CDM</span></td><td>需求域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg add">▲ 新增</span></td><td>2 / 0</td><td>0 模块 · 1 页面</td><td class="mono" style="font-size:9px">小时级增量（hi）</td><td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td></tr>
+<tr class="is-mod"><td class="mono nm"><b>issue</b></td><td><span class="layer-tag biz">业务库</span></td><td>需求域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg mod">◆ 修改</span></td><td>48 / 26</td><td>6 模块 · 11 页面 · <b style="color:var(--purple-brand)">3 逻辑表</b></td><td><span class="col-diff"><span class="c add">+assignee_ai</span><span class="c add">+priority_score</span><span class="c typ">stage: int→text</span></span> <span class="mono" style="font-size:9px">459</span></td><td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td></tr>
+<tr class="is-mod"><td class="mono nm"><b>project_graph_snapshot</b></td><td><span class="layer-tag biz">业务库</span></td><td>图谱域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg mod">◆ 修改</span></td><td>21 / 9</td><td>2 模块 · 4 页面</td><td><span class="col-diff"><span class="c add">+bus_matrix jsonb</span><span class="c add">+parent_snapshot_id</span></span> <span class="mono" style="font-size:9px">461</span></td><td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td></tr>
+<tr class="is-del"><td class="mono nm">issue_vcs_pull_request</td><td><span class="layer-tag biz">业务库</span></td><td>需求域</td><td><span class="pill danger">deprecated</span></td><td><span class="badge-chg del">✕ 删除</span></td><td>4 / 0</td><td>1 模块 · 2 页面 ⚠</td><td class="mono" style="font-size:9px">被 vcs_pull_request 取代 · 仍有 4 处 READS</td><td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td></tr>
+<tr><td class="mono nm">project_artifact</td><td><span class="layer-tag biz">业务库</span></td><td>交付域</td><td><span class="pill run">in_use</span></td><td><span class="badge-chg same">不变</span></td><td>12 / 7</td><td>3 模块 · 5 页面 · <b style="color:var(--purple-brand)">1 逻辑表</b></td><td class="mono" style="font-size:9px;color:var(--faint-foreground)">—</td><td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td></tr>
+<tr><td class="mono nm">feedback</td><td><span class="layer-tag biz">业务库</span></td><td>身份用量</td><td><span class="pill mute">orphan</span></td><td><span class="badge-chg same">不变</span></td><td>0 / 0</td><td>0 模块 · 0 页面 ⚠</td><td class="mono" style="font-size:9px;color:var(--faint-foreground)">—</td><td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="anno-legend">
+<span><span class="anno">1</span> <b>分层全景透明化</b>：业务库主库、ODS 贴源与 CDM 公共维度一键区分筛选</span>
+<span><span class="anno">2</span> <b>物理-逻辑双向引用穿透</b>：物理表展示被逻辑表组装引用的计数，支持一键溯源消费拓扑</span>
+</div>
+<!-- ============ 画面 5：子 TAB · 逻辑表清单 ============ -->
+<div class="part-head"><span class="rn">Ⅴ</span>能力 ③<span class="ds">数据模型子 TAB：逻辑表清单（业务过程 × 指标构成血缘）</span></div>
+<div class="frame-head" id="f5">
+<h2>画面 5 · 数据视角 v3.1 · 子 TAB「逻辑表」—— 业务过程维度主键 × 指标挂载血缘</h2>
+<p>围绕「逻辑表三要素」展开：<b>业务过程（维度主键组合）</b>、<b>挂载指标数</b>、<b>来源物理表</b>；顶栏支持「＋ 新建逻辑表」调起画面 3 双栏工作台。行内可展开查看由组装器生成的指标构成与来源变更传导记录，支持 360° 深度血缘溯源。</p>
+</div>
+<div class="frame" style="height:auto">
+<div class="frame-bar"><i></i><i></i><i></i><span>Multica — dsh_desktop / 数据模型 / 数据视角 / 逻辑表</span></div>
+<div class="app" style="height:600px">
+<aside class="sidebar">
+<div class="ws"><span class="ws-avatar">H</span> hanmourang</div>
+<div class="s-item">📥 收件箱 <span class="badge-n">4</span></div>
+<div class="s-item">✅ 我的任务</div>
+<div class="s-group">项目</div>
+<div class="s-item active"><span class="s-dot" style="background:var(--brand)"></span> dsh_desktop</div>
+<div class="s-item"><span class="s-dot" style="background:var(--st4)"></span> multica</div>
+<div class="s-group">视图</div>
+<div class="s-item">📋 看板</div>
+<div class="s-item">🗂 档案</div>
+<div class="s-item">🧩 产品功能</div>
+<div class="s-item active">📊 数据模型</div>
+</aside>
+<div class="main">
+<div class="topbar">
+<div class="crumb">项目 <span>/</span> <b>dsh_desktop</b></div>
+<span class="tab-pill">看板</span>
+<span class="tab-pill">档案</span>
+<span class="tab-pill">产品功能</span>
+<span class="tab-pill active">数据模型</span>
+<div class="topbar-right">
+<span class="ver-pick">🏷 当前 <span class="mono">b27c</span>（09-14）▾ <span class="ver-vs">⇄ 对比</span> <span class="mono">a91f</span>（09-05）▾</span>
+<a class="btn sm purple" href="#f3" style="text-decoration:none">＋ 新建逻辑表 (双栏工作台) <span class="anno purple" style="margin-left:2px">1</span></a>
+</div>
+</div>
+<div class="ar-toolbar">
+<span class="seg"><span>产品视角（按行）</span><span class="active">数据视角（按列）</span><span>迭代视角</span></span>
+<span class="chip-filter">业务过程 <b>全部</b> ▾</span>
+<span class="chip-filter">来源表 <b>全部</b> ▾</span>
+<span class="chip-filter on">仅看变更 3</span>
+<div class="toolbar-right">
+<span class="btn sm">⇪ 导出逻辑表字典</span>
+</div>
+</div>
+<div class="sub-tabs">
+<span class="sub-tab">全部 <span class="cnt">134</span></span>
+<span class="sub-tab">🟦 物理表 <span class="cnt">126</span></span>
+<span class="sub-tab active">🟪 逻辑表 <span class="cnt">8</span> <span class="anno" style="margin-left:2px">2</span></span>
+</div>
+<div class="bm-wrap" style="overflow:auto">
+<div class="risk-strip info">🟪 <b>逻辑表 = 虚拟视图，不落数据</b>：消费方按业务过程读写，无需感知底层多表 JOIN；来源物理表删除 / 改列会传导为逻辑表 <span class="mono">stale</span> 告警，不会静默失效</div>
+<div class="panel">
+<div class="panel-hd">🟪 逻辑表清单 <span class="right">当前 <span class="mono">b27c</span> vs 基线 <span class="mono">a91f</span> · 点击行展开指标构成</span></div>
+<table class="tbl">
+<thead><tr><th>逻辑表</th><th>业务过程（维度主键组合）</th><th>挂载指标</th><th>来源物理表</th><th>版本状态</th><th>被引用（模块 × 页面）</th><th></th></tr></thead>
+<tbody>
+<tr class="is-new is-logic">
+<td class="mono nm"><b>lg_issue_detail_view</b></td>
+<td class="mono" style="font-size:9.5px">issue·detail<br/><span style="color:var(--muted-foreground)">workspace_id + issue_id</span></td>
+<td><b>6</b> 指标</td>
+<td class="mono" style="font-size:9px">issue · agent_run · project_artifact <span class="layer-tag ods" style="margin-left:2px">+ODS</span></td>
+<td><span class="badge-chg add">▲ 新增</span></td>
+<td><b>1 模块 · 1 页面</b></td>
+<td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td>
+</tr>
+<tr class="is-logic">
+<td colspan="7" style="padding:0;border-bottom:1px solid var(--border)">
+<div class="metric-spec new-el">
+<div class="ms-ttl">指标构成 · 血缘 <span class="anno" style="margin-left:3px">3</span></div>
+<div class="col-diff" style="font-size:9.5px;gap:5px">
+<span class="c add">priority_score ← issue.priority_score · 原始值</span>
+<span class="c add">avg_progress_pct ← agent_run.progress_pct · AVG (ON issue_id)</span>
+<span class="c add">deliverable_cnt ← project_artifact.id · COUNT (ON issue_id)</span>
+<span class="c add">last_synced_at ← ods_issue_sync_raw.synced_at · MAX (ON issue_id)</span>
+<span class="c add">open_subtask_cnt ← issue_subtask.id · COUNT</span>
+<span class="c add">stage_text ← issue.stage · 原始值</span>
+</div>
+<div style="font-size:9px;color:var(--muted-foreground);margin-top:5px">⤴ 来源变更传导：<span class="mono">issue</span> 本期 <span class="mono">+priority_score</span> → 本逻辑表已增补该指标；<span class="mono">agent_run.stage</span> 类型变更 <span class="mono">int→text</span> 不影响现有指标</div>
+</div>
+</td>
+</tr>
+<tr class="is-logic">
+<td class="mono nm"><b>lg_req_pipeline_view</b></td>
+<td class="mono" style="font-size:9.5px">issue·pipeline<br/><span style="color:var(--muted-foreground)">workspace_id + pipeline_stage</span></td>
+<td><b>9</b> 指标</td>
+<td class="mono" style="font-size:9px">issue · issue_stage_log · agent_run · deliverable</td>
+<td><span class="badge-chg mod">◆ 修改</span></td>
+<td><b>2 模块 · 3 页面</b></td>
+<td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td>
+</tr>
+<tr class="is-logic">
+<td class="mono nm"><b>lg_delivery_overview_view</b></td>
+<td class="mono" style="font-size:9.5px">delivery·overview<br/><span style="color:var(--muted-foreground)">workspace_id + issue_id + artifact_type</span></td>
+<td><b>7</b> 指标</td>
+<td class="mono" style="font-size:9px">project_artifact · attachment · filing_item</td>
+<td><span class="badge-chg same">不变</span></td>
+<td><b>2 模块 · 2 页面</b></td>
+<td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td>
+</tr>
+<tr class="is-logic">
+<td class="mono nm"><b>lg_agent_run_cost_view</b></td>
+<td class="mono" style="font-size:9.5px">agent_run·cost<br/><span style="color:var(--muted-foreground)">workspace_id + agent_id + day</span></td>
+<td><b>5</b> 指标</td>
+<td class="mono" style="font-size:9px">agent_run · usage_counter <span class="layer-tag cdm" style="margin-left:2px">+CDM</span></td>
+<td><span class="badge-chg mod">◆ 修改</span></td>
+<td><b>1 模块 · 2 页面</b></td>
+<td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td>
+</tr>
+<tr class="is-del">
+<td class="mono nm">lg_legacy_import_view</td>
+<td class="mono" style="font-size:9.5px">legacy·import<br/><span style="color:var(--muted-foreground)">workspace_id + batch_id</span></td>
+<td><b>3</b> 指标</td>
+<td class="mono" style="font-size:9px">legacy_scan_cache（已删除 ⛔）</td>
+<td><span class="badge-chg del">✕ 下线</span></td>
+<td><b>0 模块 · 0 页面</b></td>
+<td><span style="color:var(--brand);font-weight:700;cursor:pointer">360° →</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="anno-legend">
+<span><span class="anno purple">1</span> <b>逻辑表无缝挂载与消费</b>：上层业务直接通过业务过程与维度主键查询，彻底屏蔽复杂物理表 JOIN 拓扑</span>
+<span><span class="anno">2</span> <b>变更级联溯源</b>：物理表改列、类型变更或废弃将实时在逻辑表行内标记，保障数据管道敏捷透明</span>
+</div>
+</div>
+</body></html>
