@@ -95,6 +95,8 @@ const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   issues: ["issues", "tasks", "bugs", "任务"],
   calendar: ["calendar", "schedule", "month", "week", "日历", "排期"],
   projects: ["projects", "kanban", "项目"],
+  assets: ["assets", "asset", "binding", "资产管理", "研发资产", "绑定"],
+  workflows: ["workflow", "workflows", "template", "工作流", "模板", "门控"],
   autopilots: ["autopilot", "autopilots", "automation", "schedule", "cron", "webhook", "自动化", "定时"],
   agents: ["agents", "bots", "ai", "智能体"],
   squads: ["squads", "teams", "小队", "团队"],
@@ -316,7 +318,7 @@ export function SearchCommand() {
   const { t: tNav } = useT("layout");
   const navPages = useMemo<NavPage[]>(
     () =>
-      NAV_PAGE_KEYS.map((key) => ({
+      NAV_PAGE_KEYS.filter((key) => key !== "workflows").map((key) => ({
         key,
         label: tNav(($) => $.nav[WORKSPACE_PAGES[key].navKey]),
         keywords: PAGE_KEYWORDS[key],

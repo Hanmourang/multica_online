@@ -1,0 +1,106 @@
+{
+  "title": "スプリント",
+  "subtitle": "プロジェクトのタイムボックス作業単位。課題はバックログからスプリントに追加し、完了したスプリントは履歴として保存されます。",
+  "status": {
+    "planned": "予定",
+    "active": "実行中",
+    "completed": "完了"
+  },
+  "filter": {
+    "all": "すべてのステータス",
+    "by_status": "ステータスで絞り込み"
+  },
+  "sidebar": {
+    "search_placeholder": "スプリントを検索",
+    "list_label": "スプリント一覧",
+    "load_failed": "スプリントの読み込みに失敗しました。",
+    "no_match_search": "「{{query}}」に一致するスプリントはありません"
+  },
+  "detail": {
+    "select_hint": "左側でスプリントを選択すると、範囲と進捗を確認できます。",
+    "goal_label": "ゴール"
+  },
+  "columns": {
+    "name": "スプリント",
+    "dates": "期間",
+    "issues": "課題",
+    "capacity": "キャパシティ",
+    "progress": "進捗",
+    "actions": "操作"
+  },
+  "actions": {
+    "create": "新規スプリント",
+    "edit": "編集",
+    "delete": "削除",
+    "start": "開始",
+    "complete": "完了",
+    "reopen": "再オープン",
+    "add_issues": "課題を追加",
+    "remove_issue": "スプリントから除外",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "create_submit": "スプリントを作成"
+  },
+  "form": {
+    "create_title": "新規スプリント",
+    "edit_title": "スプリントを編集",
+    "name_label": "名称",
+    "name_placeholder": "例：スプリント 01",
+    "goal_label": "ゴール（任意）",
+    "goal_placeholder": "このタイムボックスで達成する目標",
+    "start_date_label": "開始日",
+    "end_date_label": "終了日",
+    "capacity_label": "キャパシティ（任意）",
+    "capacity_placeholder": "ポイント"
+  },
+  "progress": {
+    "done": "{{done}} / {{total}} 完了",
+    "cancelled": "{{count}} 件キャンセル",
+    "no_members": "このスプリントに課題はまだありません。"
+  },
+  "delete_confirm": {
+    "title": "このスプリントを削除しますか？",
+    "desc": "削除できるのは予定状態のスプリントのみです。課題はバックログに戻り、削除されません。",
+    "confirm": "削除",
+    "cancel": "保持"
+  },
+  "backlog": {
+    "title": "バックログ",
+    "desc": "どのスプリントにも属していないプロジェクトの課題。",
+    "add_hint": "スプリントに追加する課題を選択してください。"
+  },
+  "empty": {
+    "no_sprints": "スプリントがまだありません。作成してイテレーション計画を始めましょう。",
+    "no_match": "現在の絞り込みに一致するスプリントはありません。"
+  },
+  "dates": {
+    "unscheduled": "日付未設定"
+  },
+  "errors": {
+    "name_required": "スプリント名は必須です（最大80文字）。",
+    "date_order": "終了日は開始日より前にできません。",
+    "name_exists": "このプロジェクトに同名のスプリントが既に存在します。",
+    "not_planned": "このスプリントは予定状態ではありません。",
+    "not_active": "このスプリントは実行中ではありません。",
+    "not_completed": "このスプリントは完了していません。",
+    "sprint_completed": "完了したスプリントに課題は追加できません。",
+    "start_failed": "スプリントの開始に失敗しました。",
+    "complete_failed": "スプリントの完了に失敗しました。",
+    "reopen_failed": "スプリントの再オープンに失敗しました。",
+    "create_failed": "スプリントの作成に失敗しました。",
+    "update_failed": "スプリントの更新に失敗しました。",
+    "delete_failed": "スプリントの削除に失敗しました。",
+    "assign_failed": "課題の追加に失敗しました。",
+    "remove_failed": "課題の除外に失敗しました。"
+  },
+  "toast": {
+    "created": "スプリントを作成しました",
+    "updated": "スプリントを更新しました",
+    "deleted": "スプリントを削除しました",
+    "started": "スプリントを開始しました",
+    "completed": "スプリントを完了しました",
+    "reopened": "スプリントを再オープンしました",
+    "issues_assigned": "課題をスプリントに追加しました",
+    "issues_removed": "課題をスプリントから除外しました"
+  }
+}

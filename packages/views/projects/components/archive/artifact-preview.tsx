@@ -85,6 +85,7 @@ export function ArtifactPreviewDialog({
           t(($) => $.browser.stage_s2),
           t(($) => $.browser.stage_s3),
           t(($) => $.browser.stage_s4),
+          t(($) => $.browser.stage_s5),
           t(($) => $.browser.stage_missing),
         ),
       },
@@ -256,6 +257,7 @@ function stageLabel(
   s2: string,
   s3: string,
   s4: string,
+  s5: string,
   missing: string,
 ): string {
   switch (stage) {
@@ -267,6 +269,8 @@ function stageLabel(
       return s3;
     case 4:
       return s4;
+    case 5:
+      return s5;
     default:
       return missing;
   }

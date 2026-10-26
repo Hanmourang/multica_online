@@ -1,0 +1,227 @@
+{
+  "title": "アセット管理",
+  "subtitle": "研究開発アセットをこのプロジェクトにバインドします。バインドはプロジェクトリソースを指すポインターであり、バインド解除しても基のリソースは削除されません。",
+  "workspace_title": "アセット管理",
+  "workspace_subtitle": "このワークスペース全プロジェクトのアセットバインドを一元的に確認。カテゴリ / 名前で絞り込み、バインド先のプロジェクトやワークアイテムへ直接移動できます。",
+  "go_to_projects": "プロジェクトへ",
+  "project_filter": {
+    "all": "すべてのプロジェクト"
+  },
+  "tabs": {
+    "bound": "バインド済みアセット",
+    "candidates": "検索とおすすめ",
+    "batch": "フォルダインポート"
+  },
+  "categories": {
+    "all": "すべてのカテゴリ",
+    "code_repository": "コードリポジトリ",
+    "application": "アプリケーション",
+    "package": "パッケージ",
+    "knowledge_repo": "ナレッジリポジトリ",
+    "knowledge_group": "ナレッジグループ",
+    "other": "その他"
+  },
+  "columns": {
+    "name": "名前",
+    "category": "カテゴリ",
+    "subtype": "サブタイプ",
+    "bound_to": "バインド先",
+    "source": "ソース",
+    "created_at": "バインド日時",
+    "actions": "操作",
+    "stage": "ステージ",
+    "role": "オブジェクト",
+    "tags": "タグ",
+    "links": "関連"
+  },
+  "bound_kind": {
+    "work_item": "ワークアイテム",
+    "project": "プロジェクト"
+  },
+  "actions": {
+    "bind": "バインド",
+    "sync_from_archive": "アーカイブから同期",
+    "bind_now": "今すぐバインド",
+    "unbind": "バインド解除",
+    "add_manual": "手動で追加",
+    "search": "検索",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "edit": "編集",
+    "preview": "プレビュー"
+  },
+  "confirm_unbind": {
+    "title": "このアセットのバインドを解除しますか？",
+    "desc": "バインド関係のみを削除します。基のプロジェクトリソースは残り、いつでも再バインドできます。",
+    "confirm": "解除",
+    "cancel": "維持"
+  },
+  "recommended_label": "おすすめ",
+  "reason": {
+    "recent": "最近ご自身が作成・参加しました",
+    "joint": "このプロジェクトの要求で多く使われています",
+    "hot": "コードグラフでファンイン度が高いです"
+  },
+  "empty": {
+    "no_assets": "まだバインドされたアセットがありません。",
+    "no_candidates": "一致する候補がありません。別のキーワードで検索するか、手動で追加してください。",
+    "no_source": "このカテゴリには接続可能なソースがまだありません。手動で追加してください。"
+  },
+  "search_placeholder": "リポジトリ / アセットを検索…",
+  "related_to_me": "自分関連のみ",
+  "already_bound": "バインド済み",
+  "pager": {
+    "prev": "前へ",
+    "next": "次へ",
+    "page_of": "{{page}} / {{totalPages}} ページ"
+  },
+  "manual_form": {
+    "title": "アセットを手動で追加",
+    "name_label": "アセット名",
+    "name_placeholder": "例: order-service",
+    "category_label": "カテゴリ",
+    "subtype_label": "サブタイプ（任意）",
+    "url_label": "URL（任意）",
+    "url_placeholder": "https://git.example.com/group/repo.git",
+    "stage_label": "ステージ",
+    "role_label": "オブジェクト",
+    "tags_label": "タグ",
+    "tags_placeholder": "design、api-doc（カンマ区切り）"
+  },
+  "batch": {
+    "select_folder": "フォルダからインポート",
+    "select_files": "ファイルを選択してインポート",
+    "folder_hint": "ローカルフォルダを選択すると、ドキュメント（md / doc / pdf / html / 画像など）を1件ずつアップロードしアセットとして自動バインドします。隠しファイル・20MB 超過・未対応形式はスキップされます。",
+    "no_files": "インポート可能なファイルが選択されていません。",
+    "too_large": "サイズ超過（>20MB）",
+    "hidden": "隠しファイル",
+    "unsupported_type": "未対応の形式",
+    "uploading": "アップロード中 {{done}} / {{total}}",
+    "uploading_current": "現在: {{name}}",
+    "cancel": "キャンセル",
+    "cancelling": "キャンセル中…",
+    "cancelled": "キャンセルしました — 完了 {{done}} / {{total}}（インポート済みは保持）",
+    "imported": "{{count}} 件のアセットをインポートしました",
+    "import_failed": "インポート失敗 — バインドされたアセットはありません",
+    "done_summary": "成功 {{succeeded}}・失敗 {{failed}}・スキップ {{skipped}}",
+    "done_detail_failures": "失敗: {{failures}}",
+    "done_detail_skipped": "スキップ: {{skipped_list}}"
+  },
+  "views": {
+    "list": "リスト",
+    "matrix": "ステージマトリクス",
+    "issues": "ワークアイテム × アセット"
+  },
+  "stages": {
+    "all": "全ステージ",
+    "none": "未設定",
+    "S1": "S1 プロジェクト計画",
+    "S2": "S2 プロダクトプロトタイプ",
+    "S3": "S3 技術設計",
+    "S4": "S4 振り返り",
+    "S5": "S5 要件イテレーション",
+    "general": "全ステージ共通"
+  },
+  "roles": {
+    "all": "全オブジェクト",
+    "none": "未設定",
+    "input": "インプット",
+    "output": "アウトプット"
+  },
+  "link_types": {
+    "depends_on": "依存",
+    "produces": "成果物",
+    "resolves": "修正・検証"
+  },
+  "edit": {
+    "title": "アセットメタ情報を編集",
+    "desc": "「{{name}}」のステージ・オブジェクト・タグ・ワークアイテム関連を設定します。バインドと基のリソースは変更されません。",
+    "stage_label": "ライフサイクルステージ",
+    "role_label": "インプット / アウトプット",
+    "tags_label": "タグ",
+    "tags_placeholder": "design, api-doc（カンマ区切り）",
+    "tags_help": "最大20タグ。空・重複は自動除去されます。",
+    "links_label": "関連する要求 / バグ",
+    "links_search": "ワークアイテムを絞り込み…",
+    "links_none_linked": "まだ関連付けられたワークアイテムはありません。",
+    "links_no_candidates": "関連付けられる未クローズのワークアイテムがありません。"
+  },
+  "matrix": {
+    "empty_col": "このステージにアセットはありません",
+    "count": "{{count}} 件"
+  },
+  "issues_view": {
+    "no_rows": "アセットとワークアイテムの関連がまだありません。行の「編集」から要求やバグを関連付けてください。",
+    "asset_count": "関連アセット {{count}} 件"
+  },
+  "toast": {
+    "bound": "アセットをバインドしました",
+    "bind_failed": "アセットのバインドに失敗しました",
+    "already_bound": "このアセットはすでにバインドされています",
+    "unbound": "アセットのバインドを解除しました",
+    "unbind_failed": "アセットのバインド解除に失敗しました",
+    "archive_synced": "アーカイブから {{imported}} 件のドキュメントアセットをインポートしました",
+    "archive_sync_noop": "インポート可能な新しいアーカイブドキュメントはありません",
+    "archive_sync_failed": "アーカイブからの同期に失敗しました",
+    "meta_saved": "アセットメタ情報を保存しました",
+    "meta_save_failed": "アセットメタ情報の保存に失敗しました",
+    "batch_updated": "{{count}} 件を更新しました",
+    "batch_update_failed": "一括更新に失敗しました"
+  },
+  "stats": {
+    "total": "アセット合計",
+    "knowledge": "ナレッジドキュメント",
+    "staged": "ステージ済み",
+    "untagged": "未タグ",
+    "unstaged": "ステージ未設定の資産",
+    "share": "カテゴリ分布",
+    "coverage": "ステージカバレッジ {{covered}}/5"
+  },
+  "view_switch": {
+    "list": "リストビュー",
+    "grid": "カードビュー"
+  },
+  "preview": {
+    "title": "アセットプレビュー",
+    "position": "{{current}} / {{total}}",
+    "prev": "前へ",
+    "next": "次へ",
+    "open_external": "新しいタブで開く",
+    "download": "ダウンロード",
+    "unavailable": "このアセットにプレビューできる内容はありません。",
+    "artifact_missing": "関連付けられたアーカイブドキュメントは存在しません。",
+    "too_large": "ファイルが大きすぎるためインラインプレビューできません。ダウンロードしてご覧ください。",
+    "unsupported_type": "このファイル形式はインラインプレビューに対応していません。ダウンロードしてご覧ください。"
+  },
+  "inline_edit": {
+    "tags_placeholder": "タグを追加…"
+  },
+  "batch_edit": {
+    "title": "メタ情報を一括編集",
+    "desc": "選択した {{count}} 件のアセットに変更を適用します。",
+    "apply": "適用",
+    "unchanged": "— 変更なし —",
+    "clear": "— クリア —",
+    "stage_label": "ライフサイクルステージ",
+    "role_label": "オブジェクト",
+    "category_label": "カテゴリ",
+    "tags_label": "タグ",
+    "tags_mode_label": "タグモード",
+    "tags_mode": {
+      "replace": "置換",
+      "add": "追加",
+      "remove": "削除"
+    }
+  },
+  "selection": {
+    "selected_count": "{{count}} 件選択中",
+    "select_all": "すべて選択",
+    "clear": "選択解除",
+    "batch_edit": "一括編集"
+  },
+  "batch_result": {
+    "partial": "{{succeeded}} プロジェクト成功、{{failed}} 失敗",
+    "failed_projects": "{{count}} プロジェクトが失敗",
+    "retry": "失敗したプロジェクトを再試行"
+  }
+}

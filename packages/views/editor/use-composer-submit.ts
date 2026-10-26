@@ -51,6 +51,8 @@ export interface ComposerSubmitOptions {
    * draft in place for retry. Throwing is treated as `false`.
    */
   onSubmit: (content: string) => Promise<boolean>;
+  /** Structured chat resources can form a complete message without markdown. */
+  allowEmpty?: boolean;
   /**
    * Run once after an accepted submit: clear the editor, attachments, and the
    * persisted draft. Not run on rejection.
@@ -150,7 +152,7 @@ export function useComposerSubmit(opts: ComposerSubmitOptions): ComposerSubmit {
     const o = optsRef.current;
     const raw = o.editorRef.current?.getMarkdown() ?? "";
     const content = (o.normalize ?? defaultNormalize)(raw);
-    if (!content || inFlight.current) return;
+    if ((!content && !o.allowEmpty) || inFlight.current) return;
     // Submit-time upload re-check: the disabled button is a frame behind, and
     // Cmd+Enter / Enter-on-title bypass the button entirely.
     if (o.uploadGate.isBlocked()) return;

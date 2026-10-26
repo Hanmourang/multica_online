@@ -1,0 +1,227 @@
+{
+  "title": "Assets",
+  "subtitle": "Bind R&D assets to this project. Bindings point at project resources; unbinding never deletes the underlying resource.",
+  "workspace_title": "Asset Management",
+  "workspace_subtitle": "Every R&D asset binding across all projects in this workspace — filter by category or name, jump to the project or work item each asset is bound to, or unbind from here.",
+  "go_to_projects": "Go to Projects",
+  "project_filter": {
+    "all": "All projects"
+  },
+  "tabs": {
+    "bound": "Bound assets",
+    "candidates": "Search & recommend",
+    "batch": "Folder import"
+  },
+  "categories": {
+    "all": "All categories",
+    "code_repository": "Code repository",
+    "application": "Application",
+    "package": "Package",
+    "knowledge_repo": "Knowledge repo",
+    "knowledge_group": "Knowledge group",
+    "other": "Other"
+  },
+  "columns": {
+    "name": "Name",
+    "category": "Category",
+    "subtype": "Subtype",
+    "bound_to": "Bound to",
+    "source": "Source",
+    "created_at": "Bound at",
+    "actions": "Actions",
+    "stage": "Stage",
+    "role": "Object",
+    "tags": "Tags",
+    "links": "Links"
+  },
+  "bound_kind": {
+    "work_item": "Work item",
+    "project": "Project"
+  },
+  "actions": {
+    "bind": "Bind",
+    "sync_from_archive": "Sync from archive",
+    "bind_now": "Bind now",
+    "unbind": "Unbind",
+    "add_manual": "Add manually",
+    "search": "Search",
+    "cancel": "Cancel",
+    "save": "Save",
+    "edit": "Edit",
+    "preview": "Preview"
+  },
+  "confirm_unbind": {
+    "title": "Unbind this asset?",
+    "desc": "Only the binding is removed. The underlying project resource stays and can be re-bound at any time.",
+    "confirm": "Unbind",
+    "cancel": "Keep"
+  },
+  "recommended_label": "Recommended",
+  "reason": {
+    "recent": "Recently you created or worked with it",
+    "joint": "Frequently used across this project's requirements",
+    "hot": "High fan-in in the code graph"
+  },
+  "empty": {
+    "no_assets": "No assets bound yet.",
+    "no_candidates": "No matching candidates. Try another keyword, or add one manually.",
+    "no_source": "This category has no connected source yet — add it manually."
+  },
+  "search_placeholder": "Search repositories / assets…",
+  "related_to_me": "Only mine",
+  "already_bound": "Already bound",
+  "pager": {
+    "prev": "Previous",
+    "next": "Next",
+    "page_of": "Page {{page}} / {{totalPages}}"
+  },
+  "manual_form": {
+    "title": "Add asset manually",
+    "name_label": "Asset name",
+    "name_placeholder": "e.g. order-service",
+    "category_label": "Category",
+    "subtype_label": "Subtype (optional)",
+    "url_label": "URL (optional)",
+    "url_placeholder": "https://git.example.com/group/repo.git",
+    "stage_label": "Stage",
+    "role_label": "Object",
+    "tags_label": "Tags",
+    "tags_placeholder": "design, api-doc — comma separated"
+  },
+  "batch": {
+    "select_folder": "Import from folder",
+    "select_files": "Import files",
+    "folder_hint": "Pick a local folder — documents (md / doc / pdf / html / images …) are uploaded one by one and bound as assets automatically. Hidden files, files over 20 MB and unsupported types are skipped.",
+    "no_files": "No importable files were selected.",
+    "too_large": "too large (>20MB)",
+    "hidden": "hidden file",
+    "unsupported_type": "unsupported type",
+    "uploading": "Uploading {{done}} / {{total}}",
+    "uploading_current": "Current: {{name}}",
+    "cancel": "Cancel",
+    "cancelling": "Cancelling…",
+    "cancelled": "Cancelled — {{done}} / {{total}} already imported (kept)",
+    "imported": "Imported {{count}} assets",
+    "import_failed": "Import failed — no assets bound",
+    "done_summary": "Succeeded {{succeeded}} · failed {{failed}} · skipped {{skipped}}",
+    "done_detail_failures": "Failed: {{failures}}",
+    "done_detail_skipped": "Skipped: {{skipped_list}}"
+  },
+  "views": {
+    "list": "List",
+    "matrix": "Stage matrix",
+    "issues": "Work items × assets"
+  },
+  "stages": {
+    "all": "All stages",
+    "none": "Not tagged",
+    "S1": "S1 Project Planning",
+    "S2": "S2 Product Prototype",
+    "S3": "S3 Technical Design",
+    "S4": "S4 Retrospective",
+    "S5": "S5 Requirement Iteration",
+    "general": "Cross-stage"
+  },
+  "roles": {
+    "all": "All objects",
+    "none": "Unset",
+    "input": "Input",
+    "output": "Output"
+  },
+  "link_types": {
+    "depends_on": "depends on",
+    "produces": "produces",
+    "resolves": "resolves"
+  },
+  "edit": {
+    "title": "Edit asset metadata",
+    "desc": "Stage, object, tags and work-item links for “{{name}}”. The binding and the underlying resource stay untouched.",
+    "stage_label": "Lifecycle stage",
+    "role_label": "Input / output object",
+    "tags_label": "Tags",
+    "tags_placeholder": "design, api-doc — comma separated",
+    "tags_help": "Up to 20 tags; blanks and duplicates are dropped.",
+    "links_label": "Linked requirements / bugs",
+    "links_search": "Filter work items…",
+    "links_none_linked": "Nothing linked yet — tick the work items this asset feeds or delivers.",
+    "links_no_candidates": "No open work items available to link."
+  },
+  "matrix": {
+    "empty_col": "No assets in this stage",
+    "count": "{{count}} assets"
+  },
+  "issues_view": {
+    "no_rows": "No asset ↔ work-item links yet. Use “Edit” on a binding to link requirements or bugs.",
+    "asset_count": "{{count}} linked assets"
+  },
+  "toast": {
+    "bound": "Asset bound",
+    "bind_failed": "Failed to bind asset",
+    "already_bound": "This asset is already bound",
+    "unbound": "Asset unbound",
+    "unbind_failed": "Failed to unbind asset",
+    "archive_synced": "Imported {{imported}} archive document(s) as assets",
+    "archive_sync_noop": "No new archive documents to import",
+    "archive_sync_failed": "Failed to sync from archive",
+    "meta_saved": "Asset metadata saved",
+    "meta_save_failed": "Failed to save asset metadata",
+    "batch_updated": "Updated {{count}} asset(s)",
+    "batch_update_failed": "Batch update failed"
+  },
+  "stats": {
+    "total": "Total assets",
+    "knowledge": "Knowledge docs",
+    "staged": "Stage-tagged",
+    "untagged": "Untagged",
+    "unstaged": "Stage unassigned",
+    "share": "Category mix",
+    "coverage": "Stage coverage {{covered}}/5"
+  },
+  "view_switch": {
+    "list": "List view",
+    "grid": "Card view"
+  },
+  "preview": {
+    "title": "Asset preview",
+    "position": "{{current}} / {{total}}",
+    "prev": "Previous",
+    "next": "Next",
+    "open_external": "Open in new tab",
+    "download": "Download",
+    "unavailable": "No previewable content for this asset yet.",
+    "artifact_missing": "The linked archive document no longer exists.",
+    "too_large": "File is too large for inline preview — download it to view.",
+    "unsupported_type": "This file type can't be previewed inline — download it to view."
+  },
+  "inline_edit": {
+    "tags_placeholder": "Add tag…"
+  },
+  "batch_edit": {
+    "title": "Batch edit metadata",
+    "desc": "Apply changes to {{count}} selected asset(s).",
+    "apply": "Apply",
+    "unchanged": "— unchanged —",
+    "clear": "— clear —",
+    "stage_label": "Lifecycle stage",
+    "role_label": "Object",
+    "category_label": "Category",
+    "tags_label": "Tags",
+    "tags_mode_label": "Tags mode",
+    "tags_mode": {
+      "replace": "Replace",
+      "add": "Append",
+      "remove": "Remove"
+    }
+  },
+  "selection": {
+    "selected_count": "{{count}} selected",
+    "select_all": "Select all",
+    "clear": "Clear selection",
+    "batch_edit": "Batch edit"
+  },
+  "batch_result": {
+    "partial": "Succeeded in {{succeeded}} project(s), {{failed}} failed",
+    "failed_projects": "{{count}} project(s) failed",
+    "retry": "Retry failed projects"
+  }
+}

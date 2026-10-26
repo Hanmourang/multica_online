@@ -1,8 +1,15 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Bot, MessagesSquare, Plus, UsersRound } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
@@ -16,6 +23,8 @@ import type { Agent } from "@multica/core/types";
 import { isAgentRuntimeBound } from "@multica/core/agents";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import { DmCreateDialog } from "./dm-create-dialog";
+import { GroupCreateDialog } from "./group-create-dialog";
 
 /**
  * Agent picker: a searchable, grouped (My agents / Others) list of agents in a
@@ -217,5 +226,112 @@ export function NewChatButton({
       }
       trigger={<Plus />}
     />
+  );
+}
+
+/**
+ * Single "new" menu for Agent chats, DMs, and groups. Shown only while
+ * chat_conversations is on; flag-off keeps NewChatButton.
+ * Lives in this module so the desktop Vite server, which was started before
+ * the menu existed, can load it from a file it already resolves.
+ */
+export function ConversationNewMenu({
+  agents,
+  userId,
+  memberRole,
+  onStartAgent,
+  onCreated,
+}: {
+  agents: Agent[];
+  userId: string | undefined;
+  memberRole: string | undefined;
+  onStartAgent: (agent: Agent | null) => void;
+  onCreated: (sessionId: string) => void;
+}) {
+  const { t } = useT("conversations");
+  const { t: tChat } = useT("chat");
+  const [dmOpen, setDmOpen] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
+
+  const startAgent = (agent: Agent | null) => {
+    if (agent && !isAgentRuntimeBound(agent)) {
+      toast.error(tChat(($) => $.input.runtime_required_toast));
+      return;
+    }
+    onStartAgent(agent);
+  };
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1 rounded-lg px-2.5 text-caption font-semibold"
+              aria-label={t(($) => $.rail.new_menu)}
+            />
+          }
+        >
+          <Plus className="size-3.5" />
+          {t(($) => $.rail.new_label)}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-64">
+          {agents.length <= 1 ? (
+            <DropdownMenuItem onClick={() => startAgent(agents[0] ?? null)}>
+              <Bot className="h-4 w-4" />
+              <span className="flex flex-col">
+                <span>{t(($) => $.rail.new_agent)}</span>
+                <span className="text-micro text-muted-foreground">{t(($) => $.rail.new_agent_hint)}</span>
+              </span>
+            </DropdownMenuItem>
+          ) : (
+            agents.map((agent) => (
+              <DropdownMenuItem key={agent.id} onClick={() => startAgent(agent)}>
+                <Bot className="h-4 w-4" />
+                <span className="truncate">{agent.name}</span>
+              </DropdownMenuItem>
+            ))
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => setDmOpen(true)}>
+            <MessagesSquare className="h-4 w-4" />
+            <span className="flex flex-col">
+              <span>{t(($) => $.rail.new_dm)}</span>
+              <span className="text-micro text-muted-foreground">{t(($) => $.rail.new_dm_hint)}</span>
+            </span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setGroupOpen(true)}>
+            <UsersRound className="h-4 w-4" />
+            <span className="flex flex-col">
+              <span>{t(($) => $.rail.new_group)}</span>
+              <span className="text-micro text-muted-foreground">{t(($) => $.rail.new_group_hint)}</span>
+            </span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DmCreateDialog
+        userId={userId}
+        hideTrigger
+        open={dmOpen}
+        onOpenChange={setDmOpen}
+        onCreated={(sessionId) => {
+          setDmOpen(false);
+          onCreated(sessionId);
+        }}
+      />
+      <GroupCreateDialog
+        userId={userId}
+        memberRole={memberRole}
+        hideTrigger
+        open={groupOpen}
+        onOpenChange={setGroupOpen}
+        onCreated={(sessionId) => {
+          setGroupOpen(false);
+          onCreated(sessionId);
+        }}
+      />
+    </>
   );
 }

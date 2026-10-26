@@ -16,6 +16,9 @@ import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { CalendarPage } from "@multica/views/calendar";
 import { ProjectsPage } from "@multica/views/projects/components";
+import { WorkspaceAssetsPage } from "@multica/views/assets";
+import { WorkflowsPage } from "@multica/views/workflows";
+import { WorkflowTemplateEditorPage } from "./pages/workflow-template-editor-page";
 import { DashboardPage } from "@multica/views/dashboard";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
@@ -152,6 +155,21 @@ export const appRoutes: RouteObject[] = [
             path: "projects/:id",
             element: <ProjectDetailPage />,
             handle: { title: "Project" },
+          },
+          {
+            path: "assets",
+            element: <WorkspaceAssetsPage />,
+            handle: { title: "Assets" },
+          },
+          {
+            path: "workflows",
+            element: <WorkflowsPage />,
+            handle: { title: "Workflows" },
+          },
+          {
+            path: "workflows/templates/:templateId",
+            element: <WorkflowTemplateEditorPage />,
+            handle: { title: "Workflow Template" },
           },
           {
             path: "autopilots",

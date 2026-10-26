@@ -106,7 +106,7 @@ export function syncItemFromScanFile(file: ArchiveScanFile): ArtifactSyncItem | 
     version: inferVersion(relPath, frontmatter),
     size_bytes: new TextEncoder().encode(content).length,
   };
-  if (parsed.stage === 1 || parsed.stage === 2 || parsed.stage === 3 || parsed.stage === 4) {
+  if (parsed.stage === 1 || parsed.stage === 2 || parsed.stage === 3 || parsed.stage === 4 || parsed.stage === 5) {
     item.stage = parsed.stage;
   }
   if (parsed.reqKey) item.requirement_key = parsed.reqKey;

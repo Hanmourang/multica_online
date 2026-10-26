@@ -1,0 +1,227 @@
+{
+  "title": "资产管理",
+  "subtitle": "将研发资产绑定到本项目。绑定只是指向项目资源的指针，解绑永不删除底层资源。",
+  "workspace_title": "资产管理",
+  "workspace_subtitle": "聚合当前工作区所有项目的研发资产绑定：按分类 / 名称检索，「绑定于」可直达归属项目或工作项，也可在此统一解绑。",
+  "go_to_projects": "前往项目",
+  "project_filter": {
+    "all": "全部项目"
+  },
+  "tabs": {
+    "bound": "已绑定资产",
+    "candidates": "搜索与推荐",
+    "batch": "目录导入"
+  },
+  "categories": {
+    "all": "全部分类",
+    "code_repository": "代码仓库",
+    "application": "应用",
+    "package": "制品包",
+    "knowledge_repo": "知识库",
+    "knowledge_group": "知识组",
+    "other": "其他"
+  },
+  "columns": {
+    "name": "名称",
+    "category": "分类",
+    "subtype": "子类型",
+    "bound_to": "绑定于",
+    "source": "来源",
+    "created_at": "绑定时间",
+    "actions": "操作",
+    "stage": "阶段",
+    "role": "对象",
+    "tags": "标签",
+    "links": "关联"
+  },
+  "bound_kind": {
+    "work_item": "工作项",
+    "project": "项目"
+  },
+  "actions": {
+    "bind": "绑定",
+    "sync_from_archive": "从档案同步",
+    "bind_now": "立即绑定",
+    "unbind": "解绑",
+    "add_manual": "手动添加",
+    "search": "搜索",
+    "cancel": "取消",
+    "save": "保存",
+    "edit": "编辑",
+    "preview": "预览"
+  },
+  "confirm_unbind": {
+    "title": "解绑该资产？",
+    "desc": "仅移除绑定关系，底层项目资源保留，随时可重新绑定。",
+    "confirm": "解绑",
+    "cancel": "保留"
+  },
+  "recommended_label": "推荐",
+  "reason": {
+    "recent": "你近期创建或参与过",
+    "joint": "本项目需求中高频使用",
+    "hot": "代码图谱扇入度高"
+  },
+  "empty": {
+    "no_assets": "尚未绑定任何资产。",
+    "no_candidates": "没有匹配的候选。换个关键词试试，或手动添加。",
+    "no_source": "该分类暂无可对接的来源，请手动添加。"
+  },
+  "search_placeholder": "搜索仓库 / 资产…",
+  "related_to_me": "只看与我相关",
+  "already_bound": "已绑定",
+  "pager": {
+    "prev": "上一页",
+    "next": "下一页",
+    "page_of": "第 {{page}} / {{totalPages}} 页"
+  },
+  "manual_form": {
+    "title": "手动添加资产",
+    "name_label": "资产名称",
+    "name_placeholder": "如 order-service",
+    "category_label": "分类",
+    "subtype_label": "子类型（可选）",
+    "url_label": "URL（可选）",
+    "url_placeholder": "https://git.example.com/group/repo.git",
+    "stage_label": "阶段",
+    "role_label": "对象",
+    "tags_label": "标签",
+    "tags_placeholder": "design、api-doc，逗号分隔"
+  },
+  "batch": {
+    "select_folder": "从文件夹导入",
+    "select_files": "选择文件导入",
+    "folder_hint": "选择本地目录，文档（md / doc / pdf / html / 图片等）将逐个上传并自动绑定为资产；隐藏文件、超过 20MB 与不支持的类型会自动跳过。",
+    "no_files": "没有选到可导入的文件。",
+    "too_large": "超过 20MB",
+    "hidden": "隐藏文件",
+    "unsupported_type": "不支持的类型",
+    "uploading": "上传中 {{done}} / {{total}}",
+    "uploading_current": "当前：{{name}}",
+    "cancel": "取消",
+    "cancelling": "取消中…",
+    "cancelled": "已取消——已完成 {{done}} / {{total}}（已导入部分保留）",
+    "imported": "成功导入 {{count}} 个资产",
+    "import_failed": "导入失败，未绑定任何资产",
+    "done_summary": "成功 {{succeeded}}、失败 {{failed}}、跳过 {{skipped}}",
+    "done_detail_failures": "失败：{{failures}}",
+    "done_detail_skipped": "跳过：{{skipped_list}}"
+  },
+  "views": {
+    "list": "列表",
+    "matrix": "阶段矩阵",
+    "issues": "工作项 × 资产"
+  },
+  "stages": {
+    "all": "全部阶段",
+    "none": "未标阶段",
+    "S1": "S1 项目规划",
+    "S2": "S2 产品原型",
+    "S3": "S3 技术方案",
+    "S4": "S4 问题复盘",
+    "S5": "S5 需求迭代",
+    "general": "跨阶段通用"
+  },
+  "roles": {
+    "all": "全部对象",
+    "none": "未设置",
+    "input": "输入",
+    "output": "产物"
+  },
+  "link_types": {
+    "depends_on": "依赖它",
+    "produces": "产出它",
+    "resolves": "修复/验证"
+  },
+  "edit": {
+    "title": "编辑资产元信息",
+    "desc": "为「{{name}}」设置阶段、对象、标签与需求/Bug 关联；绑定关系与底层资源不受影响。",
+    "stage_label": "生命周期阶段",
+    "role_label": "输入 / 产物对象",
+    "tags_label": "标签",
+    "tags_placeholder": "design、api-doc，逗号分隔",
+    "tags_help": "最多 20 个标签，空值与重复自动去除。",
+    "links_label": "关联需求 / Bug",
+    "links_search": "筛选工作项…",
+    "links_none_linked": "尚未关联工作项——勾选该资产消费或交付的工作项。",
+    "links_no_candidates": "没有可关联的未关闭工作项。"
+  },
+  "matrix": {
+    "empty_col": "该阶段暂无资产",
+    "count": "{{count}} 个资产"
+  },
+  "issues_view": {
+    "no_rows": "还没有资产 ↔ 工作项关联。点击行内「编辑」为资产关联需求或 Bug。",
+    "asset_count": "关联 {{count}} 个资产"
+  },
+  "toast": {
+    "bound": "资产已绑定",
+    "bind_failed": "绑定资产失败",
+    "already_bound": "该资产已绑定",
+    "unbound": "资产已解绑",
+    "unbind_failed": "解绑资产失败",
+    "archive_synced": "已从档案导入 {{imported}} 个文档资产",
+    "archive_sync_noop": "没有可导入的新档案文档",
+    "archive_sync_failed": "从档案同步失败",
+    "meta_saved": "资产元信息已保存",
+    "meta_save_failed": "保存资产元信息失败",
+    "batch_updated": "已更新 {{count}} 个资产",
+    "batch_update_failed": "批量更新失败"
+  },
+  "stats": {
+    "total": "资产总数",
+    "knowledge": "知识文档",
+    "staged": "已标阶段",
+    "untagged": "未打标签",
+    "unstaged": "未分阶资产",
+    "share": "分类分布",
+    "coverage": "阶段覆盖 {{covered}}/5"
+  },
+  "view_switch": {
+    "list": "列表视图",
+    "grid": "卡片视图"
+  },
+  "preview": {
+    "title": "资产预览",
+    "position": "{{current}} / {{total}}",
+    "prev": "上一篇",
+    "next": "下一篇",
+    "open_external": "新窗口打开",
+    "download": "下载",
+    "unavailable": "该资产暂无可预览的内容。",
+    "artifact_missing": "关联的档案文档已不存在。",
+    "too_large": "文件超出内联预览上限，请下载后查看。",
+    "unsupported_type": "该文件类型暂不支持内联预览，请下载后查看。"
+  },
+  "inline_edit": {
+    "tags_placeholder": "添加标签…"
+  },
+  "batch_edit": {
+    "title": "批量修改元信息",
+    "desc": "对选中的 {{count}} 个资产应用变更。",
+    "apply": "应用",
+    "unchanged": "— 不修改 —",
+    "clear": "— 清除 —",
+    "stage_label": "生命周期阶段",
+    "role_label": "对象",
+    "category_label": "分类",
+    "tags_label": "标签",
+    "tags_mode_label": "标签模式",
+    "tags_mode": {
+      "replace": "覆盖",
+      "add": "追加",
+      "remove": "删除"
+    }
+  },
+  "selection": {
+    "selected_count": "已选 {{count}} 项",
+    "select_all": "全选",
+    "clear": "取消选择",
+    "batch_edit": "批量修改"
+  },
+  "batch_result": {
+    "partial": "{{succeeded}} 个项目成功，{{failed}} 个失败",
+    "failed_projects": "{{count}} 个项目失败",
+    "retry": "重试失败项目"
+  }
+}

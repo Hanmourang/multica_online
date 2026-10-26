@@ -27,16 +27,69 @@
     "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment.",
     "add_tooltip": "Add",
     "upload_file": "Image or files",
+    "upload_file_hint": "Choose an image or file on this device",
     "project_context": "Project context",
+    "project_context_hint": "Ask in this project's context",
     "change_project_context": "Change project context",
     "remove_project_context": "Remove project context",
     "no_projects": "No projects yet",
+    "projects_loading": "Loading projects…",
+    "projects_error": "Couldn't load projects. Try again in a moment.",
+    "project_search": "Search projects",
+    "project_no_match": "No matching projects",
+    "project_menu_meta": "{{open}} open · {{resources}} resources",
+    "project_menu_hint": "After you pick a project, just ask. The agent reads the description, resources, and open work before running commands.",
+    "project_attached_hint": "Ask directly. For example: which requirements in this project are still open?",
+    "project_attached_hint_group": "Mention the agent, then ask. For example: which requirements in this project are still open?",
     "project_context_unsupported": "Project description won't apply — this agent's daemon needs an upgrade",
     "page_prototype_mounted": "Prototype attached · {{name}}",
-    "placeholder_named_many": "Message {{name}} and {{count}} agents…",
+    "placeholder_named_multiple": "Message {{name}} and {{count}} agents…",
     "fanout_ok": "Sent to {{count}} agents",
     "fanout_partial": "Sent to {{sent}} agents, {{failed}} failed",
     "fanout_failed": "Could not send to the other agents"
+  },
+  "resources": {
+    "add": "Task, requirement or document",
+    "add_hint": "Attach a task, requirement, or project file",
+    "picker_title": "Share into this conversation",
+    "picker_description": "Reference workspace resources without copying files. Recipients only see what they can access.",
+    "search_placeholder": "Search identifier, title, project, or owner…",
+    "picker_limit": "Up to 3 items",
+    "picker_cancel": "Cancel",
+    "picker_add": "Add to composer",
+    "picker_add_count": "Add {{count}} to composer",
+    "task": "Tasks",
+    "requirement": "Requirements",
+    "document": "Documents",
+    "loading": "Loading resources…",
+    "empty": "No matches. Try an identifier, title, or project.",
+    "draft_aria": "Resources attached to this message",
+    "remove": "Remove {{name}}",
+    "unavailable": "This resource is unavailable or you no longer have access.",
+    "denied_task": "You don't have access to this task.",
+    "denied_requirement": "You don't have access to this requirement.",
+    "denied_document": "You don't have access to this document.",
+    "missing_task": "This task is no longer available.",
+    "missing_requirement": "This requirement is no longer available.",
+    "missing_document": "This document is no longer available.",
+    "retry": "Retry",
+    "goal": "Goal:",
+    "stage": "Stage",
+    "subtask_progress": "Tasks",
+    "assignee": "Assignee:",
+    "unassigned": "Unassigned",
+    "creator": "Creator",
+    "children": "Subtasks",
+    "more_children": "{{count}} more",
+    "project": "Project:",
+    "priority": "Priority",
+    "start": "Start",
+    "due": "Due",
+    "open_document": "Preview document",
+    "open_details": "Open details",
+    "document_preview": "Document preview",
+    "close_preview": "Close preview",
+    "loading_card": "Loading shared resource…"
   },
   "queue": {
     "title_one": "{{count}} queued message",
@@ -90,7 +143,16 @@
     "quick_actions_heading": "Follow-up questions",
     "quick_actions_aria": "Suggested follow-ups",
     "quick_actions_regenerate": "Regenerate suggestions",
-    "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again."
+    "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again.",
+    "feedback": {
+      "react": "Emoji",
+      "reply": "Reply",
+      "reply_placeholder": "Reply to this message",
+      "reply_send": "Send",
+      "reply_failed": "Couldn't send the reply",
+      "react_failed": "Couldn't add the reaction",
+      "you": "You"
+    }
   },
   "session_history": {
     "untitled": "Untitled",
@@ -229,6 +291,17 @@
       "making_edits": "Making edits",
       "searching_web": "Searching the web",
       "fallback": "Working"
+    },
+    "group": {
+      "agent_fallback": "Agent",
+      "stages": {
+        "queued": "Queued",
+        "running": "Working",
+        "waiting": "Waiting",
+        "completed": "Completed",
+        "failed": "Failed",
+        "blocked": "Blocked"
+      }
     }
   },
   "list": {
@@ -255,6 +328,7 @@
     "rename": "Rename chat",
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",
-    "delete": "Delete chat"
+    "delete": "Delete chat",
+    "group_members": "{{count}} members"
   }
 }

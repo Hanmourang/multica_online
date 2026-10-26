@@ -34,11 +34,12 @@ import {
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
-import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
+import { mergeChatResourceSnapshots, rememberPendingChatResources, upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import {
   enqueuePendingChatTask,
   hideQueuedChatMessages,
 } from "@multica/core/chat/pending";
+import { visibleGroupPendingTasks } from "./group-pending-pills";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { useChatTaskActions } from "./use-chat-task-actions";
 import { useChatProjectContextSupport } from "./use-chat-project-context-support";
@@ -47,9 +48,14 @@ import type {
   Agent,
   Attachment,
   ChatMessage,
+  ChatMessageResource,
   ChatPendingTask,
+  ChatResourceRefInput,
+  ConversationKind,
+  GroupPendingAgentTask,
 } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { extractMentionsFromContent } from "../lib/mention-extract";
 import { preparePageSurfaceSend, usePageSurfaceContext } from "../lib/page-surface-context";
 import { fanOutChatMessage, useChatFanout } from "../lib/fanout-agents";
 import { useAppForeground } from "../../common/use-app-foreground";
@@ -110,6 +116,8 @@ export function isStillOnComposeTarget(
  *    (`agentId`): clearing the active session otherwise drops selection back
  *    to the stored `selectedAgentId`, which can be a stale preference for a
  *    different agent, sending the lazily-created session to the wrong agent.
+ *  - `bindCurrent`: a dm/group has no owning agent to fork. Write the project
+ *    onto the open session so the next agent turn reads that project.
  *  - `setDraftProject`: no open session, so this only adjusts the new-chat
  *    draft's project.
  *
@@ -119,18 +127,29 @@ export function isStillOnComposeTarget(
 export type ProjectContextChange =
   | { kind: "awaitSession" }
   | { kind: "detachCurrent"; sessionId: string }
+  | { kind: "bindCurrent"; sessionId: string; projectId: string }
   | { kind: "startFreshChat"; agentId: string; projectId: string }
   | { kind: "setDraftProject"; projectId: string | null };
 
 export function planProjectContextChange(input: {
   targetProjectId: string | null;
   activeSessionId: string | null;
-  currentSession: { id: string; agent_id: string } | null;
+  currentSession: { id: string; agent_id: string | null } | null;
 }): ProjectContextChange {
   if (input.activeSessionId) {
     if (!input.currentSession) return { kind: "awaitSession" };
     if (input.targetProjectId === null) {
       return { kind: "detachCurrent", sessionId: input.currentSession.id };
+    }
+    // A dm/group conversation has no owning agent to fork a fresh chat onto.
+    // Bind the project on this session; a draft-only write would leave
+    // activeProjectId on the session row and the picker would look empty.
+    if (!input.currentSession.agent_id) {
+      return {
+        kind: "bindCurrent",
+        sessionId: input.currentSession.id,
+        projectId: input.targetProjectId,
+      };
     }
     return {
       kind: "startFreshChat",
@@ -224,9 +243,23 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
     chatSessionsOptions(wsId),
   );
-  const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
-    projectListOptions(wsId),
-  );
+
+  // Conversation-kind gate (plan 20261025). Computed from the open session's
+  // kind (defaulting to the legacy "agent"), NOT from agent presence: a dm/
+  // group session has no owning agent, so every agent-driven affordance —
+  // pending-task poll, runtime/queue/quick-action chrome, agent upload gating —
+  // must be bypassed. The agent path is left byte-for-byte unchanged.
+  const activeSessionKind: ConversationKind =
+    (activeSessionId ? sessions.find((s) => s.id === activeSessionId)?.kind : undefined) ??
+    "agent";
+  const isConversationSession =
+    activeSessionKind === "dm" || activeSessionKind === "group";
+  const {
+    data: projects = [],
+    isSuccess: projectsLoaded,
+    isPending: projectsPending,
+    isError: projectsError,
+  } = useQuery(projectListOptions(wsId));
   const {
     data: rawMessagePages,
     isLoading: messagesLoading,
@@ -238,9 +271,15 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const messagePages = activeSessionId ? rawMessagePages?.pages ?? [] : [];
   const allMessages = [...messagePages].reverse().flatMap((page) => page.messages);
 
-  const { data: pendingTask, isLoading: pendingTaskLoading } = useQuery(
-    pendingChatTaskOptions(activeSessionId ?? ""),
-  );
+  const { data: pendingTask, isLoading: pendingTaskLoading } = useQuery({
+    ...pendingChatTaskOptions(activeSessionId ?? ""),
+    // dm never enqueues an agent task — polling /pending-task would seed a
+    // phantom pill and gate the composer for a session that has no runtime.
+    // Group DOES poll: the §6 response carries the per-agent in-flight set
+    // (`agent_tasks`) with no root task_id, so it renders the parallel stage
+    // pills without touching the single-task pill/queue logic.
+    enabled: !!activeSessionId && (!isConversationSession || activeSessionKind === "group"),
+  });
   const showSkeleton =
     !!activeSessionId && (messagesLoading || pendingTaskLoading);
   const messages = hideQueuedChatMessages(allMessages, pendingTask);
@@ -356,11 +395,15 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
   // Resolve selected agent: open session's agent → stored preference → first
   // available. New chats have no session, so they fall through to the picker.
-  const activeAgent =
-    sessionAgent ??
-    availableAgents.find((a) => a.id === selectedAgentId) ??
-    availableAgents[0] ??
-    null;
+  // DM/Group have no owning agent. Falling through to the workspace picker
+  // would stamp a stranger's name, runtime banner, and send gate onto a
+  // human conversation.
+  const activeAgent = isConversationSession
+    ? null
+    : sessionAgent ??
+      availableAgents.find((a) => a.id === selectedAgentId) ??
+      availableAgents[0] ??
+      null;
   const isAgentRuntimeBound = !!activeAgent && hasAgentRuntime(activeAgent);
 
   // A session outlives the permission that created it. The agent can be flipped
@@ -487,7 +530,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
   // Upload transport moved into the coordinated-upload engine inside ChatInput
   // (MUL-5181 L2); surfaces only forward whether the affordance exists.
-  const uploadEnabled = !!activeAgent;
+  // dm/group carry attachments too — gate on the conversation, not the agent.
+  const uploadEnabled = !!activeAgent || isConversationSession;
 
   const handleSend = useCallback(
     async (
@@ -495,7 +539,83 @@ export function useChatController(opts?: { isActive?: boolean }) {
       attachmentIds?: string[],
       commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
       draftAttachments: Attachment[] = [],
+      resourceRefs?: ChatResourceRefInput[],
+      resourceSnapshots?: ChatMessageResource[],
     ): Promise<boolean> => {
+      // dm/group send path (plan 20261025 §6.2). A conversation session has no
+      // owning agent, so the entire agent guard chain below (runtime/archived/
+      // access/queue) is inapplicable, and the send produces no task. The server
+      // persists the member-authored row and fans it to the peers over directed
+      // realtime; no pending-task seeding. Reached only when the open session is
+      // a dm/group — the agent path below is untouched.
+      if (isConversationSession) {
+        const dmSessionId = activeSessionId;
+        if (!dmSessionId) {
+          apiLogger.warn("sendChatMessage skipped: conversation session not open");
+          return false;
+        }
+        let dmPrepared;
+        try {
+          dmPrepared = await preparePageSurfaceSend(api, content, pageSurface, dmSessionId);
+        } catch (err) {
+          apiLogger.error("sendChatMessage.pageSurface.error", { sessionId: dmSessionId, err });
+          dmPrepared = { content, attachmentIds: [], attachments: [] };
+        }
+        const dmContent = dmPrepared.content;
+        const dmAttachmentIds = [...(attachmentIds ?? []), ...dmPrepared.attachmentIds];
+        const dmAttachments = [...draftAttachments, ...dmPrepared.attachments];
+        // Both DM and Group submit the mention:// links the editor rendered.
+        // The server re-checks that each target is a current participant.
+        const dmMentions = extractMentionsFromContent(dmContent);
+        rememberPendingChatResources(dmSessionId, dmContent, resourceSnapshots ?? []);
+        const dmOptions =
+          (dmMentions && dmMentions.length > 0) || (resourceRefs?.length ?? 0) > 0
+            ? {
+                ...(dmMentions && dmMentions.length > 0 ? { mentions: dmMentions } : {}),
+                ...(resourceRefs && resourceRefs.length > 0 ? { resource_refs: resourceRefs } : {}),
+              }
+            : undefined;
+        let dmResult;
+        try {
+          dmResult = await api.sendChatMessage(
+            dmSessionId,
+            dmContent,
+            dmAttachmentIds.length > 0 ? dmAttachmentIds : undefined,
+            dmOptions,
+          );
+        } catch (err) {
+          apiLogger.error("sendChatMessage.conversation.error", { sessionId: dmSessionId, err });
+          toast.error(t(($) => $.input.send_failed_toast));
+          return false;
+        }
+        const dmSent: ChatMessage = {
+          id: dmResult.message_id,
+          chat_session_id: dmSessionId,
+          role: "user",
+          content: dmContent,
+          task_id: null,
+          created_at: dmResult.created_at,
+          attachments: dmAttachments,
+          author_type: "member",
+          author_id: user?.id ?? null,
+          resources: mergeChatResourceSnapshots(dmResult.resources, resourceSnapshots),
+          has_resources: (mergeChatResourceSnapshots(dmResult.resources, resourceSnapshots)?.length ?? 0) > 0 || undefined,
+        };
+        upsertChatMessageToCaches(qc, dmSessionId, dmSent, { seedIfMissing: true });
+        const dmLive = useChatStore.getState();
+        const dmStillOnSource = isStillOnComposeTarget(dmLive.activeSessionId, dmSessionId);
+        commitInput?.({ extraDraftKeys: [dmSessionId], clearEditor: dmStillOnSource });
+        qc.invalidateQueries({ queryKey: chatKeys.messages(dmSessionId) });
+        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(dmSessionId) });
+        qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+        // Fan-out accepted: refresh the per-agent in-flight set immediately so
+        // the stage pills appear without waiting for the next poll/task:queued
+        // event (server dispatches one task per mentioned agent, §4).
+        if ((dmResult.dispatches?.length ?? 0) > 0) {
+          qc.invalidateQueries({ queryKey: chatKeys.pendingTask(dmSessionId) });
+        }
+        return true;
+      }
       if (!activeAgent) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
         return false;
@@ -580,6 +700,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       const finalContent = prepared.content;
       const mergedAttachmentIds = [...(attachmentIds ?? []), ...prepared.attachmentIds];
       const mergedAttachments = [...draftAttachments, ...prepared.attachments];
+      rememberPendingChatResources(sessionId, finalContent, resourceSnapshots ?? []);
 
       let result;
       try {
@@ -587,6 +708,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
           sessionId,
           finalContent,
           mergedAttachmentIds.length > 0 ? mergedAttachmentIds : undefined,
+          resourceRefs && resourceRefs.length > 0
+            ? { resource_refs: resourceRefs }
+            : undefined,
         );
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
@@ -622,9 +746,11 @@ export function useChatController(opts?: { isActive?: boolean }) {
         chat_session_id: sessionId,
         role: "user",
         content: finalContent,
-        task_id: result.task_id,
+        task_id: result.task_id ?? null,
         created_at: result.created_at,
         attachments: mergedAttachments,
+        resources: mergeChatResourceSnapshots(result.resources, resourceSnapshots),
+        has_resources: (mergeChatResourceSnapshots(result.resources, resourceSnapshots)?.length ?? 0) > 0 || undefined,
       };
       // Single door into the message caches (MUL-5711): idempotent by id, so
       // this row and the chat:message echo of the same send converge in either
@@ -632,7 +758,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       // is never downgraded by the echo, which has no attachments field.
       upsertChatMessageToCaches(qc, sessionId, sent, { seedIfMissing: true });
       seedAcceptedPendingTask(qc, sessionId, {
-        task_id: result.task_id,
+        task_id: result.task_id ?? "",
         created_at: result.created_at,
         message_id: result.message_id,
         content: finalContent,
@@ -652,7 +778,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
       if (stopRequestedBeforeTaskRef.current) {
         stopRequestedBeforeTaskRef.current = false;
-        await cancelChatTask(result.task_id, sessionId, {
+        await cancelChatTask(result.task_id ?? "", sessionId, {
           restoreDraftToInput: true,
           source: "deferred-send",
         });
@@ -713,6 +839,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
       createSession,
       activeProjectId,
       t,
+      isConversationSession,
+      activeSessionKind,
+      user?.id,
+      wsId,
     ],
   );
 
@@ -779,10 +909,11 @@ export function useChatController(opts?: { isActive?: boolean }) {
   );
 
   const handleSelectSession = useCallback(
-    (session: { id: string; agent_id: string; project_id?: string | null }) => {
+    (session: { id: string; agent_id: string | null; project_id?: string | null }) => {
       // Sessions are bound 1:1 to an agent — picking a session from a
-      // different agent implicitly switches the agent too.
-      if (activeAgent && session.agent_id !== activeAgent.id) {
+      // different agent implicitly switches the agent too. dm/group sessions
+      // carry no owning agent (agent_id null) and never drive an agent switch.
+      if (session.agent_id && activeAgent && session.agent_id !== activeAgent.id) {
         uiLogger.info("selectSession (cross-agent)", {
           from: activeAgent.id,
           toAgent: session.agent_id,
@@ -813,6 +944,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
           return;
         case "detachCurrent":
           setSessionProject.mutate({ sessionId: plan.sessionId, projectId: null });
+          break;
+        case "bindCurrent":
+          setSessionProject.mutate({ sessionId: plan.sessionId, projectId: plan.projectId });
           break;
         case "startFreshChat":
           setSelectedAgentId(plan.agentId);
@@ -845,7 +979,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // right agent even when the next chat belongs to a different agent. A no-op
   // when the archived session isn't the open one — that selection stays put.
   const advanceSelectionAfterArchive = useCallback(
-    (session: { id: string; agent_id: string }) => {
+    (session: { id: string; agent_id: string | null }) => {
       if (activeSessionId !== session.id) return;
       const history = sortChatSessions(
         sessions.filter((s) => s.status !== "archived"),
@@ -865,6 +999,13 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
   const hasMessages = messages.length > 0 || !!pendingTaskId;
 
+  // Group parallel-dispatch set for the footer stage pills (§6). Non-group
+  // responses never carry agent_tasks.
+  const groupPendingTasks: GroupPendingAgentTask[] | undefined =
+    activeSessionKind === "group"
+      ? visibleGroupPendingTasks(pendingTask?.agent_tasks, messages)
+      : undefined;
+
   return {
     // identity / lists
     wsId,
@@ -874,6 +1015,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
     agentsSettled,
     sessions,
     projects,
+    projectsLoading: projectsPending && !projectsLoaded,
+    projectsError,
     activeSessionId,
     selectedAgentId,
     activeProjectId,
@@ -882,6 +1025,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
       setSessionProject.isPending || (!!activeSessionId && !currentSession),
     currentSession,
     isSessionArchived,
+    activeSessionKind,
+    isConversationSession,
     isAgentArchived,
     isAgentAccessRevoked,
     isAgentRuntimeBound,
@@ -893,6 +1038,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
     messages,
     pendingTask,
     pendingTaskId,
+    groupPendingTasks,
+    memberRole,
     showSkeleton,
     hasMessages,
     firstItemIndex,

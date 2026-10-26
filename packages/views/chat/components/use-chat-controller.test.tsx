@@ -77,6 +77,9 @@ const h = vi.hoisted(() => {
     agents: [] as Agent[],
     projects: [] as Project[],
     pendingTask: null as ChatPendingTask | null,
+    // Captures the `enabled` the controller passes for the pending-task query so
+    // DM tests can prove the poll is bypassed for a conversation session.
+    pendingTaskQueryEnabled: undefined as boolean | undefined,
     draftRestores: null as
       | { restores: { id: string; chat_session_id: string; content: string }[] }
       | null,
@@ -174,7 +177,10 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
       if (key.includes("runtimes")) return { data: [] };
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };
       if (key.includes("projects")) return { data: h.projects, isSuccess: true };
-      if (key.includes("pending-task")) return { data: h.pendingTask };
+      if (key.includes("pending-task")) {
+        h.pendingTaskQueryEnabled = (options as { enabled?: boolean }).enabled;
+        return { data: h.pendingTask };
+      }
       if (key.includes("draft-restores")) return { data: h.draftRestores };
       return { data: null };
     },
@@ -1228,5 +1234,152 @@ describe("useChatController revoked invoke permission", () => {
     expect(sent).toBe(false);
     expect(vi.mocked(api.sendChatMessage)).not.toHaveBeenCalled();
     expect(h.createSessionMutate).not.toHaveBeenCalled();
+  });
+});
+
+describe("useChatController dm conversation (plan 20261025)", () => {
+  const dmSession: ChatSession = {
+    ...makeSession({ id: "dm-1", agent_id: "" }),
+    kind: "dm",
+  };
+
+  beforeEach(() => {
+    vi.mocked(api.sendChatMessage).mockReset();
+    h.createSessionMutate.mockClear();
+    h.queryClient.setQueryData.mockClear();
+    h.pendingTaskQueryEnabled = undefined;
+  });
+
+  it("bypasses the pending-task poll for a dm session but not for an agent session", () => {
+    const dmResult = setup("dm-1", [dmSession], []);
+    expect(dmResult.current.activeSessionKind).toBe("dm");
+    expect(dmResult.current.isConversationSession).toBe(true);
+    expect(h.pendingTaskQueryEnabled).toBe(false);
+
+    const agentSession = makeSession({ id: "sA", agent_id: "agent-a" });
+    const agentResult = setup("sA", [agentSession], [agentA]);
+    expect(agentResult.current.isConversationSession).toBe(false);
+    expect(h.pendingTaskQueryEnabled).toBe(true);
+  });
+
+  it("sends a dm message without an agent: no lazy create, no pending task", async () => {
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "dm-msg-1",
+      created_at: new Date(0).toISOString(),
+    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
+
+    const result = setup("dm-1", [dmSession], []);
+    let sent: boolean | undefined;
+    await act(async () => {
+      sent = await result.current.handleSend("hey there");
+    });
+
+    expect(sent).toBe(true);
+    // Direct send against the open dm session — no agent id, no attachments,
+    // and no @-mentions (a dm carries none, so the group options arg is undefined).
+    expect(vi.mocked(api.sendChatMessage)).toHaveBeenCalledWith("dm-1", "hey there", undefined, undefined);
+    expect(h.createSessionMutate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the workspace agent off a dm even when agents are available", () => {
+    const result = setup("dm-1", [dmSession], [agentA]);
+    expect(result.current.activeAgent).toBeNull();
+  });
+
+  it("submits a structured member mention from dm content", async () => {
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "dm-msg-2",
+      created_at: new Date(0).toISOString(),
+    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
+    const peer = "11111111-1111-4111-8111-111111111111";
+    const result = setup("dm-1", [dmSession], []);
+    await act(async () => {
+      await result.current.handleSend(`[@Ada](mention://member/${peer}) hi`);
+    });
+    expect(vi.mocked(api.sendChatMessage)).toHaveBeenCalledWith(
+      "dm-1",
+      `[@Ada](mention://member/${peer}) hi`,
+      undefined,
+      { mentions: [{ type: "member", id: peer }] },
+    );
+  });
+
+  it("sends ordered resource refs with mentions and caches the returned snapshots", async () => {
+    const resources = [
+      { type: "issue" as const, id: "issue-1", kind: "task" as const, access: "granted" as const },
+    ];
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "dm-resource-msg",
+      created_at: new Date(0).toISOString(),
+      resources,
+    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
+    const peer = "11111111-1111-4111-8111-111111111111";
+    const result = setup("dm-1", [dmSession], []);
+
+    await act(async () => {
+      await result.current.handleSend(
+        `[@Ada](mention://member/${peer})`,
+        undefined,
+        undefined,
+        [],
+        [{ type: "issue", id: "issue-1", kind: "task" }],
+      );
+    });
+
+    expect(vi.mocked(api.sendChatMessage)).toHaveBeenCalledWith(
+      "dm-1",
+      `[@Ada](mention://member/${peer})`,
+      undefined,
+      {
+        mentions: [{ type: "member", id: peer }],
+        resource_refs: [{ type: "issue", id: "issue-1", kind: "task" }],
+      },
+    );
+    const seed = h.queryClient.setQueryData.mock.calls[0]?.[1];
+    expect(seed).toBeTypeOf("function");
+    expect((seed as (old: undefined) => unknown)(undefined)).toEqual([
+      expect.objectContaining({ resources, has_resources: true }),
+    ]);
+  });
+
+  it("sends resource refs on an agent turn and caches the returned snapshots", async () => {
+    const resources = [
+      {
+        type: "document" as const,
+        id: "artifact-1",
+        source: "artifact" as const,
+        project_id: "project-1",
+        access: "granted" as const,
+      },
+    ];
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "agent-resource-msg",
+      task_id: "task-resource",
+      created_at: new Date(0).toISOString(),
+      resources,
+    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
+    const result = setup("sA", [sA], [agentA]);
+
+    await act(async () => {
+      await result.current.handleSend("", undefined, undefined, [], [
+        { type: "document", id: "artifact-1", source: "artifact", project_id: "project-1" },
+      ]);
+    });
+
+    expect(vi.mocked(api.sendChatMessage)).toHaveBeenCalledWith(
+      "sA",
+      "",
+      undefined,
+      {
+        resource_refs: [
+          { type: "document", id: "artifact-1", source: "artifact", project_id: "project-1" },
+        ],
+      },
+    );
+    const seed = h.queryClient.setQueryData.mock.calls[0]?.[1];
+    expect(seed).toBeTypeOf("function");
+    expect((seed as (old: undefined) => unknown)(undefined)).toEqual([
+      expect.objectContaining({ resources, has_resources: true }),
+    ]);
   });
 });

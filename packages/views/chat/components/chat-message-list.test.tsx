@@ -13,6 +13,39 @@ import enChat from "../../locales/en/chat.json";
 // renders its Footer but NO data rows under jsdom's zero-height viewport, so
 // these tests must stub it to see rows at all. computeItemKey is still applied
 // here — it is what expresses the live -> persisted identity.
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: ({ actorId, actorType }: { actorId: string; actorType: string }) => (
+    <span data-testid="message-avatar" data-actor-id={actorId} data-actor-type={actorType} />
+  ),
+}));
+
+vi.mock("../../navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../navigation")>();
+  return {
+    ...actual,
+    AppLink: ({ href, children, ...props }: React.ComponentProps<"a">) => (
+      <a href={href} {...props}>{children}</a>
+    ),
+  };
+});
+
+vi.mock("@multica/core/paths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+  return {
+    ...actual,
+    useWorkspacePaths: () => ({
+      issueDetail: (id: string) => `/issues/${id}`,
+      projectView: (id: string, view: string) => `/projects/${id}?view=${view}`,
+      assets: () => "/assets",
+    }),
+  };
+});
+
+vi.mock("@multica/core/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/hooks")>();
+  return { ...actual, useWorkspaceId: () => "ws-1" };
+});
+
 vi.mock("react-virtuoso", () => ({
   Virtuoso: ({
     data,
@@ -414,6 +447,309 @@ describe("ChatMessageList onboarding kickoff", () => {
     expect(
       screen.queryByText("INTERNAL ONBOARDING PROMPT"),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatMessageList DM author attribution (plan 20261025)", () => {
+  // Both participants are humans, so the server persists every message with
+  // role: "user". The old role-based logic would put BOTH on the right as
+  // "self". For a dm session the side is decided by author_id === currentUserId,
+  // so the peer's bubble must align left (justify-start) and the viewer's right
+  // (justify-end).
+  function bubbleAlign(text: string): string | undefined {
+    let node: HTMLElement | null = screen.getByText(text);
+    while (node) {
+      if (node.className.includes("justify-")) return node.className;
+      node = node.parentElement;
+    }
+    return undefined;
+  }
+
+  it("renders a peer's message on the left and the viewer's on the right", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "m1",
+                chat_session_id: "s1",
+                role: "user",
+                content: "from peer",
+                task_id: null,
+                created_at: new Date(0).toISOString(),
+                author_type: "member",
+                author_id: "user-b",
+              },
+              {
+                id: "m2",
+                chat_session_id: "s1",
+                role: "user",
+                content: "from me",
+                task_id: null,
+                created_at: new Date(1).toISOString(),
+                author_type: "member",
+                author_id: "user-a",
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+            conversationKind="dm"
+            currentUserId="user-a"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    await screen.findByText("from peer");
+    expect(bubbleAlign("from peer")).toContain("justify-start");
+    expect(bubbleAlign("from me")).toContain("justify-end");
+    const avatars = screen.getAllByTestId("message-avatar");
+    expect(avatars.map((node) => node.getAttribute("data-actor-id"))).toEqual(["user-b", "user-a"]);
+    const selfBubble = screen.getByText("from me").parentElement?.parentElement;
+    expect(selfBubble?.className).toContain("bg-card");
+  });
+
+  it("keeps every role=user message on the right for an agent session (no regression)", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "m1",
+                chat_session_id: "s1",
+                role: "user",
+                content: "agent-mode message",
+                task_id: null,
+                created_at: new Date(0).toISOString(),
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    await screen.findByText("agent-mode message");
+    expect(bubbleAlign("agent-mode message")).toContain("justify-end");
+  });
+
+  it("renders structured resources outside the message content bubble", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "resource-message",
+                chat_session_id: "s1",
+                role: "user",
+                content: "shared doc",
+                task_id: null,
+                created_at: new Date(0).toISOString(),
+                author_type: "member",
+                author_id: "user-a",
+                resources: [{
+                  type: "document",
+                  id: "artifact-1",
+                  source: "artifact",
+                  project_id: "project-1",
+                  access: "granted",
+                  artifact: {
+                    id: "artifact-1",
+                    project_id: "project-1",
+                    rel_path: "docs/prd.md",
+                  } as never,
+                }],
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+            conversationKind="dm"
+            currentUserId="user-a"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const content = await screen.findByText("shared doc");
+    const resource = screen.getByRole("button", { name: "Preview document" });
+    const bubble = content.closest("div.rounded-2xl");
+    expect(bubble).not.toBeNull();
+    expect(bubble).not.toContainElement(resource);
+  });
+
+  it("does not render an empty content bubble for a resource-only message", async () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "resource-only-message",
+              chat_session_id: "s1",
+              role: "user",
+              content: "",
+              task_id: null,
+              created_at: new Date(0).toISOString(),
+              author_type: "member",
+              author_id: "user-a",
+              resources: [{
+                type: "document",
+                id: "artifact-1",
+                source: "artifact",
+                project_id: "project-1",
+                access: "granted",
+                artifact: {
+                  id: "artifact-1",
+                  project_id: "project-1",
+                  rel_path: "docs/prd.md",
+                } as never,
+              }],
+            }]}
+            pendingTask={undefined}
+            availability="online"
+            conversationKind="dm"
+            currentUserId="user-a"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: "Preview document" })).toBeInTheDocument();
+    expect(container.querySelector("div.rounded-2xl")).toBeNull();
+  });
+
+  it("keeps the viewer's own DM bubble on a light tint so the text stays readable", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "own-message",
+              chat_session_id: "s1",
+              role: "user",
+              content: "from me",
+              task_id: null,
+              created_at: new Date(0).toISOString(),
+              author_type: "member",
+              author_id: "user-a",
+            }]}
+            pendingTask={undefined}
+            availability="online"
+            conversationKind="dm"
+            currentUserId="user-a"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const bubble = (await screen.findByText("from me")).closest("div.rounded-2xl");
+    expect(bubble).toHaveClass("bg-card", "text-foreground");
+  });
+});
+
+describe("ChatMessageList group dispatch history", () => {
+  function renderDispatch(
+    dispatches: Array<{ agent_id: string; task_id?: string; status: string; reason?: string }>,
+    agentTasks?: Array<{ agent_id: string; task_id: string; status: string; created_at: string }>,
+  ) {
+    return render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            conversationKind="group"
+            currentUserId="member-1"
+            groupAgentNames={new Map([["agent-release", "Release Bot"]])}
+            messages={[{
+              id: "message-dispatch",
+              chat_session_id: "group-1",
+              role: "user",
+              author_type: "member",
+              author_id: "member-1",
+              content: "Please review the release",
+              task_id: null,
+              created_at: new Date(0).toISOString(),
+              dispatches,
+            }]}
+            pendingTask={agentTasks ? { agent_tasks: agentTasks } : null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it("renders persisted dispatch outcomes without matching agent ids in the message body", async () => {
+    renderDispatch([
+      { agent_id: "agent-release", task_id: "task-1", status: "completed" },
+      { agent_id: "agent-qa", task_id: "task-2", status: "failed" },
+      { agent_id: "agent-private", status: "blocked", reason: "invocation_not_allowed" },
+    ]);
+
+    expect(await screen.findByText("Release Bot · Completed")).toBeInTheDocument();
+    expect(screen.getByText("Agent · Failed")).toBeInTheDocument();
+    expect(screen.getByText("Agent · Blocked")).toBeInTheDocument();
+  });
+
+  it("uses the current pending status for the same dispatched task", async () => {
+    renderDispatch(
+      [{ agent_id: "agent-release", task_id: "task-1", status: "queued" }],
+      [{ agent_id: "agent-release", task_id: "task-1", status: "running", created_at: new Date(0).toISOString() }],
+    );
+
+    expect(await screen.findByText("Release Bot · Working")).toBeInTheDocument();
+    expect(screen.queryByText("Release Bot · Queued")).not.toBeInTheDocument();
+  });
+
+  it("hides the working pill after the assistant reply for that task is on screen", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            conversationKind="group"
+            currentUserId="member-1"
+            groupAgentNames={new Map([["agent-release", "Release Bot"]])}
+            messages={[
+              {
+                id: "message-ask",
+                chat_session_id: "group-1",
+                role: "user",
+                author_type: "member",
+                author_id: "member-1",
+                content: "Please review agent-release",
+                task_id: null,
+                created_at: new Date(0).toISOString(),
+                mentions: [{ type: "agent", id: "agent-release" }],
+              },
+              {
+                id: "message-answer",
+                chat_session_id: "group-1",
+                role: "assistant",
+                author_type: "agent",
+                author_id: "agent-release",
+                content: "Done",
+                task_id: "task-1",
+                created_at: new Date(1).toISOString(),
+              },
+            ]}
+            pendingTask={{
+              agent_tasks: [{
+                agent_id: "agent-release",
+                task_id: "task-1",
+                status: "running",
+                created_at: new Date(0).toISOString(),
+              }],
+            }}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Done")).toBeInTheDocument();
+    expect(screen.queryByText("Release Bot · Working")).not.toBeInTheDocument();
   });
 });
 

@@ -41,6 +41,21 @@ vi.mock("@multica/core/chat", () => ({
     selector({ setActiveSession }),
 }));
 
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (s: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "user-1" } }),
+}));
+
+vi.mock("@multica/core/chat/dm", () => ({
+  selectDMPeer: (
+    participants: { participant_type: string; participant_id: string }[] | undefined,
+    currentUserId: string,
+  ) =>
+    participants?.find(
+      (p) => p.participant_type === "member" && p.participant_id !== currentUserId,
+    ),
+}));
+
 vi.mock("@multica/core/chat/mutations", () => ({
   useDeleteChatSession: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChatSessionPinned: () => ({ mutate: vi.fn(), isPending: false }),
@@ -299,5 +314,42 @@ describe("ChatThreadList row keyboard semantics", () => {
     );
 
     expect(onSelectSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatThreadList dm row (plan 20261025)", () => {
+  it("renders the peer member's avatar for a dm row instead of an agent one", () => {
+    const dmRow = makeSession({
+      id: "dm-1",
+      agent_id: "",
+      kind: "dm",
+      updated_at: "2026-07-08T04:00:00Z",
+      participants: [
+        {
+          chat_session_id: "dm-1",
+          participant_type: "member",
+          participant_id: "user-1",
+          display_name: "Me",
+          admin: false,
+          joined_at: new Date(0).toISOString(),
+          last_read_at: "",
+        },
+        {
+          chat_session_id: "dm-1",
+          participant_type: "member",
+          participant_id: "user-2",
+          display_name: "Bob",
+          admin: false,
+          joined_at: new Date(0).toISOString(),
+          last_read_at: "",
+        },
+      ],
+    });
+
+    renderList(null, { renderedSessions: [dmRow], renderedAgents: [] });
+
+    // No agent binding → the peer (user-2, not the viewer user-1) drives the avatar.
+    expect(screen.getByTestId("avatar-user-2")).toBeInTheDocument();
+    expect(screen.queryByTestId("avatar-agent-1")).not.toBeInTheDocument();
   });
 });

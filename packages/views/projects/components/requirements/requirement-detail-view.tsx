@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useFeatureEnabled } from "@multica/core/config";
+import { ASSET_MODULE_FLAG } from "@multica/core/feature-flags";
 import {
   issueDeliverablesOptions,
   issueDynamicsOptions,
@@ -37,8 +39,9 @@ import { StageDots } from "./stage-dots";
 import { QuickConfirmButton } from "../../../issues/components/quick-confirm-button";
 import { RequirementConfigEditor } from "../../../issues/components/requirement-config-editor";
 import { needsQuickConfirm } from "../requirement-drill/requirement-display";
+import { AssetTab } from "../assets";
 
-const DRILLS = ["dynamics", "progress", "deliverables", "basics"] as const;
+const DRILLS = ["dynamics", "progress", "deliverables", "basics", "assets"] as const;
 type Drill = (typeof DRILLS)[number];
 
 function isDrill(value: string | null): value is Drill {
@@ -68,6 +71,8 @@ export function RequirementDetailView({
   const { t } = useT("archive");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
+  // 资产 drill 双层门控：与项目级 TAB 同源 flag，flag off 时 drill 不可见。
+  const assetsEnabled = useFeatureEnabled(ASSET_MODULE_FLAG, false);
   const active: Drill = isDrill(drill) ? drill : "dynamics";
   const [benchOpen, setBenchOpen] = useState(false);
 
@@ -180,6 +185,9 @@ export function RequirementDetailView({
             )}
           </TabsTrigger>
           <TabsTrigger value="basics">{t(($) => $.tabs.basics)}</TabsTrigger>
+          {assetsEnabled && (
+            <TabsTrigger value="assets">{t(($) => $.tabs.assets)}</TabsTrigger>
+          )}
           <span className="ml-auto hidden text-micro text-muted-foreground lg:inline">
             {t(($) => $.req_detail.tab_source)}
           </span>
@@ -263,6 +271,11 @@ export function RequirementDetailView({
             </div>
           </div>
         </TabsContent>
+        {assetsEnabled && (
+          <TabsContent value="assets" className="mt-3">
+            <AssetTab projectId={projectId} issueId={issueId} />
+          </TabsContent>
+        )}
       </Tabs>
       <RequirementDrawer
         issueId={benchOpen ? issue.id : null}

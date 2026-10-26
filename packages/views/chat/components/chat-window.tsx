@@ -55,11 +55,14 @@ import {
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
-import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
+import { mergeChatResourceSnapshots, rememberPendingChatResources, upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
+import { extractMentionsFromContent } from "../lib/mention-extract";
+import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./use-quick-actions-failure-toast";
 import { hideQueuedChatMessages } from "@multica/core/chat/pending";
+import { visibleGroupPendingTasks } from "./group-pending-pills";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { useChatTaskActions } from "./use-chat-task-actions";
@@ -67,7 +70,7 @@ import { useChatInputFocus } from "./use-chat-input-focus";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import { ChatQueue } from "./chat-queue";
-import { EmptyState } from "./chat-empty-state";
+import { ConversationEmpty, EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
@@ -84,7 +87,7 @@ import { useChatProjectContextSupport } from "./use-chat-project-context-support
 import { preparePageSurfaceSend, usePageSurfaceContext } from "../lib/page-surface-context";
 import { fanOutChatMessage, useChatFanout } from "../lib/fanout-agents";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, Attachment, ChatMessage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import type { Agent, Attachment, ChatMessage, ChatMessageResource, ChatResourceRefInput, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
@@ -120,9 +123,12 @@ export function ChatWindow() {
   const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
     chatSessionsOptions(wsId),
   );
-  const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
-    projectListOptions(wsId),
-  );
+  const {
+    data: projects = [],
+    isSuccess: projectsLoaded,
+    isPending: projectsPending,
+    isError: projectsError,
+  } = useQuery(projectListOptions(wsId));
   const {
     data: rawMessagePages,
     isLoading: messagesLoading,
@@ -244,18 +250,33 @@ export function ChatWindow() {
   // render some *other* available agent — wrong avatar/name and a send that
   // targets the wrong agent. Binding to the session's real agent keeps it
   // honest; the archived state then makes the conversation read-only.
-  const sessionAgent = currentSession
+  const groupAgentNames = useMemo(() => {
+    const roster = currentSession?.participants;
+    if (!roster) return undefined;
+    const map = new Map<string, string>();
+    for (const participant of roster) {
+      if (participant.participant_type === "agent") {
+        map.set(participant.participant_id, participant.display_name);
+      }
+    }
+    return map;
+  }, [currentSession?.participants]);
+  const conversationKind = currentSession?.kind ?? "agent";
+  const isConversationSession = conversationKind === "dm" || conversationKind === "group";
+  const sessionAgent = !isConversationSession && currentSession
     ? agents.find((a) => a.id === currentSession.agent_id) ?? null
     : null;
   const isAgentArchived = !!sessionAgent?.archived_at;
 
   // Resolve selected agent: open session's agent → stored preference → first
-  // available. New chats have no session, so they fall through to the picker.
-  const activeAgent =
-    sessionAgent ??
-    availableAgents.find((a) => a.id === selectedAgentId) ??
-    availableAgents[0] ??
-    null;
+  // available. DM/Group have no owning agent, so they must not fall through
+  // to a workspace agent. New chats have no session, so they fall through to the picker.
+  const activeAgent = isConversationSession
+    ? null
+    : sessionAgent ??
+      availableAgents.find((a) => a.id === selectedAgentId) ??
+      availableAgents[0] ??
+      null;
   const activeAgentRuntimeBound =
     !!activeAgent && isAgentRuntimeBound(activeAgent);
 
@@ -432,7 +453,72 @@ export function ChatWindow() {
       attachmentIds?: string[],
       commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
       draftAttachments: Attachment[] = [],
+      resourceRefs?: ChatResourceRefInput[],
+      resourceSnapshots?: ChatMessageResource[],
     ): Promise<boolean> => {
+      if (isConversationSession) {
+        const dmSessionId = activeSessionId;
+        if (!dmSessionId) {
+          apiLogger.warn("sendChatMessage skipped: conversation session not open");
+          return false;
+        }
+        let dmPrepared;
+        try {
+          dmPrepared = await preparePageSurfaceSend(api, content, pageSurface, dmSessionId);
+        } catch (err) {
+          apiLogger.error("sendChatMessage.pageSurface.error", { sessionId: dmSessionId, err });
+          dmPrepared = { content, attachmentIds: [], attachments: [] };
+        }
+        const dmContent = dmPrepared.content;
+        const dmAttachmentIds = [...(attachmentIds ?? []), ...dmPrepared.attachmentIds];
+        const dmAttachments = [...draftAttachments, ...dmPrepared.attachments];
+        const dmMentions = extractMentionsFromContent(dmContent);
+        rememberPendingChatResources(dmSessionId, dmContent, resourceSnapshots ?? []);
+        const dmOptions = dmMentions.length > 0 || (resourceRefs?.length ?? 0) > 0
+          ? {
+              ...(dmMentions.length > 0 ? { mentions: dmMentions } : {}),
+              ...(resourceRefs && resourceRefs.length > 0 ? { resource_refs: resourceRefs } : {}),
+            }
+          : undefined;
+        let dmResult;
+        try {
+          dmResult = await api.sendChatMessage(
+            dmSessionId,
+            dmContent,
+            dmAttachmentIds.length > 0 ? dmAttachmentIds : undefined,
+            dmOptions,
+          );
+        } catch (err) {
+          apiLogger.error("sendChatMessage.conversation.error", { sessionId: dmSessionId, err });
+          toast.error(t(($) => $.input.send_failed_toast));
+          return false;
+        }
+        const dmResources = mergeChatResourceSnapshots(dmResult.resources, resourceSnapshots);
+        const dmSent: ChatMessage = {
+          id: dmResult.message_id,
+          chat_session_id: dmSessionId,
+          role: "user",
+          content: dmContent,
+          task_id: null,
+          created_at: dmResult.created_at,
+          attachments: dmAttachments,
+          author_type: "member",
+          author_id: user?.id ?? null,
+          resources: dmResources,
+          has_resources: (dmResources?.length ?? 0) > 0 || undefined,
+        };
+        upsertChatMessageToCaches(qc, dmSessionId, dmSent, { seedIfMissing: true });
+        const dmLive = useChatStore.getState();
+        const dmStillOnSource = isStillOnComposeTarget(dmLive.activeSessionId, dmSessionId);
+        commitInput?.({ extraDraftKeys: [dmSessionId], clearEditor: dmStillOnSource });
+        qc.invalidateQueries({ queryKey: chatKeys.messages(dmSessionId) });
+        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(dmSessionId) });
+        qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+        if ((dmResult.dispatches?.length ?? 0) > 0) {
+          qc.invalidateQueries({ queryKey: chatKeys.pendingTask(dmSessionId) });
+        }
+        return true;
+      }
       if (!activeAgent) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
         return false;
@@ -515,12 +601,16 @@ export function ChatWindow() {
       const mergedAttachmentIds = [...(attachmentIds ?? []), ...prepared.attachmentIds];
       const mergedAttachments = [...draftAttachments, ...prepared.attachments];
 
+      rememberPendingChatResources(sessionId, finalContent, resourceSnapshots ?? []);
       let result;
       try {
         result = await api.sendChatMessage(
           sessionId,
           finalContent,
           mergedAttachmentIds.length > 0 ? mergedAttachmentIds : undefined,
+          resourceRefs && resourceRefs.length > 0
+            ? { resource_refs: resourceRefs }
+            : undefined,
         );
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
@@ -555,9 +645,11 @@ export function ChatWindow() {
         chat_session_id: sessionId,
         role: "user",
         content: finalContent,
-        task_id: result.task_id,
+        task_id: result.task_id ?? null,
         created_at: result.created_at,
         attachments: mergedAttachments,
+        resources: mergeChatResourceSnapshots(result.resources, resourceSnapshots),
+        has_resources: (mergeChatResourceSnapshots(result.resources, resourceSnapshots)?.length ?? 0) > 0 || undefined,
       };
       // Single door into the message caches (MUL-5711): idempotent by id, so
       // this row and the chat:message echo of the same send converge in either
@@ -565,7 +657,7 @@ export function ChatWindow() {
       // is never downgraded by the echo, which has no attachments field.
       upsertChatMessageToCaches(qc, sessionId, sent, { seedIfMissing: true });
       seedAcceptedPendingTask(qc, sessionId, {
-        task_id: result.task_id,
+        task_id: result.task_id ?? "",
         created_at: result.created_at,
         message_id: result.message_id,
         content: finalContent,
@@ -587,7 +679,7 @@ export function ChatWindow() {
 
       if (stopRequestedBeforeTaskRef.current) {
         stopRequestedBeforeTaskRef.current = false;
-        await cancelChatTask(result.task_id, sessionId, {
+        await cancelChatTask(result.task_id ?? "", sessionId, {
           restoreDraftToInput: true,
           source: "deferred-send",
         });
@@ -652,6 +744,9 @@ export function ChatWindow() {
       createSession,
       activeProjectId,
       t,
+      isConversationSession,
+      user?.id,
+      wsId,
     ],
   );
 
@@ -693,8 +788,9 @@ export function ChatWindow() {
   const handleSelectSession = useCallback(
     (session: ChatSession) => {
       // Sessions are bound 1:1 to an agent — picking a session from a
-      // different agent implicitly switches the agent too.
-      if (activeAgent && session.agent_id !== activeAgent.id) {
+      // different agent implicitly switches the agent too. dm/group sessions
+      // carry no owning agent (agent_id null) and never drive an agent switch.
+      if (session.agent_id && activeAgent && session.agent_id !== activeAgent.id) {
         uiLogger.info("selectSession (cross-agent)", {
           from: activeAgent.id,
           toAgent: session.agent_id,
@@ -725,6 +821,9 @@ export function ChatWindow() {
           return;
         case "detachCurrent":
           setSessionProject.mutate({ sessionId: plan.sessionId, projectId: null });
+          break;
+        case "bindCurrent":
+          setSessionProject.mutate({ sessionId: plan.sessionId, projectId: plan.projectId });
           break;
         case "startFreshChat":
           setSelectedAgentId(plan.agentId);
@@ -923,12 +1022,12 @@ export function ChatWindow() {
           messages={messages}
           pendingTask={pendingTask}
           availability={availability}
-          firstItemIndex={firstItemIndex}
-          hasOlderMessages={!!hasOlderMessages}
-          isFetchingOlderMessages={isFetchingOlderMessages}
-          onLoadOlderMessages={() => void fetchOlderMessages()}
-          onQuickAction={(action) => handleSend(action.prompt)}
+          conversationKind={conversationKind}
+          currentUserId={user?.id}
+          participants={currentSession?.participants}
+          groupAgentNames={groupAgentNames}
           quickActionsDisabled={
+            isConversationSession ||
             !!pendingTaskId ||
             isSessionArchived ||
             isAgentArchived ||
@@ -936,6 +1035,11 @@ export function ChatWindow() {
             !activeAgentRuntimeBound ||
             noAgent
           }
+          firstItemIndex={firstItemIndex}
+          hasOlderMessages={!!hasOlderMessages}
+          isFetchingOlderMessages={isFetchingOlderMessages}
+          onLoadOlderMessages={() => void fetchOlderMessages()}
+          onQuickAction={(action) => handleSend(action.prompt)}
           onRegenerateQuickActions={(message) =>
             activeSessionId
               ? regenerateQuickActions.mutateAsync({
@@ -947,12 +1051,16 @@ export function ChatWindow() {
           quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
+        isConversationSession ? (
+          <ConversationEmpty kind={conversationKind} />
+        ) : (
         <EmptyState
           agent={activeAgent}
           hasSessions={sessions.length > 0}
           onPickPrompt={prefillConversationStarter}
           customizeHref={customizeConversationStartersHref}
         />
+        )
       )}
 
       {/* Status banner above the input — single mutually-exclusive slot.
@@ -964,7 +1072,7 @@ export function ChatWindow() {
        *  We key off `noAgent` (the resolved-empty state) rather than
        *  `!activeAgent`, so the loading window between mount and the
        *  first agent-list response stays banner-free. */}
-      {noAgent ? (
+      {!isConversationSession && noAgent ? (
         <NoAgentBanner />
       ) : isAgentAccessRevoked ? (
         <AgentAccessRevokedBanner agentName={activeAgent?.name} />
@@ -979,6 +1087,7 @@ export function ChatWindow() {
         <OfflineBanner agentName={activeAgent?.name} availability={availability} />
       )}
 
+      {!isConversationSession && (
       <ChatQueue
         tasks={queuedTasks}
         headStatus={pendingTask?.status}
@@ -988,32 +1097,50 @@ export function ChatWindow() {
         onRemove={handleRemoveQueuedTask}
         onClear={handleClearQueuedTasks}
       />
+      )}
 
       {/* Input — disabled for legacy archived sessions and for sessions whose
        *  agent has been archived (read-only); locked out entirely when there's
        *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
         onSend={handleSend}
+        resourceSharingEnabled
         restoreDraftRequest={restoreDraftRequest}
         conversationStarterRequest={conversationStarterRequest}
         onConversationStarterApplied={handleConversationStarterApplied}
         onRestoreDraftApplied={handleRestoreDraftApplied}
-        uploadEnabled={!!activeAgent && !isAgentAccessRevoked}
+        uploadEnabled={isConversationSession || (!!activeAgent && !isAgentAccessRevoked)}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
         allowSubmitWhileRunning={pendingTask?.supports_queue === true}
         disabled={
-          isSessionArchived ||
-          isAgentArchived ||
-          isAgentAccessRevoked ||
-          !activeAgentRuntimeBound
+          isConversationSession
+            ? isSessionArchived
+            : isSessionArchived ||
+              isAgentArchived ||
+              isAgentAccessRevoked ||
+              !activeAgentRuntimeBound
         }
-        noAgent={noAgent}
-        agentArchived={isAgentArchived}
-        agentAccessRevoked={isAgentAccessRevoked}
-        agentRuntimeRequired={!activeAgentRuntimeBound}
-        agentName={activeAgent?.name}
+        noAgent={isConversationSession ? false : noAgent}
+        agentArchived={isConversationSession ? false : isAgentArchived}
+        agentAccessRevoked={isConversationSession ? false : isAgentAccessRevoked}
+        agentRuntimeRequired={isConversationSession ? false : !activeAgentRuntimeBound}
+        agentName={isConversationSession ? undefined : activeAgent?.name}
+        conversationKind={isConversationSession ? conversationKind : "agent"}
+        mentionItems={
+          isConversationSession
+            ? (currentSession?.participants ?? [])
+                .filter((participant) => participant.participant_id !== user?.id)
+                .map((participant): MentionItem => ({
+                  id: participant.participant_id,
+                  label: participant.display_name || participant.participant_id,
+                  type: participant.participant_type === "agent" ? "agent" : "member",
+                }))
+            : undefined
+        }
         projects={projects}
+        projectsLoading={projectsPending && !projectsLoaded}
+        projectsError={projectsError}
         projectId={activeProjectId}
         onProjectChange={handleProjectChange}
         projectContextUnsupported={projectContextSupport === false}
@@ -1021,14 +1148,22 @@ export function ChatWindow() {
           setSessionProject.isPending || (!!activeSessionId && !currentSession)
         }
         leftAdornment={
+          isConversationSession ? undefined : (
           <AgentDropdown
             agents={availableAgents}
             activeAgent={activeAgent}
             userId={user?.id}
           />
+          )
         }
         contextItems={contextItems}
         focusRequest={focusRequest}
+        groupRuns={
+          conversationKind === "group"
+            ? visibleGroupPendingTasks(pendingTask?.agent_tasks, messages)
+            : undefined
+        }
+        groupAgentNames={groupAgentNames}
       />
     </motion.div>
   );
@@ -1062,7 +1197,7 @@ function SessionDropdown({
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const title = activeSession?.title?.trim() || t(($) => $.window.untitled);
-  const triggerAgent = activeSession ? agentById.get(activeSession.agent_id) ?? null : null;
+  const triggerAgent = activeSession?.agent_id ? agentById.get(activeSession.agent_id) ?? null : null;
 
   // The old soft-archive feature was removed. Pre-existing rows with
   // status='archived' are legacy dead data and are excluded from history.
@@ -1234,7 +1369,7 @@ function SessionDropdown({
 
   const renderRow = (session: ChatSession) => {
     const isCurrent = session.id === activeSessionId;
-    const agent = agentById.get(session.agent_id) ?? null;
+    const agent = session.agent_id ? agentById.get(session.agent_id) ?? null : null;
     const pendingTask = pendingTaskBySessionId.get(session.id);
     const isRunning = !!pendingTask;
     const showCompleted = completedFlashIds.has(session.id) && !isCurrent;

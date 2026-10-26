@@ -3,6 +3,7 @@
 import type { ReactNode, SyntheticEvent } from "react";
 import { ArrowUp, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { cn } from "@multica/ui/lib/utils";
 import {
   Tooltip,
   TooltipContent,
@@ -37,6 +38,9 @@ interface SubmitButtonProps {
   stopTooltip?: ReactNode;
   /** Accessible name for the icon-only stop button. */
   stopAriaLabel?: string;
+  /** Visual tone. Chat uses brand so Send reads as the primary action. */
+  variant?: "default" | "brand";
+  className?: string;
 }
 
 /** Keep the composer focused so Send and Stop do not dismiss Android's keyboard. */
@@ -55,6 +59,8 @@ function SubmitButton({
   ariaLabel,
   stopTooltip,
   stopAriaLabel,
+  variant = "default",
+  className,
 }: SubmitButtonProps) {
   if (running) {
     const stopButton = (
@@ -79,8 +85,9 @@ function SubmitButton({
 
   const submitButton = (
     <Button
-      size="icon-sm"
-      className="rounded-full"
+      variant={variant}
+      size="icon"
+      className={cn("rounded-full", className)}
       disabled={disabled || loading || busy}
       aria-disabled={busy || undefined}
       aria-busy={loading || busy || undefined}

@@ -250,7 +250,7 @@ export function useBuilderSession(options: {
           chat_session_id: sessionId,
           role: "user",
           content: encodedContent,
-          task_id: result.task_id,
+          task_id: result.task_id ?? null,
           created_at: createdAt,
         },
         { seedIfMissing: true },

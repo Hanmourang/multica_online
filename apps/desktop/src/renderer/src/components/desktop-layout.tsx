@@ -115,11 +115,14 @@ function useNativeNavigationGestures() {
 
 
 // The main area's top bar doubles as a window drag region. When the sidebar
-// is not occupying main-flow width, leave room for the fixed window toolbar
-// so tabs do not land beneath the traffic lights / navigation controls.
+// holds no main-flow width at all (offcanvas-collapsed or the compact sheet),
+// leave room for the fixed window toolbar so tabs do not land beneath the
+// traffic lights / navigation controls. The icon strip keeps a flow-width gap,
+// so the toolbar never overlaps the tabs — no clearance needed there.
 function MainTopBar() {
-  const { state, isCompact } = useSidebar();
-  const sidebarHidden = state === "collapsed" || isCompact;
+  const { isCompact } = useSidebar();
+  // Below `lg` the nav is an overlay sheet — no flow width, toolbar overlaps.
+  const sidebarHidden = isCompact;
 
   return (
     <motion.header
@@ -145,10 +148,11 @@ function MainTopBar() {
 
 // The canvas hugs the expanded sidebar with a hairline gap. When the sidebar
 // leaves the main flow, the left margin must grow to mirror the fixed mr-2 so
-// the floating canvas sits symmetrically inside the window frame.
+// the floating canvas sits symmetrically inside the window frame. An
+// icon-collapsed sidebar still occupies flow width, so it keeps the tight gap.
 function MainCanvas({ children }: { children: React.ReactNode }) {
-  const { state, isCompact } = useSidebar();
-  const sidebarHidden = state === "collapsed" || isCompact;
+  const { isCompact } = useSidebar();
+  const sidebarHidden = isCompact;
 
   return (
     <motion.div

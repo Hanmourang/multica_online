@@ -15,6 +15,7 @@ import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
+  BuiltinSkillSummary,
   Skill,
   SkillSummary,
 } from "@multica/core/types";
@@ -27,6 +28,7 @@ import {
   agentListOptions,
   memberListOptions,
   selectSkillAssignments,
+  builtinSkillListOptions,
   skillListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
@@ -407,13 +409,56 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
 // Empty state
 // ---------------------------------------------------------------------------
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function PlatformSkillsSection({ skills }: { skills: BuiltinSkillSummary[] }) {
+  const { t } = useT("skills");
+  if (skills.length === 0) return null;
+  return (
+    <section className="shrink-0 border-b px-6 py-4">
+      <h2 className="text-body font-medium">{t(($) => $.page.platform.title)}</h2>
+      <p className="mt-1 max-w-3xl text-caption leading-5 text-muted-foreground">
+        {t(($) => $.page.platform.description)}
+      </p>
+      <ul className="mt-3 divide-y rounded-lg border">
+        {skills.map((skill) => (
+          <li key={skill.id} className="flex items-center gap-3 px-3 py-2">
+            <SkillIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-body font-medium">{skill.name}</span>
+              <span className="block truncate text-caption text-muted-foreground">
+                {skill.description}
+              </span>
+            </span>
+            <span className="shrink-0 text-caption text-muted-foreground">
+              {t(($) => $.page.platform.all_agents)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function EmptyState({
+  onCreate,
+  workspaceOnly,
+}: {
+  onCreate: () => void;
+  workspaceOnly: boolean;
+}) {
   const { t } = useT("skills");
   return (
     <CollectionPageState
       icon={SkillIcon}
-      title={t(($) => $.page.empty.title)}
-      description={t(($) => $.page.empty.description)}
+      title={
+        workspaceOnly
+          ? t(($) => $.page.empty.workspace_title)
+          : t(($) => $.page.empty.title)
+      }
+      description={
+        workspaceOnly
+          ? t(($) => $.page.empty.workspace_description)
+          : t(($) => $.page.empty.description)
+      }
       actions={
         <Button type="button" onClick={onCreate} size="sm">
           <Plus aria-hidden="true" className="size-3" />
@@ -598,6 +643,7 @@ export default function SkillsPage() {
     error: listError,
     refetch: refetchList,
   } = useQuery(skillListOptions(wsId));
+  const { data: platformSkills = [] } = useQuery(builtinSkillListOptions(wsId));
   const { data: agents = [], error: agentsError } = useQuery(
     agentListOptions(wsId),
   );
@@ -841,11 +887,18 @@ export default function SkillsPage() {
           <LoadingSkeleton />
         </div>
       ) : showEmpty ? (
-        <div className="flex flex-1 items-center justify-center">
-          <EmptyState onCreate={() => setCreateOpen(true)} />
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <PlatformSkillsSection skills={platformSkills} />
+          <div className="flex flex-1 items-center justify-center">
+            <EmptyState
+              workspaceOnly={platformSkills.length > 0}
+              onCreate={() => setCreateOpen(true)}
+            />
+          </div>
         </div>
       ) : (
         <>
+          <PlatformSkillsSection skills={platformSkills} />
           <SkillListToolbar
             search={search}
             onSearchChange={setSearch}

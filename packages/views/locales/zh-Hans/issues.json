@@ -401,6 +401,7 @@
     "prop_due_date": "截止日期",
     "prop_project": "项目",
     "prop_module": "模块",
+    "prop_sprint": "迭代",
     "prop_labels": "标签",
     "add_property_action": "添加字段",
     "prop_created_by": "创建者",
@@ -810,6 +811,13 @@
     "detail_hint": "前置未完成时任务将保持排队；前置失败/取消时需人工处理后自动放行。",
     "waiting_badge": "等待模块锁释放"
   },
+  "sprint": {
+    "picker_label": "迭代",
+    "picker_search": "搜索迭代…",
+    "picker_none": "无迭代（待办池）",
+    "picker_none_hint": "未入迭代的工作项留在待办池，不落在任何时间盒内",
+    "picker_completed_hint": "已完成的迭代已冻结，需重新打开后才能纳入工作项"
+  },
   "labels_panel": {
     "intro": "创建和管理标签，用于在工作区内分类任务。",
     "new_placeholder": "新标签名称...",
@@ -1143,7 +1151,9 @@
     "deps_empty": "已加载子任务没有 blocked_by 边",
     "held_by": "held by #{{n}} {{title}}",
     "exec_log": "执行日志 →",
-    "exec_log_failed": "查看失败 →"
+    "exec_log_failed": "查看失败 →",
+    "gate_blocked": "该项目已启用工作流强制门控。请先发起工作流并通过首门审批后再触发。",
+    "gate_go": "打开工作流 →"
   },
   "acceptance_panel": {
     "title": "验收",

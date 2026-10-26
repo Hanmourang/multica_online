@@ -6,6 +6,8 @@
     "issues": "タスク",
     "calendar": "カレンダー",
     "projects": "プロジェクト",
+    "assets": "アセット管理",
+    "workflows": "ワークフロー",
     "autopilots": "オートパイロット",
     "agents": "エージェント",
     "squads": "スクワッド",

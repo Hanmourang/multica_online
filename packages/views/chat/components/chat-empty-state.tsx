@@ -11,6 +11,21 @@ import {
   useFallbackConversationStarters,
 } from "./conversation-starter-list";
 
+/** Empty state for a DM or group that has no messages yet. */
+export function ConversationEmpty({ kind }: { kind: "dm" | "group" }) {
+  const { t } = useT("conversations");
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+      <p className="text-body font-medium text-foreground">
+        {kind === "dm" ? t(($) => $.dm.empty_title) : t(($) => $.group.empty_title)}
+      </p>
+      <p className="max-w-sm text-caption text-muted-foreground">
+        {kind === "dm" ? t(($) => $.dm.empty_body) : t(($) => $.group.empty_body)}
+      </p>
+    </div>
+  );
+}
+
 /** Empty compose placeholder shown before the first user message. */
 export function EmptyState({
   agent,

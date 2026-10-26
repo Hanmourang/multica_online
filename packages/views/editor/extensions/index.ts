@@ -164,7 +164,7 @@ export interface EditorExtensionsOptions {
    */
   disableMentions?: boolean;
   /** Override @ behavior for chat context suggestions. */
-  mentionMode?: "default" | "context";
+  mentionMode?: "default" | "context" | "roster";
   getMentionContextItems?: () => MentionItem[];
   /** When true, attach the `/` picker. Default false. */
   enableSlashCommands?: boolean;
@@ -189,6 +189,12 @@ export interface EditorExtensionsOptions {
    * context; the setup layer owns React Query + workspace access.
    */
   resolveIssueIdentifierRef?: RefObject<IssueIdentifierResolver | undefined>;
+  /**
+   * Chat composers also send on a plain Enter. Shift+Enter keeps a newline.
+   * Read through a getter so the editor is created once. Other editors stay
+   * on the configured `send` chord (Cmd/Ctrl+Enter by default).
+   */
+  plainEnterAlsoSubmits?: () => boolean;
 }
 
 export function createEditorExtensions(
@@ -296,7 +302,7 @@ export function createEditorExtensions(
       if (!fn) return false;
       fn();
       return true;
-    }),
+    }, { plainEnterAlsoSubmits: options.plainEnterAlsoSubmits }),
     createBlurShortcutExtension(),
     createFileUploadExtension(options.onUploadFileRef!, options.pasteAsFileThresholdRef),
   ];

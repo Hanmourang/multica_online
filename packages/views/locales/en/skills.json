@@ -25,7 +25,14 @@
     },
     "empty": {
       "title": "No skills yet",
-      "description": "Create your first skill, import one from a URL or a local folder, or copy one from a connected runtime — and every agent in the workspace can use it."
+      "description": "Create your first skill, import one from a URL or a local folder, or copy one from a connected runtime — and every agent in the workspace can use it.",
+      "workspace_title": "No workspace skills yet",
+      "workspace_description": "The platform skills above are already on every agent. Create or import a workspace skill when you want to assign one to a specific agent."
+    },
+    "platform": {
+      "title": "Platform skills",
+      "description": "These ship with Multica and are given to every agent automatically. They do not appear in an agent's assignable list, and they cannot be removed.",
+      "all_agents": "All agents"
     },
     "no_matches": {
       "title": "No matches",

@@ -41,6 +41,7 @@ function makeEditor(
   content: Content,
   onSubmit: () => void,
   extraExtensions: AnyExtension[] = [],
+  plainEnterAlsoSubmits = false,
 ) {
   return new Editor({
     element: document.createElement("div"),
@@ -52,7 +53,7 @@ function makeEditor(
       createSubmitShortcutExtension(() => {
         onSubmit();
         return true;
-      }),
+      }, { plainEnterAlsoSubmits: () => plainEnterAlsoSubmits }),
       ...extraExtensions,
     ],
   });
@@ -234,5 +235,19 @@ describe("Send = Enter editor behavior", () => {
     expect(submitCount).toBe(1);
     expect(press(editor, event("Enter", { shiftKey: true }))).toBe(true);
     expect(editor.state.doc.firstChild?.textContent).toBe("line\n");
+  });
+
+  it("sends on plain Enter when the chat composer opts in, and keeps Shift+Enter as a newline", () => {
+    let submitCount = 0;
+    const editor = makeEditor("<p>hello</p>", () => { submitCount += 1; }, [], true);
+    editors.push(editor);
+    editor.commands.focus("end");
+
+    expect(press(editor, event("Enter", { shiftKey: true }))).toBe(true);
+    expect(submitCount).toBe(0);
+    expect(editor.state.doc.childCount).toBe(2);
+
+    expect(press(editor, event("Enter"))).toBe(true);
+    expect(submitCount).toBe(1);
   });
 });

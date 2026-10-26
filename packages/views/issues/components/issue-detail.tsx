@@ -73,6 +73,7 @@ import { api, errorCode } from "@multica/core/api";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { ModulePicker } from "./pickers/module-picker";
+import { SprintPicker } from "./pickers/sprint-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
@@ -118,12 +119,15 @@ import {
 } from "./issue-detail-tab";
 import { isRequirementWorkbench } from "./requirement-flow-section";
 import { PullRequestList } from "./pull-request-list";
+import { IssueAssetSection } from "../../projects/components/assets";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { ASSET_MODULE_FLAG, SPRINT_MODULE_FLAG } from "@multica/core/feature-flags";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useModalStore } from "@multica/core/modals";
 import { issueKeys, issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
@@ -1313,6 +1317,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const githubSettings = useGitHubSettings();
+  // 资产管理（spec §F3）：与项目级 TAB / 需求 drill 同源 flag，flag off 时右栏
+  // 资产块不渲染。
+  const assetsEnabled = useFeatureEnabled(ASSET_MODULE_FLAG, false);
+  // 迭代归属（CoCo 对标 02 §F）：与项目迭代 TAB 同源 flag。flag off 时服务端
+  // 路由也不存在，行内不渲染，避免 picker 打到 404。
+  const sprintsEnabled = useFeatureEnabled(SPRINT_MODULE_FLAG, false);
 
   // Per-issue, per-session set of optional properties currently visible in
   // the sidebar Properties section. Seeded on issue switch with whichever
@@ -2589,6 +2599,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </PropRow>
           )}
 
+          {sprintsEnabled && issue.project_id && (
+            <PropRow label={t(($) => $.detail.prop_sprint)}>
+              <SprintPicker
+                projectId={issue.project_id}
+                value={issue.sprint_id}
+                onChange={(sprintId) => handleUpdateField({ sprint_id: sprintId })}
+                align="start"
+              />
+            </PropRow>
+          )}
+
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the
               order of `OPTIONAL_PROP_KEYS`. */}
@@ -2825,6 +2846,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </button>
           {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
         </div>
+      )}
+
+      {/* 资产绑定（spec §F3，CoCo 工作项「绑定资产」）：紧凑右栏块，复用
+          issue 作用域 endpoint + BindAssetDialog。仅当 flag on 且该 issue 归属
+          某项目时展示（资产需项目上下文）。解绑只删 binding 不动 resource。 */}
+      {assetsEnabled && issue.project_id && (
+        <IssueAssetSection projectId={issue.project_id} issueId={id} />
       )}
 
       {/* A2 属性栏「需求」卡：仅需求型或其子任务显示。执行日志已迁入主栏 Tab。 */}

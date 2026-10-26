@@ -114,8 +114,8 @@ export function SkillAddDialog({
           loading={isLoading}
           emptyMessage={
             workspaceSkills.length === 0
-              ? t(($) => $.tab_body.skills.add_dialog_empty)
-              : t(($) => $.tab_body.skills.add_dialog_empty_partial)
+              ? t(($) => $.tab_body.skills.add_dialog_library_empty)
+              : t(($) => $.tab_body.skills.add_dialog_empty)
           }
         />
 

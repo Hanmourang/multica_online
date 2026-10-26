@@ -698,7 +698,7 @@ function matchesMentionQuery(item: MentionItem, query: string): boolean {
 }
 
 interface MentionSuggestionOptions {
-  mode?: "default" | "context";
+  mode?: "default" | "context" | "roster";
   getContextItems?: () => MentionItem[];
 }
 
@@ -818,6 +818,9 @@ export function createMentionSuggestion(
     // `@` opens the picker just as readily (MUL-5429).
     shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
     items: ({ query }) => {
+      if (options.mode === "roster") {
+        return (options.getContextItems?.() ?? []).filter((item) => matchesMentionQuery(item, query));
+      }
       if (options.mode === "context") {
         const normalizedQuery = query.trim();
         const contextItems = (options.getContextItems?.() ?? []).filter((item) => matchesMentionQuery(item, query));

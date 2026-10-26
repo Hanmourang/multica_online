@@ -46,6 +46,20 @@ describe("useComposerSubmit", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("allows an explicitly enabled structured-resource-only submission", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(true);
+    const { result } = renderHook(() =>
+      useComposerSubmit({
+        editorRef: editorWith("   \n"),
+        uploadGate: openGate,
+        allowEmpty: true,
+        onSubmit,
+      }),
+    );
+    await act(async () => { await result.current.submit(); });
+    expect(onSubmit).toHaveBeenCalledWith("");
+  });
+
   it("clears (onAccepted) only when the server accepts", async () => {
     const onAccepted = vi.fn();
     const { result } = renderHook(() =>

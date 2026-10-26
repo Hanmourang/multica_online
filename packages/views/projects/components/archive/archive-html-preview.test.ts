@@ -3,6 +3,9 @@ import {
   archiveFileUrl,
   collectRelativeScripts,
   collectRelativeStylesheets,
+  inlineHtmlRelativeAssets,
+  isContractPrototypeHtml,
+  withContractPrototypeChrome,
   inlineRelativeScripts,
   inlineRelativeStylesheets,
   isRelativeAssetHref,
@@ -78,5 +81,34 @@ describe("relative html assets", () => {
     expect(next).not.toContain("cdn.tailwindcss.com");
     expect(next).not.toContain("fonts.googleapis.com");
     expect(next).toContain("./shared.css");
+  });
+
+  it("inlines sibling css and js resolved from the html path", async () => {
+    const html = [
+      '<link rel="stylesheet" href="./shared.css">',
+      '<script src="./icons.js"></script>',
+      "<h1>市场</h1>",
+    ].join("");
+    const next = await inlineHtmlRelativeAssets(
+      html,
+      "projects/dsh_desktop/overview/product-design/prototype/market.html",
+      async (resolved) => {
+        if (resolved.endsWith("/shared.css")) return ".card{color:red}";
+        if (resolved.endsWith("/icons.js")) return "window.__icons=1;";
+        return null;
+      },
+    );
+    expect(next).toContain(".card{color:red}");
+    expect(next).toContain("window.__icons=1;");
+    expect(next).not.toContain('href="./shared.css"');
+  });
+
+  it("treats a data-fp stub as a contract and leaves styled pages alone", () => {
+    const stub = `<!doctype html><html><body><div data-fp="fp.graph.list" data-title="社区列表">社区列表</div></body></html>`;
+    expect(isContractPrototypeHtml(stub)).toBe(true);
+    const dressed = withContractPrototypeChrome(stub);
+    expect(dressed).toContain("data-contract-prototype");
+    expect(dressed).toContain('data-fp="fp.graph.list"');
+    expect(isContractPrototypeHtml('<link rel="stylesheet" href="./shared.css"><div data-fp="a">x</div>')).toBe(false);
   });
 });

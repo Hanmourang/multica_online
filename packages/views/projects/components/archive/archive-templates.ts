@@ -26,6 +26,7 @@ export const ARCHIVE_CREATE_TYPES: ArchiveDocChoice[] = [
   { value: "product-design", label: "product-design", shelf: "product-design" },
   { value: "architecture", label: "architecture", shelf: "architecture" },
   { value: "retrospective", label: "retrospective", shelf: "retrospective" },
+  { value: "iteration", label: "iteration（需求迭代）", shelf: "iteration" },
   { value: "requirement", label: "需求单 / 需求级 PRD", shelf: "requirement", docClass: "prd" },
   { value: "plan", label: "plan", shelf: "plan" },
   { value: "decomposition", label: "decomposition", shelf: "decomposition" },

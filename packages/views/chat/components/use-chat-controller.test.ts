@@ -198,6 +198,16 @@ describe("planProjectContextChange", () => {
     ).toEqual({ kind: "startFreshChat", agentId: "agent-b", projectId: "project-x" });
   });
 
+  it("binds an open human conversation in place instead of forking an agent chat", () => {
+    expect(
+      planProjectContextChange({
+        targetProjectId: "project-x",
+        activeSessionId: "sG",
+        currentSession: { id: "sG", agent_id: null },
+      }),
+    ).toEqual({ kind: "bindCurrent", sessionId: "sG", projectId: "project-x" });
+  });
+
   it("only adjusts the new-chat draft project when there is no open session", () => {
     expect(
       planProjectContextChange({

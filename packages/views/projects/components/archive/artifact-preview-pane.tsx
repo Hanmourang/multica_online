@@ -17,7 +17,7 @@ import {
 import { useArchivePreviewSource } from "./use-archive-preview-source";
 import { CodeBlockIframe } from "../../../editor/code-block-iframe";
 import { withFragmentNavShim } from "../../../editor/utils/iframe-fragment-nav";
-import { stripRemotePreviewAssets } from "./archive-html-preview";
+import { stripRemotePreviewAssets, withContractPrototypeChrome } from "./archive-html-preview";
 import {
   isPrototypeFpFrom,
   postPrototypeHighlight,
@@ -248,7 +248,9 @@ function ArchiveHtmlFrame({
   }, [highlightFp, interact, html]);
 
   if (html != null && html.trim() !== "") {
-    const body = withFragmentNavShim(stripRemotePreviewAssets(html));
+    const body = withFragmentNavShim(
+      withContractPrototypeChrome(stripRemotePreviewAssets(html)),
+    );
     return (
       <CodeBlockIframe
         ref={iframeRef}

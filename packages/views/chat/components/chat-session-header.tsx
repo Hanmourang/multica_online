@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Trash2, UserRound } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { cn } from "@multica/ui/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -27,10 +28,14 @@ import {
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { useAuthStore } from "@multica/core/auth";
+import { selectDMPeer } from "@multica/core/chat/dm";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { composeGroupFaces, GroupCompositeAvatar } from "./group-composite-avatar";
 import { AppLink } from "../../navigation";
+import { GroupSettingsSheet } from "./group-settings-sheet";
 import { useT } from "../../i18n";
 
 /**
@@ -43,6 +48,8 @@ export function ChatSessionHeader({
   session,
   agent,
   onArchive,
+  runningCount = 0,
+  queuedCount = 0,
 }: {
   session: ChatSession;
   agent: Agent | null;
@@ -50,15 +57,39 @@ export function ChatSessionHeader({
   // next chat on desktop, back to the list on mobile), so the parent owns it —
   // see ChatPage.handleArchive. Falls back to a plain status flip if unwired.
   onArchive?: (session: ChatSession) => void;
+  runningCount?: number;
+  queuedCount?: number;
 }) {
   const { t } = useT("chat");
+  const { t: tConv } = useT("conversations");
   const wsPaths = useWorkspacePaths();
   const updateSession = useUpdateChatSession();
   const deleteSession = useDeleteChatSession();
   const setArchived = useSetChatSessionArchived();
   const setActiveSession = useChatStore((s) => s.setActiveSession);
+  const user = useAuthStore((s) => s.user);
 
   const isArchived = session.status === "archived";
+  // A DM is a 1:1 human conversation with no agent binding: its identity comes
+  // from the peer participant, and it is not renameable (plan 20261025 §2.2).
+  // Unknown/legacy kinds keep reading as the agent session, so nothing drifts.
+  const isDm = (session.kind ?? "agent") === "dm";
+  const peer = isDm && user?.id ? selectDMPeer(session.participants, user.id) : undefined;
+  // A group is a named multi-party room: renameable like an agent session, but
+  // its identity and management come from the roster (plan 20261025 §6.2), so
+  // the header swaps the agent avatar for a group glyph and mounts the settings
+  // sheet instead of the "view agent profile" affordance.
+  const isGroup = (session.kind ?? "agent") === "group";
+  const groupMemberCount = isGroup
+    ? (session.participants ?? []).filter((p) => p.participant_type === "member").length
+    : 0;
+  const groupAgentCount = isGroup
+    ? (session.participants ?? []).filter((p) => p.participant_type === "agent").length
+    : 0;
+  const selfParticipant = (session.participants ?? []).find(
+    (participant) => participant.participant_type === "member" && participant.participant_id === user?.id,
+  );
+  const canRename = !isDm && (!isGroup || !!selfParticipant?.admin);
 
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -124,10 +155,27 @@ export function ChatSessionHeader({
       : setArchived.mutate({ sessionId: session.id, archived: true });
   const doUnarchive = () => setArchived.mutate({ sessionId: session.id, archived: false });
 
+  const groupMembers = isGroup
+    ? (session.participants ?? []).filter((participant) => participant.participant_type === "member")
+    : [];
+
   return (
-    <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+    <div className="shrink-0 border-b">
+    <div className="flex h-12 items-center gap-3 px-4">
       {agent ? (
         <ActorAvatar actorType="agent" actorId={agent.id} size="lg" enableHoverCard showStatusDot />
+      ) : peer ? (
+        <ActorAvatar actorType="member" actorId={peer.participant_id} size="lg" enableHoverCard />
+      ) : isGroup ? (
+        <GroupCompositeAvatar
+          faces={composeGroupFaces(
+            groupMembers.map((member) => ({ type: "member", id: member.participant_id })),
+            (session.participants ?? [])
+              .filter((participant) => participant.participant_type === "agent")
+              .map((participant) => ({ type: "agent", id: participant.participant_id })),
+          )}
+          label={title}
+        />
       ) : (
         <span className="size-[30px] shrink-0" />
       )}
@@ -192,11 +240,14 @@ export function ChatSessionHeader({
         ) : (
           <button
             type="button"
-            onClick={startRename}
-            title={t(($) => $.header.rename)}
-            className="block max-w-full truncate text-left text-body font-semibold text-foreground outline-none hover:text-foreground/80 focus-visible:text-foreground/80"
+            onClick={canRename ? startRename : undefined}
+            title={canRename ? t(($) => $.header.rename) : undefined}
+            className={cn(
+              "block max-w-full truncate text-left text-body font-semibold text-foreground",
+              canRename && "outline-none hover:text-foreground/80 focus-visible:text-foreground/80",
+            )}
           >
-            {title}
+            {isDm && peer?.display_name ? peer.display_name : title}
           </button>
         )}
         {agent && (
@@ -205,7 +256,40 @@ export function ChatSessionHeader({
             {agent.description ? ` · ${agent.description}` : ""}
           </div>
         )}
+        {isDm && (
+          <div className="truncate text-caption text-muted-foreground">
+            {tConv(($) => $.dm.privacy)}
+          </div>
+        )}
+        {isGroup && (
+          <div className="truncate text-caption text-muted-foreground">
+            {runningCount > 0
+              ? tConv(($) => $.group.header_meta, {
+                  members: groupMemberCount,
+                  agents: groupAgentCount,
+                  running: runningCount,
+                })
+              : queuedCount > 0
+                ? tConv(($) => $.group.meta_queued, {
+                    members: groupMemberCount,
+                    agents: groupAgentCount,
+                    queued: queuedCount,
+                  })
+                : tConv(($) => $.group.meta_idle, {
+                    members: groupMemberCount,
+                    agents: groupAgentCount,
+                  })}
+          </div>
+        )}
       </div>
+
+      {isGroup && (
+        <GroupSettingsSheet
+          sessionId={session.id}
+          disabled={isArchived}
+          onLeft={() => setActiveSession(null)}
+        />
+      )}
 
       <DropdownMenu>
         <DropdownMenuTrigger
@@ -214,10 +298,12 @@ export function ChatSessionHeader({
           <MoreHorizontal className="h-4 w-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-auto">
-          <DropdownMenuItem onClick={startRename}>
-            <Pencil className="h-4 w-4" />
-            {t(($) => $.header.rename)}
-          </DropdownMenuItem>
+          {canRename && (
+            <DropdownMenuItem onClick={startRename}>
+              <Pencil className="h-4 w-4" />
+              {t(($) => $.header.rename)}
+            </DropdownMenuItem>
+          )}
           {agent && (
             <DropdownMenuItem
               render={<AppLink href={wsPaths.agentDetail(agent.id)} />}
@@ -265,6 +351,26 @@ export function ChatSessionHeader({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+    {(isDm || isGroup) && (
+      <div className="flex items-center gap-2 px-4 pb-2 text-micro text-muted-foreground">
+        {isGroup && (
+          <span className="flex -space-x-1.5">
+            {groupMembers.slice(0, 4).map((member) => (
+              <ActorAvatar
+                key={member.participant_id}
+                actorType="member"
+                actorId={member.participant_id}
+                size="sm"
+              />
+            ))}
+          </span>
+        )}
+        <span className="min-w-0 truncate">
+          {isDm ? tConv(($) => $.dm.privacy) : tConv(($) => $.group.private_agent_note)}
+        </span>
+      </div>
+    )}
     </div>
   );
 }

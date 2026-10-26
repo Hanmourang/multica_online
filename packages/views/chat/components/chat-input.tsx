@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { TriangleAlert } from "lucide-react";
+import { TriangleAlert, X } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -20,20 +20,35 @@ import {
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { GroupPendingPills } from "./group-pending-pills";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
-import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
-import type { Attachment, Project } from "@multica/core/types";
+import type {
+  Attachment,
+  ChatMessageResource,
+  ChatResourceRefInput,
+  GroupPendingAgentTask,
+  Project,
+} from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
 import { pageSurfaceChip, usePageSurfaceContext } from "../lib/page-surface-context";
 import { useChatFanout } from "../lib/fanout-agents";
+import { ResourcePickerDialog } from "./resource-picker-dialog";
+import {
+  canSubmitChatComposer,
+  CHAT_RESOURCE_DRAFT_LIMIT,
+  chatResourceDraftKey,
+  chatResourceMark,
+  chatResourceRef,
+} from "./chat-resource-drafts";
 
 const logger = createLogger("chat.ui");
 const EMPTY_UPLOADS: DraftUpload[] = [];
+const EMPTY_RESOURCES: ChatMessageResource[] = [];
 /** Editor identity for the chat composer — see the editorKey note below. */
 const CHAT_COMPOSER_EDITOR_KEY = "chat-composer";
 
@@ -62,6 +77,8 @@ interface ChatInputProps {
     attachmentIds: string[] | undefined,
     commitInput: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
     draftAttachments: Attachment[],
+    resourceRefs?: ChatResourceRefInput[],
+    resourceSnapshots?: ChatMessageResource[],
   ) => void | boolean | Promise<void | boolean>;
   restoreDraftRequest?: {
     id: string;
@@ -120,12 +137,18 @@ interface ChatInputProps {
   agentRuntimeRequired?: boolean;
   /** Name of the currently selected agent, used in the placeholder. */
   agentName?: string;
+  /** DM/Group composers ignore agent gates and use interpersonal copy. */
+  conversationKind?: "agent" | "dm" | "group";
+  /** Closed @ candidates for the open DM or group. Ignored for agent chats. */
+  mentionItems?: MentionItem[];
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
   leftAdornment?: ReactNode;
   /** Chat @ suggestions: current/recent issue/project entries. */
   contextItems?: MentionItem[];
   /** Optional project context for the draft or current chat session. */
   projects?: Project[];
+  projectsLoading?: boolean;
+  projectsError?: boolean;
   projectId?: string | null;
   onProjectChange?: (projectId: string | null) => void;
   isProjectUpdating?: boolean;
@@ -146,6 +169,13 @@ interface ChatInputProps {
    */
   draftKeyOverride?: string;
   editorKeyOverride?: string;
+  /** In-flight group agent tasks, shown as a dock above the composer. */
+  groupRuns?: GroupPendingAgentTask[];
+  groupAgentNames?: Map<string, string>;
+  /** Optional controlled resource draft used by tests and embedded hosts. */
+  resources?: ChatMessageResource[];
+  onResourcesChange?: (resources: ChatMessageResource[]) => void;
+  resourceSharingEnabled?: boolean;
 }
 
 export function ChatInput({
@@ -164,9 +194,13 @@ export function ChatInput({
   agentAccessRevoked,
   agentRuntimeRequired,
   agentName,
+  conversationKind = "agent",
+  mentionItems,
   leftAdornment,
   contextItems,
   projects = [],
+  projectsLoading,
+  projectsError,
   projectId,
   onProjectChange,
   isProjectUpdating,
@@ -174,11 +208,18 @@ export function ChatInput({
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
+  groupRuns,
+  groupAgentNames,
+  resources: controlledResources,
+  onResourcesChange,
+  resourceSharingEnabled = false,
 }: ChatInputProps) {
   const { t } = useT("chat");
+  const { t: tConv } = useT("conversations");
   const { t: tEditor } = useT("editor");
+  const isHumanConversation = conversationKind === "dm" || conversationKind === "group";
+  const noAgentGate = isHumanConversation ? false : noAgent;
   const extraAgentCount = useChatFanout((state) => state.extraAgentIds.length);
-  const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -212,6 +253,13 @@ export function ChatInput({
   // their own composer.
   const pageSurface = usePageSurfaceContext((state) => state.context);
   const draftKey = draftKeyOverride ?? activeSessionId ?? DRAFT_NEW_SESSION;
+  const [resourceDrafts, setResourceDrafts] = useState<Record<string, ChatMessageResource[]>>({});
+  const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
+  const resources = controlledResources ?? resourceDrafts[draftKey] ?? EMPTY_RESOURCES;
+  const changeResources = useCallback((next: ChatMessageResource[]) => {
+    if (controlledResources) onResourcesChange?.(next);
+    else setResourceDrafts((current) => ({ ...current, [draftKey]: next }));
+  }, [controlledResources, draftKey, onResourcesChange]);
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const storeUploads = useChatStore(
@@ -230,7 +278,7 @@ export function ChatInput({
   // restored or parked one, or any persisted draft the user typed in another
   // session) still enables the button. A false enable costs nothing: handleSend
   // reads the live editor and bails when it is empty.
-  const hasNothingToSend = isEmpty && !inputDraft.trim();
+  const hasNothingToSend = !canSubmitChatComposer(isEmpty ? inputDraft : "content", resources);
   const appliedRestoreIdRef = useRef<string | null>(null);
   const appliedConversationStarterIdRef = useRef<number | null>(null);
   const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
@@ -476,6 +524,7 @@ export function ChatInput({
   const { submitting, submit } = useComposerSubmit({
     editorRef,
     uploadGate: gate,
+    allowEmpty: resources.length > 0,
     containerRef: composerRef,
     // Chat keeps the caret in the box after a send (the next turn is typed in
     // the same place), except when the commit left the editor alone — see
@@ -485,10 +534,10 @@ export function ChatInput({
       editorScrubbedRef.current = false;
       // These states disable the SubmitButton, but Mod+Enter bypasses it — so a
       // read-only or busy composer must still refuse the keyboard path.
-      if (disabled || noAgent || (isRunning && !allowSubmitWhileRunning)) {
+      if (disabled || noAgentGate || (isRunning && !allowSubmitWhileRunning)) {
         logger.debug("input.send skipped", {
           disabled,
-          noAgent,
+          noAgent: noAgentGate,
           runningWithoutQueueSupport: !!isRunning && !allowSubmitWhileRunning,
         });
         return false;
@@ -519,6 +568,8 @@ export function ChatInput({
       // activeSessionId synchronously, so reading it after onSend would point
       // at the new session and leave the old draft orphaned.
       const keyAtSend = draftKey;
+      const resourcesAtSend = resources;
+      const resourceRefs = resourcesAtSend.map(chatResourceRef);
       // Stale-submit guard (MUL-5181 P0): snapshot the sent draft's persisted
       // value, flushing the editor's pending debounce first so pre-submit
       // typing is inside the snapshot. A late success may only clear what it
@@ -558,6 +609,17 @@ export function ChatInput({
         // is on its way, but a draft replaced since the snapshot is NEWER work
         // and must not resurface as collateral.
         if (untouched) clearInputDraft(keyAtSend);
+        const sentKeys = new Set(resourcesAtSend.map(chatResourceDraftKey));
+        if (controlledResources) {
+          onResourcesChange?.(resources.filter((item) => !sentKeys.has(chatResourceDraftKey(item))));
+        } else {
+          setResourceDrafts((current) => ({
+            ...current,
+            [keyAtSend]: (current[keyAtSend] ?? []).filter(
+              (item) => !sentKeys.has(chatResourceDraftKey(item)),
+            ),
+          }));
+        }
         for (const key of options?.extraDraftKeys ?? []) {
           if (key !== keyAtSend) clearInputDraft(key);
         }
@@ -567,11 +629,16 @@ export function ChatInput({
         draftKey: keyAtSend,
         attachmentCount: uniqueActiveIds.length,
       });
+      const sendAttachments = draftAttachments.filter((attachment) =>
+        uniqueActiveIds.includes(attachment.id)
+      );
       const accepted = await onSend(
         content,
         uniqueActiveIds.length > 0 ? uniqueActiveIds : undefined,
         commitInput,
-        draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
+        sendAttachments,
+        resourceRefs.length > 0 ? resourceRefs : undefined,
+        resourcesAtSend.length > 0 ? resourcesAtSend : undefined,
       );
       // Owner rejected the send (or threw, which useComposerSubmit also treats
       // as a rejection): the draft was never committed, so it stays put for
@@ -582,9 +649,13 @@ export function ChatInput({
     },
   });
 
-  const placeholder = agentAccessRevoked
+  const placeholder = isHumanConversation
+    ? conversationKind === "dm"
+      ? tConv(($) => $.dm.composer_placeholder)
+      : tConv(($) => $.group.composer_placeholder)
+    : agentAccessRevoked
     ? t(($) => $.input.placeholder_access_revoked)
-    : noAgent
+    : noAgentGate
     ? t(($) => $.input.placeholder_no_agent)
     : disabled
       ? agentArchived
@@ -594,21 +665,21 @@ export function ChatInput({
         : t(($) => $.input.placeholder_archived)
       : agentName
         ? extraAgentCount > 0
-          ? t(($) => $.input.placeholder_named_many, {
+          ? t(($) => $.input.placeholder_named_multiple, {
               name: agentName,
               count: extraAgentCount + 1,
             })
           : t(($) => $.input.placeholder_named, { name: agentName })
         : t(($) => $.input.placeholder_default);
 
-  const uploadEnabled = !!uploadAllowed && !disabled && !noAgent;
+  const uploadEnabled = !!uploadAllowed && !disabled && !noAgentGate;
   // Lock only while the send request itself is creating/resolving the target
   // session. Once accepted, its project can still be detached while agent work
   // continues: changing session metadata does not cancel or move that task.
   const projectSelectionEnabled =
     !!onProjectChange &&
     !disabled &&
-    !noAgent &&
+    !noAgentGate &&
     !submitting &&
     !isProjectUpdating;
   const selectedProject = projects.find((project) => project.id === projectId);
@@ -625,7 +696,7 @@ export function ChatInput({
         // user resizes or expands the window. The wrapper must be a flex
         // column for the card below to shrink into that cap instead of
         // spilling out of it.
-        "flex max-h-[50%] min-h-0 flex-col pb-3 pt-0",
+        "flex max-h-[50%] min-h-0 flex-col pb-4 pt-1",
         CHAT_GUTTER,
         // Static elevation, NOT queue-conditional: ChatQueue tucks its bottom
         // edge under this surface (z-0 + negative margin on its side), and the
@@ -635,9 +706,19 @@ export function ChatInput({
         // pointer-events-none, which suppresses hover (and therefore
         // any cursor of its own) — splitting the two layers lets hover
         // bubble back here so the browser actually reads cursor.
-        noAgent && "cursor-not-allowed",
+        noAgentGate && "cursor-not-allowed",
       )}
     >
+      {groupRuns && groupRuns.length > 0 && (
+        <div className={cn(CHAT_COLUMN, "mb-2 rounded-lg border border-border bg-card px-3 py-2")}>
+          <GroupPendingPills tasks={groupRuns} agentNames={groupAgentNames} variant="dock" />
+        </div>
+      )}
+      {conversationKind === "group" && (
+        <p className={cn(CHAT_COLUMN, "mb-2 rounded-lg border border-amber-200/80 bg-amber-50 px-2.5 py-1.5 text-caption text-amber-950 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100")}>
+          {tConv(($) => $.group.composer_hint)}
+        </p>
+      )}
       <div
         data-slot="chat-input-surface"
         {...(uploadEnabled ? dropZoneProps : {})}
@@ -648,17 +729,54 @@ export function ChatInput({
           // composer without a definite height (percentage max-height would
           // then resolve to none).
           CHAT_COLUMN,
-          "relative flex min-h-16 max-h-96 flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
+          "relative flex min-h-[4.5rem] max-h-96 flex-col rounded-2xl border border-surface-border bg-surface pb-10 shadow-[0_12px_28px_-22px_rgba(45,32,12,0.55)] transition-[border-color,box-shadow] focus-within:border-brand focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--brand)_18%,transparent)]",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
           // cleanly post-mount, and the prop has been removed); instead
           // we drop pointer events at the wrapper level so clicks miss
           // the editor entirely, and dim the surface so it reads as
           // "disabled" rather than "broken".
-          noAgent && "pointer-events-none opacity-60",
+          noAgentGate && "pointer-events-none opacity-60",
         )}
-        aria-disabled={noAgent || undefined}
+        aria-disabled={noAgentGate || undefined}
       >
+        {resources.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-3 pt-2" aria-label={t(($) => $.resources.draft_aria)}>
+            {resources.map((resource) => {
+              const key = chatResourceDraftKey(resource);
+              const title = resource.title
+                ?? resource.issue?.title
+                ?? resource.artifact?.rel_path
+                ?? resource.attachment?.filename
+                ?? resource.id;
+              const code = resource.issue?.identifier;
+              const label = code ? `${code} · ${title}` : title;
+              return (
+                <span
+                  key={key}
+                  className={cn(
+                    "inline-flex max-w-60 items-center gap-1.5 rounded-lg border py-1 pl-1.5 pr-1 text-[11px]",
+                    resource.type === "document" && "border-violet-200 bg-violet-50 text-violet-950 dark:border-violet-400/30 dark:bg-violet-500/10 dark:text-violet-100",
+                    resource.kind === "requirement" && "border-sky-200 bg-sky-50 text-sky-950 dark:border-sky-400/30 dark:bg-sky-500/10 dark:text-sky-100",
+                    resource.type === "issue" && resource.kind !== "requirement" && "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100",
+                  )}
+                >
+                  <b className="font-mono text-[9px] font-extrabold">{chatResourceMark(resource)}</b>
+                  <span className="truncate">{label}</span>
+                  <button
+                    type="button"
+                    className="grid size-5 shrink-0 place-items-center rounded hover:bg-muted disabled:opacity-50"
+                    disabled={submitting}
+                    aria-label={t(($) => $.resources.remove, { name: label })}
+                    onClick={() => changeResources(resources.filter((item) => chatResourceDraftKey(item) !== key))}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
         {selectedProject && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pt-2">
             <div
@@ -689,6 +807,11 @@ export function ChatInput({
                 {t(($) => $.input.project_context_unsupported)}
               </span>
             )}
+            <p className="min-w-0 basis-full text-caption text-muted-foreground">
+              {conversationKind === "group"
+                ? t(($) => $.input.project_attached_hint_group)
+                : t(($) => $.input.project_attached_hint)}
+            </p>
           </div>
         )}
         {pageSurface?.surface === "prototype" && (
@@ -698,7 +821,7 @@ export function ChatInput({
             </span>
           </div>
         )}
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
+        <div className="flex-1 min-h-0 overflow-y-auto px-3.5 py-3">
           <ContentEditor
             // See the editorKey / draftKey split note above — editor identity
             // intentionally tracks neither the session nor the agent.
@@ -714,13 +837,14 @@ export function ChatInput({
               commitDraft(editorDraftKeyRef.current, md);
             }}
             onSubmit={submit}
+            submitOnPlainEnter
             onUploadFile={uploadEnabled ? handleUpload : undefined}
             pasteAsFileThreshold={PASTE_AS_FILE_THRESHOLD}
             onUploadingChange={uploadGate.onUploadingChange}
             attachments={draftAttachments}
             debounceMs={100}
-            mentionMode={contextItems ? "context" : "default"}
-            mentionContextItems={contextItems}
+            mentionMode={isHumanConversation ? "roster" : contextItems ? "context" : "default"}
+            mentionContextItems={isHumanConversation ? mentionItems : contextItems}
             enableSlashCommands
             // The bubble menu carries the only affordance that can strip
             // formatting — "Normal text" (setParagraph) plus the mark/list
@@ -731,16 +855,19 @@ export function ChatInput({
             showBubbleMenu
           />
         </div>
-        {(uploadEnabled || projectSelectionEnabled || leftAdornment) && (
+        {(uploadEnabled || projectSelectionEnabled || resourceSharingEnabled || leftAdornment) && (
           <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">
-            {(uploadEnabled || projectSelectionEnabled) && (
+            {(uploadEnabled || projectSelectionEnabled || resourceSharingEnabled) && (
               <ChatAddMenu
                 onSelectFile={uploadEnabled
                   ? (file) => editorRef.current?.uploadFile(file)
                   : undefined}
                 projects={projects}
+                projectsLoading={projectsLoading}
+                projectsError={projectsError}
                 projectId={projectId}
                 onSelectProject={projectSelectionEnabled ? onProjectChange : undefined}
+                onSelectResource={resourceSharingEnabled && !disabled && !noAgentGate ? () => setResourcePickerOpen(true) : undefined}
                 projectContextUnsupported={projectContextUnsupported}
               />
             )}
@@ -749,8 +876,10 @@ export function ChatInput({
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
           <SubmitButton
+            variant="brand"
+            className="shadow-[0_6px_16px_-8px_var(--brand)]"
             onClick={submit}
-            disabled={hasNothingToSend || submitting || !!disabled || !!noAgent}
+            disabled={hasNothingToSend || submitting || !!disabled || !!noAgentGate}
             loading={submitting}
             busy={gate.uploading}
             // Queue-capable runs reuse this one action slot: an empty composer
@@ -768,9 +897,7 @@ export function ChatInput({
               ? tEditor(($) => $.upload.in_progress)
               : isRunning
                 ? t(($) => $.input.queue_send_tooltip)
-                : sendShortcut
-                  ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
-                  : t(($) => $.input.send_tooltip)}
+                : tConv(($) => $.message.enter_send)}
             ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
               : isRunning
@@ -782,6 +909,14 @@ export function ChatInput({
         </div>
         {uploadEnabled && isDragOver && <FileDropOverlay />}
       </div>
+      {resourceSharingEnabled && (
+        <ResourcePickerDialog
+          open={resourcePickerOpen}
+          onOpenChange={setResourcePickerOpen}
+          selected={resources}
+          onApply={(next) => changeResources(next.slice(0, CHAT_RESOURCE_DRAFT_LIMIT))}
+        />
+      )}
     </div>
   );
 }

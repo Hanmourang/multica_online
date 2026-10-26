@@ -434,6 +434,7 @@ export function ArchiveTab({
     { value: 2 as ArtifactStage, label: t(($) => $.browser.stage_s2) },
     { value: 3 as ArtifactStage, label: t(($) => $.browser.stage_s3) },
     { value: 4 as ArtifactStage, label: t(($) => $.browser.stage_s4) },
+    { value: 5 as ArtifactStage, label: t(($) => $.browser.stage_s5) },
   ];
 
   const docTypeItems = useMemo(() => {

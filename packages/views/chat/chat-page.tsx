@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
@@ -28,8 +28,11 @@ import { AgentDropdown } from "./components/agent-dropdown";
 import { ChatQueue } from "./components/chat-queue";
 import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatSessionHeader } from "./components/chat-session-header";
-import { EmptyState } from "./components/chat-empty-state";
-import { NewChatButton } from "./components/new-chat-button";
+import { ConversationEmpty, EmptyState } from "./components/chat-empty-state";
+import { ConversationNewMenu, NewChatButton } from "./components/new-chat-button";
+import type { MentionItem } from "../editor/extensions/mention-suggestion";
+import { useFeatureEnabled } from "@multica/core/config";
+import { CHAT_CONVERSATIONS_FLAG } from "@multica/core/feature-flags";
 import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
@@ -208,7 +211,21 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume when the URL param or the resolving agent list changes
   }, [urlAgent, c.availableAgents, c.agentsSettled]);
 
-  const newChatButton = (
+  const conversationsEnabled = useFeatureEnabled(CHAT_CONVERSATIONS_FLAG, false);
+  const openCreated = (sessionId: string) => {
+    supersedeAgentIntent();
+    c.setActiveSession(sessionId);
+    setComposingNew(false);
+  };
+  const newChatButton = conversationsEnabled ? (
+    <ConversationNewMenu
+      agents={c.availableAgents}
+      userId={c.user?.id}
+      memberRole={c.memberRole}
+      onStartAgent={startNewChat}
+      onCreated={openCreated}
+    />
+  ) : (
     <NewChatButton
       agents={c.availableAgents}
       userId={c.user?.id}
@@ -243,6 +260,28 @@ export function ChatPage() {
   // `@container`: the conversation column's gutter (CHAT_GUTTER) widens with
   // THIS pane, which the user resizes independently of the browser window.
   const queuedTasks = c.pendingTask?.queued_tasks ?? [];
+  // Agent-id → display name for the group parallel-dispatch pills, from the
+  // roster embedded on the session row (same source the DM header reads;
+  // undefined for agent sessions renders nothing anyway).
+  const groupAgentNames = useMemo(() => {
+    const roster = c.currentSession?.participants;
+    if (!roster) return undefined;
+    const map = new Map<string, string>();
+    for (const p of roster) {
+      if (p.participant_type === "agent") map.set(p.participant_id, p.display_name);
+    }
+    return map;
+  }, [c.currentSession]);
+  const mentionItems = useMemo((): MentionItem[] | undefined => {
+    if (!c.isConversationSession) return undefined;
+    return (c.currentSession?.participants ?? [])
+      .filter((participant) => participant.participant_id !== c.user?.id)
+      .map((participant) => ({
+        id: participant.participant_id,
+        label: participant.display_name || participant.participant_id,
+        type: participant.participant_type === "agent" ? "agent" : "member",
+      }));
+  }, [c.isConversationSession, c.currentSession?.participants, c.user?.id]);
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
@@ -250,6 +289,16 @@ export function ChatPage() {
           session={c.currentSession}
           agent={c.activeAgent}
           onArchive={handleArchive}
+          runningCount={
+            c.groupPendingTasks?.filter(
+              (task) => task.status === "running" || task.status === "dispatched",
+            ).length ?? 0
+          }
+          queuedCount={
+            c.groupPendingTasks?.filter(
+              (task) => task.status === "queued" || task.status === "deferred",
+            ).length ?? 0
+          }
         />
       )}
       {c.showSkeleton ? (
@@ -260,12 +309,17 @@ export function ChatPage() {
           messages={c.messages}
           pendingTask={c.pendingTask}
           availability={c.availability}
+          conversationKind={c.currentSession?.kind ?? "agent"}
+          currentUserId={c.user?.id}
+          participants={c.currentSession?.participants}
+          groupAgentNames={groupAgentNames}
           firstItemIndex={c.firstItemIndex}
           hasOlderMessages={c.hasOlderMessages}
           isFetchingOlderMessages={c.isFetchingOlderMessages}
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
           onQuickAction={(action) => c.handleSend(action.prompt)}
           quickActionsDisabled={
+            c.isConversationSession ||
             !!c.pendingTaskId ||
             c.isSessionArchived ||
             c.isAgentArchived ||
@@ -283,6 +337,8 @@ export function ChatPage() {
           }
           quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
+      ) : c.isConversationSession && c.activeSessionKind !== "agent" ? (
+        <ConversationEmpty kind={c.activeSessionKind} />
       ) : (
         <EmptyState
           agent={c.activeAgent}
@@ -292,7 +348,7 @@ export function ChatPage() {
         />
       )}
 
-      {c.isAgentAccessRevoked ? (
+      {!c.isConversationSession && (c.isAgentAccessRevoked ? (
         <AgentAccessRevokedBanner agentName={c.activeAgent?.name} />
       ) : c.noAgent ? (
         <NoAgentBanner />
@@ -305,8 +361,9 @@ export function ChatPage() {
         />
       ) : (
         <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
-      )}
+      ))}
 
+      {!c.isConversationSession && (
       <ChatQueue
         tasks={queuedTasks}
         headStatus={c.pendingTask?.status}
@@ -316,9 +373,11 @@ export function ChatPage() {
         onRemove={c.handleRemoveQueuedTask}
         onClear={c.handleClearQueuedTasks}
       />
+      )}
 
       <ChatInput
         onSend={c.handleSend}
+        resourceSharingEnabled
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}
         onConversationStarterApplied={c.handleConversationStarterApplied}
@@ -331,25 +390,36 @@ export function ChatPage() {
           c.isSessionArchived ||
           c.isAgentArchived ||
           c.isAgentAccessRevoked ||
-          !c.isAgentRuntimeBound
+          // dm/group have no owning agent; the runtime-binding gate is
+          // agent-only (dm.ts shipped with this hole at the page level —
+          // group sends would otherwise be silently locked out here).
+          (!c.isAgentRuntimeBound && !c.isConversationSession)
         }
-        noAgent={c.noAgent}
-        agentArchived={c.isAgentArchived}
-        agentAccessRevoked={c.isAgentAccessRevoked}
-        agentRuntimeRequired={!c.isAgentRuntimeBound}
-        agentName={c.activeAgent?.name}
+        noAgent={c.isConversationSession ? false : c.noAgent}
+        agentArchived={c.isConversationSession ? false : c.isAgentArchived}
+        agentAccessRevoked={c.isConversationSession ? false : c.isAgentAccessRevoked}
+        agentRuntimeRequired={!c.isAgentRuntimeBound && !c.isConversationSession}
+        agentName={c.isConversationSession ? undefined : c.activeAgent?.name}
+        conversationKind={c.isConversationSession ? c.activeSessionKind : "agent"}
+        mentionItems={mentionItems}
         projects={c.projects}
+        projectsLoading={c.projectsLoading}
+        projectsError={c.projectsError}
         projectId={c.activeProjectId}
         projectContextUnsupported={c.projectContextUnsupported}
         onProjectChange={changeProjectContext}
         isProjectUpdating={c.isProjectUpdating}
         focusRequest={c.focusInputRequest}
+        groupRuns={c.groupPendingTasks}
+        groupAgentNames={groupAgentNames}
         leftAdornment={
+          c.isConversationSession ? undefined : (
           <AgentDropdown
             agents={c.availableAgents}
             activeAgent={c.activeAgent}
             userId={c.user?.id}
           />
+          )
         }
       />
     </div>

@@ -25,7 +25,14 @@
     },
     "empty": {
       "title": "还没有 skill",
-      "description": "创建第一个 skill、从 URL 或本地文件夹导入、或从已连接的运行时复制——之后工作区里每个智能体都能用它。"
+      "description": "创建第一个 skill、从 URL 或本地文件夹导入、或从已连接的运行时复制——之后工作区里每个智能体都能用它。",
+      "workspace_title": "还没有工作区 skill",
+      "workspace_description": "上面的平台技能已经自动提供给所有智能体。需要单独分配给某个智能体时，在这里新建或导入。"
+    },
+    "platform": {
+      "title": "平台技能",
+      "description": "这些技能随 Multica 提供，并自动交给每一个智能体。它们不会出现在可分配列表里，也不能移除。",
+      "all_agents": "所有智能体"
     },
     "no_matches": {
       "title": "无匹配",

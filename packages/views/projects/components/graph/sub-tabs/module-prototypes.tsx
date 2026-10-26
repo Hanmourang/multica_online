@@ -52,7 +52,10 @@ import {
   directoryFilesForPath,
   usePageSurfaceContext,
 } from "../../../../chat/lib/page-surface-context";
+import { isContractPrototypeHtml } from "../../archive/archive-html-preview";
 import { hasStorybookDemo, StorybookPane } from "./storybook-demos/storybook-pane";
+import { storybookDemoForModule } from "./storybook-demos/catalog";
+import { StorybookDemoCanvas } from "./storybook-demos/canvases";
 import {
   ArchiveEmpty,
   QueryError,
@@ -193,6 +196,11 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
   }
 
   const canPreview = Boolean(current && currentArtifact);
+  const designedPrototype = storybookDemoForModule(module?.graph_node_id ?? nodeId);
+  const showDesignedPrototype =
+    Boolean(designedPrototype) &&
+    currentSource.status === "ready" &&
+    isContractPrototypeHtml(currentHtml);
   const canCompare = versions.length >= 2 && Boolean(baseline && baselineArtifact);
   const viewMode = preview === "html" && canCompare && mode === "compare" ? "compare" : "single";
   const toolbarIssue = activeIssue;
@@ -335,6 +343,21 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
                 title={t(($) => $.features.prototypes_title)}
                 description={t(($) => $.features.prototypes_empty)}
               />
+            ) : viewMode === "single" && current && showDesignedPrototype && designedPrototype?.stories[0] ? (
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-surface-border bg-white">
+                <PvBar
+                  label={`${fileName(current.html_path)} · v${current.version}`}
+                  badge={t(($) => $.features.prototypes_current)}
+                />
+                <div className="min-h-0 flex-1">
+                  <StorybookDemoCanvas
+                    communityId={designedPrototype.communityId}
+                    story={designedPrototype.stories[0]}
+                    selectedFp={selectedFp}
+                    onSelectFp={setSelectedFp}
+                  />
+                </div>
+              </div>
             ) : viewMode === "single" && current && currentArtifact ? (
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-surface-border bg-white">
                 <PvBar

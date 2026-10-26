@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronUp, FileStack } from "lucide-react";
 import type { ArtifactStage, Issue, ProjectArtifact } from "@multica/core/types";
+import { ARTIFACT_STAGES } from "@multica/core/artifacts";
 import type { ArtifactEditorSeed } from "./artifact-editor-dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -38,13 +39,23 @@ import { ArchiveEmpty } from "./query-states";
  * clicks.
  */
 
-const STAGES: ArtifactStage[] = [1, 2, 3, 4];
+// 五阶段矩阵列从 Core placement 派生（五阶段对齐 plan §6.3），不本地硬编码。
+const STAGES: readonly ArtifactStage[] = ARTIFACT_STAGES;
 
-const PROJECT_SHELVES = [
-  { docType: "research", title: "shelf_research" as const },
-  { docType: "product-design", title: "shelf_product_design" as const },
-  { docType: "architecture", title: "shelf_architecture" as const },
-  { docType: "retrospective", title: "shelf_retrospective" as const },
+const PROJECT_SHELVES: Array<{
+  docType: PlanningShelf;
+  title:
+    | "shelf_research"
+    | "shelf_product_design"
+    | "shelf_architecture"
+    | "shelf_retrospective"
+    | "shelf_iteration";
+}> = [
+  { docType: "research", title: "shelf_research" },
+  { docType: "product-design", title: "shelf_product_design" },
+  { docType: "architecture", title: "shelf_architecture" },
+  { docType: "retrospective", title: "shelf_retrospective" },
+  { docType: "iteration", title: "shelf_iteration" },
 ];
 
 function requirementMissingBlocking(row: RequirementRow): boolean {
@@ -144,6 +155,11 @@ function ArtifactChip({
         onSave={onSaveTag}
         busy={tagBusy}
       />
+      {artifact.source === "asset" ? (
+        <Badge variant="secondary" className="shrink-0 text-[10px]">
+          {t(($) => $.browser.source_asset)}
+        </Badge>
+      ) : null}
       <span className="shrink-0 tabular-nums text-muted-foreground">
         {t(($) => $.common.version_badge, { version: artifact.version })}
       </span>
@@ -246,7 +262,7 @@ const REQ_ID_CLASS =
 
 /** 需求信息三子列 + S1–S4 + 就绪度。 */
 const MATRIX_GRID =
-  "grid grid-cols-[minmax(6.5rem,7.75rem)_minmax(8.5rem,1.15fr)_minmax(7.5rem,8.75rem)_repeat(4,minmax(128px,1fr))_5.75rem]";
+  "grid grid-cols-[minmax(6.5rem,7.75rem)_minmax(8.5rem,1.15fr)_minmax(7.5rem,8.75rem)_repeat(5,minmax(128px,1fr))_5.75rem]";
 
 export function ArtifactMatrix({
   artifacts,
@@ -292,6 +308,9 @@ export function ArtifactMatrix({
     const map = new Map(projectRows.map((row) => [row.docType, row.items]));
     return map;
   }, [projectRows]);
+  // 资产自动同步行（source='asset'，doc_type='asset'）：不在四固定货架内，
+  // 单独成区展示，避免绑定的知识/文档在矩阵视图隐身。
+  const assetItems = useMemo(() => projectByType.get("asset") ?? [], [projectByType]);
 
   const visibleRequirementRows = useMemo(
     () =>
@@ -311,7 +330,7 @@ export function ArtifactMatrix({
         <ArchiveMarqueeSurface
           onPickIds={(ids, additive) => onPickMany?.(ids, additive)}
         >
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {PROJECT_SHELVES.map((shelf) => {
             const items = projectByType.get(shelf.docType) ?? [];
             const missing = items.length === 0;
@@ -415,6 +434,32 @@ export function ArtifactMatrix({
           </div>
         )}
       </section>
+
+      {assetItems.length > 0 && (
+        <section className="space-y-2" aria-label={t(($) => $.browser.source_asset)}>
+          <h4 className="text-caption font-medium text-muted-foreground">
+            {t(($) => $.browser.source_asset)}
+          </h4>
+          <div className="rounded-lg border border-surface-border bg-surface p-3">
+            <div className="flex items-center gap-2">
+              <code className="text-caption font-medium">{assetItems[0]?.doc_type}</code>
+              <span className="ml-auto text-caption tabular-nums text-muted-foreground">
+                {assetItems.length}
+              </span>
+            </div>
+            <ExpandableArtifactList
+              items={assetItems}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              tagging={tagging}
+              pickedIds={pickedIds}
+              onTogglePick={onTogglePick}
+              onSaveTag={onSaveTag}
+              tagBusy={tagBusy}
+            />
+          </div>
+        </section>
+      )}
 
       {filingRows.length > 0 && (
         <section className="space-y-2" aria-label={t(($) => $.browser.filing_title)}>
@@ -819,7 +864,8 @@ function shelfTitle(
     | "shelf_research"
     | "shelf_product_design"
     | "shelf_architecture"
-    | "shelf_retrospective",
+    | "shelf_retrospective"
+    | "shelf_iteration",
 ): string {
   switch (key) {
     case "shelf_research":
@@ -830,6 +876,8 @@ function shelfTitle(
       return t(($) => $.browser.shelf_architecture);
     case "shelf_retrospective":
       return t(($) => $.browser.shelf_retrospective);
+    case "shelf_iteration":
+      return t(($) => $.browser.shelf_iteration);
   }
 }
 
@@ -843,5 +891,7 @@ function stageName(t: Translator, stage: ArtifactStage): string {
       return t(($) => $.browser.stage_s3);
     case 4:
       return t(($) => $.browser.stage_s4);
+    case 5:
+      return t(($) => $.browser.stage_s5);
   }
 }

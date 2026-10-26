@@ -131,6 +131,11 @@ interface ContentEditorBaseProps {
   className?: string;
   debounceMs?: number;
   onSubmit?: () => void;
+  /**
+   * Also send on a plain Enter. Shift+Enter inserts a newline. The configured
+   * send chord still works. Chat turns this on; issue editors leave it off.
+   */
+  submitOnPlainEnter?: boolean;
   onBlur?: () => void;
   /**
    * Upload transport. `uploadId` is minted by the editor when it inserts the
@@ -186,7 +191,7 @@ interface ContentEditorBaseProps {
    */
   disableMentions?: boolean;
   /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
-  mentionMode?: "default" | "context";
+  mentionMode?: "default" | "context" | "roster";
   mentionContextItems?: MentionItem[];
   /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
@@ -364,6 +369,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       className,
       debounceMs = 300,
       onSubmit,
+      submitOnPlainEnter = false,
       onBlur,
       onUploadFile,
       pasteAsFileThreshold,
@@ -391,6 +397,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const pendingBaseRef = useRef<string | null>(null);
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
+    const submitOnPlainEnterRef = useRef(submitOnPlainEnter);
     const onBlurRef = useRef(onBlur);
     const onReadyRef = useRef(onReady);
     const onUploadingChangeRef = useRef(onUploadingChange);
@@ -500,6 +507,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
+    submitOnPlainEnterRef.current = submitOnPlainEnter;
     onBlurRef.current = onBlur;
     onReadyRef.current = onReady;
     onUploadingChangeRef.current = onUploadingChange;
@@ -617,6 +625,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             quickActionMenuRef.current?.onRenderError?.(error),
         },
         resolveIssueIdentifierRef,
+        plainEnterAlsoSubmits: () => submitOnPlainEnterRef.current,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;

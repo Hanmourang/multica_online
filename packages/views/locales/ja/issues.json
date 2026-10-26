@@ -401,6 +401,7 @@
     "prop_due_date": "期限",
     "prop_project": "プロジェクト",
     "prop_module": "モジュール",
+    "prop_sprint": "スプリント",
     "prop_labels": "ラベル",
     "add_property_action": "プロパティを追加",
     "prop_created_by": "作成者",
@@ -810,6 +811,13 @@
     "detail_hint": "依存が未完了の間、タスクはキューに留まります。依存が失敗/キャンセルされた場合は手動で処理すると自動的に再開されます。",
     "waiting_badge": "モジュールロック待機中"
   },
+  "sprint": {
+    "picker_label": "スプリント",
+    "picker_search": "スプリントを検索…",
+    "picker_none": "スプリントなし（バックログ）",
+    "picker_none_hint": "スプリントのない課題はどのタイムボックスにも属さず、バックログに残ります",
+    "picker_completed_hint": "完了したスプリントは固定されています。課題を追加するには再開してください"
+  },
   "labels_panel": {
     "intro": "ワークスペース全体でタスクを分類するラベルを作成・管理します。",
     "new_placeholder": "新しいラベル名...",
@@ -1143,7 +1151,9 @@
     "deps_empty": "読み込み済み子タスクに blocked_by がありません",
     "held_by": "held by #{{n}} {{title}}",
     "exec_log": "実行ログ →",
-    "exec_log_failed": "失敗を見る →"
+    "exec_log_failed": "失敗を見る →",
+    "gate_blocked": "このプロジェクトはワークフローを強制しています。トリガー前にワークフローを開始し、最初のゲートを通過してください。",
+    "gate_go": "ワークフローを開く →"
   },
   "acceptance_panel": {
     "title": "受け入れ",

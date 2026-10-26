@@ -1,0 +1,106 @@
+{
+  "title": "Sprints",
+  "subtitle": "Timeboxed work sets for this project. Issues join a sprint from the backlog; completed sprints are archived as history.",
+  "status": {
+    "planned": "Planned",
+    "active": "Active",
+    "completed": "Completed"
+  },
+  "filter": {
+    "all": "All statuses",
+    "by_status": "Filter by status"
+  },
+  "sidebar": {
+    "search_placeholder": "Search sprints",
+    "list_label": "Sprint list",
+    "load_failed": "Failed to load sprints.",
+    "no_match_search": "No sprint matches \"{{query}}\""
+  },
+  "detail": {
+    "select_hint": "Select a sprint on the left to review its scope and progress.",
+    "goal_label": "Goal"
+  },
+  "columns": {
+    "name": "Sprint",
+    "dates": "Duration",
+    "issues": "Issues",
+    "capacity": "Capacity",
+    "progress": "Progress",
+    "actions": "Actions"
+  },
+  "actions": {
+    "create": "New sprint",
+    "edit": "Edit",
+    "delete": "Delete",
+    "start": "Start",
+    "complete": "Complete",
+    "reopen": "Reopen",
+    "add_issues": "Add issues",
+    "remove_issue": "Remove from sprint",
+    "cancel": "Cancel",
+    "save": "Save",
+    "create_submit": "Create sprint"
+  },
+  "form": {
+    "create_title": "New sprint",
+    "edit_title": "Edit sprint",
+    "name_label": "Name",
+    "name_placeholder": "e.g. Sprint 01",
+    "goal_label": "Goal (optional)",
+    "goal_placeholder": "What this time box is trying to achieve",
+    "start_date_label": "Start date",
+    "end_date_label": "End date",
+    "capacity_label": "Capacity (optional)",
+    "capacity_placeholder": "Points"
+  },
+  "progress": {
+    "done": "{{done}} / {{total}} done",
+    "cancelled": "{{count}} cancelled",
+    "no_members": "No issues in this sprint yet."
+  },
+  "delete_confirm": {
+    "title": "Delete this sprint?",
+    "desc": "Only planned sprints can be deleted. Its issues fall back to the backlog — nothing is deleted.",
+    "confirm": "Delete",
+    "cancel": "Keep"
+  },
+  "backlog": {
+    "title": "Backlog",
+    "desc": "Project issues not assigned to any sprint.",
+    "add_hint": "Select issues to add to the sprint."
+  },
+  "empty": {
+    "no_sprints": "No sprints yet. Create one to start planning iterations.",
+    "no_match": "No sprints match the current filter."
+  },
+  "dates": {
+    "unscheduled": "No dates set"
+  },
+  "errors": {
+    "name_required": "Sprint name is required (max 80 characters).",
+    "date_order": "End date must not be before start date.",
+    "name_exists": "A sprint with this name already exists in the project.",
+    "not_planned": "This sprint is not in the planned state.",
+    "not_active": "This sprint is not active.",
+    "not_completed": "This sprint is not completed.",
+    "sprint_completed": "Cannot add issues to a completed sprint.",
+    "start_failed": "Failed to start the sprint.",
+    "complete_failed": "Failed to complete the sprint.",
+    "reopen_failed": "Failed to reopen the sprint.",
+    "create_failed": "Failed to create the sprint.",
+    "update_failed": "Failed to update the sprint.",
+    "delete_failed": "Failed to delete the sprint.",
+    "assign_failed": "Failed to add issues to the sprint.",
+    "remove_failed": "Failed to remove issues from the sprint."
+  },
+  "toast": {
+    "created": "Sprint created",
+    "updated": "Sprint updated",
+    "deleted": "Sprint deleted",
+    "started": "Sprint started",
+    "completed": "Sprint completed",
+    "reopened": "Sprint reopened",
+    "issues_assigned": "Issues added to sprint",
+    "issues_removed": "Issues removed from sprint"
+  }
+}

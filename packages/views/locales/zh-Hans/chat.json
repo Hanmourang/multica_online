@@ -26,16 +26,69 @@
     "attachment_bind_failed_toast": "消息已发送，但文件未能附加。请稍后重试。",
     "add_tooltip": "添加",
     "upload_file": "图片或文件",
+    "upload_file_hint": "从本机选择图片或文件",
     "project_context": "项目上下文",
+    "project_context_hint": "选中后直接提问，智能体按这个项目回答",
     "change_project_context": "更改项目上下文",
     "remove_project_context": "移除项目上下文",
     "no_projects": "还没有项目",
+    "projects_loading": "正在加载项目…",
+    "projects_error": "项目列表没有加载出来，请稍后再试",
+    "project_search": "搜索项目",
+    "project_no_match": "没有匹配的项目",
+    "project_menu_meta": "{{open}} 项未完成 · {{resources}} 份资料",
+    "project_menu_hint": "选中后直接提问。智能体会先看项目说明、资料和未完成任务，不必先跑命令。",
+    "project_attached_hint": "直接提问即可。例如：这个项目还有哪些未完成的需求？",
+    "project_attached_hint_group": "先 @ 要回答的智能体，再提问。例如：这个项目还有哪些未完成的需求？",
     "project_context_unsupported": "项目描述不会生效——该智能体的守护进程版本过旧，需要升级",
     "page_prototype_mounted": "已挂载原型 {{name}}",
-    "placeholder_named_many": "给 {{name}} 等 {{count}} 个智能体发消息…",
+    "placeholder_named_multiple": "给 {{name}} 等 {{count}} 个智能体发消息…",
     "fanout_ok": "已同时发给 {{count}} 个智能体",
     "fanout_partial": "已发给 {{sent}} 个智能体，{{failed}} 个失败",
     "fanout_failed": "其他智能体发送失败"
+  },
+  "resources": {
+    "add": "任务、需求或文档",
+    "add_hint": "把任务、需求或项目文件放进这条消息",
+    "picker_title": "分享到当前对话",
+    "picker_description": "引用工作区资源，不复制文件；接收者只能查看自己有权限访问的内容。",
+    "search_placeholder": "搜索编号、标题、项目或负责人…",
+    "picker_limit": "最多同时引用 3 项",
+    "picker_cancel": "取消",
+    "picker_add": "添加到输入区",
+    "picker_add_count": "添加 {{count}} 项到输入区",
+    "task": "任务",
+    "requirement": "需求",
+    "document": "文档",
+    "loading": "正在加载资源…",
+    "empty": "没有匹配的资源，试试编号、标题或项目名。",
+    "draft_aria": "此消息附带的资源",
+    "remove": "移除 {{name}}",
+    "unavailable": "资源不可用，或你已不再拥有访问权限。",
+    "denied_task": "你无权查看该任务。",
+    "denied_requirement": "你无权查看该需求。",
+    "denied_document": "你无权查看该文档。",
+    "missing_task": "该任务已不可用。",
+    "missing_requirement": "该需求已不可用。",
+    "missing_document": "该文档已不可用。",
+    "retry": "重试",
+    "goal": "目标：",
+    "stage": "阶段",
+    "subtask_progress": "任务",
+    "assignee": "负责人：",
+    "unassigned": "未分配",
+    "creator": "创建者",
+    "children": "子任务",
+    "more_children": "还有 {{count}} 项",
+    "project": "项目：",
+    "priority": "优先级",
+    "start": "开始",
+    "due": "截止",
+    "open_document": "预览文档",
+    "open_details": "打开详情",
+    "document_preview": "文档预览",
+    "close_preview": "关闭预览",
+    "loading_card": "正在加载共享资源…"
   },
   "queue": {
     "title_other": "{{count}} 条排队消息",
@@ -86,7 +139,16 @@
     "quick_actions_heading": "后续提问",
     "quick_actions_aria": "后续提问建议",
     "quick_actions_regenerate": "重新生成建议",
-    "quick_actions_regenerate_failed": "无法重新生成建议，请重试。"
+    "quick_actions_regenerate_failed": "无法重新生成建议，请重试。",
+    "feedback": {
+      "react": "表情",
+      "reply": "回复",
+      "reply_placeholder": "回复这条消息",
+      "reply_send": "发送",
+      "reply_failed": "回复没有发出去",
+      "react_failed": "表情没有加上",
+      "you": "我"
+    }
   },
   "session_history": {
     "untitled": "无标题",
@@ -225,6 +287,17 @@
       "making_edits": "修改文件",
       "searching_web": "搜索网页",
       "fallback": "处理中"
+    },
+    "group": {
+      "agent_fallback": "Agent",
+      "stages": {
+        "queued": "排队中",
+        "running": "处理中",
+        "waiting": "等待中",
+        "completed": "已完成",
+        "failed": "失败",
+        "blocked": "已阻止"
+      }
     }
   },
   "list": {
@@ -251,6 +324,7 @@
     "rename": "重命名会话",
     "delete": "删除会话",
     "archive": "归档会话",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "group_members": "群成员 {{count}} 人"
   }
 }

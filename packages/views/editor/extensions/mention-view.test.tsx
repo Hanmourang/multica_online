@@ -24,6 +24,9 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/acme/issues/${id}`,
     projectDetail: (id: string) => `/acme/projects/${id}`,
+    memberDetail: (id: string) => `/acme/members/${id}`,
+    agentDetail: (id: string) => `/acme/agents/${id}`,
+    squadDetail: (id: string) => `/acme/squads/${id}`,
   }),
 }));
 
@@ -71,6 +74,52 @@ function renderMention(
 function renderProjectMention(adapter: NavigationAdapter) {
   return renderMention({ type: "project", id: PROJECT_ID, label: "Roadmap" }, adapter);
 }
+
+describe("MentionView actor mention", () => {
+  const MEMBER_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const AGENT_ID = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+
+  it("links a member mention to that member's page", () => {
+    const push = vi.fn();
+    renderMention(
+      { type: "member", id: MEMBER_ID, label: "Ada" },
+      makeAdapter({ push }),
+    );
+
+    const link = screen.getByRole("link", { name: "@Ada" });
+    expect(link).toHaveAttribute("href", `/acme/members/${MEMBER_ID}`);
+
+    expect(fireEvent.click(link)).toBe(false);
+    expect(push).toHaveBeenCalledWith(`/acme/members/${MEMBER_ID}`);
+  });
+
+  it("links an agent mention to that agent's page", () => {
+    const push = vi.fn();
+    renderMention(
+      { type: "agent", id: AGENT_ID, label: "OpenClaw" },
+      makeAdapter({ push }),
+    );
+
+    const link = screen.getByRole("link", { name: "@OpenClaw" });
+    expect(link).toHaveAttribute("href", `/acme/agents/${AGENT_ID}`);
+    fireEvent.click(link);
+    expect(push).toHaveBeenCalledWith(`/acme/agents/${AGENT_ID}`);
+  });
+
+  it("leaves modifier-click to the browser when openInNewTab is absent", () => {
+    const push = vi.fn();
+    renderMention(
+      { type: "member", id: MEMBER_ID, label: "Ada" },
+      makeAdapter({ push }),
+    );
+
+    const defaultNotPrevented = fireEvent.click(screen.getByRole("link", { name: "@Ada" }), {
+      metaKey: true,
+    });
+    expect(defaultNotPrevented).toBe(true);
+    expect(push).not.toHaveBeenCalled();
+  });
+});
 
 describe("MentionView project mention", () => {
   it("renders an anchor carrying the project path", () => {

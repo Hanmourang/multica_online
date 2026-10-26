@@ -1,0 +1,106 @@
+{
+  "title": "스프린트",
+  "subtitle": "프로젝트의 타임박스 작업 단위. 이슈는 백로그에서 스프린트에 추가되며, 완료된 스프린트는 기록으로 보관됩니다.",
+  "status": {
+    "planned": "예정",
+    "active": "진행 중",
+    "completed": "완료"
+  },
+  "filter": {
+    "all": "모든 상태",
+    "by_status": "상태로 필터"
+  },
+  "sidebar": {
+    "search_placeholder": "스프린트 검색",
+    "list_label": "스프린트 목록",
+    "load_failed": "스프린트를 불러오지 못했습니다.",
+    "no_match_search": "\"{{query}}\"와 일치하는 스프린트가 없습니다"
+  },
+  "detail": {
+    "select_hint": "왼쪽에서 스프린트를 선택하면 범위와 진행 상황을 확인할 수 있습니다.",
+    "goal_label": "목표"
+  },
+  "columns": {
+    "name": "스프린트",
+    "dates": "기간",
+    "issues": "이슈",
+    "capacity": "캐파",
+    "progress": "진행률",
+    "actions": "작업"
+  },
+  "actions": {
+    "create": "새 스프린트",
+    "edit": "편집",
+    "delete": "삭제",
+    "start": "시작",
+    "complete": "완료",
+    "reopen": "다시 열기",
+    "add_issues": "이슈 추가",
+    "remove_issue": "스프린트에서 제거",
+    "cancel": "취소",
+    "save": "저장",
+    "create_submit": "스프린트 생성"
+  },
+  "form": {
+    "create_title": "새 스프린트",
+    "edit_title": "스프린트 편집",
+    "name_label": "이름",
+    "name_placeholder": "예: 스프린트 01",
+    "goal_label": "목표 (선택)",
+    "goal_placeholder": "이 타임박스로 달성할 목표",
+    "start_date_label": "시작일",
+    "end_date_label": "종료일",
+    "capacity_label": "캐파 (선택)",
+    "capacity_placeholder": "포인트"
+  },
+  "progress": {
+    "done": "{{done}} / {{total}} 완료",
+    "cancelled": "{{count}}건 취소",
+    "no_members": "이 스프린트에 아직 이슈가 없습니다."
+  },
+  "delete_confirm": {
+    "title": "이 스프린트를 삭제하시나요?",
+    "desc": "예정 상태의 스프린트만 삭제할 수 있습니다. 이슈는 백로그로 돌아가며 삭제되지 않습니다.",
+    "confirm": "삭제",
+    "cancel": "유지"
+  },
+  "backlog": {
+    "title": "백로그",
+    "desc": "어떤 스프린트에도 속하지 않은 프로젝트 이슈.",
+    "add_hint": "스프린트에 추가할 이슈를 선택하세요."
+  },
+  "empty": {
+    "no_sprints": "아직 스프린트가 없습니다. 생성하여 반복 계획를 시작하세요.",
+    "no_match": "현재 필터와 일치하는 스프린트가 없습니다."
+  },
+  "dates": {
+    "unscheduled": "날짜 미설정"
+  },
+  "errors": {
+    "name_required": "스프린트 이름은 필수입니다 (최대 80자).",
+    "date_order": "종료일은 시작일보다 앞설 수 없습니다.",
+    "name_exists": "이 프로젝트에 같은 이름의 스프린트가 이미 있습니다.",
+    "not_planned": "이 스프린트는 예정 상태가 아닙니다.",
+    "not_active": "이 스프린트는 진행 중이 아닙니다.",
+    "not_completed": "이 스프린트는 완료되지 않았습니다.",
+    "sprint_completed": "완료된 스프린트에는 이슈를 추가할 수 없습니다.",
+    "start_failed": "스프린트 시작에 실패했습니다.",
+    "complete_failed": "스프린트 완료를 실패했습니다.",
+    "reopen_failed": "스프린트 다시 열기에 실패했습니다.",
+    "create_failed": "스프린트 생성에 실패했습니다.",
+    "update_failed": "스프린트 업데이트에 실패했습니다.",
+    "delete_failed": "스프린트 삭제에 실패했습니다.",
+    "assign_failed": "이슈 추가에 실패했습니다.",
+    "remove_failed": "이슈 제거에 실패했습니다."
+  },
+  "toast": {
+    "created": "스프린트가 생성되었습니다",
+    "updated": "스프린트가 업데이트되었습니다",
+    "deleted": "스프린트가 삭제되었습니다",
+    "started": "스프린트가 시작되었습니다",
+    "completed": "스프린트가 완료되었습니다",
+    "reopened": "스프린트가 다시 열렸습니다",
+    "issues_assigned": "이슈가 스프린트에 추가되었습니다",
+    "issues_removed": "이슈가 스프린트에서 제거되었습니다"
+  }
+}

@@ -33,6 +33,7 @@ import {
   archiveFileUrl,
   collectRelativeScripts,
   collectRelativeStylesheets,
+  inlineHtmlRelativeAssets,
   inlineRelativeScripts,
   inlineRelativeStylesheets,
   resolveRelativeRelPath,
@@ -156,10 +157,13 @@ async function withInlinedStyles(hit: LocalPreviewHit): Promise<LocalPreviewHit>
     return { ...hit, text: stripRemotePreviewAssets(hit.text) };
   }
   const files: Record<string, string> = {};
+  // 先落成 const：闭包里对 hit.root / hit.relPath 的收窄会丢失（属性可变）。
+  const root = hit.root;
+  const relPath = hit.relPath;
   await Promise.all(
     [...hrefs, ...scripts].map(async (href) => {
-      const assetPath = resolveRelativeRelPath(hit.relPath, href);
-      const asset = await readAt(hit.root, assetPath);
+      const assetPath = resolveRelativeRelPath(relPath, href);
+      const asset = await readAt(root, assetPath);
       if (asset) files[href] = asset.text;
     }),
   );
@@ -287,16 +291,8 @@ export function useArchivePreviewSource({
     enabled: snapshotEnabled,
   });
 
-  const attachmentTextQuery = useQuery({
-    queryKey: ["archive-preview-attachment-text", attachmentId],
-    enabled: enabled && Boolean(attachmentId) && kind !== "image" && kind !== "html",
-    queryFn: async () => {
-      const { text } = await api.getAttachmentTextContent(attachmentId!);
-      return text;
-    },
-    retry: false,
-  });
-
+  // 本机可读判定必须先于 attachment 文本查询：HTML 在桌面端（或已选过目录）
+  // 优先本机磁盘，不并发取快照文本；Web 端没有静默磁盘访问能力，只能靠快照文本。
   const canReadLocal =
     Boolean(artifact) &&
     kind !== "image" &&
@@ -318,6 +314,65 @@ export function useArchivePreviewSource({
     retry: false,
     staleTime: 5 * 60_000,
     placeholderData: keepPreviousData,
+  });
+
+  // 本机目录对不上（档案绑在代码仓、原型在 projects_mgmt）时，改用已归档的
+  // HTML 正文，并把同目录 CSS / JS 附件嵌进去，srcdoc 才能按原型图渲染。
+  const htmlNeedsSnapshot =
+    kind === "html" &&
+    !localQuery.data &&
+    !queryOpening(localEnabled, localQuery);
+  const attachmentTextEnabled =
+    enabled &&
+    Boolean(attachmentId) &&
+    kind !== "image" &&
+    (kind !== "html" || htmlNeedsSnapshot);
+
+  const attachmentTextQuery = useQuery({
+    queryKey: ["archive-preview-attachment-text", attachmentId],
+    enabled: attachmentTextEnabled,
+    queryFn: async () => {
+      const { text } = await api.getAttachmentTextContent(attachmentId!);
+      return text;
+    },
+    retry: false,
+  });
+
+  const snapshotHtml =
+    kind === "html" && attachmentTextQuery.data ? attachmentTextQuery.data : null;
+  const inlineEnabled =
+    enabled &&
+    Boolean(snapshotHtml) &&
+    Boolean(projectId) &&
+    Boolean(artifact) &&
+    !localQuery.data;
+  const inlineQuery = useQuery({
+    queryKey: ["archive-preview-html-assets", projectId, artifactId, attachmentId],
+    enabled: inlineEnabled,
+    retry: false,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const listed = await api.listProjectArtifacts(projectId);
+      const byPath = new Map(
+        listed.artifacts.map((item) => [item.rel_path.replace(/\\/g, "/"), item]),
+      );
+      return inlineHtmlRelativeAssets(snapshotHtml!, artifact!.rel_path, async (resolved) => {
+        const norm = resolved.replace(/\\/g, "/");
+        const match =
+          byPath.get(norm) ??
+          listed.artifacts.find((item) => {
+            const path = item.rel_path.replace(/\\/g, "/");
+            return path.endsWith(`/${norm}`) || norm.endsWith(`/${path}`);
+          });
+        if (!match?.attachment_id) return null;
+        try {
+          const { text } = await api.getAttachmentTextContent(match.attachment_id);
+          return text;
+        } catch {
+          return null;
+        }
+      });
+    },
   });
 
   if (!enabled || !artifact) return { status: "idle" };
@@ -355,20 +410,26 @@ export function useArchivePreviewSource({
         url: snapshot.attachment_url,
       };
     }
-    if (queryOpening(enabled && Boolean(attachmentId) && kind !== "image", attachmentTextQuery)) {
+    if (queryOpening(attachmentTextEnabled, attachmentTextQuery)) {
       return { status: "loading" };
     }
     if (attachmentTextQuery.data) {
+      if (kind === "html" && queryOpening(inlineEnabled, inlineQuery) && !inlineQuery.data) {
+        return { status: "loading" };
+      }
       return {
         status: "ready",
         kind,
         from: "attachment",
-        text: attachmentTextQuery.data,
+        // 附件正文接口一律回 text/plain + nosniff，不能当 iframe.src；
+        // HTML 交给 srcdoc iframe。相对样式和脚本从同项目档案嵌进正文。
+        text:
+          kind === "html"
+            ? (inlineQuery.data ?? stripRemotePreviewAssets(attachmentTextQuery.data))
+            : attachmentTextQuery.data,
       };
     }
-    if (kind === "html") {
-      // 附件接口是 text/plain + nosniff，不能当 iframe.src；继续试本地。
-    } else {
+    if (kind !== "html") {
       return {
         status: "ready",
         kind: kind === "markdown" ? "text" : kind,
@@ -376,6 +437,8 @@ export function useArchivePreviewSource({
         url: snapshot.attachment_url,
       };
     }
+    // html 且快照文本拿不到（413 超限 / 415 类型拒绝）：继续试本机目录，
+    // 都失败才落 unavailable。
   }
 
   if (queryOpening(snapshotEnabled, snapshotQuery)) return { status: "loading" };

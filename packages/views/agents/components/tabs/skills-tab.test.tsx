@@ -41,6 +41,7 @@ vi.mock("@multica/core/hooks", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     listSkills: (...args: unknown[]) => mockListSkills(...args),
+    listBuiltinSkills: () => Promise.resolve([]),
     getSkill: (...args: unknown[]) => mockGetSkill(...args),
     setAgentSkills: vi.fn(),
     setAgentSkillEnabled: (...args: unknown[]) => mockSetAgentSkillEnabled(...args),

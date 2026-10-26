@@ -26,16 +26,69 @@
     "attachment_bind_failed_toast": "메시지는 보냈지만 파일이 첨부되지 않았습니다. 잠시 후 다시 시도해 주세요.",
     "add_tooltip": "추가",
     "upload_file": "이미지 또는 파일",
+    "upload_file_hint": "이 기기에서 이미지나 파일을 고릅니다",
     "project_context": "프로젝트 컨텍스트",
+    "project_context_hint": "고르면 이 프로젝트에 대해 바로 질문합니다",
     "change_project_context": "프로젝트 컨텍스트 변경",
     "remove_project_context": "프로젝트 컨텍스트 제거",
     "no_projects": "아직 프로젝트가 없습니다",
+    "projects_loading": "프로젝트를 불러오는 중…",
+    "projects_error": "프로젝트 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요",
+    "project_search": "프로젝트 검색",
+    "project_no_match": "일치하는 프로젝트가 없습니다",
+    "project_menu_meta": "미완료 {{open}} · 자료 {{resources}}",
+    "project_menu_hint": "선택한 뒤 바로 질문하세요. 에이전트는 설명, 자료, 미완료 작업을 먼저 읽습니다.",
+    "project_attached_hint": "바로 질문하세요. 예: 이 프로젝트에서 아직 열린 요구사항은?",
+    "project_attached_hint_group": "답할 에이전트를 @한 뒤 질문하세요. 예: 이 프로젝트에서 아직 열린 요구사항은?",
     "project_context_unsupported": "프로젝트 설명이 적용되지 않습니다 — 이 에이전트의 데몬 업그레이드가 필요합니다",
     "page_prototype_mounted": "프로토타입 연결됨 · {{name}}",
-    "placeholder_named_many": "{{name}} 등 {{count}}개 에이전트에게 보내기…",
+    "placeholder_named_multiple": "{{name}} 등 {{count}}개 에이전트에게 보내기…",
     "fanout_ok": "{{count}}개 에이전트에게 보냈습니다",
     "fanout_partial": "{{sent}}개 전송, {{failed}}개 실패",
     "fanout_failed": "다른 에이전트에게 보내지 못했습니다"
+  },
+  "resources": {
+    "add": "작업, 요구사항 또는 문서",
+    "add_hint": "작업, 요구사항 또는 프로젝트 파일을 이 메시지에 붙입니다",
+    "picker_title": "이 대화에 공유",
+    "picker_description": "파일을 복사하지 않고 워크스페이스 리소스를 참조합니다. 받는 사람은 접근할 수 있는 내용만 봅니다.",
+    "search_placeholder": "번호, 제목, 프로젝트 또는 담당자 검색…",
+    "picker_limit": "한 번에 최대 3개",
+    "picker_cancel": "취소",
+    "picker_add": "입력창에 추가",
+    "picker_add_count": "{{count}}개를 입력창에 추가",
+    "task": "작업",
+    "requirement": "요구사항",
+    "document": "문서",
+    "loading": "리소스를 불러오는 중…",
+    "empty": "일치하는 리소스가 없습니다. 번호, 제목 또는 프로젝트 이름을 시도해 보세요.",
+    "draft_aria": "이 메시지에 첨부된 리소스",
+    "remove": "{{name}} 제거",
+    "unavailable": "리소스를 사용할 수 없거나 접근 권한이 없습니다.",
+    "denied_task": "이 작업을 볼 수 있는 권한이 없습니다.",
+    "denied_requirement": "이 요구사항을 볼 수 있는 권한이 없습니다.",
+    "denied_document": "이 문서를 볼 수 있는 권한이 없습니다.",
+    "missing_task": "이 작업은 더 이상 사용할 수 없습니다.",
+    "missing_requirement": "이 요구사항은 더 이상 사용할 수 없습니다.",
+    "missing_document": "이 문서는 더 이상 사용할 수 없습니다.",
+    "retry": "다시 시도",
+    "goal": "목표:",
+    "stage": "단계",
+    "subtask_progress": "작업",
+    "assignee": "담당자:",
+    "unassigned": "미할당",
+    "creator": "작성자",
+    "children": "하위 작업",
+    "more_children": "{{count}}개 더 보기",
+    "project": "프로젝트:",
+    "priority": "우선순위",
+    "start": "시작",
+    "due": "마감",
+    "open_document": "문서 미리보기",
+    "open_details": "세부 정보 열기",
+    "document_preview": "문서 미리보기",
+    "close_preview": "미리보기 닫기",
+    "loading_card": "공유 리소스를 불러오는 중…"
   },
   "queue": {
     "title_other": "대기 중인 메시지 {{count}}개",
@@ -86,7 +139,16 @@
     "quick_actions_heading": "후속 질문",
     "quick_actions_aria": "추천 후속 질문",
     "quick_actions_regenerate": "제안 다시 생성",
-    "quick_actions_regenerate_failed": "제안을 다시 생성하지 못했습니다. 다시 시도해 주세요."
+    "quick_actions_regenerate_failed": "제안을 다시 생성하지 못했습니다. 다시 시도해 주세요.",
+    "feedback": {
+      "react": "이모지",
+      "reply": "답장",
+      "reply_placeholder": "이 메시지에 답장",
+      "reply_send": "보내기",
+      "reply_failed": "답장을 보내지 못했습니다",
+      "react_failed": "이모지를 달지 못했습니다",
+      "you": "나"
+    }
   },
   "session_history": {
     "untitled": "제목 없음",
@@ -225,6 +287,17 @@
       "making_edits": "수정 중",
       "searching_web": "웹 검색 중",
       "fallback": "작업 중"
+    },
+    "group": {
+      "agent_fallback": "에이전트",
+      "stages": {
+        "queued": "대기 중",
+        "running": "처리 중",
+        "waiting": "대기 중",
+        "completed": "완료",
+        "failed": "실패",
+        "blocked": "차단됨"
+      }
     }
   },
   "list": {
@@ -251,6 +324,7 @@
     "rename": "이름 변경",
     "delete": "채팅 삭제",
     "archive": "채팅 보관",
-    "unarchive": "채팅 보관 해제"
+    "unarchive": "채팅 보관 해제",
+    "group_members": "멤버 {{count}}명"
   }
 }

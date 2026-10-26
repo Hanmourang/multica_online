@@ -405,6 +405,7 @@
     "prop_due_date": "Due date",
     "prop_project": "Project",
     "prop_module": "Module",
+    "prop_sprint": "Sprint",
     "prop_labels": "Labels",
     "add_property_action": "Add property",
     "prop_created_by": "Created by",
@@ -841,6 +842,13 @@
     "detail_hint": "While a dependency is unfinished the task stays queued; a failed or cancelled dependency needs manual handling before the task proceeds.",
     "waiting_badge": "Waiting for module lock"
   },
+  "sprint": {
+    "picker_label": "Sprint",
+    "picker_search": "Search sprints…",
+    "picker_none": "No sprint (backlog)",
+    "picker_none_hint": "An issue with no sprint stays in the backlog, outside every timebox",
+    "picker_completed_hint": "Completed sprints are frozen — reopen the sprint to add issues"
+  },
   "labels_panel": {
     "intro": "Create and manage labels to categorize issues across your workspace.",
     "new_placeholder": "New label name…",
@@ -1176,7 +1184,9 @@
     "deps_empty": "No blocked_by edges on loaded children",
     "held_by": "held by #{{n}} {{title}}",
     "exec_log": "Execution log →",
-    "exec_log_failed": "View failure →"
+    "exec_log_failed": "View failure →",
+    "gate_blocked": "This project enforces a workflow. Start one and pass its first gate before triggering.",
+    "gate_go": "Open workflows →"
   },
   "acceptance_panel": {
     "title": "Acceptance",

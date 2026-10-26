@@ -1179,6 +1179,8 @@ describe("ChatInput async send", () => {
       undefined,
       expect.any(Function),
       [],
+      undefined,
+      undefined,
     );
     expect(useChatStore.getState().clearInputDraft).not.toHaveBeenCalled();
     await waitFor(() => expect(sendButton!).toBeDisabled());
@@ -1217,7 +1219,15 @@ describe("ChatInput async send", () => {
       await Promise.resolve();
     });
 
-    expect(onSend).toHaveBeenCalledWith("retry me", undefined, expect.any(Function), []);
+    // 末尾两个参数是资源引用（479 消息资源）：本用例不发资源，为 undefined。
+    expect(onSend).toHaveBeenCalledWith(
+      "retry me",
+      undefined,
+      expect.any(Function),
+      [],
+      undefined,
+      undefined,
+    );
     expect(useChatStore.getState().clearInputDraft).not.toHaveBeenCalled();
   });
 
@@ -1264,6 +1274,8 @@ describe("ChatInput async send", () => {
       ["att-persisted"],
       expect.any(Function),
       [attachment],
+      undefined,
+      undefined,
     );
   });
 });
@@ -1515,6 +1527,64 @@ describe("ChatInput send keeps composer focus", () => {
 // `noAgent` because both are true in the reported case — the workspace's only
 // agent is the one this user may no longer run — and "create an agent" would then
 // send them to build a second agent they do not need.
+describe("ChatInput resource drafts", () => {
+  it("submits resource references without requiring text and clears only after acceptance", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    const onResourcesChange = vi.fn();
+    const issue = {
+      id: "issue-1",
+      workspace_id: "ws-1",
+      number: 12,
+      identifier: "MUL-12",
+      title: "Share work in chat",
+      description: null,
+      status: "todo",
+      priority: "high",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      stage: null,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      properties: {},
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    } as const;
+    renderInput({
+      resources: [{ type: "issue", id: issue.id, kind: "task", access: "granted", issue }],
+      onResourcesChange,
+      onSend,
+    });
+
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).not.toBeDisabled();
+    fireEvent.click(sendButton);
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("");
+    expect(onSend.mock.calls[0]![4]).toEqual([{ type: "issue", id: "issue-1", kind: "task" }]);
+    expect(onResourcesChange).toHaveBeenCalledWith([]);
+  });
+
+  it("keeps resource drafts after a rejected send", async () => {
+    const onResourcesChange = vi.fn();
+    renderInput({
+      resources: [{ type: "issue", id: "issue-1", kind: "task", access: "granted" }],
+      onResourcesChange,
+      onSend: vi.fn<ChatInputOnSend>(async () => false),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onResourcesChange).not.toHaveBeenCalled());
+    expect(screen.getByText("issue-1")).toBeInTheDocument();
+  });
+});
+
 describe("ChatInput revoked-access placeholder", () => {
   it("names the revoked permission rather than the archived-session reason", () => {
     renderInput({ disabled: true, agentAccessRevoked: true });

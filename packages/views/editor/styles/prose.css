@@ -424,12 +424,26 @@
   text-decoration: none;
 }
 
-/* Mentions */
+/* Mentions. A person or agent mention is an anchor (see ActorMentionLink) and
+   should read as a link. @all stays a span, so it keeps the emphasis color
+   without an underline. `a.mention` outranks the generic `.mention` rule. */
 .rich-text-editor .mention {
   color: var(--primary);
   font-weight: 600;
   text-decoration: none;
   margin: 0 0.125rem;
+}
+
+.rich-text-editor a.mention {
+  color: var(--brand);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--brand) 40%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.rich-text-editor a.mention:hover {
+  text-decoration-color: var(--brand);
 }
 
 /* Slash command pills */

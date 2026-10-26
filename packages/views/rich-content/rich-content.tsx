@@ -54,6 +54,7 @@ import {
   useAppOrigin,
   useOptionalNavigation,
 } from "../navigation";
+import { ActorMentionLink } from "../common/actor-mention-link";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectMentionCard } from "../projects/components/project-mention-card";
@@ -217,7 +218,7 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   }
 
   if (isMentionHref(href)) {
-    const match = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/);
+    const match = href.match(/^mention:\/\/(member|agent|squad|issue|project|all)\/(.+)$/);
     if (match?.[1] === "issue" && match[2]) {
       // A bare identifier (from the autolink preprocessor) is carried as the id
       // segment; a real mention carries a UUID. Dispatch on the id shape.
@@ -234,7 +235,19 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
     if (match?.[1] === "project" && match[2]) {
       return <ProjectMentionLink projectId={match[2]} label={childrenToLabel(children)} />;
     }
-    // Member / agent / all mentions
+    const actorType = match?.[1];
+    if (
+      (actorType === "member" || actorType === "agent" || actorType === "squad") &&
+      match?.[2]
+    ) {
+      const label = childrenToLabel(children);
+      return (
+        <ActorMentionLink type={actorType} id={match[2]} newTabTitle={label}>
+          {children}
+        </ActorMentionLink>
+      );
+    }
+    // @all and any other mention stay plain emphasis — they have no page.
     return <span className="mention">{children}</span>;
   }
 

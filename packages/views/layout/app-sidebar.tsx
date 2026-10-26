@@ -72,7 +72,8 @@ import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
 import { api, ApiError } from "@multica/core/api";
-import { useConfigStore } from "@multica/core/config";
+import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
+import { ASSET_MODULE_FLAG } from "@multica/core/feature-flags";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -117,6 +118,8 @@ type NavKey =
   | "issues"
   | "calendar"
   | "projects"
+  | "assets"
+  | "workflows"
   | "autopilots"
   | "agents"
   | "squads"
@@ -134,6 +137,8 @@ type NavLabelKey =
   | "issues"
   | "calendar"
   | "projects"
+  | "assets"
+  | "workflows"
   | "autopilots"
   | "agents"
   | "squads"
@@ -155,6 +160,12 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "issues", labelKey: "issues" },
   { key: "calendar", labelKey: "calendar" },
   { key: "projects", labelKey: "projects" },
+  // 资产管理（工作区级聚合页）。入口由 asset_module flag 门控（见渲染处），
+  // 与项目 TAB / 需求 drill 同源 flag；server 侧同一 flag 决定 /api/assets/page 注册。
+  { key: "assets", labelKey: "assets" },
+  // 工作流入口暂时不放进侧边栏。路由仍在，恢复时把下面的过滤条件改回
+  // workflow_module flag。
+  { key: "workflows", labelKey: "workflows" },
   { key: "autopilots", labelKey: "autopilots" },
   { key: "agents", labelKey: "agents" },
   { key: "squads", labelKey: "squads" },
@@ -222,6 +233,7 @@ function SortablePinItem({
       <SidebarMenuButton
         size="sm"
         isActive={isActive}
+        tooltip={label}
         render={<AppLink href={href} newTabTitle={label} draggable={false} />}
         onClick={(event) => {
           if (wasDragged.current) {
@@ -247,7 +259,7 @@ function SortablePinItem({
         <Tooltip>
           <TooltipTrigger
             render={<span role="button" />}
-            className="hidden size-2.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/pin:flex hover:text-foreground"
+            className="hidden size-2.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/pin:flex hover:text-foreground group-data-[collapsible=icon]:hidden!"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -436,6 +448,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  const assetsEnabled = useFeatureEnabled(ASSET_MODULE_FLAG, false);
 
   // On a phone the sidebar is a Sheet covering the page, so navigating out of
   // it has to dismiss it — otherwise the destination renders underneath and the
@@ -444,7 +457,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   // pinned items, the workspace switcher's programmatic push, and anything
   // added later. `setOpenMobile` is a no-op on desktop, where the sheet is not
   // the sidebar's rendering at all.
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, state } = useSidebar();
+  const sidebarCollapsed = state === "collapsed";
   useEffect(() => {
     setOpenMobile(false);
   }, [pathname, setOpenMobile]);
@@ -595,7 +609,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const createIssueShortcut = useShortcut("createIssue");
 
   return (
-      <Sidebar variant="inset">
+      <Sidebar variant="inset" collapsible="icon">
         {topSlot}
         {/* Workspace Switcher */}
         <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>
@@ -615,10 +629,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
                       </span>
-                      <span className="flex-1 truncate font-medium">
+                      <span className="flex-1 truncate font-medium group-data-[collapsible=icon]:hidden">
                         {workspace?.name ?? "Multica"}
                       </span>
-                      <ChevronDown className="size-3 text-muted-foreground" />
+                      <ChevronDown className="size-3 text-muted-foreground group-data-[collapsible=icon]:hidden" />
                     </SidebarMenuButton>
                   }
                 />
@@ -732,11 +746,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           <SidebarMenu>
             {searchSlot && (
               <SidebarMenuItem>
-                {searchSlot}
+                {/* Icon strip has no vertical room for a second row beside the
+                    workspace avatar — search stays available via ⌘K. */}
+                <div className="group-data-[collapsible=icon]:hidden">
+                  {searchSlot}
+                </div>
               </SidebarMenuItem>
             )}
             <SidebarMenuItem>
               <SidebarMenuButton
+                tooltip={t(($) => $.sidebar.new_issue)}
                 className="text-muted-foreground"
                 onClick={() => useModalStore.getState().open("create-issue")}
               >
@@ -746,7 +765,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 </span>
                 <span>{t(($) => $.sidebar.new_issue)}</span>
                 {createIssueShortcut ? (
-                  <ShortcutKeycaps shortcut={createIssueShortcut} decorative className="pointer-events-none ml-auto" />
+                  <ShortcutKeycaps shortcut={createIssueShortcut} decorative className="pointer-events-none ml-auto group-data-[collapsible=icon]:hidden" />
                 ) : null}
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -762,28 +781,32 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
                   const isActive = isNavActive(pathname, href);
+                  const unread =
+                    item.key === "inbox" ? unreadCount : item.key === "chat" ? chatUnreadCount : 0;
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
+                        tooltip={t(($) => $.nav[item.labelKey])}
                         render={<AppLink href={href} />}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <Icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "inbox" && unreadCount > 0 && (
-                          <CappedNumberFlow
-                            value={unreadCount}
-                            animated={false}
-                            className="ml-auto text-caption"
-                          />
-                        )}
-                        {item.key === "chat" && chatUnreadCount > 0 && (
-                          <CappedNumberFlow
-                            value={chatUnreadCount}
-                            animated={false}
-                            className="ml-auto text-caption"
-                          />
+                        {unread > 0 && (
+                          // The numeric count can't fit the 48px icon strip —
+                          // collapse it to a corner dot; the tooltip carries
+                          // the "there is unread" signal on hover.
+                          sidebarCollapsed ? (
+                            <span className="absolute top-1 right-1 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
+                          ) : (
+                            <CappedNumberFlow
+                              key="count"
+                              value={unread}
+                              animated={false}
+                              className="ml-auto text-caption"
+                            />
+                          )
                         )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -832,7 +855,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
+                {workspaceNav
+                  .filter((item) =>
+                    item.key === "assets"
+                      ? assetsEnabled
+                      : item.key !== "workflows",
+                  )
+                  .map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
                   const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
@@ -840,6 +869,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
+                        tooltip={t(($) => $.nav[item.labelKey])}
                         render={<AppLink href={href} />}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
@@ -865,6 +895,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
+                        tooltip={t(($) => $.nav[item.labelKey])}
                         render={<AppLink href={href} />}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
@@ -882,9 +913,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         <SidebarFooter className="p-2">
           {/* One utility strip: the Discord link takes the leading space the
               help trigger was leaving empty. `justify-end` keeps the trigger
-              right-aligned once the Discord link is dismissed. */}
+              right-aligned once the Discord link is dismissed. The promo row
+              has no place in the icon strip — the help trigger (7px round) does. */}
           <div className="flex items-center justify-end gap-1">
-            <JoinDiscordCard />
+            {!sidebarCollapsed && <JoinDiscordCard />}
             <HelpLauncher />
           </div>
         </SidebarFooter>

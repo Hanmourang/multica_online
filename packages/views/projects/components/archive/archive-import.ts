@@ -39,6 +39,7 @@ const OVERVIEW_CATS = new Set([
   "product-design",
   "architecture",
   "retrospective",
+  "iteration",
 ]);
 const FILING_CATS = new Set(["software-copyright", "patent"]);
 const REQ_KEY_RE = /^REQ-\d{8}-\d{2}$/;
@@ -194,6 +195,8 @@ export function inferDocType(
   if (name.includes("architecture")) return "architecture";
   if (name.includes("research") || name.includes("调研")) return "research";
   if (name.includes("retrospective") || name.includes("复盘")) return "retrospective";
+  // S5 需求迭代（五阶段对齐 plan §6.3）
+  if (name.includes("iteration") || name.includes("迭代")) return "iteration";
   if (name.includes("prototype") || name.endsWith(".html")) return "prototype";
   if (name.startsWith("plan") || name.includes("-plan.")) return "plan";
   if (name.includes("design")) return "design";
@@ -217,7 +220,7 @@ function asArtifactScope(scope: ParsedArchivePath["scope"]): ArtifactScope | nul
 }
 
 function asStage(stage: number | null): ArtifactStage | null {
-  if (stage === 1 || stage === 2 || stage === 3 || stage === 4) return stage;
+  if (stage === 1 || stage === 2 || stage === 3 || stage === 4 || stage === 5) return stage;
   return null;
 }
 

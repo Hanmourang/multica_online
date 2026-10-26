@@ -3,6 +3,8 @@
  * 纯函数，不读磁盘——调用方传入相对路径列表（桌面扫目录或已索引 artifact）。
  */
 
+import { SHELF_DOC_TYPES } from "@multica/core/artifacts";
+import type { ArtifactStage } from "@multica/core/types";
 import { resolveArchiveDocChoice } from "./archive-templates";
 
 export type InspectSeverity = "blocking" | "suggestion";
@@ -16,7 +18,7 @@ export interface InspectFinding {
   fix?: {
     docType: string;
     scope: "project" | "requirement";
-    stage: 1 | 2 | 3 | 4 | null;
+    stage: ArtifactStage | null;
     requirementKey?: string;
     filename: string;
   };
@@ -26,7 +28,7 @@ export interface ChecklistItem {
   id: string;
   doc_type: string;
   scope: "project" | "requirement";
-  stage: 1 | 2 | 3 | 4 | null;
+  stage: ArtifactStage | null;
   severity: "required" | "recommended";
   filename_pattern: string;
   description: string;
@@ -171,12 +173,8 @@ export const ARCHIVE_CHECKLIST: ChecklistItem[] = [
   },
 ];
 
-const OVERVIEW_CATS = new Set([
-  "research",
-  "product-design",
-  "architecture",
-  "retrospective",
-]);
+// 五货架类目从 Core placement 派生（五阶段对齐 plan §6.3）。
+const OVERVIEW_CATS = new Set<string>(SHELF_DOC_TYPES);
 const FILING_CATS = new Set(["software-copyright", "patent"]);
 const REQ_KEY_RE = /^REQ-\d{8}-\d{2}$/;
 const STAGE_RE = /^s(\d+)-/;
@@ -319,7 +317,7 @@ export function parseArchivePath(rel: string): ParsedArchivePath {
     const cat = rest[1];
     if (cat && !OVERVIEW_CATS.has(cat)) {
       result.errors.push(
-        `overview 类目 '${cat}' 非法，应为 research / product-design / architecture / retrospective`,
+        `overview 类目 '${cat}' 非法，应为 research / product-design / architecture / retrospective / iteration`,
       );
     } else if (cat) {
       result.docTypeHint = cat;
@@ -339,8 +337,8 @@ export function parseArchivePath(rel: string): ParsedArchivePath {
       const match = STAGE_RE.exec(stagePart);
       if (match) {
         const n = Number(match[1]);
-        if (n < 1 || n > 4) {
-          result.errors.push(`stage 越界 s${n}，仅允许 s1..s4`);
+        if (n < 1 || n > 5) {
+          result.errors.push(`stage 越界 s${n}，仅允许 s1..s5`);
         } else {
           result.stage = n;
         }
@@ -551,7 +549,7 @@ function defaultFilename(item: ChecklistItem): string {
 export function suggestedRelPath(input: {
   scope: "project" | "requirement" | "shared";
   docType: string;
-  stage?: 1 | 2 | 3 | 4 | null;
+  stage?: ArtifactStage | null;
   requirementKey?: string | null;
   filename: string;
 }): string {
@@ -579,7 +577,9 @@ export function suggestedRelPath(input: {
         ? "plan"
         : input.stage === 3
           ? "execution"
-          : "acceptance";
+          : input.stage === 5
+            ? "iteration"
+            : "acceptance";
   return `requirements/${key}/s${input.stage}-${slug}/${file}`;
 }
 

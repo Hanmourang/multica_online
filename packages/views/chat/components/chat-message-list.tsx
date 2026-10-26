@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { Virtuoso, type Components, type VirtuosoHandle } from "react-virtuoso";
@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { RichContent } from "../../rich-content";
 import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -39,14 +40,25 @@ import type { AgentAvailability } from "@multica/core/agents";
 import { resolveFailureReasonKey } from "@multica/core/agents";
 import type {
   ChatMessage,
+  ChatMessageDispatch,
+  ChatParticipant,
   ChatPendingTask,
   ChatQuickAction,
+  ConversationKind,
+  GroupPendingAgentTask,
   TaskMessagePayload,
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { buildTimeline } from "../../common/task-transcript";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
+import {
+  GroupDispatchPills,
+  GroupPendingPills,
+  visibleGroupPendingTasks,
+} from "./group-pending-pills";
+import { ChatMessageFeedback } from "./chat-message-feedback";
+import { ChatMessageResources } from "./chat-message-resources";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
@@ -89,6 +101,23 @@ interface ChatMessageListProps {
    * that reply until chat:quick_actions resolves it.
    */
   quickActionsPendingMessageId?: string | null;
+  /**
+   * Conversation kind (plan 20261025). For `agent` sessions the legacy
+   * role-based bubble side is preserved untouched. For `dm`/`group`, every
+   * human message is persisted with `role: "user"`, so the side a bubble lands
+   * on is decided by author attribution (`author_id === currentUserId`) rather
+   * than role — otherwise both participants would render as "self".
+   */
+  conversationKind?: ConversationKind;
+  /** Current user's id — the reference for DM/Group left/right attribution. */
+  currentUserId?: string;
+  /**
+   * Group agent-id → display name for the parallel-dispatch pills, resolved
+   * by the caller from the roster (session.participants / participants
+   * query) — the list stays agnostic of where the roster came from.
+   */
+  groupAgentNames?: Map<string, string>;
+  participants?: ChatParticipant[];
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -109,6 +138,9 @@ interface ChatListContext {
   pendingTask: ChatPendingTask | null | undefined;
   liveTaskMessages: readonly TaskMessagePayload[] | undefined;
   availability: AgentAvailability | undefined;
+  /** Group parallel-dispatch set — empty/undefined renders nothing (§6). */
+  groupPendingTasks: GroupPendingAgentTask[] | undefined;
+  groupAgentNames: Map<string, string> | undefined;
 }
 
 /**
@@ -119,14 +151,26 @@ interface ChatListContext {
  * Mermaid diagram or HTML iframe mounted across task completion.
  */
 type ChatRenderItem =
-  | { key: string; kind: "message"; message: ChatMessage; taskId: string | null }
-  | { key: string; kind: "live"; taskId: string };
+  | { key: string; kind: "message"; message: ChatMessage; taskId: string | null; showDay: boolean }
+  | { key: string; kind: "live"; taskId: string; agentId?: string };
 
 /**
  * Row key for a persisted message. Assistant turns carrying a task_id key on
  * the task so they can inherit the live row; everything else keys on its own
  * id.
  */
+function localDayKey(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function messageClock(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
 function messageRowKey(message: ChatMessage): string {
   return message.role === "assistant" && message.task_id
     ? `task:${message.task_id}`
@@ -185,6 +229,10 @@ export function ChatMessageList({
   quickActionsDisabled = false,
   onRegenerateQuickActions,
   quickActionsPendingMessageId = null,
+  conversationKind = "agent",
+  currentUserId,
+  groupAgentNames,
+  participants,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -208,6 +256,65 @@ export function ChatMessageList({
   const fadeStyle = useScrollFade(scrollRef, 16);
 
   const pendingTaskId = pendingTask?.task_id ?? null;
+  // Group fan-out runs N tasks in parallel and the response carries no root
+  // task_id, so the legacy single-task pill never fires for a group — the
+  // per-agent stages render in its place (§6).
+  const isGroupConversation = conversationKind === "group";
+  const groupPendingTasks = isGroupConversation
+    ? visibleGroupPendingTasks(pendingTask?.agent_tasks, messages)
+    : undefined;
+  const pendingByMessageId = useMemo(() => {
+    const map = new Map<string, GroupPendingAgentTask[]>();
+    for (const task of groupPendingTasks ?? []) {
+      let triggerId: string | undefined;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i];
+        if (!message || message.role !== "user") continue;
+        const mentioned =
+          message.content.includes(task.agent_id) ||
+          message.mentions?.some((mention) => mention.type === "agent" && mention.id === task.agent_id);
+        if (mentioned) {
+          triggerId = message.id;
+          break;
+        }
+      }
+      if (!triggerId) continue;
+      const list = map.get(triggerId) ?? [];
+      list.push(task);
+      map.set(triggerId, list);
+    }
+    return map;
+  }, [groupPendingTasks, messages]);
+
+  // Persisted per-agent fan-out outcomes, keyed by the message that triggered
+  // the fan-out. The persisted row records the whole life cycle, but it lags
+  // the daemon while the task is still running, so a live pending task with
+  // the same id overrides the persisted status. The live set comes from
+  // `visibleGroupPendingTasks`, which already drops tasks whose reply is on
+  // screen, so a settled task falls back to its persisted outcome.
+  const dispatchByMessageId = useMemo(() => {
+    const map = new Map<string, ChatMessageDispatch[]>();
+    const liveStatus = new Map<string, string>();
+    for (const task of groupPendingTasks ?? []) {
+      liveStatus.set(task.task_id, task.status);
+    }
+    for (const message of messages) {
+      const dispatches = message.dispatches;
+      if (!dispatches?.length) continue;
+      map.set(
+        message.id,
+        dispatches.map((dispatch) => {
+          const live = dispatch.task_id
+            ? liveStatus.get(dispatch.task_id)
+            : undefined;
+          return live && live !== dispatch.status
+            ? { ...dispatch, status: live }
+            : dispatch;
+        }),
+      );
+    }
+    return map;
+  }, [messages, groupPendingTasks]);
 
   // The session's newest assistant turn — the only one whose quick actions can
   // be refreshed (regeneration resumes the newest provider state). Computed off
@@ -260,19 +367,41 @@ export function ChatMessageList({
   // for Mika's first task, not something the member typed, so it never becomes
   // a visible bubble.
   const renderItems: ChatRenderItem[] = useMemo(() => {
+    let previousDay = "";
     const items: ChatRenderItem[] = messages
       .filter((message) => message.message_kind !== "onboarding_kickoff")
-      .map((message) => ({
-        key: messageRowKey(message),
-        kind: "message" as const,
-        message,
-        taskId: message.task_id ?? null,
-      }));
-    if (hasLive && pendingTaskId) {
+      .map((message) => {
+        const day = localDayKey(message.created_at);
+        const showDay = day !== "" && day !== previousDay;
+        if (day) previousDay = day;
+        return {
+          key: messageRowKey(message),
+          kind: "message" as const,
+          message,
+          taskId: message.task_id ?? null,
+          showDay,
+        };
+      });
+    const persistedTaskIds = new Set(
+      items.flatMap((item) => (item.kind === "message" && item.taskId ? [item.taskId] : [])),
+    );
+    const liveTaskIds = new Set<string>();
+    if (hasLive && pendingTaskId && !persistedTaskIds.has(pendingTaskId)) {
+      liveTaskIds.add(pendingTaskId);
       items.push({ key: `task:${pendingTaskId}`, kind: "live", taskId: pendingTaskId });
     }
+    for (const task of groupPendingTasks ?? []) {
+      if (!task.task_id || persistedTaskIds.has(task.task_id) || liveTaskIds.has(task.task_id)) continue;
+      liveTaskIds.add(task.task_id);
+      items.push({
+        key: `task:${task.task_id}`,
+        kind: "live",
+        taskId: task.task_id,
+        agentId: task.agent_id,
+      });
+    }
     return items;
-  }, [messages, hasLive, pendingTaskId]);
+  }, [messages, hasLive, pendingTaskId, groupPendingTasks]);
 
   const firstIndex = renderItems.length > 0 ? firstItemIndex : 0;
   const liveEndKey = renderItems[renderItems.length - 1]?.key ?? null;
@@ -283,6 +412,8 @@ export function ChatMessageList({
     pendingTask,
     liveTaskMessages,
     availability,
+    groupPendingTasks,
+    groupAgentNames,
   };
 
   // Every image in this session, in message order, so opening one lets the
@@ -371,12 +502,17 @@ export function ChatMessageList({
         components={LIST_COMPONENTS}
         itemContent={(_, item) => (
           <div
-            className={cn(CHAT_COLUMN, "py-2")}
+            className={cn(CHAT_COLUMN, "py-2.5")}
             {...(item.key === liveEndKey ? { [LIVE_END_ROW_ATTR]: "" } : {})}
           >
             <MessageBubble
               item={item}
-              isPending={!!pendingTaskId && item.taskId === pendingTaskId}
+              isPending={
+                item.kind === "live" ||
+                (!!item.taskId &&
+                  (item.taskId === pendingTaskId ||
+                    (groupPendingTasks ?? []).some((task) => task.task_id === item.taskId)))
+              }
               transformContent={transformContent}
               onQuickAction={onQuickAction}
               quickActionsDisabled={quickActionsDisabled}
@@ -384,6 +520,20 @@ export function ChatMessageList({
               latestAssistantMessageId={latestAssistantMessageId}
               quickActionsPendingMessageId={quickActionsPendingMessageId}
               starterCardsMessageId={starterCardsMessageId}
+              conversationKind={conversationKind}
+              currentUserId={currentUserId}
+              participants={participants}
+              relatedTasks={
+                item.kind === "message" && item.message.role === "user"
+                  ? pendingByMessageId.get(item.message.id)
+                  : undefined
+              }
+              relatedDispatches={
+                item.kind === "message" && item.message.role === "user"
+                  ? dispatchByMessageId.get(item.message.id)
+                  : undefined
+              }
+              groupAgentNames={groupAgentNames}
             />
           </div>
         )}
@@ -449,6 +599,12 @@ const MessageBubble = memo(function MessageBubble({
   latestAssistantMessageId,
   quickActionsPendingMessageId,
   starterCardsMessageId,
+  conversationKind = "agent",
+  currentUserId,
+  participants,
+  groupAgentNames,
+  relatedTasks,
+  relatedDispatches,
 }: {
   item: ChatRenderItem;
   isPending: boolean;
@@ -459,12 +615,19 @@ const MessageBubble = memo(function MessageBubble({
   latestAssistantMessageId: string | null;
   quickActionsPendingMessageId: string | null;
   starterCardsMessageId: string | null;
+  conversationKind?: ConversationKind;
+  currentUserId?: string;
+  participants?: ChatParticipant[];
+  groupAgentNames?: Map<string, string>;
+  relatedTasks?: GroupPendingAgentTask[];
+  relatedDispatches?: ChatMessageDispatch[];
 }) {
+  const { t: tConv } = useT("conversations");
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
   // so React reconciles rather than remounts at task completion.
   if (item.kind === "live") {
-    return (
+    const live = (
       <AssistantMessage
         taskId={item.taskId}
         isPending={isPending}
@@ -473,36 +636,155 @@ const MessageBubble = memo(function MessageBubble({
         quickActionsDisabled={quickActionsDisabled}
       />
     );
+    if (conversationKind !== "group" && conversationKind !== "dm") {
+      // The row root MUST have the same element type as the persisted
+      // assistant row below (day chip / assistant / feedback). The live →
+      // persisted handoff swaps this row's data in place; a different root
+      // type would unmount the whole subtree and re-render every diagram it
+      // holds (MUL-4922). The nulls keep the three child slots aligned.
+      return (
+        <div>
+          {null}
+          {live}
+          {null}
+        </div>
+      );
+    }
+    const name = (item.agentId && groupAgentNames?.get(item.agentId)) || tConv(($) => $.message.unknown_author);
+    return (
+      <div>
+        {null}
+        <AgentFrame name={name} tag={tConv(($) => $.message.agent_tag)} actorId={item.agentId}>
+          {live}
+        </AgentFrame>
+        {null}
+      </div>
+    );
   }
 
   const { message } = item;
+  const isConversation = conversationKind === "dm" || conversationKind === "group";
+  const day = item.showDay ? <DayChip iso={message.created_at} /> : null;
 
-  if (message.role === "user") {
+  if (message.author_type === "system") {
     return (
-      <div className="flex justify-end">
-        <div className="rounded-2xl bg-muted px-3.5 py-2 text-body max-w-[80%] break-words">
-          {/* User messages are authored as markdown in ContentEditor, so they
-           * render through the SAME RichContent as assistant replies and as
-           * Issue/Comment — a Mermaid fence a user pastes is a diagram here
-           * too. `compact` trims the leading/trailing block margins so a
-           * single-line bubble stays as tight as the plain-text version. */}
-          <RichContent
-            content={visiblePageSurfaceContent(message.content)}
-            attachments={message.attachments}
-            density="compact"
-            phase="settled"
-          />
-          <AttachmentList
-            attachments={message.attachments}
-            content={visiblePageSurfaceContent(message.content)}
-            className="mt-1.5"
-          />
+      <div>
+        {day}
+        <div className="flex items-center gap-3 px-6 text-caption text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          <span>{visiblePageSurfaceContent(message.content)}</span>
+          <span className="h-px flex-1 bg-border" />
         </div>
       </div>
     );
   }
 
-  return (
+  if (message.role === "user") {
+    // Agent sessions have exactly one human author, so every `role: "user"`
+    // message is the current user's — keep the legacy right-aligned bubble
+    // untouched (zero regression). dm/group persist every human message as
+    // `role: "user"` too, but there are several authors: the side is decided
+    // by author attribution. A missing author id stays on the left as unknown
+    // instead of being painted as the current user.
+    const isSelf = !isConversation
+      ? true
+      : Boolean(message.author_id && currentUserId && message.author_id === currentUserId);
+    const author = participants?.find((participant) => participant.participant_id === message.author_id);
+    const authorName = author?.display_name || tConv(($) => $.message.unknown_author);
+    const clock = messageClock(message.created_at);
+    const content = visiblePageSurfaceContent(message.content);
+    const hasContentBubble = content.trim().length > 0 || (message.attachments?.length ?? 0) > 0;
+    const tasksForMessage = relatedTasks ?? [];
+    // A task that is still in flight already renders as a live pill below.
+    // Rendering its persisted dispatch row as well would duplicate it, and the
+    // persisted label lags the live one (the row settles only when the task
+    // does), so the stale status would be the one the reader sees.
+    const liveTaskIds = new Set(tasksForMessage.map((task) => task.task_id));
+    const dispatchRows = (relatedDispatches ?? []).filter(
+      (dispatch) => !dispatch.task_id || !liveTaskIds.has(dispatch.task_id),
+    );
+    return (
+      <div>
+        {day}
+        <div className={cn("flex w-full items-start gap-2.5", isSelf ? "justify-end" : "justify-start")}>
+          {isConversation && !isSelf && (
+            <MessageAvatar
+              actorType="member"
+              actorId={message.author_id || undefined}
+              name={authorName}
+              avatarUrl={author?.avatar_url}
+            />
+          )}
+          <div className={cn("flex max-w-[min(78%,620px)] flex-col", isSelf ? "items-end" : "items-start")}>
+            {isConversation && !isSelf && (
+              <span className="mb-1 flex items-center gap-1.5 px-1 text-micro text-muted-foreground">
+                <span className="font-medium text-foreground">{authorName}</span>
+                <span className="rounded bg-muted px-1">{tConv(($) => $.message.member_tag)}</span>
+                {clock && <time>{clock}</time>}
+              </span>
+            )}
+            {hasContentBubble && (
+              <div
+                className={cn(
+                  "rounded-2xl px-3.5 py-2 text-body break-words text-foreground",
+                  isConversation && isSelf
+                    ? "rounded-tr-md border border-border bg-card"
+                    : isConversation
+                      ? "rounded-tl-md border border-border bg-card"
+                      : "bg-muted",
+                )}
+              >
+                <RichContent
+                  content={content}
+                  attachments={message.attachments}
+                  density="compact"
+                  phase="settled"
+                />
+                <AttachmentList
+                  attachments={message.attachments}
+                  content={content}
+                  className="mt-1.5"
+                />
+              </div>
+            )}
+            <ChatMessageResources message={message} />
+            <ChatMessageFeedback
+              message={message}
+              currentUserId={currentUserId}
+              participants={participants}
+              allowCompose={!isSelf}
+            />
+            {tasksForMessage.length > 0 && (
+              <div className="mt-1.5">
+                <GroupPendingPills tasks={tasksForMessage} agentNames={groupAgentNames} variant="dock" />
+              </div>
+            )}
+            {dispatchRows.length > 0 && (
+              <div className="mt-1.5">
+                <GroupDispatchPills dispatches={dispatchRows} agentNames={groupAgentNames} />
+              </div>
+            )}
+            {isConversation && isSelf && clock && (
+              <div className="mt-1 px-1 text-micro text-muted-foreground">
+                {tConv(($) => $.message.sent)} · {clock}
+              </div>
+            )}
+          </div>
+          {isConversation && isSelf && (
+            <MessageAvatar
+              actorType="member"
+              actorId={currentUserId}
+              name={authorName}
+              avatarUrl={author?.avatar_url}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const agentAuthor = participants?.find((participant) => participant.participant_id === message.author_id);
+  const assistant = (
     <AssistantMessage
       taskId={message.task_id ?? null}
       message={message}
@@ -516,7 +798,125 @@ const MessageBubble = memo(function MessageBubble({
       showStarterCards={message.id === starterCardsMessageId}
     />
   );
+  const feedback = (
+    <ChatMessageFeedback
+      message={message}
+      currentUserId={currentUserId}
+      participants={participants}
+      allowCompose
+    />
+  );
+  if (!isConversation) {
+    return (
+      <div>
+        {day}
+        {assistant}
+        {feedback}
+      </div>
+    );
+  }
+  const agentName = agentAuthor?.display_name || tConv(($) => $.message.unknown_author);
+  return (
+    <div>
+      {day}
+      <AgentFrame
+        name={agentName}
+        tag={tConv(($) => $.message.agent_tag)}
+        time={messageClock(message.created_at)}
+        actorId={message.author_id || undefined}
+      >
+        {assistant}
+      </AgentFrame>
+      <div className="pl-11">{feedback}</div>
+    </div>
+  );
 });
+
+function MessageAvatar({
+  actorType,
+  actorId,
+  name,
+  avatarUrl,
+}: {
+  actorType: "member" | "agent";
+  actorId?: string;
+  name: string;
+  avatarUrl?: string | null;
+}) {
+  if (actorId) {
+    return (
+      <ActorAvatar
+        actorType={actorType}
+        actorId={actorId}
+        name={name}
+        avatarUrl={avatarUrl}
+        size="lg"
+        enableHoverCard
+        profileLink={false}
+        className="shrink-0"
+      />
+    );
+  }
+  const letter = name.trim().slice(0, 1) || "?";
+  return (
+    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-micro font-semibold">
+      {letter}
+    </span>
+  );
+}
+
+function AgentFrame({
+  name,
+  tag,
+  time,
+  actorId,
+  children,
+}: {
+  name: string;
+  tag: string;
+  time?: string;
+  actorId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex w-full items-start gap-2.5">
+      <MessageAvatar actorType="agent" actorId={actorId} name={name} />
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-1.5 px-1 text-micro text-violet-700">
+          <span className="font-medium">{name}</span>
+          <span className="rounded bg-violet-100 px-1">{tag}</span>
+          {time && <time className="font-normal text-muted-foreground">{time}</time>}
+        </div>
+        <div className="rounded-2xl rounded-tl-md border border-violet-200 border-l-[3px] border-l-violet-400 bg-card px-3.5 py-2.5 text-foreground">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DayChip({ iso }: { iso: string }) {
+  const { t } = useT("conversations");
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const dayStart = new Date(date);
+  dayStart.setHours(0, 0, 0, 0);
+  const diff = Math.round((start.getTime() - dayStart.getTime()) / 86_400_000);
+  const label = diff === 0
+    ? t(($) => $.message.today)
+    : diff === 1
+      ? t(($) => $.message.yesterday)
+      : date.toLocaleDateString();
+  return (
+    <div className="mb-3 flex justify-center">
+      <span className="rounded-full border border-border bg-card px-3 py-0.5 text-micro text-muted-foreground">
+        {label}
+      </span>
+    </div>
+  );
+}
 
 /**
  * Assistant turn body — renders BOTH the in-flight (live) and the persisted
@@ -628,6 +1028,7 @@ function AssistantMessage({
             attachments={message.attachments}
             content={message.content}
           />
+          <ChatMessageResources message={message} />
           <MessageFooter
             message={message}
             timeline={timeline}

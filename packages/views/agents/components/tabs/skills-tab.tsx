@@ -25,8 +25,8 @@ import {
   runtimeDisplayLabel,
 } from "@multica/core/runtimes";
 import {
+  builtinSkillListOptions,
   skillDetailOptions,
-  skillListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -62,7 +62,7 @@ export function SkillsTab({
   const { t } = useT("agents");
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
-  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const { data: platformSkills = [] } = useQuery(builtinSkillListOptions(wsId));
   const canReadRuntime =
     runtime != null && isRuntimeUsableForUser(runtime, currentUserId ?? null);
   const runtimeId =
@@ -150,6 +150,32 @@ export function SkillsTab({
         {t(($) => $.tab_body.skills.intro)}
       </p>
 
+      {platformSkills.length > 0 && (
+        <CapabilitySection
+          title={t(($) => $.tab_body.skills.platform_title)}
+          description={t(($) => $.tab_body.skills.platform_hint)}
+        >
+          <ul className="divide-y rounded-lg border bg-surface-raised/40">
+            {platformSkills.map((skill) => (
+              <li key={skill.id} className="flex items-center gap-3 p-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                  <SkillIcon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-body font-medium">{skill.name}</span>
+                  <span className="block truncate text-caption text-muted-foreground">
+                    {skill.description || t(($) => $.tab_body.skills.no_description)}
+                  </span>
+                </span>
+                <Badge variant="secondary">
+                  {t(($) => $.tab_body.skills.platform_badge)}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        </CapabilitySection>
+      )}
+
       <CapabilitySection
         title={t(($) => $.tab_body.skills.assigned_title)}
         description={t(($) => $.tab_body.skills.assigned_hint)}
@@ -159,7 +185,6 @@ export function SkillsTab({
               variant="outline"
               size="sm"
               onClick={() => setShowAdd(true)}
-              disabled={workspaceSkills.length === 0}
             >
               <Plus className="h-3.5 w-3.5" />
               {t(($) => $.tab_body.skills.add_action)}

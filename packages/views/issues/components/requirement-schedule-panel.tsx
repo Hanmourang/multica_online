@@ -160,6 +160,20 @@ export function RequirementSchedulePanel({
         </li>
       </ul>
 
+      {/* 工作流首门强门控：项目存在 enforce 模板且未过首门时，触发返回 409
+          reason=workflow_gate_not_satisfied，给一条带跳转的引导 banner。 */}
+      {failReason?.includes("workflow_gate_not_satisfied") ? (
+        <div
+          className="mb-2 flex flex-wrap items-center gap-2 rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-600"
+          data-testid="schedule-workflow-gate"
+        >
+          <span>{t(($) => $.schedule_panel.gate_blocked)}</span>
+          <AppLink href={paths.workflows()} className="font-medium underline">
+            {t(($) => $.schedule_panel.gate_go)}
+          </AppLink>
+        </div>
+      ) : null}
+
       {/* 互斥等待：WS3 组锁未释放时派生态为「等待模块释放」。 */}
       {waitingLock && (
         <p

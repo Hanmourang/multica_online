@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { ChatSession } from "@multica/core/types";
 import enChat from "../../locales/en/chat.json";
+import enConversations from "../../locales/en/conversations.json";
 
 const updateMutate = vi.hoisted(() => vi.fn());
 
@@ -21,6 +22,21 @@ vi.mock("@multica/core/chat", () => ({
     selector({ setActiveSession: vi.fn() }),
 }));
 
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "user-1" } }),
+}));
+
+vi.mock("@multica/core/chat/dm", () => ({
+  selectDMPeer: (
+    participants: { participant_type: string; participant_id: string; display_name: string }[] | undefined,
+    currentUserId: string,
+  ) =>
+    participants?.find(
+      (p) => p.participant_type === "member" && p.participant_id !== currentUserId,
+    ),
+}));
+
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));
@@ -31,7 +47,7 @@ vi.mock("../../navigation", () => ({
 
 import { ChatSessionHeader } from "./chat-session-header";
 
-const TEST_RESOURCES = { en: { chat: enChat } };
+const TEST_RESOURCES = { en: { chat: enChat, conversations: enConversations } };
 const RENAME_LABEL = enChat.header.rename;
 const OUTSIDE_LABEL = "Outside control";
 
@@ -178,5 +194,55 @@ describe("ChatSessionHeader rename keyboard behavior", () => {
     expect(updateMutate).not.toHaveBeenCalled();
     expect(screen.queryByRole("textbox", { name: RENAME_LABEL })).not.toBeInTheDocument();
     expect(screen.getByText("Original title")).toBeInTheDocument();
+  });
+});
+
+describe("ChatSessionHeader dm form (plan 20261025)", () => {
+  const dmSession: ChatSession = {
+    ...session,
+    agent_id: "",
+    kind: "dm",
+    title: "Direct message",
+    participants: [
+      {
+        chat_session_id: "session-1",
+        participant_type: "member",
+        participant_id: "user-1",
+        display_name: "Me",
+        admin: false,
+        joined_at: new Date(0).toISOString(),
+        last_read_at: "",
+      },
+      {
+        chat_session_id: "session-1",
+        participant_type: "member",
+        participant_id: "user-2",
+        display_name: "Bob",
+        admin: false,
+        joined_at: new Date(0).toISOString(),
+        last_read_at: "",
+      },
+    ],
+  };
+
+  function renderDm() {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatSessionHeader session={dmSession} agent={null} />
+      </I18nProvider>,
+    );
+  }
+
+  it("renders the peer's display name as the identity subtitle", () => {
+    renderDm();
+    // selectDMPeer skips the viewer (user-1) and returns the other member.
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+  });
+
+  it("hides the rename affordance (DM titles are not editable)", () => {
+    renderDm();
+    // The agent path wires a title-button with the rename tooltip; a DM must
+    // not expose it, so clicking to enter edit mode is impossible.
+    expect(screen.queryByTitle(RENAME_LABEL)).not.toBeInTheDocument();
   });
 });

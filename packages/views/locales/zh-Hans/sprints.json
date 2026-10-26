@@ -1,0 +1,106 @@
+{
+  "title": "迭代",
+  "subtitle": "项目的时间盒工作集合。issue 从待办池纳入迭代；已完成的迭代作为历史归档。",
+  "status": {
+    "planned": "未开始",
+    "active": "进行中",
+    "completed": "已完成"
+  },
+  "filter": {
+    "all": "全部状态",
+    "by_status": "按状态筛选"
+  },
+  "sidebar": {
+    "search_placeholder": "搜索迭代",
+    "list_label": "迭代列表",
+    "load_failed": "迭代加载失败。",
+    "no_match_search": "没有匹配「{{query}}」的迭代"
+  },
+  "detail": {
+    "select_hint": "在左侧选择一个迭代以查看其范围与进度。",
+    "goal_label": "目标"
+  },
+  "columns": {
+    "name": "迭代",
+    "dates": "起止日期",
+    "issues": "工作项",
+    "capacity": "容量",
+    "progress": "进度",
+    "actions": "操作"
+  },
+  "actions": {
+    "create": "新建迭代",
+    "edit": "编辑",
+    "delete": "删除",
+    "start": "开始迭代",
+    "complete": "完成迭代",
+    "reopen": "重新打开",
+    "add_issues": "纳入工作项",
+    "remove_issue": "移出迭代",
+    "cancel": "取消",
+    "save": "保存",
+    "create_submit": "创建迭代"
+  },
+  "form": {
+    "create_title": "新建迭代",
+    "edit_title": "编辑迭代",
+    "name_label": "名称",
+    "name_placeholder": "如：迭代 01",
+    "goal_label": "迭代目标（可选）",
+    "goal_placeholder": "这个时间盒要达成的目标",
+    "start_date_label": "开始日期",
+    "end_date_label": "结束日期",
+    "capacity_label": "容量（可选）",
+    "capacity_placeholder": "点数"
+  },
+  "progress": {
+    "done": "已完成 {{done}} / {{total}}",
+    "cancelled": "已取消 {{count}}",
+    "no_members": "该迭代暂无工作项。"
+  },
+  "delete_confirm": {
+    "title": "删除该迭代？",
+    "desc": "仅未开始的迭代可删除。其工作项回落待办池——不会删除任何工作项。",
+    "confirm": "删除",
+    "cancel": "保留"
+  },
+  "backlog": {
+    "title": "待办池",
+    "desc": "未归属任何迭代的项目工作项。",
+    "add_hint": "勾选要纳入该迭代的工作项。"
+  },
+  "empty": {
+    "no_sprints": "还没有迭代，创建一个开始规划迭代周期。",
+    "no_match": "没有符合当前筛选条件的迭代。"
+  },
+  "dates": {
+    "unscheduled": "未设置日期"
+  },
+  "errors": {
+    "name_required": "迭代名称必填（最多 80 字符）。",
+    "date_order": "结束日期不能早于开始日期。",
+    "name_exists": "项目内已存在同名迭代。",
+    "not_planned": "该迭代不处于未开始状态。",
+    "not_active": "该迭代未在进行中。",
+    "not_completed": "该迭代未完成。",
+    "sprint_completed": "不能向已完成的迭代纳入工作项。",
+    "start_failed": "开始迭代失败。",
+    "complete_failed": "完成迭代失败。",
+    "reopen_failed": "重新打开迭代失败。",
+    "create_failed": "创建迭代失败。",
+    "update_failed": "更新迭代失败。",
+    "delete_failed": "删除迭代失败。",
+    "assign_failed": "纳入工作项失败。",
+    "remove_failed": "移出工作项失败。"
+  },
+  "toast": {
+    "created": "迭代已创建",
+    "updated": "迭代已更新",
+    "deleted": "迭代已删除",
+    "started": "迭代已开始",
+    "completed": "迭代已完成",
+    "reopened": "迭代已重新打开",
+    "issues_assigned": "工作项已纳入迭代",
+    "issues_removed": "工作项已移出迭代"
+  }
+}

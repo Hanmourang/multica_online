@@ -26,16 +26,69 @@
     "attachment_bind_failed_toast": "メッセージは送信されましたが、ファイルを添付できませんでした。しばらくしてからもう一度お試しください。",
     "add_tooltip": "追加",
     "upload_file": "画像・ファイル",
+    "upload_file_hint": "この端末から画像またはファイルを選ぶ",
     "project_context": "プロジェクトコンテキスト",
+    "project_context_hint": "選ぶと、このプロジェクトについて質問できます",
     "change_project_context": "プロジェクトコンテキストを変更",
     "remove_project_context": "プロジェクトコンテキストを削除",
     "no_projects": "プロジェクトがまだありません",
+    "projects_loading": "プロジェクトを読み込み中…",
+    "projects_error": "プロジェクト一覧を読み込めませんでした。しばらくしてから再試行してください",
+    "project_search": "プロジェクトを検索",
+    "project_no_match": "一致するプロジェクトがありません",
+    "project_menu_meta": "未完了 {{open}} · 資料 {{resources}}",
+    "project_menu_hint": "選択後はそのまま質問できます。エージェントは説明、資料、未完了の作業を先に読みます。",
+    "project_attached_hint": "そのまま質問できます。例：このプロジェクトで未完了の要件は？",
+    "project_attached_hint_group": "答えてほしいエージェントを @ してから質問します。例：このプロジェクトで未完了の要件は？",
     "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です",
     "page_prototype_mounted": "プロトタイプを接続 · {{name}}",
-    "placeholder_named_many": "{{name}} など {{count}} 体のエージェントに送信…",
+    "placeholder_named_multiple": "{{name}} など {{count}} 体のエージェントに送信…",
     "fanout_ok": "{{count}} 体のエージェントに送信しました",
     "fanout_partial": "{{sent}} 体に送信、{{failed}} 体は失敗",
     "fanout_failed": "他のエージェントへの送信に失敗しました"
+  },
+  "resources": {
+    "add": "タスク・要件・ドキュメント",
+    "add_hint": "タスク、要件、またはプロジェクトファイルをこのメッセージに添える",
+    "picker_title": "この会話に共有",
+    "picker_description": "ファイルはコピーせず、ワークスペースのリソースを参照します。受信者にはアクセスできる内容だけが表示されます。",
+    "search_placeholder": "番号、タイトル、プロジェクト、担当者で検索…",
+    "picker_limit": "同時に最大 3 件",
+    "picker_cancel": "キャンセル",
+    "picker_add": "入力欄に追加",
+    "picker_add_count": "{{count}} 件を入力欄に追加",
+    "task": "タスク",
+    "requirement": "要件",
+    "document": "ドキュメント",
+    "loading": "リソースを読み込み中…",
+    "empty": "一致するリソースはありません。番号、タイトル、プロジェクト名を試してください。",
+    "draft_aria": "このメッセージに添付されたリソース",
+    "remove": "{{name}} を削除",
+    "unavailable": "このリソースは利用できないか、アクセス権がありません。",
+    "denied_task": "このタスクを表示する権限がありません。",
+    "denied_requirement": "この要件を表示する権限がありません。",
+    "denied_document": "このドキュメントを表示する権限がありません。",
+    "missing_task": "このタスクは利用できなくなりました。",
+    "missing_requirement": "この要件は利用できなくなりました。",
+    "missing_document": "このドキュメントは利用できなくなりました。",
+    "retry": "再試行",
+    "goal": "目標：",
+    "stage": "ステージ",
+    "subtask_progress": "タスク",
+    "assignee": "担当者：",
+    "unassigned": "未割り当て",
+    "creator": "作成者",
+    "children": "子タスク",
+    "more_children": "ほか {{count}} 件",
+    "project": "プロジェクト：",
+    "priority": "優先度",
+    "start": "開始",
+    "due": "期限",
+    "open_document": "ドキュメントをプレビュー",
+    "open_details": "詳細を開く",
+    "document_preview": "ドキュメントプレビュー",
+    "close_preview": "プレビューを閉じる",
+    "loading_card": "共有リソースを読み込み中…"
   },
   "queue": {
     "title_other": "キュー内のメッセージ {{count}} 件",
@@ -86,7 +139,16 @@
     "quick_actions_heading": "フォローアップ質問",
     "quick_actions_aria": "フォローアップの候補",
     "quick_actions_regenerate": "候補を再生成",
-    "quick_actions_regenerate_failed": "候補を再生成できませんでした。もう一度お試しください。"
+    "quick_actions_regenerate_failed": "候補を再生成できませんでした。もう一度お試しください。",
+    "feedback": {
+      "react": "スタンプ",
+      "reply": "返信",
+      "reply_placeholder": "このメッセージに返信",
+      "reply_send": "送信",
+      "reply_failed": "返信を送れませんでした",
+      "react_failed": "スタンプを付けられませんでした",
+      "you": "自分"
+    }
   },
   "session_history": {
     "untitled": "無題",
@@ -225,6 +287,17 @@
       "making_edits": "編集中",
       "searching_web": "ウェブを検索中",
       "fallback": "作業中"
+    },
+    "group": {
+      "agent_fallback": "エージェント",
+      "stages": {
+        "queued": "待機中",
+        "running": "処理中",
+        "waiting": "待機中",
+        "completed": "完了",
+        "failed": "失敗",
+        "blocked": "ブロック"
+      }
     }
   },
   "list": {
@@ -251,6 +324,7 @@
     "rename": "名前を変更",
     "delete": "チャットを削除",
     "archive": "チャットをアーカイブ",
-    "unarchive": "アーカイブを解除"
+    "unarchive": "アーカイブを解除",
+    "group_members": "メンバー {{count}}人"
   }
 }

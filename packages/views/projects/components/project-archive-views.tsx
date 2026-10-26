@@ -8,7 +8,6 @@ import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureEnabled } from "@multica/core/config";
 import { ASSET_MODULE_FLAG, SPRINT_MODULE_FLAG } from "@multica/core/feature-flags";
-import { WORKFLOW_MODULE_FLAG } from "@multica/core/feature-flags";
 import { calendarIssuesOptions } from "@multica/core/issues/queries";
 import { projectArtifactListOptions } from "@multica/core/artifacts/queries";
 import { graphModulesOptions } from "@multica/core/graph/queries";
@@ -50,6 +49,9 @@ const VIEW_QUERY_KEY = "view";
 const REQ_QUERY_KEY = "req";
 const DRILL_QUERY_KEY = "drill";
 const ACCEPT_QUERY_KEY = "acc";
+// 迭代 master-detail 的选中项深链（?view=sprints&sprint=<id>），对标 CoCo
+// /projects/{id}/sprints/{sprint} 的可分享链接形态。
+const SPRINT_QUERY_KEY = "sprint";
 
 function isProjectView(value: string | null): value is ProjectView {
   if (value === "overview" || !value) return false;
@@ -148,13 +150,14 @@ export function ProjectArchiveViews({
   const assetsEnabled = useFeatureEnabled(ASSET_MODULE_FLAG, false);
   // 迭代 TAB 同构门控（plan 20261024 §02）：sprint_module flag off 时不留死 TAB。
   const sprintsEnabled = useFeatureEnabled(SPRINT_MODULE_FLAG, false);
-  // 工作流 TAB 同构双层门控（plan 20261024 §01 F3：flag off 不留死 TAB）。
-  const workflowsEnabled = useFeatureEnabled(WORKFLOW_MODULE_FLAG, false);
+  // 工作流 TAB 暂时不展示。数据与路由保留，入口先从项目里拿掉。
+  const workflowsEnabled = false;
   const navigation = useNavigation();
   const urlView = navigation.searchParams.get(VIEW_QUERY_KEY);
   const urlReq = navigation.searchParams.get(REQ_QUERY_KEY);
   const urlDrill = navigation.searchParams.get(DRILL_QUERY_KEY);
   const urlAcc = navigation.searchParams.get(ACCEPT_QUERY_KEY);
+  const urlSprint = navigation.searchParams.get(SPRINT_QUERY_KEY);
   const allowedViews = viewsForProjectTemplate(template);
 
   const [activeView, setActiveView] = useState<ProjectView>(() =>
@@ -196,10 +199,16 @@ export function ProjectArchiveViews({
           params.delete(DRILL_QUERY_KEY);
         }
         if (view !== "acceptance") params.delete(ACCEPT_QUERY_KEY);
+        if (view !== "sprints") params.delete(SPRINT_QUERY_KEY);
       });
     },
     [allowedViews, replaceParams],
   );
+
+  useEffect(() => {
+    if (workflowsEnabled || activeView !== "workflows") return;
+    selectView("archive");
+  }, [activeView, selectView]);
 
   const openRequirement = useCallback(
     (issueId: string, drill?: string) => {
@@ -210,6 +219,7 @@ export function ProjectArchiveViews({
         if (drill) params.set(DRILL_QUERY_KEY, drill);
         else params.delete(DRILL_QUERY_KEY);
         params.delete(ACCEPT_QUERY_KEY);
+        params.delete(SPRINT_QUERY_KEY);
       });
     },
     [replaceParams],
@@ -225,6 +235,7 @@ export function ProjectArchiveViews({
         else params.delete(ACCEPT_QUERY_KEY);
         params.delete(REQ_QUERY_KEY);
         params.delete(DRILL_QUERY_KEY);
+        params.delete(SPRINT_QUERY_KEY);
       });
     },
     [allowedViews, replaceParams],
@@ -299,6 +310,9 @@ export function ProjectArchiveViews({
 
   const showRequirementDetail =
     activeView === "requirements" && Boolean(urlReq);
+  // 迭代 TAB 是双栏 master-detail，自己持有两列的滚动；容器侧改成满高不滚，
+  // 与 graph 视图同一套 flex 布局前提（侧栏 overflow-y-auto 需父级有界高度）。
+  const isSplitOptions = activeView === "sprints";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -328,13 +342,15 @@ export function ProjectArchiveViews({
         <div
           className={cn(
             "min-h-0 flex-1",
-            isGraphView(activeView) ? "flex flex-col overflow-hidden" : "overflow-y-auto",
+            isGraphView(activeView) || isSplitOptions
+              ? "flex flex-col overflow-hidden"
+              : "overflow-y-auto",
           )}
         >
           <div
             className={cn(
               "w-full",
-              isGraphView(activeView)
+              isGraphView(activeView) || isSplitOptions
                 ? "flex min-h-0 flex-1 flex-col px-4 py-3"
                 : "space-y-4 px-4 py-4",
             )}
@@ -349,8 +365,16 @@ export function ProjectArchiveViews({
               />
             )}
             {activeView === "assets" && <AssetTab projectId={projectId} />}
-            {activeView === "sprints" && <SprintTab projectId={projectId} />}
-            {activeView === "workflows" && <WorkflowTab projectId={projectId} />}
+            {activeView === "sprints" && (
+              <SprintTab
+                projectId={projectId}
+                selectedSprintId={urlSprint}
+                onSelectSprint={(sprintId) =>
+                  replaceParams((params) => params.set(SPRINT_QUERY_KEY, sprintId))
+                }
+              />
+            )}
+            {activeView === "workflows" && workflowsEnabled && <WorkflowTab projectId={projectId} />}
             <GraphViewStack projectId={projectId} activeView={activeView} />
             {activeView === "requirements" &&
               (showRequirementDetail && urlReq ? (

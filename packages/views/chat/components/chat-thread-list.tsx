@@ -11,11 +11,14 @@ import {
   Loader2,
   Pin,
   PinOff,
+  Search,
   Square,
   Trash2,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { CHAT_CONVERSATIONS_FLAG } from "@multica/core/feature-flags";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
 import { api } from "@multica/core/api";
@@ -26,9 +29,12 @@ import {
   useSetChatSessionPinned,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { useAuthStore } from "@multica/core/auth";
+import { selectDMPeer } from "@multica/core/chat/dm";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { visiblePageSurfaceContent } from "../lib/page-surface-context";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { composeGroupFaces, GroupCompositeAvatar } from "./group-composite-avatar";
 import {
   RowActionsMenu,
   handleRowActivationKey,
@@ -58,6 +64,7 @@ function formatChatTime(dateStr: string, locale: string): string {
 function toPreview(content: string): string {
   return visiblePageSurfaceContent(content)
     .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\[([^\]]+)\]\(mention:\/\/[^)]+\)/g, "$1")
     .replace(/[#*`>~]/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -96,6 +103,10 @@ export function ChatThreadList({
   onArchive: (session: ChatSession) => void;
 }) {
   const { t } = useT("chat");
+  const { t: tConv } = useT("conversations");
+  const conversationsEnabled = useFeatureEnabled(CHAT_CONVERSATIONS_FLAG, false);
+  const [railQuery, setRailQuery] = useState("");
+  const [railTab, setRailTab] = useState<"all" | "agent" | "dm" | "group">("all");
   const locale = useLocale();
   const wsId = useWorkspaceId();
   // Null-safe slug (not useWorkspacePaths, which throws): the list renders in
@@ -110,6 +121,7 @@ export function ChatThreadList({
   const openInNewTab = navigation?.openInNewTab;
   const getShareableUrl = navigation?.getShareableUrl;
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
+  const user = useAuthStore((s) => s.user);
 
   // Split the flat cache locally: active chats fill the default history view,
   // archived chats fill the "Archived" view. Both sorted pinned-first (then by
@@ -206,8 +218,16 @@ export function ChatThreadList({
 
   const renderRow = (session: ChatSession) => {
     const isCurrent = session.id === activeSessionId;
-    const agent = agentById.get(session.agent_id) ?? null;
+    const agent = session.agent_id ? agentById.get(session.agent_id) ?? null : null;
     const agentName = agent?.name.trim() || null;
+    // A DM row has no agent binding: its avatar and identity come from the peer
+    // participant (plan 20261025 §6.2). Legacy/agent sessions keep using agent.
+    const isDm = (session.kind ?? "agent") === "dm";
+    const peer = isDm && user?.id ? selectDMPeer(session.participants, user.id) : undefined;
+    // A group row has no single peer to feature: it reads as a named room with
+    // a group glyph avatar (plan 20261025 §6.2). The roster/member count lives
+    // in the settings sheet, not the compact list row.
+    const isGroup = (session.kind ?? "agent") === "group";
     const pendingTask = pendingTaskBySessionId.get(session.id);
     const isRunning = !!pendingTask;
     // Only "offline" (definitively long-offline) downgrades typing → waiting.
@@ -256,9 +276,21 @@ export function ChatThreadList({
         </span>
       );
     } else if (last) {
+      const kind = session.kind ?? "agent";
+      let lead = "";
+      if (kind === "agent") {
+        lead = last.role === "user" ? t(($) => $.list.you_prefix) : "";
+      } else if (last.author_id && user?.id && last.author_id === user.id) {
+        lead = t(($) => $.list.you_prefix);
+      } else if (last.author_type !== "system") {
+        const named = (session.participants ?? []).find(
+          (participant) => participant.participant_id === last.author_id,
+        );
+        if (named?.display_name) lead = `${named.display_name}: `;
+      }
       previewNode = (
         <span className={cn("block truncate", unread > 0 ? "text-foreground" : "text-muted-foreground")}>
-          {last.role === "user" ? t(($) => $.list.you_prefix) : ""}
+          {lead}
           {toPreview(last.content)}
         </span>
       );
@@ -370,6 +402,19 @@ export function ChatThreadList({
             (the fallback's faint bg otherwise looks smaller). */}
         {agent ? (
           <ActorAvatar actorType="agent" actorId={agent.id} size="lg" enableHoverCard className="ring-1 ring-inset ring-border" />
+        ) : peer ? (
+          <ActorAvatar actorType="member" actorId={peer.participant_id} size="lg" enableHoverCard className="ring-1 ring-inset ring-border" />
+        ) : isGroup ? (
+          <GroupCompositeAvatar
+            faces={composeGroupFaces(
+              (session.participants ?? [])
+                .filter((participant) => participant.participant_type === "member")
+                .map((participant) => ({ type: "member", id: participant.participant_id })),
+              (session.participants ?? [])
+                .filter((participant) => participant.participant_type === "agent")
+                .map((participant) => ({ type: "agent", id: participant.participant_id })),
+            )}
+          />
         ) : (
           <span className="size-8 shrink-0" />
         )}
@@ -384,8 +429,26 @@ export function ChatThreadList({
               />
             )}
             <span className={cn("min-w-0 flex-1 truncate text-body", unread > 0 ? "font-semibold text-foreground" : "font-medium")}>
-              {titleText}
+              {isDm && peer?.display_name ? peer.display_name : titleText}
             </span>
+            {conversationsEnabled && (
+              <span
+                className={cn(
+                  "shrink-0 rounded px-1 py-px text-[10px] font-semibold tracking-wide",
+                  isGroup
+                    ? "bg-orange-500/15 text-orange-700 dark:text-orange-300"
+                    : isDm
+                      ? "bg-teal-500/15 text-teal-700 dark:text-teal-300"
+                      : "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+                )}
+              >
+                {isGroup
+                  ? tConv(($) => $.rail.tag_group)
+                  : isDm
+                    ? tConv(($) => $.rail.tag_dm)
+                    : tConv(($) => $.rail.tag_agent)}
+              </span>
+            )}
             <span className="ml-auto shrink-0 text-micro text-muted-foreground">{timeText}</span>
           </div>
 
@@ -515,11 +578,66 @@ export function ChatThreadList({
     </button>
   );
 
-  if (historySessions.length === 0) {
+  const sessionMatches = (session: ChatSession) => {
+    const kind = session.kind ?? "agent";
+    if (conversationsEnabled && railTab !== "all" && kind !== railTab) return false;
+    const q = railQuery.trim().toLowerCase();
+    if (!q) return true;
+    const names = (session.participants ?? []).map((participant) => participant.display_name).join(" ");
+    return `${session.title} ${names} ${session.last_message?.content ?? ""}`.toLowerCase().includes(q);
+  };
+  const visibleHistory = historySessions.filter(sessionMatches);
+  const countKind = (kind: "agent" | "dm" | "group" | "all") =>
+    historySessions.filter((session) => kind === "all" || (session.kind ?? "agent") === kind).length;
+  const railFilters = conversationsEnabled ? (
+    <div className="sticky top-0 z-10 space-y-2 bg-background px-1 pb-2">
+      <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-2.5">
+        <Search className="size-3.5 shrink-0 text-muted-foreground" />
+        <input
+          value={railQuery}
+          onChange={(event) => setRailQuery(event.target.value)}
+          placeholder={tConv(($) => $.rail.search_placeholder)}
+          aria-label={tConv(($) => $.rail.search_placeholder)}
+          className="h-8 w-full bg-transparent text-caption outline-none"
+        />
+      </div>
+      <div role="tablist" className="flex">
+        {(["all", "agent", "dm", "group"] as const).map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            role="tab"
+            aria-selected={railTab === kind}
+            onClick={() => setRailTab(kind)}
+            className={cn(
+              "flex-1 border-b-2 py-1.5 text-micro font-semibold",
+              railTab === kind
+                ? "border-foreground text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {kind === "all"
+              ? tConv(($) => $.rail.tab_all)
+              : kind === "agent"
+                ? tConv(($) => $.rail.tab_agent)
+                : kind === "dm"
+                  ? tConv(($) => $.rail.tab_dm)
+                  : tConv(($) => $.rail.tab_group)}
+            <span className="ml-1 font-normal tabular-nums text-muted-foreground">{countKind(kind)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
+  if (visibleHistory.length === 0) {
     return (
       <>
+        {railFilters}
         <div className="px-2 py-1.5 text-caption text-muted-foreground">
-          {t(($) => $.window.no_previous)}
+          {railQuery.trim() || railTab !== "all"
+            ? tConv(($) => $.rail.no_matches)
+            : t(($) => $.window.no_previous)}
         </div>
         {archivedEntry}
       </>
@@ -528,7 +646,8 @@ export function ChatThreadList({
 
   return (
     <>
-      {historySessions.map(renderRow)}
+      {railFilters}
+      {visibleHistory.map(renderRow)}
       {archivedEntry}
     </>
   );

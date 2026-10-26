@@ -401,6 +401,7 @@
     "prop_due_date": "마감일",
     "prop_project": "프로젝트",
     "prop_module": "모듈",
+    "prop_sprint": "스프린트",
     "prop_labels": "라벨",
     "add_property_action": "속성 추가",
     "prop_created_by": "생성자",
@@ -810,6 +811,13 @@
     "detail_hint": "종속성이 완료되지 않는 동안 작업은 대기 상태를 유지합니다. 종속성이 실패/취소되면 수동 처리 후 자동으로 진행됩니다.",
     "waiting_badge": "모듈 잠금 대기 중"
   },
+  "sprint": {
+    "picker_label": "스프린트",
+    "picker_search": "스프린트 검색…",
+    "picker_none": "스프린트 없음(백로그)",
+    "picker_none_hint": "스프린트가 없는 이슈는 어떤 타임박스에도 속하지 않고 백로그에 남습니다",
+    "picker_completed_hint": "완료된 스프린트는 고정되어 있습니다. 이슈를 추가하려면 다시 여세요"
+  },
   "labels_panel": {
     "intro": "워크스페이스의 태스크를 분류할 라벨을 만들고 관리하세요.",
     "new_placeholder": "새 라벨 이름...",
@@ -1143,7 +1151,9 @@
     "deps_empty": "로드된 하위 작업에 blocked_by가 없습니다",
     "held_by": "held by #{{n}} {{title}}",
     "exec_log": "실행 로그 →",
-    "exec_log_failed": "실패 보기 →"
+    "exec_log_failed": "실패 보기 →",
+    "gate_blocked": "이 프로젝트는 워크플로를 강제합니다. 트리거 전에 워크플로를 시작하고 첫 게이트를 통과하세요.",
+    "gate_go": "워크플로 열기 →"
   },
   "acceptance_panel": {
     "title": "검수",

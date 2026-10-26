@@ -30,7 +30,7 @@ export function takePendingDragIds(raw?: string): string[] {
   return held;
 }
 
-/** 四货架之间改路径：只动 `overview/<shelf>/` 这一段，子目录与文件名原样带走。 */
+/** 五货架之间改路径：只动 `overview/<shelf>/` 这一段，子目录与文件名原样带走。 */
 export function relocateOverviewPath(
   relPath: string,
   toShelf: PlanningShelf,

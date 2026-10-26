@@ -3,7 +3,8 @@
 /**
  * MentionView — NodeView for rendering @mentions inline in the editor.
  *
- * Member/agent mentions: plain "@Name" text with .mention class styling.
+ * Member/agent/squad mentions: the same profile link as readonly content
+ * (ActorMentionLink), so a click opens that actor's page.
  * Issue/project mentions render the same navigable chips as readonly content
  * (IssueMentionCard / ProjectMentionCard), so click behavior — plain click,
  * modifier click, middle click — cannot drift between an editing and a
@@ -20,6 +21,7 @@
 
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
+import { ActorMentionLink } from "../../common/actor-mention-link";
 import { IssueMentionCard } from "../../issues/components/issue-mention-card";
 import { ProjectMentionCard } from "../../projects/components/project-mention-card";
 
@@ -48,6 +50,17 @@ export function MentionView({ node }: NodeViewProps) {
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
         <ProjectMentionCard projectId={id} fallbackLabel={label} />
+      </NodeViewWrapper>
+    );
+  }
+
+  if (type === "member" || type === "agent" || type === "squad") {
+    const text = `@${label ?? id}`;
+    return (
+      <NodeViewWrapper as="span" className="inline">
+        <ActorMentionLink type={type} id={id} newTabTitle={text}>
+          {text}
+        </ActorMentionLink>
       </NodeViewWrapper>
     );
   }

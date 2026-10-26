@@ -110,6 +110,7 @@ export function ArchiveActionDialog({
     { value: "2", label: t(($) => $.browser.stage_s2) },
     { value: "3", label: t(($) => $.browser.stage_s3) },
     { value: "4", label: t(($) => $.browser.stage_s4) },
+    { value: "5", label: t(($) => $.browser.stage_s5) },
   ];
 
   return (

@@ -29,10 +29,18 @@ vi.mock("../issues/hooks", () => ({
 vi.mock("../i18n", async () => {
   const editor = (await import("../locales/en/editor.json")).default;
   const chat = (await import("../locales/en/chat.json")).default;
+  // ChatMessageList resolves author names / member+agent tags from the
+  // conversations namespace, and the feedback/resource rows read chat+issues.
+  // The mock has to carry them: a missing namespace makes every Chat row
+  // throw on the first key lookup.
+  const conversations = (await import("../locales/en/conversations.json")).default;
+  const issues = (await import("../locales/en/issues.json")).default;
+  const agents = (await import("../locales/en/agents.json")).default;
+  const bundles: Record<string, unknown> = { chat, conversations, issues, agents, editor };
   return {
     useT: (ns?: string) => ({
       t: (select: (bundle: Record<string, unknown>) => string) =>
-        select((ns === "chat" ? chat : editor) as Record<string, unknown>),
+        select((bundles[ns ?? ""] ?? editor) as Record<string, unknown>),
     }),
     useTimeAgo: () => "just now",
   };

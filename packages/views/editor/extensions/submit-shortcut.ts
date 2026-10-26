@@ -50,8 +50,19 @@ export function shouldReplayNativeEnter(
  * Tiered-priority dynamic key handler. Suggestion and slash-command plugins
  * get first refusal, while submit still runs before the base editor keymap.
  */
+function isPlainEnter(event: KeyboardEvent): boolean {
+  return (
+    event.key === "Enter" &&
+    !event.shiftKey &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey
+  );
+}
+
 export function createSubmitShortcutExtension(
   onSubmit: () => boolean,
+  options?: { plainEnterAlsoSubmits?: () => boolean },
 ) {
   return Extension.create({
     name: "submitShortcut",
@@ -68,9 +79,18 @@ export function createSubmitShortcutExtension(
             handleKeyDown(view, event) {
               if (replayingEnter) return false;
               const shortcut = getShortcut("send");
+              const plainEnterSubmits = options?.plainEnterAlsoSubmits?.() === true;
+              const composing = view.composing;
 
               if (
-                shouldReplayNativeEnter(event, shortcut, view.composing)
+                plainEnterSubmits &&
+                !composing &&
+                !isImeComposing(event) &&
+                event.key === "Enter" &&
+                event.shiftKey &&
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.altKey
               ) {
                 replayingEnter = true;
                 try {
@@ -80,10 +100,27 @@ export function createSubmitShortcutExtension(
                 }
               }
 
+              if (shouldReplayNativeEnter(event, shortcut, composing)) {
+                replayingEnter = true;
+                try {
+                  return editor.commands.keyboardShortcut("Enter");
+                } finally {
+                  replayingEnter = false;
+                }
+              }
+
+              const plainEnterSend =
+                plainEnterSubmits &&
+                !event.repeat &&
+                !composing &&
+                !isImeComposing(event) &&
+                isPlainEnter(event);
+
               if (
+                !plainEnterSend &&
                 !shouldHandleSubmitShortcut(event, {
                   configuredShortcut: shortcut,
-                  composing: view.composing,
+                  composing,
                 })
               ) {
                 return false;

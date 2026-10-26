@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Database, FolderSearch, FolderTree, GitBranch, Layers, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { clientErrorMessage } from "@multica/core/api";
-import { useDeleteArtifact } from "@multica/core/artifacts";
+import { useDeleteArtifact, ARTIFACT_STAGES } from "@multica/core/artifacts";
 import { projectArtifactListOptions } from "@multica/core/artifacts/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { ProjectArtifact } from "@multica/core/types";
@@ -124,8 +124,8 @@ export function ContractMapping({
 ├── _shared/          handbook · catalog · format · process · archive · inbox
 ├── projects/<key>/
 │   ├── PROJECT.md
-│   ├── overview/{research, product-design, architecture, retrospective}/
-│   ├── requirements/<REQ-KEY>/{s1-prototype, s2-plan, s3-execution, s4-acceptance}/
+│   ├── overview/{research, product-design, architecture, retrospective, iteration}/
+│   ├── requirements/<REQ-KEY>/{s1-prototype, s2-plan, s3-execution, s4-acceptance, s5-iteration}/
 │   └── filing/{software-copyright, patent}/
 └── change_logs/<key>/{plans, daily_logs}/`}
           </pre>
@@ -166,7 +166,7 @@ export function ContractMapping({
               {t(($) => $.mapping.stage_rule)}
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              {[1, 2, 3, 4].map((stage) => (
+              {ARTIFACT_STAGES.map((stage) => (
                 <Badge key={stage} variant="secondary">
                   {`s${stage}`}
                 </Badge>

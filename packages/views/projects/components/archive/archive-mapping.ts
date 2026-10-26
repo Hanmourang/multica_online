@@ -1,10 +1,12 @@
 /**
  * 自动 / 人工映射共用规则。
  * 自动：路径契约 + frontmatter + conflict_policy（与 CLI 同语义）。
- * 人工：画面 3 关联 / inbox 采纳到四货架；改绑定默认写回 frontmatter。
+ * 人工：画面 3 关联 / inbox 采纳到五货架；改绑定默认写回 frontmatter。
+ * 五阶段对齐 plan §6.3：货架集合从 Core placement 派生，不再本地硬编码。
  */
 
 import type { ArtifactSyncItem } from "@multica/core/types";
+import { SHELF_DOC_TYPES } from "@multica/core/artifacts";
 import {
   readArchiveFile,
   writeArchiveFile,
@@ -18,14 +20,11 @@ export type PlanningShelf =
   | "research"
   | "product-design"
   | "architecture"
-  | "retrospective";
+  | "retrospective"
+  | "iteration";
 
-export const PLANNING_SHELVES: PlanningShelf[] = [
-  "research",
-  "product-design",
-  "architecture",
-  "retrospective",
-];
+// 顺序与 Core 五货架一致（S1..S5）。
+export const PLANNING_SHELVES: PlanningShelf[] = SHELF_DOC_TYPES as PlanningShelf[];
 
 export function inferPlanningDocClass(
   docType: string,
@@ -119,6 +118,14 @@ export function suggestInboxAdopt(
     lower.includes("复盘")
   ) {
     return { shelf: "retrospective", docType: "retrospective" };
+  }
+  // S5 需求迭代（五阶段对齐 plan §6.3）
+  if (
+    fm.docType === "iteration" ||
+    lower.includes("iteration") ||
+    lower.includes("迭代")
+  ) {
+    return { shelf: "iteration", docType: "iteration" };
   }
   return {
     shelf: "research",
