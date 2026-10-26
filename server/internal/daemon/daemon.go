@@ -5932,31 +5932,45 @@ func (d *Daemon) localDirectoryPrepareWait(waitCtx context.Context, waitCancel c
 	}
 }
 
-// acquireInPlacePrepareLock is the in-place staging lock with the chat
-// exemption applied.
+// acquirePrepareWindowLock is the per-path prepare mutex with the chat
+// exemption applied, for BOTH windows it guards: the in-place staging writes
+// and the worktree snapshot.
 //
 // Chat turns are excluded from the module lock (acquireModuleLockIfNeeded) and
 // were meant to be excluded from every per-directory queue (#7344: "Serialising
 // it bought nothing and muted the squad leader for the length of every build"),
-// but this prepare window kept them inside one. Every runtime a desktop daemon
-// exposes — one per provider profile — shares a single LocalPathLocker, so an
-// @-mention of a SECOND agent in a group send queued behind the FIRST one's
-// prepare and sat in `waiting_local_directory`: the group rendered "A ·
+// but these prepare windows kept them inside one. Every runtime a desktop
+// daemon exposes — one per provider profile — shares a single LocalPathLocker,
+// so an @-mention of a SECOND agent in a group send queued behind the FIRST
+// one's prepare and sat in `waiting_local_directory`: the group rendered "A ·
 // processing" next to "B · waiting" and read as "the group runs one agent at a
 // time" even though the two runs overlap once both are released.
 //
 // The wait is not short enough to be acceptable either. The mutex was written
-// for a staging write, but in-place prepare is env-root setup + skill
-// materialisation + provider bootstrap, i.e. seconds to tens of seconds, so the
-// sibling waits for all of it.
+// for a staging write, but a prepare is env-root setup + skill materialisation
+// + provider bootstrap, and in worktree mode also a full snapshot replay of the
+// user's directory, i.e. seconds to tens of seconds, so the sibling waits for
+// all of it.
 //
-// What the chat turn skips is only the interlock with a SIBLING PREPARE. Two
-// concurrent chat turns write disjoint provider-native skill trees
-// ({workDir}/.opencode, {workDir}/skills, …) and the same project-scoped
-// resources, and they already run concurrently inside the user's tree with the
-// shared-directory warning the prompt carries — that is the accepted trade of
-// the #7344 exemption, and this is the same trade one step earlier.
-func (d *Daemon) acquireInPlacePrepareLock(prepareCtx context.Context, task Task, assignment *localDirectoryAssignment, taskLog *slog.Logger) (func(), error) {
+// What the chat turn skips is only the interlock with a SIBLING PREPARE, and
+// each mode keeps its own safety net underneath:
+//
+//   - in place: two concurrent chat turns write disjoint provider-native skill
+//     trees ({workDir}/.opencode, {workDir}/skills, …) plus the same
+//     project-scoped resources, and they already run concurrently inside the
+//     user's tree with the shared-directory warning the prompt carries.
+//   - worktree: the snapshot never writes to the user's tree (its index is
+//     private to the task's env root), and every step that touches the repo's
+//     admin state — stale cleanup, prune, branch decision, worktree add — is
+//     already serialised per repository by lockGitRoot inside
+//     PrepareLocalWorktree, cross-process. The sibling waits for that section
+//     instead of for the whole prepare, and the turns themselves are
+//     physically isolated in their own worktrees, which is the point of the
+//     mode.
+//
+// Both are the same trade-off the #7344 exemption already made, one step
+// earlier.
+func (d *Daemon) acquirePrepareWindowLock(prepareCtx context.Context, task Task, assignment *localDirectoryAssignment, taskLog *slog.Logger) (func(), error) {
 	if localDirectoryLockExempt(task) {
 		return func() {}, nil
 	}
@@ -7743,7 +7757,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// the task is queued behind the directory, and without the
 			// poller a task the user cancels keeps its daemon slot pinned
 			// until the prepare timeout.
-			release, lockErr := d.acquireLocalDirectoryPrepareLock(prepareCtx, task, localAssignment, taskLog)
+			//
+			// Chat turns are exempt (see acquirePrepareWindowLock): a group
+			// send that @-mentions two agents must not have the second one
+			// queue behind the first one's snapshot. The repo's admin state
+			// stays safe because PrepareLocalWorktree serialises it on
+			// lockGitRoot.
+			release, lockErr := d.acquirePrepareWindowLock(prepareCtx, task, localAssignment, taskLog)
 			if lockErr != nil {
 				return TaskResult{}, fmt.Errorf("local_directory worktree: wait for a consistent snapshot of %s: %w",
 					localAssignment.AbsPath, lockErr)
@@ -7758,9 +7778,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				prepParams.LocalWorkDir = localAssignment.AbsPath
 				// prepare 短锁：仅覆盖上下文文件/skills 暂存的写入窗口，
 				// 防同目录并发任务的写入撕裂；执行期放开（spec §5）。
-				// 聊天任务豁免（见 acquireInPlacePrepareLock）。
+				// 聊天任务豁免（见 acquirePrepareWindowLock）。
 				// 等待上报复用 MarkTaskWaitingLocalDirectory，与 worktree 快照锁一致。
-				release, lockErr := d.acquireInPlacePrepareLock(prepareCtx, task, localAssignment, taskLog)
+				release, lockErr := d.acquirePrepareWindowLock(prepareCtx, task, localAssignment, taskLog)
 				if lockErr != nil {
 					return TaskResult{}, fmt.Errorf("local_directory prepare: wait for the staging window of %s: %w",
 						localAssignment.AbsPath, lockErr)

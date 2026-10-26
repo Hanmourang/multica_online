@@ -58,27 +58,52 @@ func newPrepareLockTestDaemon(t *testing.T, fake *prepareLockTestServer) *Daemon
 	}
 }
 
-func inPlaceAssignment(path string) *localDirectoryAssignment {
+func prepareWindowAssignment(path, mode string) *localDirectoryAssignment {
 	return &localDirectoryAssignment{
-		Ref:      localDirectoryRef{LocalPath: path, DaemonID: "d-test"},
+		Ref:      localDirectoryRef{LocalPath: path, DaemonID: "d-test", ExecutionMode: mode},
 		AbsPath:  path,
 		RealPath: path,
 	}
 }
 
-// TestInPlacePrepareLockChatTurnExempt pins the group-parallel dispatch
-// invariant: every runtime of one desktop daemon shares one LocalPathLocker,
-// so a second agent @-mentioned in the same group send must not queue behind
-// the first agent's prepare. Before this exemption the sibling parked in
-// waiting_local_directory for the whole of the first turn's prepare, which the
-// group status line rendered as "B · waiting" next to "A · processing".
-func TestInPlacePrepareLockChatTurnExempt(t *testing.T) {
+// TestPrepareWindowLockChatTurnExempt pins the group-parallel dispatch
+// invariant: every runtime of one desktop daemon shares one LocalPathLocker, so
+// a second agent @-mentioned in the same group send must not queue behind the
+// first agent's prepare. Both local_directory modes are covered because the
+// window the daemon takes is chosen by the project resource, and a worktree
+// resource is the common case for a code project — the mode a group chat in
+// this repo actually ran under when the regression was reported. Before this
+// exemption the sibling parked in waiting_local_directory for the whole of the
+// first turn's prepare, which the group status line rendered as "B · waiting"
+// next to "A · processing".
+func TestPrepareWindowLockChatTurnExempt(t *testing.T) {
 	t.Parallel()
+
+	cases := []struct {
+		name string
+		mode string
+	}{
+		{"in_place", localDirectoryModeInPlace},
+		{"worktree", localDirectoryModeWorktree},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assertChatTurnSkipsPrepareWindowLock(t, tc.mode)
+		})
+	}
+}
+
+func assertChatTurnSkipsPrepareWindowLock(t *testing.T, mode string) {
+	t.Helper()
 
 	fake := newPrepareLockTestServer(t)
 	d := newPrepareLockTestDaemon(t, fake)
 	path := t.TempDir()
-	assignment := inPlaceAssignment(path)
+	assignment := prepareWindowAssignment(path, mode)
+	if got := assignment.UsesWorktree(); got != (mode == localDirectoryModeWorktree) {
+		t.Fatalf("UsesWorktree() = %v for mode %q", got, mode)
+	}
 
 	// A coding task holds the user's directory for its staging window.
 	releaseHolder, err := d.localPathLocks.Acquire(context.Background(), path, "task-coding", nil)
@@ -89,7 +114,7 @@ func TestInPlacePrepareLockChatTurnExempt(t *testing.T) {
 	// The group's second chat turn walks straight through.
 	chatDone := make(chan error, 1)
 	go func() {
-		release, lockErr := d.acquireInPlacePrepareLock(context.Background(),
+		release, lockErr := d.acquirePrepareWindowLock(context.Background(),
 			Task{ID: "task-chat", ChatSessionID: "session-group"}, assignment, slog.Default())
 		if release != nil {
 			release()
@@ -102,7 +127,7 @@ func TestInPlacePrepareLockChatTurnExempt(t *testing.T) {
 			t.Fatalf("chat turn prepare lock: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("a chat turn queued behind the in-place prepare lock")
+		t.Fatalf("a chat turn queued behind the %s prepare lock", mode)
 	}
 	if got := fake.waitCalls.Load(); got != 0 {
 		t.Fatalf("wait-local-directory calls for the chat turn = %d, want 0", got)
@@ -112,7 +137,7 @@ func TestInPlacePrepareLockChatTurnExempt(t *testing.T) {
 	// hold so the UI can explain it.
 	issueDone := make(chan struct{})
 	go func() {
-		release, lockErr := d.acquireInPlacePrepareLock(context.Background(),
+		release, lockErr := d.acquirePrepareWindowLock(context.Background(),
 			Task{ID: "task-issue", IssueID: "issue-1"}, assignment, slog.Default())
 		if lockErr == nil && release != nil {
 			release()
@@ -129,7 +154,7 @@ func TestInPlacePrepareLockChatTurnExempt(t *testing.T) {
 	}
 	select {
 	case <-issueDone:
-		t.Fatal("an issue task must keep waiting for the in-place prepare lock")
+		t.Fatalf("an issue task must keep waiting for the %s prepare lock", mode)
 	case <-time.After(100 * time.Millisecond):
 	}
 
