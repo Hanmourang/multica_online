@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import { chatKeys } from "../chat/queries";
+import { rememberPendingChatResources } from "../chat/pending-chat-resources";
 import { inboxKeys } from "../inbox/queries";
 import { issueKeys } from "../issues/queries";
 import { notificationPreferenceKeys } from "../notification-preferences/queries";
@@ -15,6 +16,7 @@ import type {
   ChatDonePayload,
   ChatMessage,
   ChatMessageEventPayload,
+  ChatMessageResource,
   ChatPendingTask,
   ChatMessagesPage,
   ChatSession,
@@ -100,6 +102,8 @@ describe("applyChatDoneToCache", () => {
         // no_response turn renders without a refetch (MUL-4351); defaults to
         // "message" when the server omits it.
         message_kind: "message",
+        // 478 会话模型：合成行显式标 author_type，DM/群聊里不再靠 role 反推作者。
+        author_type: "agent",
       },
     ]);
   });
@@ -159,7 +163,7 @@ describe("applyChatDoneToCache", () => {
 
     expect(qc.getQueryData<ChatMessage[]>(messagesKey)).toEqual([
       userMessage(),
-      { ...assistant, message_kind: "message" },
+      { ...assistant, message_kind: "message", author_type: "agent" },
     ]);
     expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual({});
   });
@@ -183,7 +187,12 @@ describe("applyChatDoneToCache", () => {
 
     applyChatDoneToCache(qc, donePayload({ content: "", elapsed_ms: 9999 }));
 
-    expect(qc.getQueryData<ChatMessage[]>(messagesKey)?.[0]).toBe(assistant);
+    // 缓存行自己定义的字段一个都不被降级；行内原本没有的 author_type 属于新增，
+    // 允许补上，因此断言从对象身份退化为「除新增外的全部字段等值」。
+    expect(qc.getQueryData<ChatMessage[]>(messagesKey)?.[0]).toEqual({
+      ...assistant,
+      author_type: "agent",
+    });
   });
 
   it("falls back to invalidation-only when older servers omit message fields", () => {
@@ -353,6 +362,7 @@ describe("applyChatCancelFinalizedToCache", () => {
         created_at: "2026-05-13T05:00:05Z",
         elapsed_ms: 5000,
         message_kind: "message",
+        author_type: "agent",
       },
     ]);
   });
@@ -1276,6 +1286,40 @@ describe("applyChatMessageToCache", () => {
     const rows = qc.getQueryData<ChatMessage[]>(messagesKey);
     expect(rows).toHaveLength(1);
     expect(rows?.[0]).toBe(alreadySent);
+  });
+
+  it("attaches the sender's picked task snapshot when the echo has no card", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatMessage[]>(messagesKey, [userMessage()]);
+    const snapshot: ChatMessageResource = {
+      type: "issue",
+      id: "issue-1",
+      kind: "task",
+      access: "granted",
+      title: "PM plan",
+      issue: { id: "issue-1", title: "PM plan" } as ChatMessageResource["issue"],
+    };
+    rememberPendingChatResources(sessionId, "with attachment", [snapshot]);
+
+    applyChatMessageToCache(qc, messagePayload({
+      message_id: "msg-with-resource",
+      content: "with attachment",
+      has_resources: true,
+    }));
+
+    const rows = qc.getQueryData<ChatMessage[]>(messagesKey);
+    expect(rows?.at(-1)?.resources?.[0]).toMatchObject({ id: "issue-1", title: "PM plan" });
+  });
+
+  it("keeps the resource loading marker without trusting event snapshots", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatMessage[]>(messagesKey, [userMessage()]);
+
+    applyChatMessageToCache(qc, messagePayload({ has_resources: true }));
+
+    const rows = qc.getQueryData<ChatMessage[]>(messagesKey);
+    expect(rows?.at(-1)).toMatchObject({ has_resources: true });
+    expect(rows?.at(-1)?.resources).toBeUndefined();
   });
 
   it("leaves assistant turns to chat:done, which carries the richer row", () => {

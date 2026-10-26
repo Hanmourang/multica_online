@@ -1636,7 +1636,19 @@ describe("ApiClient", () => {
       expect(fetchMock.mock.calls[1]![0]).toBe(
         "https://api.example.test/api/chat/sessions/session-1/messages",
       );
-      expect(page).toEqual({ messages: legacy, limit: 50, has_more: false, next_cursor: null });
+      // 遗留全量列表行没有 reactions / replies / dispatches，schema 默认值归一
+      // 为空数组（478 会话模型 + 群聊派发结果），回退分支同样走这一口径。
+      expect(page).toEqual({
+        messages: legacy.map((m) => ({
+          ...m,
+          reactions: [],
+          replies: [],
+          dispatches: [],
+        })),
+        limit: 50,
+        has_more: false,
+        next_cursor: null,
+      });
     });
 
     it("keeps a valid reply when its optional quick actions are malformed", async () => {
@@ -1985,6 +1997,33 @@ describe("ApiClient", () => {
       });
     });
 
+    it("sendChatMessage serialises ordered resource_refs for resource-only turns", async () => {
+          const fetchMock = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "2026-08-01T00:00:00Z" }), {
+              status: 201,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+          vi.stubGlobal("fetch", fetchMock);
+    
+          const client = new ApiClient("https://api.example.test");
+          await client.sendChatMessage("session-1", "", undefined, {
+            resource_refs: [
+              { type: "issue", id: "issue-1", kind: "requirement" },
+              { type: "document", id: "artifact-1", source: "artifact", project_id: "project-1" },
+            ],
+          });
+    
+          const [, init] = fetchMock.mock.calls[0]!;
+          expect(JSON.parse(init?.body as string)).toEqual({
+            content: "",
+            resource_refs: [
+              { type: "issue", id: "issue-1", kind: "requirement" },
+              { type: "document", id: "artifact-1", source: "artifact", project_id: "project-1" },
+            ],
+          });
+        });
+    
     it("sendChatMessage omits attachment_ids when the list is empty or undefined", async () => {
       const fetchMock = vi.fn().mockImplementation(() =>
         Promise.resolve(
@@ -2686,5 +2725,76 @@ describe("ApiClient requirement calendar endpoints", () => {
       evidence: "登录态刷新后丢失",
     });
     expect(res.repair_issue_id).toBe("child-9");
+  });
+});
+
+describe("ApiClient dm conversation (plan 20261025)", () => {
+  it("createDMChatSession returns the server's session id verbatim (idempotent reuse)", async () => {
+    // The server is idempotent on the member pair and returns 200 with the
+    // EXISTING session id when a DM already exists. The client must surface that
+    // id unchanged (never synthesize or drop it) so the dialog navigates to the
+    // single non-duplicated row. Parsed through ChatSessionSchema, not asserted.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "dm-existing",
+          workspace_id: "ws-1",
+          agent_id: "",
+          kind: "dm",
+          creator_id: "user-a",
+          title: "Bob",
+          status: "active",
+          has_unread: false,
+          created_at: "2026-08-01T00:00:00Z",
+          updated_at: "2026-08-01T00:00:00Z",
+          participants: [
+            { chat_session_id: "dm-existing", participant_type: "member", participant_id: "user-b", display_name: "Bob", admin: false, joined_at: "2026-08-01T00:00:00Z" },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const session = await new ApiClient("https://api.example.test").createDMChatSession({
+      member_id: "user-b",
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/chat/sessions/dm");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ member_id: "user-b" });
+    expect(session.id).toBe("dm-existing");
+    expect(session.kind).toBe("dm");
+    // dm has no owning agent → agent_id degrades to "" (nullable default).
+    expect(session.agent_id).toBe("");
+    expect(session.participants?.[0]?.display_name).toBe("Bob");
+  });
+
+  it("getChatParticipants maps the backend DTO field names into ChatParticipant", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          { chat_session_id: "dm-1", participant_type: "member", participant_id: "user-a", display_name: "Alice", avatar_url: null, admin: true, joined_at: "2026-08-01T00:00:00Z", pinned: false },
+          // A malformed row (missing participant_id) is filtered, not fatal.
+          { chat_session_id: "dm-1", participant_type: "member", display_name: "Broken" },
+        ]),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const participants = await new ApiClient("https://api.example.test").getChatParticipants("dm-1");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/chat/sessions/dm-1/participants",
+    );
+    expect(participants).toHaveLength(1);
+    expect(participants[0]).toMatchObject({
+      participant_id: "user-a",
+      participant_type: "member",
+      display_name: "Alice",
+      admin: true,
+      // last_read_at is absent on the DTO → schema defaults it to "".
+      last_read_at: "",
+    });
   });
 });

@@ -1,6 +1,83 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api, ApiError } from "../api";
-import type { GraphSnapshotSummary, Issue } from "../types";
+import type {
+  BusMatrixAlertsResponse,
+  BusMatrixDrilldownResponse,
+  BusMatrixResponse,
+  BusMatrixTimelineResponse,
+  GraphSnapshotSummary,
+  Issue,
+  ProjectGraphSnapshot,
+} from "../types";
+
+/**
+ * "还没有图谱快照" is an honest empty state, not a request failure: the
+ * server answers 404 (code=graph_snapshot_missing, message fallback kept for
+ * older builds) until the CLI projector pushes its first scan. Every
+ * snapshot-scoped read below normalizes that 404 to its empty payload so the
+ * views land on their ArchiveEmpty frames instead of the red QueryError row —
+ * same contract latestGraphSnapshotOptions already honors with `null`.
+ */
+function isNoSnapshotError(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 404 &&
+    ((err.body as { code?: unknown } | undefined)?.code ===
+      "graph_snapshot_missing" ||
+      err.message.includes("no graph snapshot"))
+  );
+}
+
+function noSnapshotFallback<T>(empty: T): (err: unknown) => T {
+  return (err: unknown) => {
+    if (isNoSnapshotError(err)) return empty;
+    throw err;
+  };
+}
+
+const EMPTY_SNAPSHOT_DETAIL: ProjectGraphSnapshot = {
+  id: "",
+  workspace_id: "",
+  project_id: "",
+  resource_id: "",
+  scan_id: "",
+  gitnexus_version: "",
+  git_sha: "",
+  nodes: [],
+  edges: [],
+  communities: [],
+  stats: { node_count: 0, edge_count: 0, community_count: 0 },
+  created_at: "",
+};
+
+const EMPTY_BUS_MATRIX: BusMatrixResponse = {
+  snapshot_id: "",
+  scan_id: "",
+  git_sha: "",
+  bus_matrix: [],
+  total: 0,
+};
+
+const EMPTY_BUS_DRILLDOWN: BusMatrixDrilldownResponse = {
+  cells: [],
+  total: 0,
+  tables: [],
+  detail_available: false,
+  columns_available: false,
+  tables_truncated: false,
+};
+
+const EMPTY_BUS_ALERTS: BusMatrixAlertsResponse = {
+  alerts: [],
+  total: 0,
+  rule_coverage: [],
+};
+
+const EMPTY_BUS_TIMELINE: BusMatrixTimelineResponse = {
+  snapshot_id: "",
+  changes: [],
+  total: 0,
+};
 
 /**
  * Query keys + options for the project graph snapshot store (migration 456)
@@ -92,14 +169,18 @@ export function latestGraphSnapshotOptions(
   });
 }
 
-/** Full snapshot detail (nodes/edges/communities), for the neighborhood fallback. */
+/** Full snapshot detail (nodes/edges/communities), for the neighborhood
+ * fallback. No snapshot → empty detail (see isNoSnapshotError). */
 export function graphSnapshotDetailOptions(
   wsId: string,
   projectId: string,
 ) {
   return queryOptions({
     queryKey: graphKeys.detail(wsId, projectId),
-    queryFn: () => api.getGraphSnapshotDetail(projectId),
+    queryFn: () =>
+      api
+        .getGraphSnapshotDetail(projectId)
+        .catch(noSnapshotFallback(EMPTY_SNAPSHOT_DETAIL)),
     enabled: Boolean(wsId && projectId),
   });
 }
@@ -165,7 +246,8 @@ export function moduleNeighborhoodOptions(
 export function busMatrixOptions(wsId: string, projectId: string) {
   return queryOptions({
     queryKey: graphKeys.busMatrix(wsId, projectId),
-    queryFn: () => api.getBusMatrix(projectId),
+    queryFn: () =>
+      api.getBusMatrix(projectId).catch(noSnapshotFallback(EMPTY_BUS_MATRIX)),
     enabled: Boolean(wsId && projectId),
   });
 }
@@ -177,7 +259,10 @@ export function busMatrixDrilldownOptions(
 ) {
   return queryOptions({
     queryKey: graphKeys.busMatrixDrilldown(wsId, projectId, filters),
-    queryFn: () => api.getBusMatrixDrilldown(projectId, filters),
+    queryFn: () =>
+      api
+        .getBusMatrixDrilldown(projectId, filters)
+        .catch(noSnapshotFallback(EMPTY_BUS_DRILLDOWN)),
     enabled: Boolean(wsId && projectId),
   });
 }
@@ -185,7 +270,10 @@ export function busMatrixDrilldownOptions(
 export function busMatrixAlertsOptions(wsId: string, projectId: string) {
   return queryOptions({
     queryKey: graphKeys.busMatrixAlerts(wsId, projectId),
-    queryFn: () => api.getBusMatrixAlerts(projectId),
+    queryFn: () =>
+      api
+        .getBusMatrixAlerts(projectId)
+        .catch(noSnapshotFallback(EMPTY_BUS_ALERTS)),
     enabled: Boolean(wsId && projectId),
   });
 }
@@ -197,7 +285,10 @@ export function busMatrixTimelineOptions(
 ) {
   return queryOptions({
     queryKey: [...graphKeys.busMatrixTimeline(wsId, projectId), limit],
-    queryFn: () => api.getBusMatrixTimeline(projectId, limit),
+    queryFn: () =>
+      api
+        .getBusMatrixTimeline(projectId, limit)
+        .catch(noSnapshotFallback(EMPTY_BUS_TIMELINE)),
     enabled: Boolean(wsId && projectId),
   });
 }

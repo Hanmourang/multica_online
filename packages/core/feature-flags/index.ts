@@ -23,6 +23,8 @@ export {
   PLUGINS_V1_FLAG,
   ASSET_MODULE_FLAG,
   WORKFLOW_MODULE_FLAG,
+  SPRINT_MODULE_FLAG,
+  CHAT_CONVERSATIONS_FLAG,
 } from "./keys";
 export {
   FeatureFlagsProvider,

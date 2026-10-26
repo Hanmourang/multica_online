@@ -19,6 +19,7 @@ export const workspaceKeys = {
   squadMemberStatus: (wsId: string, squadId: string) =>
     ["workspaces", wsId, "squads", squadId, "members-status"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
+  builtinSkills: (wsId: string) => ["workspaces", wsId, "builtin-skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
 };
@@ -112,6 +113,15 @@ export function skillListOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.skills(wsId),
     queryFn: () => api.listSkills(),
+  });
+}
+
+export function builtinSkillListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.builtinSkills(wsId),
+    queryFn: () => api.listBuiltinSkills(),
+    enabled: !!wsId,
+    staleTime: 5 * 60 * 1000,
   });
 }
 

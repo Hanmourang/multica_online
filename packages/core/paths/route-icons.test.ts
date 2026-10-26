@@ -56,6 +56,21 @@ describe("calendar workspace page", () => {
   });
 });
 
+describe("workflows workspace page", () => {
+  it("registers workflows with Workflow icon and nav key", () => {
+    expect(WORKSPACE_PAGES.workflows).toEqual({
+      segment: "workflows",
+      icon: "Workflow",
+      navKey: "workflows",
+    });
+  });
+
+  it("resolves /{slug}/workflows to the Workflow icon", () => {
+    expect(resolveRouteIconName("/acme/workflows")).toBe("Workflow");
+    expect(pageForSegment("workflows")).toBe("workflows");
+  });
+});
+
 describe("pageForSegment", () => {
   it("maps a known segment to its page key", () => {
     expect(pageForSegment("projects")).toBe("projects");

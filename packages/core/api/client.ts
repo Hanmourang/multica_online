@@ -66,6 +66,7 @@ import type {
   User,
   Skill,
   SkillSummary,
+  BuiltinSkillSummary,
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
@@ -96,6 +97,11 @@ import type {
   ChatSession,
   ChatPinnedAgent,
   ChatMessage,
+  ChatMessageReaction,
+  ChatMessageReply,
+  ChatMention,
+  ChatResourceRefInput,
+  ChatParticipant,
   ChatMessagesPage,
   ChatDraftRestoresResponse,
   ChatPendingTask,
@@ -128,11 +134,16 @@ import type {
   ArchiveSyncConfig,
   PutArchiveSyncConfigRequest,
   AssetPage,
+  WorkspaceAssetPage,
   ListAssetsParams,
   BindAssetRequest,
   AssetBinding,
   AssetCandidatesResponse,
   SearchAssetCandidatesParams,
+  AssetOverviewResponse,
+  UpdateAssetMetaRequest,
+  BatchUpdateAssetMetaRequest,
+  BatchUpdateAssetMetaResponse,
   ListSprintsResponse,
   Sprint,
   SprintProgress,
@@ -143,6 +154,9 @@ import type {
   CreateWorkflowTemplateRequest,
   UpdateWorkflowTemplateRequest,
   WorkflowTemplate,
+  ListWorkspaceWorkflowTemplatesParams,
+  ListWorkspaceWorkflowTemplatesResponse,
+  UpdateWorkflowTemplateDefinitionRequest,
   ListWorkflowInstancesParams,
   ListWorkflowInstancesResponse,
   CreateWorkflowInstanceRequest,
@@ -155,6 +169,8 @@ import type {
   DecideGateResponse,
   GateDecision,
   WorkflowGateMessagesResponse,
+  WorkflowTemplateDryRunRequest,
+  WorkflowTemplateDryRunResponse,
   GraphSyncPayload,
   GraphSyncResponse,
   RebridgeGraphResponse,
@@ -339,10 +355,15 @@ import {
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
   ChatMessageListSchema,
+  ChatMessageReactionsResponseSchema,
+  ChatMessageRepliesResponseSchema,
   ChatMessagesPageSchema,
   ChatPendingTaskSchema,
   ChatSessionListSchema,
   ChatSessionSchema,
+  ChatParticipantListSchema,
+  EMPTY_CHAT_PARTICIPANT_LIST,
+  GroupParticipantsUpdateSchema,
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
   StartMikaOnboardingResponseSchema,
@@ -1163,8 +1184,9 @@ export class ApiClient {
     );
   }
 
-  async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
+  async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; kind?: "task" | "requirement"; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
     const search = new URLSearchParams({ q: params.q });
+    if (params.kind) search.set("kind", params.kind);
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
@@ -1507,6 +1529,18 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/acceptance/verdict`, {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  }
+
+  /** 「流程把控」验收面板逐条勾选回写（plan 20261025 §C-1）：把已勾选条文集写入
+   *  issue.acceptance_spec.checked_criteria（纯追加键，不影响裁决/轮次事实源）。 */
+  async updateAcceptanceCriteria(
+    issueId: string,
+    checked: string[],
+  ): Promise<{ checked: string[] }> {
+    return this.fetch(`/api/issues/${issueId}/acceptance/criteria`, {
+      method: "POST",
+      body: JSON.stringify({ checked }),
     });
   }
 
@@ -3375,6 +3409,10 @@ export class ApiClient {
     return this.fetch("/api/skills");
   }
 
+  async listBuiltinSkills(): Promise<BuiltinSkillSummary[]> {
+    return this.fetch("/api/builtin-skills");
+  }
+
   async getSkill(id: string): Promise<Skill> {
     return this.fetch(`/api/skills/${id}`);
   }
@@ -3588,6 +3626,111 @@ export class ApiClient {
     await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
   }
 
+  // DM conversation (plan 20261025 §6.1). Flag-gated server-side: with
+  // FF_CHAT_CONVERSATIONS off the route 404s and fetch throws, which the
+  // create dialog surfaces. Response is parsed through ChatSessionSchema (no
+  // direct assertion) so kind/participants/agent_id nullability degrade
+  // independently of the agent path.
+  async createDMChatSession(
+    data: { member_id: string },
+    workspaceSlug?: string,
+  ): Promise<ChatSession> {
+    const raw: unknown = await this.fetch<unknown>("/api/chat/sessions/dm", {
+      method: "POST",
+      headers: workspaceHeader(workspaceSlug),
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ChatSessionSchema, EMPTY_CHAT_SESSION, {
+      endpoint: "POST /api/chat/sessions/dm",
+    });
+  }
+
+  // Participant roster for a dm/group session (flag-gated route). A 404 (flag
+  // off / older server) throws; callers gate the query on the flag so this is
+  // only ever hit for conversation-kind sessions.
+  async getChatParticipants(sessionId: string): Promise<ChatParticipant[]> {
+    const raw: unknown = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/participants`,
+    );
+    return parseWithFallback(raw, ChatParticipantListSchema, EMPTY_CHAT_PARTICIPANT_LIST, {
+      endpoint: "GET /api/chat/sessions/:id/participants",
+    });
+  }
+
+  // Group conversation (plan 20261025 §6.2). Same flag gate + schema-degrade
+  // rationale as createDMChatSession: with FF_CHAT_CONVERSATIONS off the route
+  // 404s and fetch throws, which the create dialog surfaces; the response is
+  // parsed through ChatSessionSchema so kind/participants degrade without
+  // breaking the agent-session path.
+  async createGroupChatSession(
+    data: { title?: string; member_ids: string[]; agent_ids?: string[]; project_id?: string },
+    workspaceSlug?: string,
+  ): Promise<ChatSession> {
+    const raw: unknown = await this.fetch<unknown>("/api/chat/sessions/group", {
+      method: "POST",
+      headers: workspaceHeader(workspaceSlug),
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ChatSessionSchema, EMPTY_CHAT_SESSION, {
+      endpoint: "POST /api/chat/sessions/group",
+    });
+  }
+
+  // Admin-gated participant mutations. The server returns the FULL fresh
+  // roster on success, parsed through the same list schema as the GET so a
+  // management action can seed the participants cache without a refetch. A
+  // 403/409 (not admin / zero-admin invariant) throws with the reason code —
+  // the sheet surfaces it and invalidates so local state re-converges.
+  async addGroupParticipants(
+    sessionId: string,
+    data: { member_ids?: string[]; agent_ids?: string[] },
+  ): Promise<ChatParticipant[]> {
+    const raw: unknown = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/participants`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(raw, GroupParticipantsUpdateSchema, EMPTY_CHAT_PARTICIPANT_LIST, {
+      endpoint: "POST /api/chat/sessions/:id/participants",
+    });
+  }
+
+  async removeGroupParticipant(
+    sessionId: string,
+    participantType: "member" | "agent",
+    participantId: string,
+  ): Promise<ChatParticipant[]> {
+    const raw: unknown = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/participants/${participantType}/${participantId}`,
+      { method: "DELETE" },
+    );
+    return parseWithFallback(raw, GroupParticipantsUpdateSchema, EMPTY_CHAT_PARTICIPANT_LIST, {
+      endpoint: "DELETE /api/chat/sessions/:id/participants/:type/:pid",
+    });
+  }
+
+  async setGroupParticipantAdmin(
+    sessionId: string,
+    participantId: string,
+    admin: boolean,
+  ): Promise<ChatParticipant[]> {
+    const raw: unknown = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/participants/member/${participantId}`,
+      { method: "PATCH", body: JSON.stringify({ admin }) },
+    );
+    return parseWithFallback(raw, GroupParticipantsUpdateSchema, EMPTY_CHAT_PARTICIPANT_LIST, {
+      endpoint: "PATCH /api/chat/sessions/:id/participants/member/:pid",
+    });
+  }
+
+  // Leave a group as the caller (no admin required, but the last admin must
+  // transfer first → 409 throws). { left } is all the client needs: the
+  // mutation's onSettled drops the session from every list cache.
+  async leaveGroupChatSession(sessionId: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/participants/leave`, {
+      method: "POST",
+    });
+  }
+
   // Refresh the quick-action suggestions for a session's latest assistant turn.
   // Fire-and-forget: the server enqueues a background regeneration pass and the
   // refreshed pills arrive over the chat:quick_actions realtime event, so the
@@ -3698,13 +3841,24 @@ export class ApiClient {
     sessionId: string,
     content: string,
     attachmentIds?: string[],
+    options?: { mentions?: ChatMention[]; resource_refs?: ChatResourceRefInput[] },
   ): Promise<SendChatMessageResponse> {
     const body: {
       content: string;
       attachment_ids?: string[];
+      mentions?: ChatMention[];
+      resource_refs?: ChatResourceRefInput[];
     } = { content };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;
+    }
+    // dm/group @-mentions: only the resolved targets are sent; the server
+    // re-validates access and ignores anything the sender may not mention.
+    if (options?.mentions && options.mentions.length > 0) {
+      body.mentions = options.mentions;
+    }
+    if (options?.resource_refs && options.resource_refs.length > 0) {
+      body.resource_refs = options.resource_refs;
     }
     const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",
@@ -3737,6 +3891,40 @@ export class ApiClient {
       StartMikaOnboardingResponseSchema,
       { started: false },
       { endpoint: "POST /api/chat/sessions/:id/onboarding" },
+    );
+  }
+
+  async toggleChatMessageReaction(
+    sessionId: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<{ reactions: ChatMessageReaction[] }> {
+    const raw = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/messages/${messageId}/reactions`,
+      { method: "POST", body: JSON.stringify({ emoji }) },
+    );
+    return parseWithFallback(
+      raw,
+      ChatMessageReactionsResponseSchema,
+      { reactions: [] },
+      { endpoint: "POST /api/chat/sessions/:id/messages/:messageId/reactions" },
+    );
+  }
+
+  async createChatMessageReply(
+    sessionId: string,
+    messageId: string,
+    content: string,
+  ): Promise<{ replies: ChatMessageReply[] }> {
+    const raw = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/messages/${messageId}/replies`,
+      { method: "POST", body: JSON.stringify({ content }) },
+    );
+    return parseWithFallback(
+      raw,
+      ChatMessageRepliesResponseSchema,
+      { replies: [] },
+      { endpoint: "POST /api/chat/sessions/:id/messages/:messageId/replies" },
     );
   }
 
@@ -4191,6 +4379,42 @@ export class ApiClient {
     );
   }
 
+  // 工作区级模板画廊（侧边栏「工作流」入口，对标 CoCo /workflows）。
+  async listWorkspaceWorkflowTemplates(
+    params?: ListWorkspaceWorkflowTemplatesParams,
+  ): Promise<ListWorkspaceWorkflowTemplatesResponse> {
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    if (params?.scope) search.set("scope", params.scope);
+    if (params?.project_id) search.set("project_id", params.project_id);
+    const q = search.toString();
+    return this.fetch(
+      `/api/workflow/templates${q ? `?${q}` : ""}`,
+    );
+  }
+
+  // 编辑器 JSON 保存：写 CoCo 嵌套 definition + 编译后 nodes。
+  async updateWorkflowTemplateDefinition(
+    templateId: string,
+    data: UpdateWorkflowTemplateDefinitionRequest,
+  ): Promise<WorkflowTemplate> {
+    return this.fetch(`/api/workflow/templates/${templateId}/definition`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // 项目专属强制门控开关（仅 published + project 专属可置 true）。
+  async setWorkflowTemplateEnforce(
+    templateId: string,
+    enforce: boolean,
+  ): Promise<WorkflowTemplate> {
+    return this.fetch(`/api/workflow/templates/${templateId}/enforce`, {
+      method: "PUT",
+      body: JSON.stringify({ enforce }),
+    });
+  }
+
   async listWorkflowInstances(
     projectId: string,
     params?: ListWorkflowInstancesParams,
@@ -4285,6 +4509,26 @@ export class ApiClient {
     });
   }
 
+  // 重新校验准入（plan 20261025 §B3c 手动兜底）：blocked 阶段立即复评缺件，
+  // 已补齐则 blocked→pending→派发；非 blocked 阶段 409。
+  async recheckWorkflowStage(stageRunId: string): Promise<WorkflowStageRun> {
+    return this.fetch(`/api/workflow/stage-runs/${stageRunId}/recheck`, {
+      method: "POST",
+    });
+  }
+
+  // 模板「测试运行」第一版＝零副作用渲染预览（plan 20261025 §C7）：
+  // 服务端走同一条 Flatten→spec→render 链路回 prompt + warnings，不建实例/阶段/评论。
+  async dryRunWorkflowTemplate(
+    templateId: string,
+    data?: WorkflowTemplateDryRunRequest,
+  ): Promise<WorkflowTemplateDryRunResponse> {
+    return this.fetch(`/api/workflow/templates/${templateId}/dry-run`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+  }
+
   async decideWorkflowGate(
     gateRunId: string,
     decision: GateDecision,
@@ -4331,6 +4575,23 @@ export class ApiClient {
     );
   }
 
+  // Workspace-scope aggregate: all bindings across every project in the current
+  // workspace (both project-level and work-item scope), for the left-sidebar
+  // "Assets" management page. Workspace resolves server-side (same header/cookie
+  // as project routes); rows carry project_title / issue_title for cross-linking.
+  async listWorkspaceAssets(
+    params?: Omit<ListAssetsParams, "issueId">,
+  ): Promise<WorkspaceAssetPage> {
+    const search = new URLSearchParams();
+    if (params?.page) search.set("toPage", String(params.page));
+    if (params?.pageSize) search.set("pageSize", String(params.pageSize));
+    if (params?.category) search.set("category", params.category);
+    if (params?.name) search.set("name", params.name);
+    if (params?.projectId) search.set("projectId", params.projectId);
+    const qs = search.toString();
+    return this.fetch(`/api/assets/page${qs ? `?${qs}` : ""}`);
+  }
+
   async searchAssetCandidates(
     projectId: string,
     params?: SearchAssetCandidatesParams,
@@ -4355,6 +4616,20 @@ export class ApiClient {
     });
   }
 
+  /**
+   * 档案 → 资产批量导入（migration 474 配套）。幂等：已导入的档案行自动跳过，
+   * 导入出的 binding 带 artifact_id 防循环标记，不会反向再入档。
+   */
+  async syncAssetsFromArchive(
+    projectId: string,
+    data?: { asset_category?: string },
+  ): Promise<{ imported: number; skipped: number; total: number }> {
+    return this.fetch(`/api/projects/${projectId}/assets/sync-from-archive`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+  }
+
   async unbindProjectAsset(
     projectId: string,
     bindingId: string,
@@ -4362,6 +4637,35 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/assets/${bindingId}`, {
       method: "DELETE",
     });
+  }
+
+  // 473 meta：阶段/角色/标签打标 + 需求·Bug 关联全量替换（patch 语义）。
+  async updateAssetMeta(
+    projectId: string,
+    bindingId: string,
+    data: UpdateAssetMetaRequest,
+  ): Promise<AssetBinding> {
+    return this.fetch(`/api/projects/${projectId}/assets/${bindingId}/meta`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // 批量打标：一次事务对一批 binding 改阶段/角色/分类/标签。
+  async batchUpdateAssetMeta(
+    projectId: string,
+    data: BatchUpdateAssetMetaRequest,
+  ): Promise<BatchUpdateAssetMetaResponse> {
+    return this.fetch(`/api/projects/${projectId}/assets/batch-meta`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // 阶段矩阵 / 需求×资产视图的聚合面（含 links，不分页；服务端上限 1000）。
+  async getAssetOverview(projectId?: string): Promise<AssetOverviewResponse> {
+    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    return this.fetch(`/api/assets/overview${qs}`);
   }
 
   // Issue-scope variants (CoCo dual-entry): same envelope, scope narrowed to a

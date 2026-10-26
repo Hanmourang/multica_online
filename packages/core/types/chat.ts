@@ -1,9 +1,97 @@
 import type { AgentTask } from "./agent";
+import type { Issue } from "./issue";
+import type { ProjectArtifact } from "./artifact";
 
 /** A user's pinned "quick agent" for the Chat list top bar. */
 export interface ChatPinnedAgent {
   agent_id: string;
   position: number;
+}
+
+/**
+ * Conversation kind (plan 20261025 §6). Additive: an older server omits it, so
+ * treat a missing/unknown value as "agent" — the pre-existing single-agent
+ * conversation. "dm" is a private 1:1 between two members (no agent), "group"
+ * a multi-member room that may @-fan-out to agents.
+ */
+export type ConversationKind = "agent" | "dm" | "group";
+
+/** Who authored a chat message. "member" for human authors in dm/group, "agent"
+ *  for assistant replies, "system" for platform-synthesized rows. */
+export type ChatAuthorType = "member" | "agent" | "system";
+
+/** A resolved @-mention target inside a dm/group message. */
+export interface ChatMention {
+  type: "member" | "agent";
+  id: string;
+}
+
+export type ChatResourceRefInput =
+  | { type: "issue"; id: string; kind: "task" | "requirement" }
+  | {
+      type: "document";
+      id: string;
+      source: "artifact" | "attachment";
+      project_id?: string;
+    };
+
+/** Server-resolved resource card. No client-provided title/path is trusted. */
+export interface ChatMessageResource {
+  type: "issue" | "document";
+  id: string;
+  kind?: "task" | "requirement";
+  source?: "artifact" | "attachment";
+  project_id?: string;
+  access: "granted" | "denied" | "missing";
+  /** Composer-only label for a picker result; send DTOs retain only the ref. */
+  title?: string;
+  issue?: Issue;
+  artifact?: ProjectArtifact;
+  attachment?: import("./attachment").Attachment;
+}
+
+/**
+ * A first-class participant of a dm/group conversation. Carries the per-member
+ * read/pin/archived cursors so one member's actions never move another's view.
+ */
+export interface ChatParticipant {
+  chat_session_id: string;
+  participant_type: "member" | "agent";
+  participant_id: string;
+  display_name: string;
+  avatar_url?: string | null;
+  admin: boolean;
+  joined_at: string;
+  last_read_at: string;
+  last_read_message_id?: string | null;
+  pinned?: boolean;
+}
+
+/**
+ * Per-agent outcome of a group send fan-out. A single @-multi-agent message
+ * dispatches an independent task per mentioned agent; each reports whether it
+ * queued or was blocked (e.g. no access to the room's agent).
+ */
+export interface ChatAgentDispatch {
+  agent_id: string;
+  task_id?: string;
+  status: "queued" | "blocked";
+  reason?: string;
+}
+
+/**
+ * Persisted per-agent outcome of a group fan-out, attached to the message
+ * that triggered it. The send response only reports the initial queue/block
+ * decision; the persisted row carries the whole life cycle
+ * (queued → running → completed / failed / blocked) so a reader can see who
+ * answered and who did not, even after the live pill is gone.
+ */
+export interface ChatMessageDispatch {
+  agent_id: string;
+  task_id?: string | null;
+  /** Free-form server status; see the stage map in group-pending-pills.tsx. */
+  status: string;
+  reason?: string | null;
 }
 
 /**
@@ -75,6 +163,9 @@ export interface ChatLastMessage {
   failure_reason?: string | null;
   /** "message" (default) or "no_response". Optional for older servers. */
   message_kind?: ChatMessageKind;
+  /** Set on DM/Group previews so the rail does not treat every user role as "you". */
+  author_type?: ChatAuthorType;
+  author_id?: string | null;
 }
 
 export interface ChatChannelSource {
@@ -86,7 +177,13 @@ export interface ChatChannelSource {
 export interface ChatSession {
   id: string;
   workspace_id: string;
-  agent_id: string;
+  /** Bound agent for an "agent" conversation. Null for dm/group, which have no
+   *  single owning agent. Optional-chain at read sites. */
+  agent_id: string | null;
+  /** Conversation kind. Missing/unknown reads as the legacy "agent" session. */
+  kind?: ConversationKind;
+  /** Participants for dm/group. Absent for agent sessions and on older servers. */
+  participants?: ChatParticipant[];
   creator_id: string;
   /** Durable project context for every turn in this session. Null when the
    *  conversation uses workspace context only; optional for older servers. */
@@ -172,6 +269,39 @@ export interface ChatMessage {
   message_kind?: ChatMessageKind;
   /** Up to three server-validated follow-ups generated with this reply. */
   quick_actions?: ChatQuickAction[];
+  /**
+   * Message author attribution (plan 20261025 §6). Additive: agent sessions
+   * keep the legacy `role` and omit these; treat a missing author_type as a
+   * role-derived author. `author_id` is the member or agent id behind the
+   * message; `mentions` are resolved @-targets in a dm/group message.
+   */
+  author_type?: ChatAuthorType;
+  author_id?: string | null;
+  mentions?: ChatMention[];
+  resources?: ChatMessageResource[];
+  has_resources?: boolean;
+  /** Emoji reactions on this message. Absent on older servers. */
+  reactions?: ChatMessageReaction[];
+  /** Short replies left on this message. Absent on older servers. */
+  replies?: ChatMessageReply[];
+  /**
+   * Per-agent fan-out results for a group send. Present on the message that
+   * triggered the fan-out; absent on agent/dm conversations and on older
+   * servers.
+   */
+  dispatches?: ChatMessageDispatch[];
+}
+
+export interface ChatMessageReaction {
+  emoji: string;
+  actor_id: string;
+}
+
+export interface ChatMessageReply {
+  id: string;
+  author_id: string;
+  content: string;
+  created_at?: string;
 }
 
 export interface ChatMessagesCursor {
@@ -188,7 +318,16 @@ export interface ChatMessagesPage {
 
 export interface SendChatMessageResponse {
   message_id: string;
-  task_id: string;
+  /**
+   * Queued agent task for the legacy single-agent path. Optional because a
+   * dm/group send has no owning agent task at the root — per-agent outcomes
+   * come back in `dispatches` instead.
+   */
+  task_id?: string;
+  /** Conversation kind echoed back so the client can branch on the response. */
+  kind?: ConversationKind;
+  /** Per-agent fan-out results for a group send. Absent on agent/dm paths. */
+  dispatches?: ChatAgentDispatch[];
   /** True when the server supports queued follow-up sends. */
   supports_queue?: boolean;
   /**
@@ -210,6 +349,8 @@ export interface SendChatMessageResponse {
    * compat with servers that predate the field.
    */
   attachment_ids?: string[];
+  /** Sender-scoped snapshots for immediate rendering; realtime recipients hydrate via GET. */
+  resources?: ChatMessageResource[];
 }
 
 export interface StartMikaOnboardingResponse {
@@ -289,6 +430,21 @@ export interface PrioritizeQueuedChatTaskResponse {
   active_task_id?: string;
 }
 
+/**
+ * One in-flight agent task of a group conversation. Group fan-out dispatches
+ * an independent task per @-mentioned agent and they run in parallel, so the
+ * pending state is a SET keyed by agent, not the legacy single root task
+ * (plan 20261025 §6). `wait_reason` is only set while the task is parked in
+ * `waiting_local_directory`, matching the root field's clearing rules.
+ */
+export interface GroupPendingAgentTask {
+  agent_id: string;
+  task_id: string;
+  status: string;
+  created_at: string;
+  wait_reason?: string;
+}
+
 export interface ChatPendingTask {
   task_id?: string;
   status?: string;
@@ -308,4 +464,10 @@ export interface ChatPendingTask {
    * database status `queued` before claim, but is never duplicated here.
    */
   queued_tasks?: ChatQueuedTask[];
+  /**
+   * Parallel in-flight tasks for a group session. Absent (not merely empty)
+   * on agent/dm responses — callers distinguish "older server" from "group
+   * with no in-flight task" via the session kind, never via this field.
+   */
+  agent_tasks?: GroupPendingAgentTask[];
 }

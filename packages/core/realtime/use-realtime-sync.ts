@@ -12,6 +12,8 @@ import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
 import { assetKeys } from "../assets/queries";
+import { artifactKeys } from "../artifacts/queries";
+import { issueArchiveKeys } from "../agent-runs/queries";
 import { sprintKeys } from "../sprints/queries";
 import {
   onWorkflowInstanceState,
@@ -72,7 +74,9 @@ import {
   QUICK_ACTIONS_PENDING_TIMEOUT_MS,
 } from "../chat/queries";
 import { useChatStore } from "../chat";
+import { clearRemovedConversationCaches } from "../chat/group";
 import { upsertChatMessageToCaches } from "../chat/message-cache";
+import { takePendingChatResources } from "../chat/pending-chat-resources";
 import {
   promotePendingChatTask,
   removePendingChatTask,
@@ -200,7 +204,12 @@ export function applyChatMessageToCache(
   payload: ChatMessageEventPayload,
 ) {
   const sessionId = payload.chat_session_id;
-  if (payload.role === "user" && payload.message_id) {
+  const conversation = payload.kind === "dm" || payload.kind === "group";
+  // DM/Group rows without an author must not be painted as "self" while the
+  // refetch is in flight. Agent chats still have a single human author.
+  const canAttribute = !conversation || !!payload.author_id || payload.author_type === "system";
+  if (payload.role === "user" && payload.message_id && canAttribute) {
+    const pendingResources = takePendingChatResources(sessionId, payload.content ?? "");
     upsertChatMessageToCaches(qc, sessionId, {
       id: payload.message_id,
       chat_session_id: sessionId,
@@ -208,10 +217,20 @@ export function applyChatMessageToCache(
       content: payload.content ?? "",
       task_id: payload.task_id ?? null,
       created_at: payload.created_at ?? new Date().toISOString(),
+      ...(payload.author_type ? { author_type: payload.author_type } : {}),
+      ...(payload.author_id ? { author_id: payload.author_id } : {}),
+      ...(payload.mentions ? { mentions: payload.mentions } : {}),
+      ...(pendingResources
+        ? { resources: pendingResources, has_resources: true }
+        : payload.has_resources === true
+          ? { has_resources: true }
+          : {}),
     });
   }
   invalidateChatMessageQueries(qc, sessionId);
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+  const wsId = getCurrentWsId();
+  if (wsId) qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
 }
 
 export function applyChatDoneToCache(
@@ -238,6 +257,8 @@ export function applyChatDoneToCache(
       ...(payload.quick_actions !== undefined
         ? { quick_actions: payload.quick_actions }
         : {}),
+      author_type: payload.author_type ?? "agent",
+      ...(payload.author_id ? { author_id: payload.author_id } : {}),
     };
     // Idempotent against reconnect replay and against a refetch that already
     // landed this row.
@@ -806,6 +827,7 @@ export function useRealtimeSync(
       // projection over project rows + candidates; both are keyed under the
       // workspace-wide asset slice, so invalidate it wholesale. WS only drives
       // React Query invalidation here — never mirrored into a Zustand store.
+      // asset:updated 走下方专用 handler（需携带 project_id 做档案交叉失效）。
       asset: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: assetKeys.all(wsId) });
@@ -983,6 +1005,9 @@ export function useRealtimeSync(
     const specificEvents = new Set([
       "workspace:updated",
       "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
+      // asset:updated goes through the dedicated handler below: 五阶段对齐
+      // plan §5.3 需按事件 project_id 交叉失效档案，前缀路径拿不到 payload。
+      "asset:updated",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -992,7 +1017,7 @@ export function useRealtimeSync(
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
-      "chat:session_created", "chat:session_deleted", "chat:session_updated",
+      "chat:session_created", "chat:session_deleted", "chat:session_updated", "chat:participants_changed",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -1039,6 +1064,23 @@ export function useRealtimeSync(
       if (!issue) return;
       const wsId = getCurrentWsId();
       if (wsId) onIssueCreated(qc, wsId, issue);
+    });
+
+    // asset:updated（五阶段对齐 plan §5.3）：服务端在资产↔档案同事务联动后
+    // 广播（单行带 binding，批量带 count，均带 project_id）。本地除刷新资产
+    // 域外，还按 project_id 精确失效对应档案片与 issue 档案聚合，保证双客户端
+    // 不等手动刷新；未知载荷降级为 workspace 档案前缀。
+    const unsubAssetUpdated = ws.on("asset:updated", (p) => {
+      const payload = p as { project_id?: string };
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      qc.invalidateQueries({ queryKey: assetKeys.all(wsId) });
+      qc.invalidateQueries({
+        queryKey: payload.project_id
+          ? artifactKeys.project(wsId, payload.project_id)
+          : artifactKeys.all(wsId),
+      });
+      qc.invalidateQueries({ queryKey: issueArchiveKeys.all(wsId) });
     });
 
     const unsubIssueDeleted = ws.on("issue:deleted", (p) => {
@@ -1483,6 +1525,7 @@ export function useRealtimeSync(
       // Write the user turn before invalidating so the prompt does not depend
       // on the refetch surviving (MUL-5711) — same shape as chat:done.
       applyChatMessageToCache(qc, payload);
+      invalidateSessionLists();
       // NOTE: intentionally does NOT touch the pending aggregate. chat:message
       // fires per streamed message with no status; the aggregate is maintained
       // by the task lifecycle handlers below (MUL-4159).
@@ -1711,6 +1754,26 @@ export function useRealtimeSync(
       applyChatSessionUpdatedToCache(qc, id, payload);
     });
 
+    // chat:participants_changed fires after a dm/group membership change (plan
+    // 20261025 §7). Body-free by design — the only field a removed member may
+    // receive is `removed=true` — so we never write server roster into the
+    // store: just invalidate the roster query and the sessions list so each
+    // client refetches what it is still allowed to see.
+    const unsubChatParticipantsChanged = ws.on("chat:participants_changed", (p) => {
+      const payload = p as { chat_session_id: string; removed?: boolean };
+      chatWsLogger.info("chat:participants_changed (global)", payload);
+      if (payload.removed) {
+        clearRemovedConversationCaches(qc, getCurrentWsId(), payload.chat_session_id);
+        const chatState = useChatStore.getState?.();
+        if (chatState && chatState.activeSessionId === payload.chat_session_id) {
+          chatState.setActiveSession(null);
+        }
+        return;
+      }
+      qc.invalidateQueries({ queryKey: chatKeys.participants(payload.chat_session_id) });
+      invalidateSessionLists();
+    });
+
     // chat:session_deleted fires after a hard delete. The originating tab has
     // already optimistically dropped the row via useDeleteChatSession; this
     // handler keeps OTHER tabs/devices in sync and also clears the active
@@ -1738,6 +1801,7 @@ export function useRealtimeSync(
     return () => {
       unsubAny();
       unsubIssueUpdated();
+      unsubAssetUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
       unsubIssueAttachmentsChanged();
@@ -1785,6 +1849,7 @@ export function useRealtimeSync(
       unsubChatSessionCreated();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
+      unsubChatParticipantsChanged();
       if (taskMessageFlushTimer) clearTimeout(taskMessageFlushTimer);
       if (aggregateRefreshTimer) clearTimeout(aggregateRefreshTimer);
       timers.forEach(clearTimeout);

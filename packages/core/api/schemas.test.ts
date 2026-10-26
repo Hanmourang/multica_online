@@ -25,6 +25,7 @@ import {
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
+  ChatMessageListSchema,
   ChatPendingTaskSchema,
   ChatSessionListSchema,
   ChatSessionSchema,
@@ -792,6 +793,55 @@ describe("ChatPendingTaskSchema", () => {
   });
 });
 
+describe("chat resource response schemas", () => {
+  it("keeps a resource when kind is blank and project_id is null", () => {
+    const [message] = ChatMessageListSchema.parse([{
+      id: "message-1",
+      chat_session_id: "session-1",
+      role: "user",
+      content: "shared",
+      resources: [{ type: "issue", id: "issue-1", kind: "", project_id: null, access: "granted" }],
+    }]);
+    expect(message?.resources).toHaveLength(1);
+    expect(message?.resources?.[0]?.kind).toBeUndefined();
+    expect(message?.resources?.[0]?.project_id).toBeUndefined();
+  });
+
+  it("keeps valid resources when a sibling resource is malformed", () => {
+    const [message] = ChatMessageListSchema.parse([{
+      id: "message-1",
+      chat_session_id: "session-1",
+      role: "user",
+      content: "shared",
+      resources: [
+        { type: "issue", id: "issue-1", kind: "task", access: "granted" },
+        { type: "unknown", id: "bad" },
+      ],
+    }]);
+    expect(message?.content).toBe("shared");
+    expect(message?.resources).toHaveLength(1);
+    expect(message?.resources?.[0]?.id).toBe("issue-1");
+  });
+
+  it("parses sender-only resource snapshots on the send response", () => {
+    const response = SendChatMessageResponseSchema.parse({
+      message_id: "message-1",
+      created_at: "2026-08-05T00:00:00Z",
+      resources: [{ type: "document", id: "doc-1", source: "attachment", access: "granted" }],
+    });
+    expect(response.resources?.[0]?.id).toBe("doc-1");
+  });
+
+  it("drops malformed send-response resources instead of trusting unknown fields", () => {
+    const response = SendChatMessageResponseSchema.parse({
+      message_id: "message-1",
+      created_at: "2026-08-05T00:00:00Z",
+      resources: [{ type: "unknown", id: "bad" }],
+    });
+    expect(response.resources).toEqual([]);
+  });
+});
+
 describe("SendChatMessageResponseSchema", () => {
   const base = {
     message_id: "message-1",
@@ -805,6 +855,22 @@ describe("SendChatMessageResponseSchema", () => {
 
   it("ignores a malformed additive queue position without losing the accepted send", () => {
     expect(SendChatMessageResponseSchema.parse({ ...base, queued: "no" }).queued).toBeUndefined();
+  });
+
+  it("accepts a group send whose root task_id is an empty string", () => {
+    const response = SendChatMessageResponseSchema.parse({
+      message_id: "message-1",
+      task_id: "",
+      created_at: "2026-08-05T00:00:00Z",
+      kind: "group",
+      supports_queue: false,
+      queued: false,
+      attachment_ids: null,
+      dispatches: [{ agent_id: "agent-1", task_id: "task-1", status: "queued" }],
+    });
+    expect(response.message_id).toBe("message-1");
+    expect(response.task_id).toBeUndefined();
+    expect(response.dispatches?.[0]?.task_id).toBe("task-1");
   });
 });
 

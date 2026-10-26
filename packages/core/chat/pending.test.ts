@@ -345,3 +345,30 @@ describe("promotePendingChatTask wait_reason", () => {
     expect(promoted.wait_reason).toBeUndefined();
   });
 });
+
+describe("group agent_tasks", () => {
+  const group = {
+    supports_queue: false,
+    agent_tasks: [
+      { agent_id: "agent-a", task_id: "task-a", status: "running", created_at: "2026-10-25T08:00:00Z" },
+      { agent_id: "agent-b", task_id: "task-b", status: "queued", created_at: "2026-10-25T08:00:01Z" },
+    ],
+  };
+
+  it("removes only the finished agent and keeps the other pending", () => {
+    expect(removePendingChatTask(group, "task-a")).toEqual({
+      supports_queue: false,
+      agent_tasks: [group.agent_tasks[1]],
+    });
+  });
+
+  it("promotes one agent without clearing the other", () => {
+    expect(promotePendingChatTask(group, "task-b", "running")).toEqual({
+      supports_queue: false,
+      agent_tasks: [
+        group.agent_tasks[0],
+        { ...group.agent_tasks[1], status: "running" },
+      ],
+    });
+  });
+});

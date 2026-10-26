@@ -13,3 +13,7 @@ export const WORKFLOW_MODULE_FLAG = "workflow_module";
 // migration 470）。默认 false，server 门控路由注册 + 前端迭代 TAB 显隐；
 // 关闭时 TAB 隐藏、后端整块 404，与 Go internal/featureflags/keys.go 同形。
 export const SPRINT_MODULE_FLAG = "sprint_module";
+// 聊天模块泛化（DM/Group 统一会话模型，plan 20261025，migration 478）。默认
+// false，server 门控 /dm、/group、participants 路由注册 + 前端 DM/Group 入口显隐；
+// 关闭时新路由 404、旧单 Agent 聊天行为不变，与 Go internal/featureflags ChatConversations 同形。
+export const CHAT_CONVERSATIONS_FLAG = "chat_conversations";

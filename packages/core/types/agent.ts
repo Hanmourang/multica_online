@@ -826,6 +826,13 @@ export interface UpdateAgentEnvRequest {
  * multica-ai/multica#2174). Use `Skill` from a detail endpoint when you need
  * the body. For skills embedded in an `Agent` payload see `AgentSkillSummary`.
  */
+/** Platform skill embedded in the server. Applied to every agent; not a workspace row. */
+export interface BuiltinSkillSummary {
+  id: string;
+  name: string;
+  description: string;
+}
+
 export interface SkillSummary {
   id: string;
   workspace_id: string;

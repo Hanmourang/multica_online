@@ -1,5 +1,6 @@
 import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { applyRenderedChatResources, shareChatMessages, shareChatMessagesPage } from "./pending-chat-resources";
 import type { TaskMessagePayload } from "../types/events";
 import type {
   ChatQuickActionsFailureState,
@@ -55,6 +56,11 @@ export const chatKeys = {
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
   /** Per-user pinned agents for the quick-agent bar. */
   pinnedAgents: (wsId: string) => [...chatKeys.all(wsId), "pinned-agents"] as const,
+  /**
+   * dm/group participant roster for a session (plan 20261025). Agent sessions
+   * have no roster query. Invalidated on chat:participants_changed.
+   */
+  participants: (sessionId: string) => [...chatKeys.messagesAll(), "participants", sessionId] as const,
   /**
    * Boolean "does the user have any in-flight chat task" — the FAB's cheap
    * running indicator. Separate cache from the detailed `pendingTasks` list so
@@ -137,22 +143,28 @@ export function chatSessionOptions(wsId: string, id: string) {
 export function chatMessagesOptions(sessionId: string) {
   return queryOptions({
     queryKey: chatKeys.messages(sessionId),
-    queryFn: () => api.listChatMessages(sessionId),
+    queryFn: async () => applyRenderedChatResources(await api.listChatMessages(sessionId)),
     enabled: !!sessionId,
     staleTime: Infinity,
+    // The refetch that follows chat:message replaces this cache. Keep a card
+    // the sender already attached when the list payload has no issue snapshot.
+    structuralSharing: (oldData, newData) => shareChatMessages(oldData, newData) as typeof newData,
   });
 }
 
 export function chatMessagesPageOptions(sessionId: string, limit = 50) {
   return infiniteQueryOptions({
     queryKey: chatKeys.messagesPage(sessionId),
-    queryFn: ({ pageParam }) =>
-      api.listChatMessagesPage(sessionId, { before: pageParam, limit }),
+    queryFn: async ({ pageParam }) => {
+      const page = await api.listChatMessagesPage(sessionId, { before: pageParam, limit });
+      return { ...page, messages: applyRenderedChatResources(page.messages) };
+    },
     initialPageParam: null as { created_at: string; id: string } | null,
     getNextPageParam: (lastPage) =>
       lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
     enabled: !!sessionId,
     staleTime: Infinity,
+    structuralSharing: (oldData, newData) => shareChatMessagesPage(oldData, newData) as typeof newData,
   });
 }
 

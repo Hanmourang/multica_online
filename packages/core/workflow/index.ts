@@ -7,6 +7,7 @@
 export {
   workflowKeys,
   workflowTemplatesOptions,
+  workspaceTemplatesOptions,
   workflowInstancesOptions,
   workflowInstanceDetailOptions,
   workflowRecoveryDiagnosisOptions,
@@ -21,13 +22,17 @@ export {
   useArchiveWorkflowTemplate,
   useDuplicateWorkflowTemplate,
   useShareWorkflowTemplate,
+  useUpdateWorkflowTemplateDefinition,
+  useSetWorkflowTemplateEnforce,
   useCreateWorkflowInstance,
   useWorkflowInstanceAction,
   useWorkflowStageAction,
   useDecideWorkflowGate,
   usePostWorkflowGateMessage,
+  useDryRunWorkflowTemplate,
   workflowTemplateAfterWrite,
 } from "./mutations";
+export type { StageAction } from "./mutations";
 export {
   onWorkflowInstanceState,
   onWorkflowGateDecided,

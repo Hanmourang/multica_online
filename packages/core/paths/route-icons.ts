@@ -34,6 +34,8 @@ export type RouteIconName =
   | "Server"
   | "BookOpenText"
   | "Settings"
+  | "Package"
+  | "Workflow"
   | "File"
   | "FileText"
   | "FileImage"
@@ -51,6 +53,8 @@ export type NavLabelKey =
   | "issues"
   | "calendar"
   | "projects"
+  | "assets"
+  | "workflows"
   | "autopilots"
   | "agents"
   | "squads"
@@ -67,6 +71,8 @@ export type WorkspacePageKey =
   | "issues"
   | "calendar"
   | "projects"
+  | "assets"
+  | "workflows"
   | "autopilots"
   | "agents"
   | "squads"
@@ -95,6 +101,8 @@ export const WORKSPACE_PAGES: Record<WorkspacePageKey, WorkspacePage> = {
   issues: { segment: "issues", icon: "ListTodo", navKey: "issues" },
   calendar: { segment: "calendar", icon: "CalendarDays", navKey: "calendar" },
   projects: { segment: "projects", icon: "FolderKanban", navKey: "projects" },
+  assets: { segment: "assets", icon: "Package", navKey: "assets" },
+  workflows: { segment: "workflows", icon: "Workflow", navKey: "workflows" },
   autopilots: { segment: "autopilots", icon: "Zap", navKey: "autopilots" },
   agents: { segment: "agents", icon: "Bot", navKey: "agents" },
   squads: { segment: "squads", icon: "Users", navKey: "squads" },

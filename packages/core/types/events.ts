@@ -11,6 +11,10 @@ import type {
   WorkflowInstanceStatePayload,
   WorkflowGateDecidedPayload,
 } from "./workflow";
+import type {
+  SprintUpdatedPayload,
+  SprintIssuesChangedPayload,
+} from "./sprint";
 
 // WebSocket event types (matching Go server protocol/events.go)
 export type WSEventType =
@@ -68,6 +72,7 @@ export type WSEventType =
   | "chat:session_read"
   | "chat:session_deleted"
   | "chat:session_updated"
+  | "chat:participants_changed"
   | "project:created"
   | "project:updated"
   | "project:deleted"
@@ -101,7 +106,13 @@ export type WSEventType =
   | "workflow:template_changed"
   // 迭代（Sprint）模块（plan 20261024 §02，对照 Go protocol/events.go 两常量）。
   | "sprint:updated"
-  | "sprint:issues_changed";
+  | "sprint:issues_changed"
+  // 资产管理模块（plan 20261024 §03，对照 Go protocol/events.go 两常量）。
+  // 前端只按 `asset` 前缀整片 invalidate assetKeys（见 use-realtime-sync
+  // refreshMap），不做行级 merge，故载荷用宽松形状。
+  | "asset:bound"
+  | "asset:unbound"
+  | "asset:updated";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -411,6 +422,11 @@ export interface ChatMessageEventPayload {
   content: string;
   task_id?: string;
   created_at: string;
+  kind?: import("./chat").ConversationKind;
+  author_type?: import("./chat").ChatAuthorType;
+  author_id?: string;
+  mentions?: import("./chat").ChatMention[];
+  has_resources?: boolean;
 }
 
 export interface ChatDonePayload {
@@ -442,6 +458,9 @@ export interface ChatDonePayload {
    * quick_actions; absent on older servers/daemons.
    */
   quick_actions_pending?: boolean;
+  kind?: import("./chat").ConversationKind;
+  author_type?: import("./chat").ChatAuthorType;
+  author_id?: string;
 }
 
 /**
@@ -496,6 +515,14 @@ export interface ChatCancelFinalizedPayload {
 
 export interface ChatSessionReadPayload {
   chat_session_id: string;
+}
+
+// chat:participants_changed is body-free by design (plan 20261025 §7): a
+// removed member may only ever receive `removed=true` so they can clear local
+// caches — never roster contents or message bodies.
+export interface ChatParticipantsChangedPayload {
+  chat_session_id: string;
+  removed?: boolean;
 }
 
 export interface ChatSessionDeletedPayload {
@@ -583,6 +610,17 @@ export interface WSEventPayloadMap {
   "workflow:instance_state": WorkflowInstanceStatePayload;
   "workflow:gate_decided": WorkflowGateDecidedPayload;
   "workflow:template_changed": Record<string, unknown>;
+  // 迭代（Agent-S，plan §02）：两事件都只走通用前缀 invalidate（refreshMap
+  // 的 sprint 条目），载荷不做行级 merge，故用宽松形状。
+  "sprint:updated": SprintUpdatedPayload;
+  "sprint:issues_changed": SprintIssuesChangedPayload;
+  // 资产（Agent-A，plan §03）：两事件都只走 `asset` 前缀整片 invalidate assetKeys
+  // （refreshMap 的 asset 条目），载荷不做行级 merge；形状仅作文档化用途。
+  // 五阶段对齐 plan §5.3：asset:updated 兼容单行（binding）与批量（count）载荷，
+  // project_id 必带供档案交叉失效。
+  "asset:bound": { binding: Record<string, unknown>; project_id: string };
+  "asset:unbound": { binding_id: string; project_id: string };
+  "asset:updated": { binding?: Record<string, unknown>; project_id: string; count?: number };
   "reaction:added": ReactionAddedPayload;
   "reaction:removed": ReactionRemovedPayload;
   "agent:status": AgentStatusPayload;
@@ -621,6 +659,7 @@ export interface WSEventPayloadMap {
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;
   "chat:session_updated": unknown;
+  "chat:participants_changed": ChatParticipantsChangedPayload;
   "project:created": ProjectCreatedPayload;
   "project:updated": ProjectUpdatedPayload;
   "project:deleted": ProjectDeletedPayload;

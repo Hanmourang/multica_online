@@ -23,11 +23,26 @@ export type StageRunState =
   | "waiting_gate"
   | "done"
   | "failed"
-  | "skipped";
+  | "skipped"
+  // 资产准入未过（缺必备输入 / 上游产物未就绪）：禁止进入 running，等补齐后由编排器重新派发。
+  | "blocked";
 
 export type GateState = "pending" | "running" | "waiting" | "decided" | "cancelled";
 
 export type GateDecision = "" | "loop" | "exit";
+
+/**
+ * 阶段 spec（plan 20261025 §B1）：authoring 的目标/判定/输入输出模板经 Flatten
+ * 编译后的快照形状，与 Go service.StageSpec 同形；gate 节点只带 loopLabel/exitLabel。
+ */
+export interface StageSpec {
+  goal?: string;
+  criteria?: string;
+  inputTpl?: string;
+  outputTpl?: string;
+  loopLabel?: string;
+  exitLabel?: string;
+}
 
 /** workflow_template.nodes JSONB 元素（与 Go service.WorkflowNode 同形）。 */
 export interface WorkflowNode {
@@ -41,6 +56,74 @@ export interface WorkflowNode {
   gate_doc_types: string[];
   inputs?: unknown[];
   outputs?: unknown[];
+  spec?: StageSpec;
+}
+
+/**
+ * CoCo 嵌套 authoring schema（workflow_template.definition JSONB）。
+ * 与 Go service.WorkflowDefinition / DefinitionNode 同形；运行时引擎只消费
+ * 展平后的 nodes，definition 仅供编辑器/导入/流程图读取。
+ */
+export interface WorkflowDefinition {
+  schemaVersion: number;
+  kind: string;
+  name: string;
+  description: string;
+  nodes: DefinitionNode[];
+  roleNames?: Record<string, string>;
+}
+
+export type DefinitionNodeKind = "stage" | "iteration" | "parallel" | "branch";
+export type DefinitionNodeMode = "auto" | "human_loop";
+
+export interface DefinitionNode {
+  kind: DefinitionNodeKind;
+  id: string;
+  name: string;
+  mode?: DefinitionNodeMode;
+  roleId?: string;
+  prompt?: string;
+  children?: DefinitionNode[];
+  gate?: DefinitionGate | null;
+  inputs?: DefinitionInput[];
+  outputs?: DefinitionOutput[];
+  // 阶段目标管理（plan 101 C4）：goal=本阶段要达成什么，criteria=达成判定口径。
+  goal?: string;
+  criteria?: string;
+  // 阶段输入/输出模板（plan 101 C3）：带占位符的正文骨架，执行时按上游产物渲染。
+  inputTpl?: string;
+  outputTpl?: string;
+}
+
+export interface DefinitionGate {
+  id: string;
+  mode?: DefinitionNodeMode;
+  loopLabel?: string;
+  exitLabel?: string;
+}
+
+export interface DefinitionInput {
+  fromStageId?: string;
+  outputId?: string;
+  outputName?: string;
+  // 资产准入（plan 101 C5）：in=外部/上游必备输入，out=本阶段自产。
+  assetRole?: "in" | "out";
+  // required=true 的执行前必检项——映射到引擎 WorkflowNode.gate_doc_types。
+  required?: boolean;
+}
+
+export interface DefinitionOutput {
+  id: string;
+  name: string;
+  type?: string;
+  description?: string;
+}
+
+/** 画廊卡片的阶段 chip（server 从扁平 nodes 派生）。 */
+export interface StageFlowItem {
+  id: string;
+  name: string;
+  mode: StageMode;
 }
 
 export interface WorkflowTemplate {
@@ -52,6 +135,8 @@ export interface WorkflowTemplate {
   status: WorkflowTemplateStatus;
   version: number;
   nodes: WorkflowNode[];
+  definition: WorkflowDefinition | Record<string, never>;
+  enforce: boolean;
   official: boolean;
   source_project_id: string | null;
   created_by_type: string;
@@ -61,6 +146,7 @@ export interface WorkflowTemplate {
   created_at: string;
   updated_at: string;
   shared_project_ids: string[];
+  stage_flow: StageFlowItem[];
 }
 
 export interface ListWorkflowTemplatesResponse {
@@ -68,17 +154,39 @@ export interface ListWorkflowTemplatesResponse {
   total: number;
 }
 
+/** 工作区级画廊响应（GET /api/workflow/templates）。 */
+export interface ListWorkspaceWorkflowTemplatesResponse {
+  templates: WorkflowTemplate[];
+  total: number;
+  status_counts: Record<"all" | "published" | "draft" | "archived", number>;
+}
+
+export interface ListWorkspaceWorkflowTemplatesParams {
+  status?: WorkflowTemplateStatus | "all";
+  scope?: "mine";
+  project_id?: string;
+}
+
 export interface CreateWorkflowTemplateRequest {
   name: string;
   description?: string | null;
   nodes: WorkflowNode[];
+  definition?: WorkflowDefinition;
   workspace_official?: boolean;
+  enforce?: boolean;
 }
 
 export interface UpdateWorkflowTemplateRequest {
   name: string;
   description?: string | null;
   nodes: WorkflowNode[];
+}
+
+/** 编辑器 JSON 保存（PUT /api/workflow/templates/{tid}/definition）。 */
+export interface UpdateWorkflowTemplateDefinitionRequest {
+  definition: WorkflowDefinition;
+  name?: string;
+  description?: string | null;
 }
 
 export interface WorkflowInstance {
@@ -130,6 +238,10 @@ export interface WorkflowStageRun {
   state: StageRunState;
   inputs: unknown;
   outputs: unknown;
+  // 创建实例时从模板 definition 编译的快照（§B1）；旧实例为 null。
+  spec?: StageSpec | null;
+  // 仅 blocked 阶段附带：当前仍缺失的必检资产名（§A1.4）。
+  admission_missing?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -204,6 +316,23 @@ export interface WorkflowRecoveryDiagnosisResponse {
   instance_status: WorkflowInstanceStatus;
   can_recover: boolean;
   suggestions: WorkflowRecoverySuggestion[];
+}
+
+/** POST /api/workflow/templates/{tid}/dry-run 请求体（§C7，零副作用渲染预览）。 */
+export interface WorkflowTemplateDryRunRequest {
+  node_id?: string;
+  workitem?: Record<string, string>;
+}
+
+export interface WorkflowTemplateDryRunResponse {
+  node_id: string;
+  node_name: string;
+  mode: StageMode;
+  agent_ref?: string;
+  prompt: string;
+  warnings: string[];
+  spec?: StageSpec | null;
+  node_count: number;
 }
 
 /** WS workflow:instance_state 载荷（service.publishInstanceState 形状）。 */

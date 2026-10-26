@@ -5,11 +5,11 @@ import type { GraphSyncPayload } from "./graph";
 /** 档案作用域：由目录契约推导 —— overview/ → project，requirements/ → requirement，_shared/ → shared。 */
 export type ArtifactScope = "shared" | "project" | "requirement";
 
-/** 写入通道：sync = CLI 同步，agent = 交付物归档动作，server = 原型投影，manual = 手动关联。 */
-export type ArtifactSource = "sync" | "agent" | "server" | "manual";
+/** 写入通道：sync = CLI 同步，agent = 交付物归档动作，server = 原型投影，manual = 手动关联，asset = 资产自动映射（migration 474）。 */
+export type ArtifactSource = "sync" | "agent" | "server" | "manual" | "asset";
 
-/** 需求日历阶段（由 s<N>-<slug>/ 路径片段解析，N ∈ 1..4，越界拒绝入库）。 */
-export type ArtifactStage = 1 | 2 | 3 | 4;
+/** 需求日历阶段（由 s<N>-<slug>/ 路径片段解析，N ∈ 1..5，越界拒绝入库；五阶段对齐 plan §4.5）。 */
+export type ArtifactStage = 1 | 2 | 3 | 4 | 5;
 
 /** 文档类型：开放式字符串，常见值 research / product-design / architecture / tech-spec / test-report 等。 */
 export type ArtifactDocType = string;

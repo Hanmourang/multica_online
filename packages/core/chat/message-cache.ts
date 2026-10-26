@@ -1,6 +1,13 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import { chatKeys } from "./queries";
-import type { ChatMessage, ChatMessagesPage } from "../types";
+import type { ChatMessage, ChatMessageReaction, ChatMessageReply, ChatMessagesPage } from "../types";
+
+import { rememberRenderedChatResources } from "./pending-chat-resources";
+
+export {
+  mergeChatResourceSnapshots,
+  rememberPendingChatResources,
+} from "./pending-chat-resources";
 
 /**
  * The single door a settled chat message goes through on its way into the
@@ -121,6 +128,7 @@ export function upsertChatMessageToCaches(
   message: ChatMessage,
   { seedIfMissing = false }: UpsertChatMessageOptions = {},
 ): void {
+  rememberRenderedChatResources([message]);
   qc.setQueryData<ChatMessage[] | undefined>(chatKeys.messages(sessionId), (old) => {
     if (!old) return seedIfMissing ? [message] : old;
     return upsertIntoList(old, message);
@@ -130,6 +138,34 @@ export function upsertChatMessageToCaches(
     (old) => {
       if (!old?.pages.length) return seedIfMissing ? seedPage(message) : old;
       return upsertIntoPages(old, message);
+    },
+  );
+}
+
+/** Replace reactions or replies on one message in both transcript caches. */
+export function patchChatMessageFeedback(
+  qc: QueryClient,
+  sessionId: string,
+  messageId: string,
+  patch: { reactions?: ChatMessageReaction[]; replies?: ChatMessageReply[] },
+): void {
+  const apply = (message: ChatMessage): ChatMessage =>
+    message.id === messageId ? { ...message, ...patch } : message;
+  qc.setQueryData<ChatMessage[] | undefined>(chatKeys.messages(sessionId), (old) =>
+    old?.map(apply),
+  );
+  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+    chatKeys.messagesPage(sessionId),
+    (old) => {
+      if (!old) return old;
+      let changed = false;
+      const pages = old.pages.map((page) => {
+        const messages = page.messages.map(apply);
+        if (messages.every((message, index) => message === page.messages[index])) return page;
+        changed = true;
+        return { ...page, messages };
+      });
+      return changed ? { ...old, pages } : old;
     },
   );
 }

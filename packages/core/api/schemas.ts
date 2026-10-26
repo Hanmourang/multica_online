@@ -13,9 +13,15 @@ import type {
   BillingTransactionsPage,
   CancelTaskResponse,
   ChatMessage,
+  ChatMessageReaction,
+  ChatMessageReply,
   ChatDraftRestoresResponse,
   ChatPendingTask,
   ChatSession,
+  ChatMention,
+  ChatParticipant,
+  ChatAgentDispatch,
+  ChatMessageDispatch,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
@@ -44,6 +50,7 @@ import type {
   ListTelegramInstallationsResponse,
   RedeemTelegramBindingTokenResponse,
   GroupedIssuesResponse,
+  Issue,
   GitHubConnectResponse,
   GitHubPullRequest,
   InboxItem,
@@ -73,6 +80,7 @@ import type {
   PluginPackageListResponse,
   PluginPreview,
   PluginSurfaceLaunch,
+  ProjectArtifact,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
   SearchIssuesResponse,
@@ -806,6 +814,76 @@ const ChatQuickActionSchema = z.object({
   primary: z.boolean().optional(),
 }).loose();
 
+// Conversation-model schemas (plan 20261025 §6). All additive: agent sessions
+// omit these fields, so each degrades independently and never drops a message
+// or a session. A malformed mention/participant list falls back to empty.
+const ChatMentionSchema: z.ZodType<ChatMention> = z.object({
+  type: z.enum(["member", "agent"]),
+  id: z.string(),
+}).loose();
+
+const ChatParticipantSchema: z.ZodType<ChatParticipant> = z.object({
+  chat_session_id: z.string(),
+  participant_type: z.enum(["member", "agent"]).catch("member"),
+  participant_id: z.string(),
+  display_name: z.string().default(""),
+  avatar_url: z.string().nullable().optional(),
+  admin: z.boolean().default(false),
+  joined_at: z.string().default(""),
+  last_read_at: z.string().default(""),
+  last_read_message_id: z.string().nullable().optional(),
+  pinned: z.boolean().optional(),
+}).loose();
+
+const ChatAgentDispatchSchema: z.ZodType<ChatAgentDispatch> = z.object({
+  agent_id: z.string(),
+  task_id: z.string().optional(),
+  status: z.enum(["queued", "blocked"]).catch("blocked"),
+  reason: z.string().optional(),
+}).loose();
+
+// Persisted per-agent fan-out outcome. The server writes the whole life cycle
+// here (queued / running / completed / failed / blocked), so the status stays a
+// free-form string instead of the send-response enum.
+const ChatMessageDispatchSchema: z.ZodType<ChatMessageDispatch> = z.object({
+  agent_id: z.string(),
+  task_id: z.string().nullish(),
+  status: z.string().catch("queued"),
+  reason: z.string().nullish(),
+}).loose();
+
+export const ChatMessageResourceSchema = z.object({
+  type: z.enum(["issue", "document"]),
+  id: z.string(),
+  kind: z.enum(["task", "requirement"]).or(z.literal("")).nullish().transform((value) => value || undefined),
+  source: z.enum(["artifact", "attachment"]).or(z.literal("")).nullish().transform((value) => value || undefined),
+  project_id: z.string().nullish().transform((value) => value || undefined),
+  access: z.enum(["granted", "denied", "missing"]).default("granted"),
+  issue: z.custom<Issue>().optional(),
+  artifact: z.custom<ProjectArtifact>().optional(),
+  attachment: z.custom<Attachment>().optional(),
+}).loose();
+
+const ChatMessageReactionSchema = z.object({
+  emoji: z.string().min(1),
+  actor_id: z.string().min(1),
+}).loose();
+
+const ChatMessageReplySchema = z.object({
+  id: z.string().min(1),
+  author_id: z.string().min(1),
+  content: z.string(),
+  created_at: z.string().optional(),
+}).loose();
+
+export const ChatMessageReactionsResponseSchema: z.ZodType<{ reactions: ChatMessageReaction[] }> = z.object({
+  reactions: z.array(ChatMessageReactionSchema).default([]),
+}).loose();
+
+export const ChatMessageRepliesResponseSchema: z.ZodType<{ replies: ChatMessageReply[] }> = z.object({
+  replies: z.array(ChatMessageReplySchema).default([]),
+}).loose();
+
 export const ChatMessageSchema = z.object({
   id: z.string(),
   chat_session_id: z.string(),
@@ -823,6 +901,54 @@ export const ChatMessageSchema = z.object({
   // Optional additive data degrades independently: a malformed suggestion
   // must not hide the assistant reply that contains it.
   quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
+  // Author attribution (plan 20261025 §6). Additive: agent sessions omit these;
+  // a malformed mention list degrades to empty, never dropping the message.
+  author_type: z.enum(["member", "agent", "system"]).catch("agent").optional(),
+  author_id: z.string().nullable().optional(),
+  mentions: z.array(ChatMentionSchema).catch([]).optional(),
+  resources: z
+    .array(z.unknown())
+    .catch([])
+    .transform((resources) =>
+      resources.flatMap((resource) => {
+        const parsed = ChatMessageResourceSchema.safeParse(resource);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    )
+    .optional(),
+  has_resources: z.boolean().optional(),
+  reactions: z
+    .array(z.unknown())
+    .nullish()
+    .transform((rows) =>
+      (rows ?? []).flatMap((row) => {
+        const parsed = ChatMessageReactionSchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    )
+    .optional(),
+  replies: z
+    .array(z.unknown())
+    .nullish()
+    .transform((rows) =>
+      (rows ?? []).flatMap((row) => {
+        const parsed = ChatMessageReplySchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    )
+    .optional(),
+  // Group fan-out outcomes persisted on the triggering message. A malformed
+  // row degrades to "drop that row", never to "drop the message".
+  dispatches: z
+    .array(z.unknown())
+    .nullish()
+    .transform((rows) =>
+      (rows ?? []).flatMap((row) => {
+        const parsed = ChatMessageDispatchSchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    )
+    .optional(),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
@@ -1812,6 +1938,8 @@ const ChatLastMessageSchema = z.object({
     "onboarding_kickoff",
     "onboarding_opening",
   ]).optional().catch(undefined),
+  author_type: z.enum(["member", "agent", "system"]).optional().catch(undefined),
+  author_id: z.string().nullable().optional().catch(undefined),
 }).loose();
 
 const ChatChannelSourceSchema = z.object({
@@ -1823,7 +1951,10 @@ const ChatChannelSourceSchema = z.object({
 export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
-  agent_id: z.string().default(""),
+  // agent_id is null for dm/group conversations (no single owning agent).
+  agent_id: z.string().nullable().default(""),
+  kind: z.enum(["agent", "dm", "group"]).catch("agent").optional(),
+  participants: z.array(ChatParticipantSchema).catch([]).optional(),
   creator_id: z.string().default(""),
   project_id: z.string().nullable().optional(),
   title: z.string().default(""),
@@ -1854,6 +1985,34 @@ export const ChatSessionListSchema = z
   .transform((sessions) => sessions.filter((session) => session.id !== ""))
   .default([]);
 export const EMPTY_CHAT_SESSION_LIST: ChatSession[] = [];
+
+// Participant roster (plan 20261025 §6). GET /api/chat/sessions/:id/participants
+// returns this array directly. A single malformed row degrades to the empty
+// sentinel and is filtered out rather than dropping the whole roster, so a bad
+// entry can never blank the participant list of an otherwise healthy dm/group.
+export const EMPTY_CHAT_PARTICIPANT: ChatParticipant = {
+  chat_session_id: "",
+  participant_type: "member",
+  participant_id: "",
+  display_name: "",
+  admin: false,
+  joined_at: "",
+  last_read_at: "",
+};
+export const ChatParticipantListSchema = z
+  .array(ChatParticipantSchema.catch(EMPTY_CHAT_PARTICIPANT))
+  .transform((participants) =>
+    participants.filter((participant) => participant.participant_id !== ""),
+  )
+  .default([]);
+export const EMPTY_CHAT_PARTICIPANT_LIST: ChatParticipant[] = [];
+
+// Participant mutations (add/remove/set-admin) answer
+// { participants: [...] } with the full fresh roster; unwrap through the same
+// row-degrade list so one bad entry cannot blank the whole management sheet.
+export const GroupParticipantsUpdateSchema = z
+  .object({ participants: ChatParticipantListSchema })
+  .loose();
 
 // Deferred-cancellation draft restores
 // (`GET /api/chat/sessions/{id}/draft-restores`, #5219) feed the composer
@@ -1889,26 +2048,62 @@ const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
   }),
 );
 
-// Root fields retain the legacy single-task response shape. Keep additive
-// fields optional so callers can distinguish an older server from an empty
-// queue. A malformed queue row is ignored without discarding a valid head.
+// Malformed queue row is ignored without discarding a valid head.
+const GroupPendingAgentTaskSchema = z.object({
+  agent_id: z.string().min(1),
+  task_id: z.string().min(1),
+  status: z.string().default("queued"),
+  created_at: z.string().default(""),
+  wait_reason: z.string().optional(),
+}).loose();
+
 export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
   task_id: z.string().optional(),
   status: z.string().optional(),
   created_at: z.string().optional(),
   supports_queue: z.boolean().optional(),
   queued_tasks: ChatQueuedTasksSchema.optional(),
+  // Group parallel-dispatch set (plan 20261025 §6). Additive: an older server
+  // omits it; a malformed row is dropped rather than discarding the head.
+  agent_tasks: z
+    .array(z.unknown())
+    .transform((tasks) =>
+      tasks.flatMap((task) => {
+        const parsed = GroupPendingAgentTaskSchema.safeParse(task);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    )
+    .optional(),
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   message_id: z.string().min(1),
-  task_id: z.string().min(1),
+  // Group and DM sends have no root agent task. The server still serializes
+  // task_id as "" because the field has no omitempty. An empty or null id must
+  // not fail the whole response — the message is already persisted and pushed
+  // over realtime, and a parse failure surfaces as a false "send failed".
+  task_id: z
+    .string()
+    .nullish()
+    .transform((id) => (id && id.length > 0 ? id : undefined)),
+  kind: z.enum(["agent", "dm", "group"]).catch("agent").optional(),
+  dispatches: z.array(ChatAgentDispatchSchema).catch([]).optional(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),
   created_at: z.string().min(1),
   attachment_ids: z.array(z.string()).nullish().transform((ids) => ids ?? undefined),
+  resources: z
+    .array(z.unknown())
+    .catch([])
+    .transform((resources) =>
+      resources.flatMap((resource) => {
+        const parsed = ChatMessageResourceSchema.safeParse(resource);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    )
+    .optional(),
 }).loose();
 
 // `started` is the only field the flow branches on, and a malformed response

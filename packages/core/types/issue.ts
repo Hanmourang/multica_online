@@ -190,6 +190,8 @@ export interface Issue {
   project_id: string | null;
   /** 所属模块（项目级单选标签）；null/缺省 = 无模块，不参与任何锁 */
   module_id?: string | null;
+  /** 所属迭代（CoCo 对标 02_迭代模块，migration 470）；null/缺省 = backlog */
+  sprint_id?: string | null;
   /** 跨模块避免冲突：勾选后本任务与异模块任务互斥执行 */
   avoid_conflict?: boolean;
   position: number;

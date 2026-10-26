@@ -52,6 +52,23 @@ describe("workflowKeys", () => {
       "instances",
     ]);
   });
+
+  it("nests the workspace gallery under wsId and serializes filters into the key (plan §3)", () => {
+    expect(workflowKeys.workspaceTemplates("ws1")).toEqual([
+      "workflow",
+      "ws1",
+      "workspaceTemplates",
+      {},
+    ]);
+    expect(
+      workflowKeys.workspaceTemplates("ws1", { status: "published", scope: "mine" }),
+    ).toEqual([
+      "workflow",
+      "ws1",
+      "workspaceTemplates",
+      { status: "published", scope: "mine" },
+    ]);
+  });
 });
 
 describe("query options enabled guards", () => {

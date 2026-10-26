@@ -6,6 +6,7 @@ import type {
   CreateWorkflowInstanceRequest,
   CreateWorkflowTemplateRequest,
   GateDecision,
+  UpdateWorkflowTemplateDefinitionRequest,
   UpdateWorkflowTemplateRequest,
   WorkflowGateMessagesResponse,
   WorkflowTemplate,
@@ -86,6 +87,39 @@ export function useShareWorkflowTemplate(projectId: string) {
   });
 }
 
+/**
+ * 工作区级模板写动作（侧边栏「工作流」编辑器保存 / enforce）的失效集：
+ * 画廊 filters 进 key 尾段，故按 workflow 父键前缀整片失效，同时覆盖项目级
+ * templates 切片与派生视图。
+ */
+function useWorkspaceTemplateInvalidation() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return () => {
+    qc.invalidateQueries({ queryKey: workflowKeys.all(wsId) });
+  };
+}
+
+export function useUpdateWorkflowTemplateDefinition() {
+  const settle = useWorkspaceTemplateInvalidation();
+  return useMutation({
+    mutationFn: (vars: {
+      templateId: string;
+      data: UpdateWorkflowTemplateDefinitionRequest;
+    }) => api.updateWorkflowTemplateDefinition(vars.templateId, vars.data),
+    onSettled: settle,
+  });
+}
+
+export function useSetWorkflowTemplateEnforce() {
+  const settle = useWorkspaceTemplateInvalidation();
+  return useMutation({
+    mutationFn: (vars: { templateId: string; enforce: boolean }) =>
+      api.setWorkflowTemplateEnforce(vars.templateId, vars.enforce),
+    onSettled: settle,
+  });
+}
+
 /** 实例写动作的公共失效集：列表（行集 + status_counts）+ 详情。 */
 function useInstanceInvalidation(projectId: string | undefined, instanceId?: string) {
   const qc = useQueryClient();
@@ -135,7 +169,14 @@ export function useWorkflowInstanceAction(
   });
 }
 
-type StageAction = "approve" | "loop-back" | "skip" | "rerun" | "interrupt";
+export type StageAction =
+  | "approve"
+  | "loop-back"
+  | "skip"
+  | "rerun"
+  | "interrupt"
+  // 缺件 blocked 阶段的手动复评（plan 20261025 §B3c）：补齐资产后不等 sweep。
+  | "recheck";
 
 const stageActionFn: Record<
   StageAction,
@@ -146,9 +187,10 @@ const stageActionFn: Record<
   skip: (id) => api.skipWorkflowStage(id),
   rerun: (id) => api.rerunWorkflowStage(id),
   interrupt: (id) => api.interruptWorkflowStage(id),
+  recheck: (id) => api.recheckWorkflowStage(id),
 };
 
-/** 阶段动作统一入口：action ∈ approve|loop-back|skip|rerun|interrupt。 */
+/** 阶段动作统一入口：action ∈ approve|loop-back|skip|rerun|interrupt|recheck。 */
 export function useWorkflowStageAction(
   projectId: string | undefined,
   instanceId: string,
@@ -222,6 +264,25 @@ export function usePostWorkflowGateMessage(gateRunId: string) {
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: workflowKeys.all(wsId) });
     },
+  });
+}
+
+/**
+ * 模板「测试运行」第一版＝零副作用渲染预览（plan 20261025 §C7）。
+ * 服务端用与 dispatchStage 同源的渲染链回 prompt + warnings，不写任何表，
+ * 因此无需 invalidate——缓存里也没有该结果的位置。
+ */
+export function useDryRunWorkflowTemplate() {
+  return useMutation({
+    mutationFn: (vars: {
+      templateId: string;
+      nodeId?: string;
+      workitem?: Record<string, string>;
+    }) =>
+      api.dryRunWorkflowTemplate(vars.templateId, {
+        node_id: vars.nodeId ?? "",
+        workitem: vars.workitem,
+      }),
   });
 }
 

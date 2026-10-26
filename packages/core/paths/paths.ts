@@ -61,6 +61,13 @@ function workspaceScoped(slug: string) {
       `${ws}/projects/${encode(projectId)}?view=${encode(view)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
+    // 资产管理（工作区级跨项目聚合）。与 server /api/assets/page + 前端
+    // WORKSPACE_PAGES.assets 对齐；flag off 时侧栏入口隐藏，路由仍可达供回滚。
+    assets: () => `${ws}/assets`,
+    // 工作流（工作区级侧边栏模块，对标 CoCo /workflows）。与 server
+    // /api/workflow/templates + WORKSPACE_PAGES.workflows 对齐；flag off 时入口隐藏。
+    workflows: () => `${ws}/workflows`,
+    workflowTemplate: (id: string) => `${ws}/workflows/templates/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,

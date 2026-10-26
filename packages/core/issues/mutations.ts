@@ -757,6 +757,19 @@ export function useBatchDeleteIssues() {
 
 type TimelineCache = TimelineEntry[];
 
+/** 「流程把控」验收面板逐条勾选回写（plan 20261025 §C-1）。写成功后失效需求详情缓存，
+ *  让面板 refetch 拿到带 checked_criteria 的最新 acceptance_spec（刷新保持一致）。 */
+export function useUpdateAcceptanceCriteria(issueId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (checked: string[]) => api.updateAcceptanceCriteria(issueId, checked),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+    },
+  });
+}
+
 export function useCreateComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

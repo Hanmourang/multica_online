@@ -17,6 +17,9 @@ export interface CreateIssueRequest {
   module_id?: string;
   /** 跨模块避免冲突：勾选后本任务与异模块任务互斥执行。 */
   avoid_conflict?: boolean;
+  /** 所属迭代；必须属于 issue 所在项目且未 completed，否则服务端 404 / 409
+   * 拒绝整个创建（CoCo 对标 02 §F）。省略 = 不入迭代（backlog）。 */
+  sprint_id?: string;
   /** Ordered stage (>= 1) grouping this sub-issue under its parent. */
   stage?: number;
   start_date?: string;
@@ -282,6 +285,10 @@ export interface UpdateIssueRequest {
   module_id?: string | null;
   /** 跨模块避免冲突：勾选后本任务与异模块任务互斥执行。 */
   avoid_conflict?: boolean;
+  /** 所属迭代；null 显式移出（回 backlog）。异项目迭代服务端 404、
+   * completed 迭代 409；未显式给出时随 project_id 变更自动清空。
+   * （CoCo 对标 02 §F：迭代是项目作用域，与 module_id 同款不变式） */
+  sprint_id?: string | null;
   /** Ordered stage (>= 1); null clears it (unstaged). */
   stage?: number | null;
   /** Attachment IDs to bind to this issue alongside the description update.
@@ -366,6 +373,12 @@ export interface ListIssuesParams {
   assignee_types?: IssueAssigneeType[];
   creator_id?: string;
   project_id?: string;
+  /**
+   * 按迭代归属过滤（CoCo 对标 02_迭代模块 §E2：迭代内 issue 列表复用
+   * /api/issues，不新造端点）。backlog（sprint_id IS NULL）由前端在 project
+   * 级结果集内客户端过滤。
+   */
+  sprint_id?: string;
   /** Actor-aware table facets. OR within each field. */
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;

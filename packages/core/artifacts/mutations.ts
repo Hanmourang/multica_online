@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import { issueArchiveKeys } from "../agent-runs/queries";
+import { assetKeys } from "../assets/queries";
 import { artifactKeys } from "./queries";
 import type {
   ArchiveDeliverableRequest,
@@ -20,6 +21,9 @@ import type {
  * / f9 进度追踪 aggregates are server-side projections over the same artifact
  * rows, so without this cross-key invalidation those views keep showing
  * stale counts after an archive action until a manual refresh.
+ *
+ * 五阶段对齐 plan §5.2：档案写路径（PATCH / 归档重分类 / manifest 同步）在服务端
+ * 同事务回写关联资产 lifecycle，前端必须同时失效 assetKeys，否则另一侧展示旧阶段。
  */
 export function useSyncProjectArtifacts(projectId: string) {
   const qc = useQueryClient();
@@ -33,6 +37,8 @@ export function useSyncProjectArtifacts(projectId: string) {
       });
       // f8/f9 issue-level aggregates project the same artifact rows.
       qc.invalidateQueries({ queryKey: issueArchiveKeys.all(wsId) });
+      // manifest 同步会在事务内回写关联资产 placement（plan §4.3-7）。
+      qc.invalidateQueries({ queryKey: assetKeys.all(wsId) });
     },
   });
 }
@@ -59,6 +65,8 @@ export function useArchiveDeliverable(projectId: string) {
       // f6 归档动作 re-files a deliverable → f8 交付概览 / f9 进度追踪 must
       // refresh, they aggregate the same rows server-side.
       qc.invalidateQueries({ queryKey: issueArchiveKeys.all(wsId) });
+      // 可重分类资产关联行 → 同事务反写资产 lifecycle，资产侧同步刷新（plan §5.2）。
+      qc.invalidateQueries({ queryKey: assetKeys.all(wsId) });
     },
   });
 }
@@ -86,6 +94,9 @@ export function usePatchArtifact(workspaceId: string, projectId: string) {
       });
       // Reclassification changes the f8/f9 aggregates (scope/stage buckets).
       qc.invalidateQueries({ queryKey: issueArchiveKeys.all(workspaceId) });
+      // 资产关联行的 stage/doc_type 联动回写 binding.lifecycle_stage（plan §4.3），
+      // 正文/模块编辑也刷新资产，保证关联展示不陈旧（plan §5.2）。
+      qc.invalidateQueries({ queryKey: assetKeys.all(workspaceId) });
     },
   });
 }

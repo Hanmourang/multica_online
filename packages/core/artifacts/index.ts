@@ -18,3 +18,18 @@ export {
   useDeleteArtifact,
   usePutArchiveSyncConfig,
 } from "./mutations";
+export {
+  ARTIFACT_STAGES,
+  ASSET_UNSTAGED_PLACEMENT,
+  FIVE_STAGE_PLACEMENTS,
+  SHELF_DOC_TYPES,
+  UNSTAGED_DOC_TYPE,
+  isArtifactStage,
+  isShelfDocType,
+  lifecycleForArtifactStage,
+  lifecycleForPlacement,
+  placementForLifecycle,
+  shelfRelPathForMove,
+  stageForShelfDocType,
+  type ArchivePlacement,
+} from "./placement";

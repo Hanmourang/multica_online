@@ -3,6 +3,8 @@ import { api } from "../api";
 import type {
   ListWorkflowInstancesParams,
   ListWorkflowInstancesResponse,
+  ListWorkspaceWorkflowTemplatesParams,
+  ListWorkspaceWorkflowTemplatesResponse,
   WorkflowGateMessagesResponse,
   WorkflowInstanceDetailResponse,
   WorkflowRecoveryDiagnosisResponse,
@@ -24,6 +26,12 @@ export const workflowKeys = {
     [...workflowKeys.all(wsId), projectId] as const,
   templates: (wsId: string, projectId: string) =>
     [...workflowKeys.project(wsId, projectId), "templates"] as const,
+  // 工作区级画廊（跨项目，侧边栏「工作流」入口）。filters 序列化进 key。
+  workspaceTemplates: (
+    wsId: string,
+    filters?: ListWorkspaceWorkflowTemplatesParams,
+  ) =>
+    [...workflowKeys.all(wsId), "workspaceTemplates", filters ?? {}] as const,
   instances: (
     wsId: string,
     projectId: string,
@@ -50,6 +58,17 @@ export function workflowTemplatesOptions(wsId: string, projectId: string) {
     queryKey: workflowKeys.templates(wsId, projectId),
     queryFn: () => api.listWorkflowTemplates(projectId),
     enabled: Boolean(wsId && projectId),
+  });
+}
+
+export function workspaceTemplatesOptions(
+  wsId: string,
+  filters?: ListWorkspaceWorkflowTemplatesParams,
+) {
+  return queryOptions<ListWorkspaceWorkflowTemplatesResponse>({
+    queryKey: workflowKeys.workspaceTemplates(wsId, filters),
+    queryFn: () => api.listWorkspaceWorkflowTemplates(filters),
+    enabled: Boolean(wsId),
   });
 }
 

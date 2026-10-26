@@ -1,4 +1,9 @@
-import type { ChatMessage, ChatPendingTask, ChatQueuedTask } from "../types/chat";
+import type {
+  ChatMessage,
+  ChatPendingTask,
+  ChatQueuedTask,
+  GroupPendingAgentTask,
+} from "../types/chat";
 
 const EMPTY_PENDING_TASK: ChatPendingTask = {};
 
@@ -100,6 +105,24 @@ function resolveWaitReason(
   return incoming ?? existing;
 }
 
+function patchGroupAgentTasks(
+  current: ChatPendingTask | undefined,
+  taskID: string,
+  patch: (task: GroupPendingAgentTask) => GroupPendingAgentTask | null,
+): GroupPendingAgentTask[] | undefined {
+  if (!current?.agent_tasks) return undefined;
+  const next: GroupPendingAgentTask[] = [];
+  for (const task of current.agent_tasks) {
+    if (task.task_id !== taskID) {
+      next.push(task);
+      continue;
+    }
+    const mapped = patch(task);
+    if (mapped) next.push(mapped);
+  }
+  return next;
+}
+
 export function promotePendingChatTask(
   current: ChatPendingTask | undefined,
   taskID: string,
@@ -108,21 +131,37 @@ export function promotePendingChatTask(
   waitReason?: string,
 ): ChatPendingTask {
   const queue = current?.queued_tasks ?? [];
+  const agentTasks = patchGroupAgentTasks(current, taskID, (task) => ({
+    ...task,
+    status,
+    created_at: task.created_at || createdAt || "",
+    wait_reason: resolveWaitReason(status, waitReason, task.wait_reason),
+  }));
+  const withAgents = (value: ChatPendingTask): ChatPendingTask =>
+    agentTasks ? { ...value, agent_tasks: agentTasks } : value;
+
   if (current?.task_id === taskID) {
-    return {
+    return withAgents({
       ...current,
       status,
       wait_reason: resolveWaitReason(status, waitReason, current.wait_reason),
       queued_tasks: queue.filter((task) => task.task_id !== taskID),
-    };
+    });
   }
 
   const promoted = queue.find((task) => task.task_id === taskID);
   // Lifecycle events are only hints. A late event for an unknown task must
   // not synthesize a new head after the authoritative pending query cleared.
-  if (!current?.task_id || !promoted) return current ?? EMPTY_PENDING_TASK;
+  // Group sessions often have no root task_id — patch only the matching
+  // agent_tasks entry and leave every other agent running.
+  if (!current?.task_id || !promoted) {
+    if (agentTasks && current?.agent_tasks?.some((task) => task.task_id === taskID)) {
+      return withAgents({ ...(current ?? {}) });
+    }
+    return current ?? EMPTY_PENDING_TASK;
+  }
   const previousHead = asSummary(current ?? {});
-  return {
+  return withAgents({
     ...promoted,
     supports_queue: current.supports_queue,
     status,
@@ -132,29 +171,46 @@ export function promotePendingChatTask(
       ...(previousHead?.status === "queued" ? [previousHead] : []),
       ...queue.filter((task) => task.task_id !== taskID),
     ]),
-  };
+  });
 }
 
 export function removePendingChatTask(
   current: ChatPendingTask | undefined,
   taskID: string,
 ): ChatPendingTask {
-  if (!current?.task_id) return EMPTY_PENDING_TASK;
+  const agentTasks = patchGroupAgentTasks(current, taskID, () => null);
+  const hadAgents = (current?.agent_tasks?.length ?? 0) > 0;
+  const withAgents = (value: ChatPendingTask): ChatPendingTask =>
+    hadAgents ? { ...value, agent_tasks: agentTasks ?? [] } : value;
+
+  if (!current?.task_id) {
+    if (!current || !hadAgents) return EMPTY_PENDING_TASK;
+    const queueSupport = current.supports_queue === undefined
+      ? {}
+      : { supports_queue: current.supports_queue };
+    return withAgents(queueSupport);
+  }
   if (current.task_id !== taskID) {
-    return {
+    return withAgents({
       ...current,
       queued_tasks: (current.queued_tasks ?? []).filter((task) => task.task_id !== taskID),
-    };
+    });
   }
 
   const [next, ...rest] = uniqueQueue(
     (current.queued_tasks ?? []).filter((task) => task.task_id !== taskID),
   );
-  if (!next) return EMPTY_PENDING_TASK;
+  if (!next) {
+    if (!hadAgents) return EMPTY_PENDING_TASK;
+    const queueSupport = current.supports_queue === undefined
+      ? {}
+      : { supports_queue: current.supports_queue };
+    return withAgents(queueSupport);
+  }
   const queueSupport = current.supports_queue === undefined
     ? {}
     : { supports_queue: current.supports_queue };
-  return { ...next, ...queueSupport, queued_tasks: rest };
+  return withAgents({ ...next, ...queueSupport, queued_tasks: rest });
 }
 
 export function prioritizePendingChatTask(
