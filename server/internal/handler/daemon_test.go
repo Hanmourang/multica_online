@@ -315,6 +315,41 @@ func TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies(t *testing.T) {
 	}
 }
 
+// 1:1/DM 的 chat 串行必须保留：同一会话的两个 turn 共用一个 provider session
+// 指针，并行会把两轮对话交织进同一个上下文。群会话不共享续聊指针（每个任务自
+// 带不可变快照 + ForceFreshSession），见
+// TestGroupClaimAllowsConcurrentTurnsForOneAgent。
+func TestClaimTaskByRuntime_SerializesResumeChatTurns(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Resume chat serialization runtime")
+	agentID, _ := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Resume chat serialization agent")
+	// 额度不是这里的限制：即使并发度足够，续聊 turn 仍必须等前一轮结束。
+	dbfx.Exec(t, `UPDATE agent SET max_concurrent_tasks = 5 WHERE id = $1`, agentID)
+
+	sessionID := dbfx.ChatSession(t, agentID, testutil.Cols{"runtime_id": runtimeID})
+	firstTask := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "chat_session_id": sessionID})
+	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "chat_session_id": sessionID})
+
+	claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(runtimeID))
+	if err != nil || claimed == nil {
+		t.Fatalf("first claim: task=%v err=%v", claimed, err)
+	}
+	if got := uuidToString(claimed.ID); got != firstTask {
+		t.Fatalf("first claim = %s, want %s", got, firstTask)
+	}
+
+	next, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if next != nil {
+		t.Fatalf("a resume turn claimed while its session already has one in flight: %s", uuidToString(next.ID))
+	}
+}
+
 func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

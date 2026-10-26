@@ -741,7 +741,15 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 -- a task is only claimable when no other task for the same issue AND same agent is
 -- already dispatched or running. This allows different agents to work on the same
 -- issue in parallel while preventing a single agent from running duplicate tasks.
--- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
+-- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead,
+-- but ONLY for resume sessions (agent 1:1 and DM): those share one provider
+-- session pointer, so two turns at once would interleave into the same
+-- conversation. Group dispatches are ForceFreshSession by construction, each
+-- with its own immutable input snapshot (chat_group_task_input), and the claim
+-- path never resumes them — serializing them carried no shared state to
+-- protect while capping an agent at one concurrent task per group, regardless
+-- of agent.max_concurrent_tasks. Two questions to the same agent in one group
+-- therefore run concurrently, bounded by capacity like any other parallel work.
 -- Quick-create tasks have no issue / chat / autopilot link, so they serialize on
 -- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
 -- otherwise a user mashing the create button could fire concurrent quick-creates
@@ -803,7 +811,14 @@ WHERE id = (
             AND active.status IN ('dispatched', 'running', 'waiting_local_directory', 'waiting_module_lock')
             AND (
               (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
-              OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+              OR (
+                atq.chat_session_id IS NOT NULL
+                AND active.chat_session_id = atq.chat_session_id
+                AND NOT EXISTS (
+                  SELECT 1 FROM chat_session cs
+                  WHERE cs.id = atq.chat_session_id AND cs.kind = 'group'
+                )
+              )
               OR (
                 atq.issue_id IS NULL
                 AND atq.chat_session_id IS NULL
