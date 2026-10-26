@@ -741,7 +741,7 @@ function MetaItem({
 }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
-      <span className="shrink-0 text-muted-foreground/70">{icon}</span>
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
       <span className="truncate">{children}</span>
     </span>
   );
@@ -884,7 +884,7 @@ function ToolStepRow({ step }: { step: IssueProgressTodo }) {
       >
         {step.title}
       </span>
-      <span className="shrink-0 font-mono text-micro text-muted-foreground/50">
+      <span className="shrink-0 font-mono text-micro text-faint-foreground">
         {step.todo_key.length > 10 ? `${step.todo_key.slice(0, 10)}…` : step.todo_key}
       </span>
     </li>
@@ -925,7 +925,7 @@ function TodoStateIcon({ status }: { status: IssueProgressTodo["status"] }) {
         <Minus
           role="img"
           aria-label={t(($) => $.progress.todo_status_skipped)}
-          className={cn(cls, "text-muted-foreground/60")}
+          className={cn(cls, "text-muted-foreground")}
         />
       );
     case "pending":
@@ -934,7 +934,7 @@ function TodoStateIcon({ status }: { status: IssueProgressTodo["status"] }) {
         <Circle
           role="img"
           aria-label={t(($) => $.progress.todo_status_pending)}
-          className={cn(cls, "text-muted-foreground/40")}
+          className={cn(cls, "text-faint-foreground")}
         />
       );
   }

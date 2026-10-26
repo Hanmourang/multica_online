@@ -210,7 +210,7 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[10px] border border-surface-border bg-surface" data-testid="module-prototypes">
       <div className="flex shrink-0 items-center gap-1.5 border-b border-surface-border bg-muted/25 px-3 py-2">
         <span className="rounded-[3px] bg-primary/12 px-1 py-px text-[8.5px] font-bold text-primary">
-          子TAB 1
+          {t(($) => $.features.subtab_tag, { count: 1 })}
         </span>
         <span className="text-[11px] font-bold">{t(($) => $.features.prototypes_title)}</span>
         <span className="ml-auto truncate font-mono text-[9px] font-semibold text-muted-foreground">
@@ -549,7 +549,7 @@ function HtmlComparePane({
         <div className="grid min-h-0 flex-1 gap-3 overflow-auto lg:grid-cols-2">
           <div>
             <div className="mb-1.5 flex items-center gap-2 text-[11.5px] font-semibold">
-              {t(($) => $.features.change_summary)} v{baseline.version} → v{current.version}
+              {`${t(($) => $.features.change_summary)} v${baseline.version} → v${current.version}`}
               <span className="ml-auto text-[10px] font-normal text-muted-foreground">
                 {t(($) => $.features.change_summary_auto)}
               </span>
@@ -582,7 +582,8 @@ function HtmlComparePane({
               <div className="mt-1 flex items-center gap-2 px-1 py-1 text-[11px]">
                 <KindTag kind="same" label={t(($) => $.features.marks_label)} />
                 <span className="text-muted-foreground">
-                  ✓ {marks.ok}/{marks.total}
+                  {"✓ "}
+                  {marks.ok}/{marks.total}
                 </span>
               </div>
             )}

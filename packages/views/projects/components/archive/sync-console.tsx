@@ -66,6 +66,16 @@ import { projectRequirements } from "../requirements/requirement-helpers";
  * 全量清单只能由能读目录的 CLI / Desktop 产出。此页的「校验」只 refetch，
  * 不 POST `[]`。绑定走已有 POST /artifacts/{id}/bind，不改目录名。
  */
+// Contract folder → field mapping, shown verbatim: these are disk paths and
+// column names, not prose, so they stay out of the translation bundles.
+const CONTRACT_PATH_RULES = [
+  "projects/<key>/ → project_key",
+  "overview/<shelf>/ → scope=project",
+  "requirements/<REQ-KEY>/sN-… → stage N",
+  "filing/<cat>/ → filing-*",
+  "_attic/ · dist/ · vendor/ → skip",
+];
+
 export function SyncConsole({
   projectId,
   archiveRoot,
@@ -661,11 +671,11 @@ export function SyncConsole({
           <div className="space-y-1.5">
             <div className="text-caption font-medium">{t(($) => $.sync.contract_title)}</div>
             <ul className="space-y-1 text-caption text-muted-foreground">
-              <li className="font-mono">projects/&lt;key&gt;/ → project_key</li>
-              <li className="font-mono">overview/&lt;shelf&gt;/ → scope=project</li>
-              <li className="font-mono">requirements/&lt;REQ-KEY&gt;/sN-… → stage N</li>
-              <li className="font-mono">filing/&lt;cat&gt;/ → filing-*</li>
-              <li className="font-mono">_attic/ · dist/ · vendor/ → skip</li>
+              {CONTRACT_PATH_RULES.map((rule) => (
+                <li key={rule} className="font-mono">
+                  {rule}
+                </li>
+              ))}
             </ul>
           </div>
         </CardContent>

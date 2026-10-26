@@ -471,7 +471,7 @@ export function CalendarView({
             key={label}
             className={cn(
               "py-1 text-caption text-muted-foreground",
-              i >= 5 && "text-muted-foreground/60",
+              i >= 5 && "text-muted-foreground",
             )}
           >
             {label}
@@ -519,7 +519,7 @@ export function CalendarView({
                 className={cn(
                   "self-start text-caption",
                   outOfMonth
-                    ? "text-muted-foreground/50"
+                    ? "text-faint-foreground"
                     : "text-muted-foreground",
                   sameDayUTC(day, today) &&
                     "flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground",

@@ -553,6 +553,11 @@
     "failed": "確認に失敗しました"
   },
   "features": {
+    "subtab_tag": "サブTAB {{count}}",
+    "axis_read": "読み取り軸",
+    "axis_write": "書き込み軸",
+    "scan_label": "スキャン",
+    "strategies_title_with_range": "モジュール戦略（S1–S10）",
     "title": "プロダクト機能",
     "scan_status": "スキャン状況",
     "scan_graph": "グラフ",

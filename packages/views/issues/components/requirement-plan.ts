@@ -32,6 +32,7 @@ export function splitPlanSections(plan: string | null | undefined): PlanSections
   const sections: PlanSections = { ...empty, split: true };
   for (let i = 0; i < matches.length; i++) {
     const match = matches[i];
+    if (!match) continue;
     const kind = headingKind(match[2] ?? "");
     if (!kind) continue;
     const start = (match.index ?? 0) + match[0].length;
@@ -62,7 +63,7 @@ export function extractPlanWorkItems(
     for (const line of chunk.split("\n")) {
       const match = line.match(LIST_ITEM);
       if (!match) continue;
-      const text = match[1].replace(/^[*_~`]+|[*_~`]+$/g, "").trim();
+      const text = (match[1] ?? "").replace(/^[*_~`]+|[*_~`]+$/g, "").trim();
       if (text.length < 2) continue;
       const key = text.toLowerCase();
       if (seen.has(key)) continue;

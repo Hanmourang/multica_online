@@ -585,7 +585,7 @@ export function RequirementFlowSection({
                   done && "text-emerald-600",
                   current && "font-semibold text-primary",
                   viewed && !current && "underline decoration-dotted",
-                  skipped && "line-through opacity-55",
+                  skipped && "line-through text-faint-foreground",
                 )}
               >
                 <span

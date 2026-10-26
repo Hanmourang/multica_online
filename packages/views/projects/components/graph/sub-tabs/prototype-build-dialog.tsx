@@ -165,7 +165,7 @@ function AgentRow({
       >
         <ActorAvatar actorType="agent" actorId={agent.id} size="sm" />
         <span className="min-w-0 flex-1 truncate font-medium">{agent.name}</span>
-        {selected ? <span className="text-[10px] font-bold text-primary">✓</span> : null}
+        {selected ? <span className="text-[10px] font-bold text-primary">{"✓"}</span> : null}
       </button>
     </li>
   );

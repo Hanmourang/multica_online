@@ -129,7 +129,8 @@ export function StorybookPane({
       <aside className="w-[clamp(220px,30%,380px)] shrink-0 overflow-auto border-l border-surface-border bg-muted/10">
         <section className="border-b border-surface-border p-3 text-[11.5px]">
           <div className="mb-1.5 flex items-center gap-1.5 font-semibold">
-            ① {t(($) => $.features.storybook_anchor)}
+            {"① "}
+            {t(($) => $.features.storybook_anchor)}
             <span className="ml-auto text-[10px] font-normal text-muted-foreground">
               {t(($) => $.features.storybook_align)}
             </span>
@@ -138,7 +139,7 @@ export function StorybookPane({
             <div className="rounded-md border border-surface-border bg-surface px-2 py-2">
               <p className="font-mono text-[10.5px]">{story.storyId}</p>
               <p className="mt-1 text-[10px] text-muted-foreground">
-                parameters.featurePointIds
+                {"parameters.featurePointIds"}
               </p>
               <p className="mt-0.5 font-mono text-[10px] text-primary">
                 {story.points.map((point) => point.id).join(" · ")}
@@ -152,7 +153,8 @@ export function StorybookPane({
         </section>
         <section className="border-b border-surface-border p-3 text-[11.5px]">
           <div className="mb-1.5 flex items-center gap-1.5 font-semibold">
-            ② {t(($) => $.features.related_code)}
+            {"② "}
+            {t(($) => $.features.related_code)}
             <span className="ml-auto font-mono text-[10px] font-normal text-muted-foreground">
               {version?.status ?? t(($) => $.features.storybook_demo)}
             </span>
@@ -167,7 +169,8 @@ export function StorybookPane({
         </section>
         <section className="p-3 text-[11.5px]">
           <div className="mb-1.5 flex items-center gap-1.5 font-semibold">
-            ③ {t(($) => $.features.graph_layer)}
+            {"③ "}
+            {t(($) => $.features.graph_layer)}
             <span className="ml-auto text-[10px] font-normal text-muted-foreground">
               {t(($) => $.features.neighborhood_ready)}
             </span>
@@ -185,7 +188,8 @@ export function StorybookPane({
                   </div>
                   {related.slice(0, 2).map((edge, index) => (
                     <p key={`${edge.source}-${edge.target}-${index}`} className="pl-3 font-mono text-[10px] text-muted-foreground">
-                      └ {edge.type}
+                      {"└ "}
+                      {edge.type}
                     </p>
                   ))}
                 </div>

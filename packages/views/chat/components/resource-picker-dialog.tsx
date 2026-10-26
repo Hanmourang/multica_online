@@ -185,6 +185,8 @@ export function ResourcePickerDialog({
                     key={binding.id}
                     mark={chatResourceMark(ref)}
                     tone="document"
+                    // Resource-kind prefix (DOC/CHAT), not copy.
+                    // eslint-disable-next-line no-restricted-syntax
                     title={`DOC · ${binding.asset_name}`}
                     meta={meta}
                     selected={isSelected}

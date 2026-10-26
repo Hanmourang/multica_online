@@ -38,6 +38,12 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
 }));
 
 vi.mock("@multica/core/runtimes", () => ({
+  // The row menu only issues profile queries, but the dialog it opens echoes
+  // provider names — without this formatter it renders as "not a function".
+  // Same first-letter rule as core's display helper, inlined because
+  // `@multica/core/runtimes/display` is not a package entry.
+  providerDisplayName: (provider: string) =>
+    provider.charAt(0).toUpperCase() + provider.slice(1),
   deriveRuntimeHealth: () => "online",
   runtimeUsageOptions: () => ({ kind: "usage" }),
   runtimeProfileListOptions: () => ({ kind: "runtime-profiles" }),

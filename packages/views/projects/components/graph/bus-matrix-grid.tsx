@@ -348,7 +348,7 @@ export function BusMatrixGrid({
                       aria-label={t(($) => $.bus_manage.delete_column)}
                       title={t(($) => $.bus_manage.delete_column)}
                       onClick={() => deleteColumn(domain)}
-                      className="rounded p-0.5 text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive"
+                      className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     >
                       <X className="size-3" />
                     </button>
@@ -418,7 +418,7 @@ export function BusMatrixGrid({
                               aria-label={t(($) => $.bus_manage.delete_page)}
                               title={t(($) => $.bus_manage.delete_page)}
                               onClick={() => deletePage(page)}
-                              className="rounded p-0.5 text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive"
+                              className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                             >
                               <X className="size-3" />
                             </button>
@@ -450,7 +450,7 @@ export function BusMatrixGrid({
                             aria-label={t(($) => $.bus_manage.delete_row)}
                             title={t(($) => $.bus_manage.delete_row)}
                             onClick={() => deleteRow(row.rowKey)}
-                            className="rounded p-0.5 text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive"
+                            className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                           >
                             <X className="size-3" />
                           </button>
@@ -472,7 +472,7 @@ export function BusMatrixGrid({
                                 aria-label={`${empty.module_name} ${empty.page_name} ${layout.aliases[domain] ?? domain} ${t(($) => $.bus_manage.cell_empty)}`}
                                 onClick={() => openCell(empty)}
                                 className={cn(
-                                  "flex h-12 w-full items-center justify-center text-muted-foreground/40 hover:bg-accent/50 hover:text-muted-foreground",
+                                  "flex h-12 w-full items-center justify-center text-faint-foreground hover:bg-accent/50 hover:text-muted-foreground",
                                   selected && "ring-2 ring-primary",
                                 )}
                               >
@@ -513,7 +513,7 @@ export function BusMatrixGrid({
                           </td>
                         );
                       })}
-                      <td className="px-2 py-2 text-center text-muted-foreground/30"> </td>
+                      <td className="px-2 py-2 text-center text-faint-foreground"> </td>
                       <td className="px-2 py-2 text-center font-semibold tabular-nums">
                         {row.totalTables}
                       </td>

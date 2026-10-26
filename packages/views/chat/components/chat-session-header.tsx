@@ -244,7 +244,7 @@ export function ChatSessionHeader({
             title={canRename ? t(($) => $.header.rename) : undefined}
             className={cn(
               "block max-w-full truncate text-left text-body font-semibold text-foreground",
-              canRename && "outline-none hover:text-foreground/80 focus-visible:text-foreground/80",
+              canRename && "outline-none hover:text-foreground focus-visible:text-foreground",
             )}
           >
             {isDm && peer?.display_name ? peer.display_name : title}

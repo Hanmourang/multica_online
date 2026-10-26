@@ -95,7 +95,7 @@ export function artifactModuleTagTone(tag: string): ModuleTagTone {
   return (
     NAMED_TAG_TONES[trimmed] ??
     NAMED_TAG_TONES[trimmed.toLowerCase()] ??
-    TONE_ORDER[hashTag(trimmed.toLowerCase()) % TONE_ORDER.length]
+    TONE_ORDER[hashTag(trimmed.toLowerCase()) % TONE_ORDER.length] ?? "slate"
   );
 }
 

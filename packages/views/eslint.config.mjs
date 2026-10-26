@@ -11,11 +11,16 @@ import {
 // attribute values and plain TS literals are allowed through — the two doors
 // `eslint-i18n-guard.mjs` pins shut.
 
+// The storybook demo canvases reproduce sample screens (and third-party UI) as
+// fixture content, the same way a `*.stories.tsx` file does: the copy inside
+// them is demo data rather than product copy, so it stays out of the guard.
+const DEMO_CANVASES = "**/storybook-demos/canvases.tsx";
+
 export default [
   ...reactConfig,
   {
     files: ["**/*.tsx"],
-    ignores: ["**/*.test.tsx", "test/**"],
+    ignores: ["**/*.test.tsx", "test/**", DEMO_CANVASES],
     plugins: { i18next },
     rules: {
       "i18next/no-literal-string": [
@@ -27,7 +32,7 @@ export default [
   {
     // Toasts are fired from hooks (`.ts`) as often as from components.
     files: ["**/*.{ts,tsx}"],
-    ignores: ["**/*.test.{ts,tsx}", "test/**"],
+    ignores: ["**/*.test.{ts,tsx}", "test/**", DEMO_CANVASES],
     rules: {
       "no-restricted-syntax": [
         "error",

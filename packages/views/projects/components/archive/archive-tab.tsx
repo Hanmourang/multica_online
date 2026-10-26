@@ -1007,7 +1007,7 @@ function LinkRow({
   const base = "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-caption";
   const inner = (
     <>
-      <span className="shrink-0 text-muted-foreground/70">{icon}</span>
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <span
         className="min-w-0 flex-1 truncate text-right font-mono font-medium"

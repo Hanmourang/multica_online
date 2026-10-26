@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Issue } from "@multica/core/types";
+import type { Issue, ProjectArtifact } from "@multica/core/types";
 import {
   decoratePrototypeFeatures,
   diffFeaturePoints,
@@ -133,7 +133,7 @@ describe("module feature stats", () => {
       created_by_id: null,
       created_at: "2026-09-08T00:00:00Z",
     };
-    const row = {
+    const row: ProjectArtifact = {
       id: "a1",
       workspace_id: "ws",
       project_id: "p",

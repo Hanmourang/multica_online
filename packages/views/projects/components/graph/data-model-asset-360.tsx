@@ -190,12 +190,12 @@ export function DataModelAsset360({
                         </span>
                         <div className="flex min-w-0 flex-wrap items-center gap-1">
                           {hops.length === 0 ? (
-                            <span className="text-[10px] text-muted-foreground/50">—</span>
+                            <span className="text-[10px] text-faint-foreground">—</span>
                           ) : (
                             hops.map((hop, hopIndex) => (
                               <span key={hopIndex} className="flex items-center gap-1">
                                 {hopIndex > 0 ? (
-                                  <span className="text-muted-foreground/40">→</span>
+                                  <span className="text-faint-foreground">→</span>
                                 ) : null}
                                 <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
                                   {hop}

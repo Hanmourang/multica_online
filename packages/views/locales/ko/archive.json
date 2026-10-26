@@ -553,6 +553,11 @@
     "failed": "확인 실패"
   },
   "features": {
+    "subtab_tag": "하위 탭 {{count}}",
+    "axis_read": "읽기 축",
+    "axis_write": "쓰기 축",
+    "scan_label": "스캔",
+    "strategies_title_with_range": "모듈 전략 (S1–S10)",
     "title": "제품 기능",
     "scan_status": "스캔 상태",
     "scan_graph": "그래프",

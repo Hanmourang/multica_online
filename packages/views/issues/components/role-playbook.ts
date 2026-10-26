@@ -31,12 +31,15 @@ export function emptyRolePlaybook(
 
 export function playbookHasOverride(p?: RolePlaybook | null): boolean {
   if (!p) return false;
+  // init_mode is a closed union, but rows written before the checklist mode
+  // existed still carry an empty string at runtime.
+  const initMode: string = p.init_mode;
   return (
     p.background.trim() !== "" ||
     p.standards.trim() !== "" ||
     p.process.trim() !== "" ||
     p.init_content.trim() !== "" ||
-    (p.init_mode !== "" && p.init_mode !== "brief")
+    (initMode !== "" && initMode !== "brief")
   );
 }
 

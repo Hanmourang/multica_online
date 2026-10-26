@@ -710,7 +710,7 @@ function TaskSummaryCard({
       </div>
       {stats.latest && (
         <div className="mt-1 truncate text-micro text-muted-foreground">
-          {t(($) => $.dynamics.latest)}：{stats.latest.content || t(($) => $.dynamics.event_no_content)}
+          {`${t(($) => $.dynamics.latest)}：${stats.latest.content || t(($) => $.dynamics.event_no_content)}`}
         </div>
       )}
       <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted">
@@ -821,7 +821,7 @@ function EventRow({
           {event.type === "conversation" ? (
             <ConversationBubble event={event} />
           ) : (
-            <span className="text-caption text-foreground/90">
+            <span className="text-caption text-foreground">
               {event.content || t(($) => $.dynamics.event_no_content)}
             </span>
           )}

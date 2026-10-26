@@ -553,6 +553,11 @@
     "failed": "确认失败"
   },
   "features": {
+    "subtab_tag": "子TAB {{count}}",
+    "axis_read": "读轴",
+    "axis_write": "写轴",
+    "scan_label": "扫描",
+    "strategies_title_with_range": "模块策略（S1–S10）",
     "title": "产品功能",
     "scan_status": "扫描状态",
     "scan_graph": "图谱",

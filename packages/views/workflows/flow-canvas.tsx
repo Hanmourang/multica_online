@@ -380,13 +380,13 @@ function StageChip({
         <span className="inline-flex min-w-0 items-center gap-1 text-sm">
           <span
             {...dragListeners}
-            className="cursor-grab touch-none text-muted-foreground/60 active:cursor-grabbing"
+            className="cursor-grab touch-none text-muted-foreground active:cursor-grabbing"
             aria-label={t(($) => $.editor.canvas_hint)}
           >
             <GripVertical className="size-3.5 shrink-0" />
           </span>
           {seq ? (
-            <span className="shrink-0 text-2xs font-bold text-muted-foreground/60">{circledSeq(seq)}</span>
+            <span className="shrink-0 text-2xs font-bold text-muted-foreground">{circledSeq(seq)}</span>
           ) : null}
           <span className="truncate">{node.name || node.id}</span>
         </span>
@@ -446,7 +446,7 @@ function OverlayChip({ node, agent, wiring }: { node: DefinitionNode; agent: str
 
 /** 兄弟块之间的流程箭头（对齐原型 →）。 */
 function ArrowSep() {
-  return <ArrowRight className="size-4 shrink-0 text-muted-foreground/40" aria-hidden />;
+  return <ArrowRight className="size-4 shrink-0 text-faint-foreground" aria-hidden />;
 }
 
 const CIRCLED = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
@@ -492,7 +492,7 @@ function StageDetailRows({ node, def, agent }: { node: DefinitionNode; def: Work
         </p>
       ) : null}
       {incoming.length > 0 ? (
-        <p className="mt-0.5 truncate text-2xs text-muted-foreground/70">
+        <p className="mt-0.5 truncate text-2xs text-muted-foreground">
           {incoming.map((inp) => stageNameById(def, inp.fromStageId ?? "")).filter(Boolean).join(" · ")}
         </p>
       ) : null}
@@ -504,7 +504,7 @@ function StageDetailRows({ node, def, agent }: { node: DefinitionNode; def: Work
             </span>
           ))}
           {outputs.length > shown.length ? (
-            <span className="text-2xs text-muted-foreground/70">+{outputs.length - shown.length}</span>
+            <span className="text-2xs text-muted-foreground">+{outputs.length - shown.length}</span>
           ) : null}
         </p>
       ) : null}
@@ -545,7 +545,7 @@ function StaticBlock({
         <div className="flex items-center justify-between gap-2">
           <span className="inline-flex min-w-0 items-center gap-1 text-sm">
             {seq ? (
-              <span className="shrink-0 text-2xs font-bold text-muted-foreground/60">{circledSeq(seq)}</span>
+              <span className="shrink-0 text-2xs font-bold text-muted-foreground">{circledSeq(seq)}</span>
             ) : null}
             <span className="truncate">{node.name || node.id}</span>
           </span>

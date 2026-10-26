@@ -276,7 +276,7 @@ function RoleCard({
         <div
           className={cn(
             "text-[9px] leading-tight text-muted-foreground",
-            !enabled && "opacity-60",
+            !enabled && "text-faint-foreground",
           )}
         >
           {t(($) => $.role_strip[`${role}_note`])}

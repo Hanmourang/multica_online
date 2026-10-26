@@ -390,6 +390,7 @@ function DraftCard({
   goalText: string | null;
 }) {
   const { t } = useT("issues");
+  const [open, setOpen] = useState(defaultOpen);
   const isAcceptance = draft.stage === 4;
   const [initialAsg] = useState(`${draft.assignee_type ?? ""}:${draft.assignee_id ?? ""}`);
   const asgChanged = `${draft.assignee_type ?? ""}:${draft.assignee_id ?? ""}` !== initialAsg;
@@ -408,7 +409,8 @@ function DraftCard({
     <details
       className="rounded-md border p-2"
       data-testid={`draft-card-${draft.temp_id}`}
-      defaultOpen={defaultOpen}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="mb-1 flex cursor-pointer items-center gap-2">
         <span className="text-sm font-medium">{draft.title || "—"}</span>

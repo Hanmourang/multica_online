@@ -3491,7 +3491,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   <button
                     type="button"
                     onClick={() => setSubIssuesCollapsed((v) => !v)}
-                    className="flex items-center gap-1.5 text-body font-medium text-foreground hover:text-foreground/80 transition-colors"
+                    className="flex items-center gap-1.5 text-body font-medium text-foreground hover:text-foreground transition-colors"
                   >
                     <ChevronDown
                       className={cn(

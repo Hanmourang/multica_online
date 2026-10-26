@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ProjectArtifact } from "@multica/core/types";
+import type { ArtifactStage, ProjectArtifact } from "@multica/core/types";
 import {
   blockingReadiness,
   missingBlockingDocTypes,
@@ -36,7 +36,7 @@ describe("archive-stage-gate", () => {
   });
 
   it("counts only requirement + blocking gates for readiness", () => {
-    const files = new Map<number | null, ProjectArtifact[]>();
+    const files = new Map<ArtifactStage | null, ProjectArtifact[]>();
     files.set(null, [artifact("requirement")]);
     files.set(2, [artifact("plan", 2), artifact("decomposition", 2)]);
     files.set(3, [artifact("design", 3)]);

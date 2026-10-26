@@ -32,7 +32,7 @@ export function WorkflowFlowDiagram({ definition }: { definition: WorkflowDefini
         {nodes.map((node, i) => (
           <div key={node.id ?? i} className="flex shrink-0 items-center gap-1">
             <FlowBlock node={node} roleNames={roleNames} />
-            {i < nodes.length - 1 ? <ArrowRight className="size-4 shrink-0 text-muted-foreground/60" /> : null}
+            {i < nodes.length - 1 ? <ArrowRight className="size-4 shrink-0 text-muted-foreground" /> : null}
           </div>
         ))}
       </div>
@@ -55,12 +55,12 @@ function FlowBlock({ node, roleNames }: { node: DefinitionNode; roleNames: Recor
           {(node.children ?? []).map((child, i, arr) => (
             <div key={child.id ?? i} className="flex items-center gap-1">
               <FlowBlock node={child} roleNames={roleNames} />
-              {i < arr.length - 1 ? <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" /> : null}
+              {i < arr.length - 1 ? <ArrowRight className="size-3.5 shrink-0 text-faint-foreground" /> : null}
             </div>
           ))}
           {node.gate ? (
             <div className="flex items-center gap-1">
-              <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
+              <ArrowRight className="size-3.5 shrink-0 text-faint-foreground" />
               <GateChip
                 loop={node.gate.loopLabel}
                 exit={node.gate.exitLabel}

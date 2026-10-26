@@ -143,7 +143,8 @@ export function ArtifactPreviewPane({
               onSelectFp={onSelectFp}
             />
           ) : source.kind === "image" && source.url ? (
-            // eslint-disable-next-line @next/next/no-img-element
+            // Preview URLs point at desktop/CLI-served files, so next/image has
+            // nothing to optimize here; plain <img> is the intended element.
             <img
               src={source.url}
               alt={artifact.rel_path}

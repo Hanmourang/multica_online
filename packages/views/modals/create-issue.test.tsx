@@ -47,6 +47,10 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+// The requirement-archive scaffold reports success/failure through `info`.
+// Without it a create that scaffolds would throw inside the scaffold catch and
+// swallow the post-create navigation these tests assert on.
+const mockToastInfo = vi.hoisted(() => vi.fn());
 const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
@@ -397,6 +401,11 @@ vi.mock("@multica/core/api", async () => {
       replaceIssueRoleAssignments: mockReplaceIssueRoleAssignments,
       replaceIssueRolePlaybooks: vi.fn().mockResolvedValue({ playbooks: {}, overrides: {}, builtins: {} }),
       listProjectModules: vi.fn().mockResolvedValue([]),
+      // Requirement archive scaffold reads the existing keys before creating
+      // the next one, then writes the scaffold artifact. Empty + inert here:
+      // the scaffold is a post-create side effect these tests don't assert on.
+      listProjectArtifacts: vi.fn().mockResolvedValue({ artifacts: [], total: 0 }),
+      createProjectArtifact: vi.fn(),
     },
     ApiError,
     parseWithFallback,
@@ -688,6 +697,7 @@ vi.mock("sonner", () => ({
     custom: mockToastCustom,
     dismiss: mockToastDismiss,
     error: mockToastError,
+    info: mockToastInfo,
   },
 }));
 

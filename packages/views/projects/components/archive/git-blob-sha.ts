@@ -18,7 +18,7 @@ export function gitBlobSha1FromText(text: string): string {
 function sha1Hex(message: Uint8Array): string {
   const words = bytesToWords(message);
   const bitLen = message.length * 8;
-  words[bitLen >> 5] |= 0x80 << (24 - (bitLen % 32));
+  words[bitLen >> 5] = (words[bitLen >> 5] ?? 0) | (0x80 << (24 - (bitLen % 32)));
   words[(((bitLen + 64) >> 9) << 4) + 15] = bitLen;
 
   let h0 = 0x67452301;
@@ -29,7 +29,7 @@ function sha1Hex(message: Uint8Array): string {
   const w = new Array<number>(80);
 
   for (let i = 0; i < words.length; i += 16) {
-    for (let t = 0; t < 16; t++) w[t] = words[i + t] | 0;
+    for (let t = 0; t < 16; t++) w[t] = (words[i + t] ?? 0) | 0;
     for (let t = 16; t < 80; t++) {
       const n = (w[t - 3] ?? 0) ^ (w[t - 8] ?? 0) ^ (w[t - 14] ?? 0) ^ (w[t - 16] ?? 0);
       w[t] = rotl(n, 1);
@@ -77,7 +77,7 @@ function rotl(n: number, bits: number): number {
 function bytesToWords(bytes: Uint8Array): number[] {
   const words = new Array<number>((((bytes.length + 8) >> 6) + 1) * 16).fill(0);
   for (let i = 0; i < bytes.length; i++) {
-    words[i >> 2] |= bytes[i]! << (24 - (i % 4) * 8);
+    words[i >> 2] = (words[i >> 2] ?? 0) | (bytes[i]! << (24 - (i % 4) * 8));
   }
   return words;
 }

@@ -460,7 +460,7 @@ export function ModuleListPanel({
                       : ` · ${t(($) => $.features.unbound_hint)}`}
                     <button
                       type="button"
-                      className="ml-2 hidden text-micro text-destructive/70 hover:text-destructive group-hover:inline"
+                      className="ml-2 hidden text-micro text-destructive hover:text-destructive group-hover:inline"
                       onClick={(event) => {
                         event.stopPropagation();
                         if (window.confirm(t(($) => $.features.delete_confirm))) {

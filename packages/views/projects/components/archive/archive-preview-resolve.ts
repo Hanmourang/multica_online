@@ -11,7 +11,6 @@ const PREVIEW_SHELVES = [
 export function previewRelPathCandidates(relPath: string): string[] {
   const raw = relPath.replace(/\\/g, "/");
   const parts = raw.split("/").filter(Boolean);
-  const base = parts[parts.length - 1] ?? raw;
   const overviewAt = parts.findIndex(
     (part, index) =>
       part === "overview" &&
@@ -88,6 +87,7 @@ export function extractProjectKeysFromYaml(text: string): string[] {
   const seen = new Set<string>();
   for (const match of text.matchAll(/^[ \t]*-[ \t]+key:[ \t]+([A-Za-z0-9_-]+)/gm)) {
     const key = match[1];
+    if (!key) continue;
     if (!seen.has(key)) {
       seen.add(key);
       keys.push(key);

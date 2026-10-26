@@ -553,6 +553,11 @@
     "failed": "Confirmation failed"
   },
   "features": {
+    "subtab_tag": "Sub-tab {{count}}",
+    "axis_read": "Read axis",
+    "axis_write": "Write axis",
+    "scan_label": "scan",
+    "strategies_title_with_range": "Module strategies (S1–S10)",
     "title": "Product features",
     "scan_status": "Scan status",
     "scan_graph": "Graph",

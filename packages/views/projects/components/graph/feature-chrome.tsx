@@ -134,7 +134,8 @@ export function FeatureNode({
 export function FeatureEdge({ children }: { children: ReactNode }) {
   return (
     <p className="px-3 pb-1 font-mono text-[9.5px] leading-relaxed text-muted-foreground">
-      └ {children}
+      {"└ "}
+      {children}
     </p>
   );
 }

@@ -348,6 +348,8 @@ export function ArtifactEditorDialog({
               <Input
                 value={requirementKey}
                 onChange={(event) => setRequirementKey(event.target.value)}
+                // Requirement key format hint, not copy.
+                // eslint-disable-next-line no-restricted-syntax
                 placeholder="REQ-20260907-01"
               />
             </label>
@@ -357,6 +359,8 @@ export function ArtifactEditorDialog({
             <Input
               value={issueId}
               onChange={(event) => setIssueId(event.target.value)}
+              // Column name of the linked issue, not copy.
+              // eslint-disable-next-line no-restricted-syntax
               placeholder="multica_issue_id"
               className="font-mono"
             />

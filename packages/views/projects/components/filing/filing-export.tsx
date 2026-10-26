@@ -169,7 +169,7 @@ export function FilingExport({
                     item.tier === "conditional" &&
                       "bg-amber-500/15 text-amber-700 dark:text-amber-400",
                     item.tier === "aux" && "bg-muted text-muted-foreground",
-                    !item.artifact_id && "line-through opacity-70",
+                    !item.artifact_id && "line-through text-faint-foreground",
                   )}
                 >
                   {item.artifact_id

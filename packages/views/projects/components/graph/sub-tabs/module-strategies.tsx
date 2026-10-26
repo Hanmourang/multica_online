@@ -44,7 +44,7 @@ export function ModuleStrategiesTab({ nodeId }: { nodeId: string }) {
   return (
     <FeaturePane
       tag="子TAB 4"
-      title={`${t(($) => $.features.strategies_title)}（S1–S10）`}
+      title={t(($) => $.features.strategies_title_with_range)}
       meta={t(($) => $.features.strategies_ready)}
     >
       <div className="space-y-2">

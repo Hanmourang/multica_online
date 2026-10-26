@@ -176,7 +176,7 @@ function IssueFact({ label, children }: { label: string; children: string }) {
   if (!children) return null;
   return (
     <div className="min-w-0">
-      <div className="text-[10px] leading-4 text-current/70">{label}</div>
+      <div className="text-[10px] leading-4 text-current">{label}</div>
       <div className="truncate text-micro font-medium">{children}</div>
     </div>
   );
@@ -273,12 +273,12 @@ function IssueResourceCard({ resource }: { resource: ChatMessageResource }) {
         <div className="min-w-0">
         <AppLink href={paths.issueDetail(issue.id)} className="block min-w-0">
           <div className="flex items-center gap-2 text-micro">
-            <span className="opacity-70">
+            <span className="text-muted-foreground">
               {isRequirement
                 ? t(($) => $.resources.requirement)
                 : t(($) => $.resources.task)}
             </span>
-            <span className="font-mono opacity-70">{issue.identifier}</span>
+            <span className="font-mono text-muted-foreground">{issue.identifier}</span>
             <span
               className={cn(
                 "ml-auto shrink-0 rounded-md px-1.5 py-0.5 font-medium",
@@ -292,7 +292,7 @@ function IssueResourceCard({ resource }: { resource: ChatMessageResource }) {
           <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
             {isRequirement && issue.stage_progress && (
               <div className="min-w-0">
-                <div className="text-[10px] leading-4 opacity-70">{t(($) => $.resources.stage)}</div>
+                <div className="text-[10px] leading-4 text-faint-foreground">{t(($) => $.resources.stage)}</div>
                 <div className="truncate text-micro font-medium">{issue.stage_progress}</div>
               </div>
             )}
@@ -314,7 +314,7 @@ function IssueResourceCard({ resource }: { resource: ChatMessageResource }) {
             )}
             {progress && progress.total > 0 && (
               <div className="min-w-0">
-                <div className="text-[10px] leading-4 opacity-70">{t(($) => $.resources.subtask_progress)}</div>
+                <div className="text-[10px] leading-4 text-faint-foreground">{t(($) => $.resources.subtask_progress)}</div>
                 <div className="truncate text-micro font-medium">{progress.done}/{progress.total}</div>
               </div>
             )}
@@ -326,7 +326,7 @@ function IssueResourceCard({ resource }: { resource: ChatMessageResource }) {
             </div>
           )}
           {excerpt && (
-            <p className="mt-2 line-clamp-4 text-micro leading-relaxed opacity-80">{excerpt}</p>
+            <p className="mt-2 line-clamp-4 text-micro leading-relaxed text-muted-foreground">{excerpt}</p>
           )}
           {labels.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
@@ -352,20 +352,20 @@ function IssueResourceCard({ resource }: { resource: ChatMessageResource }) {
         </AppLink>
         {visibleChildren.length > 0 && (
           <div className="mt-2">
-            <div className="text-[10px] leading-4 opacity-70">{t(($) => $.resources.children)}</div>
+            <div className="text-[10px] leading-4 text-faint-foreground">{t(($) => $.resources.children)}</div>
             <ul className="mt-1 grid gap-1">
               {visibleChildren.map((child) => (
                 <li key={child.id}>
                   <AppLink href={paths.issueDetail(child.id)} className="flex min-w-0 items-center gap-1.5 text-micro">
                     <span className="shrink-0 rounded bg-white/70 px-1 py-0.5 text-[10px]">{statusLabel(child.status)}</span>
-                    <span className="shrink-0 font-mono opacity-70">{child.identifier}</span>
+                    <span className="shrink-0 font-mono text-muted-foreground">{child.identifier}</span>
                     <span className="truncate font-medium">{child.title}</span>
                   </AppLink>
                 </li>
               ))}
             </ul>
             {children.length > visibleChildren.length && (
-              <div className="mt-1 text-[10px] opacity-70">
+              <div className="mt-1 text-[10px] text-faint-foreground">
                 {t(($) => $.resources.more_children, { count: children.length - visibleChildren.length })}
               </div>
             )}
@@ -380,7 +380,7 @@ function IssueResourceCard({ resource }: { resource: ChatMessageResource }) {
         )}
       >
         {issue.updated_at && (
-          <time className="opacity-70" dateTime={issue.updated_at}>{formatTimestamp(issue.updated_at)}</time>
+          <time className="text-faint-foreground" dateTime={issue.updated_at}>{formatTimestamp(issue.updated_at)}</time>
         )}
         <AppLink
           href={paths.issueDetail(issue.id)}

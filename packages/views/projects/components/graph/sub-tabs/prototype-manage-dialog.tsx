@@ -141,6 +141,8 @@ export function PrototypeManageDialog({
             <Input
               value={path}
               onChange={(event) => setPath(event.target.value)}
+              // Prototype path format hint, not copy.
+              // eslint-disable-next-line no-restricted-syntax
               placeholder="requirements/REQ-…/s1-prototype/prototype-v3.html"
               className="font-mono text-[11px]"
             />

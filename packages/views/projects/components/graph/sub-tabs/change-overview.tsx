@@ -109,13 +109,16 @@ export function ChangeOverviewTab({ nodeId }: { nodeId: string }) {
           </div>
           <div className="mt-1.5 flex flex-wrap gap-x-2.5 gap-y-1 text-[9px] text-muted-foreground">
             <span className="text-emerald-600 dark:text-emerald-400">
-              ● <b className="text-muted-foreground">{t(($) => $.features.task_done)} {tasks.done}</b>
+              {"● "}
+              <b className="text-muted-foreground">{t(($) => $.features.task_done)} {tasks.done}</b>
             </span>
             <span className="text-primary">
-              ● <b className="text-muted-foreground">{t(($) => $.features.task_doing)} {tasks.doing}</b>
+              {"● "}
+              <b className="text-muted-foreground">{t(($) => $.features.task_doing)} {tasks.doing}</b>
             </span>
             <span className="text-amber-600 dark:text-amber-400">
-              ● <b className="text-muted-foreground">{t(($) => $.features.task_stuck)} {tasks.stuck}</b>
+              {"● "}
+              <b className="text-muted-foreground">{t(($) => $.features.task_stuck)} {tasks.stuck}</b>
             </span>
           </div>
           <div className="mt-1.5 flex flex-wrap gap-x-3 text-[9px] text-muted-foreground">

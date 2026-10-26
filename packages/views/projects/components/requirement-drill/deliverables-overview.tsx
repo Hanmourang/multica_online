@@ -585,7 +585,7 @@ function StatusCard({
         <span className="truncate">{title}</span>
       </div>
       {children}
-      <div className="mt-1.5 text-micro leading-snug text-muted-foreground/80">
+      <div className="mt-1.5 text-micro leading-snug text-muted-foreground">
         {hint}
       </div>
     </div>
@@ -739,7 +739,7 @@ function ModuleLockCard({ lock }: { lock?: DeliverablesModuleLock | null }) {
           ))}
         </ul>
       )}
-      <p className="mt-1 border-t border-dashed pt-1 text-micro leading-snug text-muted-foreground/80">
+      <p className="mt-1 border-t border-dashed pt-1 text-micro leading-snug text-muted-foreground">
         {t(($) => $.deliverables.mutex_degraded_hint)}
       </p>
     </StatusCard>
@@ -899,7 +899,7 @@ function CompletenessCard({
         </div>
       )}
 
-      <p className="mt-1 border-t border-dashed pt-1 text-micro leading-snug text-muted-foreground/80">
+      <p className="mt-1 border-t border-dashed pt-1 text-micro leading-snug text-muted-foreground">
         {gateDefined
           ? t(($) => $.deliverables.completeness_gate_hint)
           : t(($) => $.deliverables.completeness_gate_undefined)}

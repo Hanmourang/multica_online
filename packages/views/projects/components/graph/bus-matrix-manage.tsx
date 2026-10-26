@@ -247,13 +247,13 @@ export function BusMatrixManage({
               value={read}
               onChange={(e) => setRead(e.target.value)}
               className="h-8 text-caption"
-              aria-label="R"
+              aria-label={t(($) => $.features.axis_read)}
             />
             <Input
               value={write}
               onChange={(e) => setWrite(e.target.value)}
               className="h-8 text-caption"
-              aria-label="W"
+              aria-label={t(($) => $.features.axis_write)}
             />
           </div>
           <Button size="xs" onClick={addManual} disabled={!name.trim()}>

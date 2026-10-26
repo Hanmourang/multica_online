@@ -132,7 +132,7 @@ export function DataModelIterations({ dataModel }: { dataModel: DataModelV2 }) {
                   <span className="ml-1 tabular-nums">{grouped[type].length}</span>
                 </div>
                 {grouped[type].length === 0 ? (
-                  <p className="text-[10px] text-muted-foreground/50">—</p>
+                  <p className="text-[10px] text-faint-foreground">—</p>
                 ) : (
                   grouped[type].map((change) => (
                     <div

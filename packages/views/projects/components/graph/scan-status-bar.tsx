@@ -80,7 +80,7 @@ export function ScanStatusBar({
         {t(($) => $.features.scan_graph)}
       </span>
       <span className="font-mono">
-        scan {snapshot.scan_id.replace(/^demo-/, "").slice(0, 8)}
+        {`${t(($) => $.features.scan_label)} ${snapshot.scan_id.replace(/^demo-/, "").slice(0, 8)}`}
       </span>
       <span>·</span>
       <span>{formatScanWhen(snapshot.created_at)}</span>
