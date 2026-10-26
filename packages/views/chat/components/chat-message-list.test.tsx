@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
-import type { TaskMessagePayload } from "@multica/core/types";
+import type { ChatMessage, ChatPendingTask, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
 
@@ -750,6 +750,117 @@ describe("ChatMessageList group dispatch history", () => {
 
     expect(await screen.findByText("Done")).toBeInTheDocument();
     expect(screen.queryByText("Release Bot · Working")).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatMessageList conversation order", () => {
+  // An assistant row is stamped when its task COMPLETES, so a member who asks a
+  // second agent while the first is still working persisted the second question
+  // BEFORE the first answer — read in created_at order the transcript claimed
+  // the member had answered themselves. A reply now renders under the message
+  // whose dispatch started its task (see conversation-order.ts).
+  function rowKeys(container: HTMLElement): string[] {
+    return Array.from(container.querySelectorAll("[data-row-key]")).map(
+      (row) => row.getAttribute("data-row-key") ?? "",
+    );
+  }
+
+  function renderOrdered(messages: ChatMessage[], pendingTask?: ChatPendingTask | null) {
+    return render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            conversationKind="group"
+            currentUserId="member-1"
+            groupAgentNames={new Map([["agent-a", "Bot A"], ["agent-b", "Bot B"]])}
+            messages={messages}
+            pendingTask={pendingTask}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  function ask(
+    id: string,
+    at: number,
+    agentId: string,
+    taskId: string,
+    dispatches?: ChatMessage["dispatches"],
+  ): ChatMessage {
+    return {
+      id,
+      chat_session_id: "group-1",
+      role: "user",
+      author_type: "member",
+      author_id: "member-1",
+      content: `Please run ${agentId}`,
+      task_id: null,
+      created_at: new Date(at).toISOString(),
+      mentions: [{ type: "agent", id: agentId }],
+      ...(dispatches ? { dispatches } : {}),
+    };
+  }
+
+  function answer(id: string, at: number, agentId: string, taskId: string): ChatMessage {
+    return {
+      id,
+      chat_session_id: "group-1",
+      role: "assistant",
+      author_type: "agent",
+      author_id: agentId,
+      content: `${agentId} done`,
+      task_id: taskId,
+      created_at: new Date(at).toISOString(),
+    };
+  }
+
+  it("puts each reply under the question it answers, not after the next question", async () => {
+    const { container } = renderOrdered([
+      ask("ask-a", 0, "agent-a", "task-a", [
+        { agent_id: "agent-a", task_id: "task-a", status: "completed" },
+      ]),
+      ask("ask-b", 2, "agent-b", "task-b", [
+        { agent_id: "agent-b", task_id: "task-b", status: "completed" },
+      ]),
+      answer("reply-a", 3, "agent-a", "task-a"),
+      answer("reply-b", 4, "agent-b", "task-b"),
+    ]);
+
+    expect(await screen.findByText("agent-a done")).toBeInTheDocument();
+    expect(rowKeys(container)).toEqual(["ask-a", "task:task-a", "ask-b", "task:task-b"]);
+  });
+
+  it("slots a still-running reply where its persisted message will land", async () => {
+    const { container } = renderOrdered(
+      [ask("ask-a", 0, "agent-a", "task-a"), ask("ask-b", 2, "agent-b", "task-b")],
+      {
+        agent_tasks: [
+          {
+            agent_id: "agent-a",
+            task_id: "task-a",
+            status: "running",
+            created_at: new Date(0).toISOString(),
+          },
+        ],
+      },
+    );
+
+    expect(await screen.findByText("Please run agent-a")).toBeInTheDocument();
+    expect(rowKeys(container)).toEqual(["ask-a", "task:task-a", "ask-b"]);
+  });
+
+  it("holds the original order when no reply has a discoverable trigger", async () => {
+    const { container } = renderOrdered([
+      ask("ask-a", 0, "agent-a", "task-a"),
+      answer("reply-a", 1, "agent-a", "task-a"),
+      ask("ask-b", 2, "agent-b", "task-b"),
+      answer("reply-b", 3, "agent-b", "task-b"),
+    ]);
+
+    expect(await screen.findByText("agent-a done")).toBeInTheDocument();
+    expect(rowKeys(container)).toEqual(["ask-a", "task:task-a", "ask-b", "task:task-b"]);
   });
 });
 

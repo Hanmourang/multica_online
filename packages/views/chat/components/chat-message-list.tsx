@@ -64,6 +64,10 @@ import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-f
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
+import {
+  orderMessagesForConversation,
+  resolveConversationAnchors,
+} from "../lib/conversation-order";
 import { visiblePageSurfaceContent } from "../lib/page-surface-context";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
 import { useT } from "../../i18n";
@@ -263,8 +267,13 @@ export function ChatMessageList({
   const groupPendingTasks = isGroupConversation
     ? visibleGroupPendingTasks(pendingTask?.agent_tasks, messages)
     : undefined;
-  const pendingByMessageId = useMemo(() => {
-    const map = new Map<string, GroupPendingAgentTask[]>();
+  // The same scan also yields the task → trigger link the ordering pass needs
+  // for a task still in flight. It is a heuristic (the newest message whose
+  // body or mentions name the agent) and only a fallback: once `messages`
+  // carries `dispatches`, the persisted link wins (see conversation-order.ts).
+  const { pendingByMessageId, liveTaskAnchors } = useMemo(() => {
+    const byMessage = new Map<string, GroupPendingAgentTask[]>();
+    const anchors = new Map<string, string>();
     for (const task of groupPendingTasks ?? []) {
       let triggerId: string | undefined;
       for (let i = messages.length - 1; i >= 0; i--) {
@@ -279,11 +288,12 @@ export function ChatMessageList({
         }
       }
       if (!triggerId) continue;
-      const list = map.get(triggerId) ?? [];
+      if (task.task_id) anchors.set(task.task_id, triggerId);
+      const list = byMessage.get(triggerId) ?? [];
       list.push(task);
-      map.set(triggerId, list);
+      byMessage.set(triggerId, list);
     }
-    return map;
+    return { pendingByMessageId: byMessage, liveTaskAnchors: anchors };
   }, [groupPendingTasks, messages]);
 
   // Persisted per-agent fan-out outcomes, keyed by the message that triggered
@@ -360,48 +370,90 @@ export function ChatMessageList({
   const hasLive = showLiveTimeline && (liveTaskMessages?.length ?? 0) > 0;
   const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
 
-  // Persisted messages plus, while a task is in flight, one synthetic trailing
-  // row for it. When the assistant message persists, `hasLive` goes false and
-  // the message takes the SAME key at the SAME position — an in-place data
-  // swap, not a remount. The onboarding kickoff is a server-authored carrier
-  // for Mika's first task, not something the member typed, so it never becomes
-  // a visible bubble.
+  // Persisted messages plus, while a task is in flight, one synthetic row for
+  // it. When the assistant message persists, `hasLive` goes false and the
+  // message takes the SAME key at the SAME position — an in-place data swap,
+  // not a remount. The onboarding kickoff is a server-authored carrier for
+  // Mika's first task, not something the member typed, so it never becomes a
+  // visible bubble.
+  //
+  // Rows render in CONVERSATION order, not `created_at` order. An assistant
+  // row is stamped when its task completes, so a group where a member asks a
+  // second agent while the first is still working persists the second
+  // question "before" the first answer and the transcript reads as if the
+  // member answered themselves. Each reply is slotted under the message whose
+  // dispatch started its task; replies with no discoverable trigger keep their
+  // own position (see conversation-order.ts).
   const renderItems: ChatRenderItem[] = useMemo(() => {
-    let previousDay = "";
-    const items: ChatRenderItem[] = messages
-      .filter((message) => message.message_kind !== "onboarding_kickoff")
-      .map((message) => {
-        const day = localDayKey(message.created_at);
-        const showDay = day !== "" && day !== previousDay;
-        if (day) previousDay = day;
-        return {
-          key: messageRowKey(message),
-          kind: "message" as const,
-          message,
-          taskId: message.task_id ?? null,
-          showDay,
-        };
-      });
-    const persistedTaskIds = new Set(
-      items.flatMap((item) => (item.kind === "message" && item.taskId ? [item.taskId] : [])),
+    const anchors = resolveConversationAnchors(messages, liveTaskAnchors);
+    const ordered = orderMessagesForConversation(
+      messages.filter((message) => message.message_kind !== "onboarding_kickoff"),
+      anchors,
     );
-    const liveTaskIds = new Set<string>();
+
+    const persistedTaskIds = new Set(
+      ordered.flatMap((message) => (message.task_id ? [message.task_id] : [])),
+    );
+    const liveRows: { taskId: string; agentId?: string }[] = [];
     if (hasLive && pendingTaskId && !persistedTaskIds.has(pendingTaskId)) {
-      liveTaskIds.add(pendingTaskId);
-      items.push({ key: `task:${pendingTaskId}`, kind: "live", taskId: pendingTaskId });
+      liveRows.push({ taskId: pendingTaskId });
     }
     for (const task of groupPendingTasks ?? []) {
-      if (!task.task_id || persistedTaskIds.has(task.task_id) || liveTaskIds.has(task.task_id)) continue;
-      liveTaskIds.add(task.task_id);
-      items.push({
-        key: `task:${task.task_id}`,
-        kind: "live",
-        taskId: task.task_id,
-        agentId: task.agent_id,
-      });
+      if (!task.task_id || persistedTaskIds.has(task.task_id)) continue;
+      if (liveRows.some((row) => row.taskId === task.task_id)) continue;
+      liveRows.push({ taskId: task.task_id, agentId: task.agent_id });
     }
+
+    // A live row lands in the slot its persisted message will take, after the
+    // replies already anchored there — so siblings stay in completion order
+    // and the task:… handoff is still an in-place swap at one position. A row
+    // with no anchor keeps the trailing position it always had.
+    const orderedIds = new Set(ordered.map((message) => message.id));
+    const lastReplyByAnchor = new Map<string, string>();
+    for (const message of ordered) {
+      const anchorId = anchors.anchorByMessageId.get(message.id);
+      if (anchorId && orderedIds.has(anchorId)) lastReplyByAnchor.set(anchorId, message.id);
+    }
+    const liveAfter = new Map<string, { taskId: string; agentId?: string }[]>();
+    const trailingLive: { taskId: string; agentId?: string }[] = [];
+    for (const row of liveRows) {
+      const anchorId = anchors.anchorByTaskId.get(row.taskId);
+      const afterId = anchorId ? (lastReplyByAnchor.get(anchorId) ?? anchorId) : undefined;
+      if (!afterId || !orderedIds.has(afterId)) {
+        trailingLive.push(row);
+        continue;
+      }
+      const bucket = liveAfter.get(afterId) ?? [];
+      bucket.push(row);
+      liveAfter.set(afterId, bucket);
+    }
+
+    const items: ChatRenderItem[] = [];
+    const pushLive = (row: { taskId: string; agentId?: string }) => {
+      items.push({
+        key: `task:${row.taskId}`,
+        kind: "live",
+        taskId: row.taskId,
+        agentId: row.agentId,
+      });
+    };
+    let previousDay = "";
+    for (const message of ordered) {
+      const day = localDayKey(message.created_at);
+      const showDay = day !== "" && day !== previousDay;
+      if (day) previousDay = day;
+      items.push({
+        key: messageRowKey(message),
+        kind: "message",
+        message,
+        taskId: message.task_id ?? null,
+        showDay,
+      });
+      for (const row of liveAfter.get(message.id) ?? []) pushLive(row);
+    }
+    for (const row of trailingLive) pushLive(row);
     return items;
-  }, [messages, hasLive, pendingTaskId, groupPendingTasks]);
+  }, [messages, hasLive, pendingTaskId, groupPendingTasks, liveTaskAnchors]);
 
   const firstIndex = renderItems.length > 0 ? firstItemIndex : 0;
   const liveEndKey = renderItems[renderItems.length - 1]?.key ?? null;
