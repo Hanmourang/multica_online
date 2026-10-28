@@ -4,7 +4,9 @@ import { useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
+  ChevronRight,
   Download,
+  FileText,
   HardDrive,
   Lock,
   Pencil,
@@ -72,6 +74,7 @@ import {
   type SkillSortField,
 } from "@multica/core/skills/stores";
 import { SkillListToolbar } from "./skill-list-toolbar";
+import { SkillSourceSheet } from "./skill-source-sheet";
 import {
   SkillBatchToolbar,
   SkillRowActions,
@@ -409,7 +412,16 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
 // Empty state
 // ---------------------------------------------------------------------------
 
-function PlatformSkillsSection({ skills }: { skills: BuiltinSkillSummary[] }) {
+// Exported for the platform-row test: the section is the only place the
+// "open the source sheet" affordance lives, and asserting it through the full
+// page would drag every list dependency into the test.
+export function PlatformSkillsSection({
+  skills,
+  onOpen,
+}: {
+  skills: BuiltinSkillSummary[];
+  onOpen: (skillId: string) => void;
+}) {
   const { t } = useT("skills");
   if (skills.length === 0) return null;
   return (
@@ -420,17 +432,38 @@ function PlatformSkillsSection({ skills }: { skills: BuiltinSkillSummary[] }) {
       </p>
       <ul className="mt-3 divide-y rounded-lg border">
         {skills.map((skill) => (
-          <li key={skill.id} className="flex items-center gap-3 px-3 py-2">
-            <SkillIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-body font-medium">{skill.name}</span>
-              <span className="block truncate text-caption text-muted-foreground">
-                {skill.description}
+          <li key={skill.id}>
+            {/* The row is the affordance: platform skills have no page of
+                their own, so before this they were a list you could read but
+                not inspect. The trailing chip names the action in words
+                instead of relying on a hover-only icon. */}
+            <button
+              type="button"
+              onClick={() => onOpen(skill.id)}
+              title={t(($) => $.source_sheet.open_hint)}
+              className="group flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            >
+              <SkillIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-body font-medium">
+                  {skill.name}
+                </span>
+                <span className="block truncate text-caption text-muted-foreground">
+                  {skill.description}
+                </span>
               </span>
-            </span>
-            <span className="shrink-0 text-caption text-muted-foreground">
-              {t(($) => $.page.platform.all_agents)}
-            </span>
+              <span className="hidden shrink-0 text-caption text-muted-foreground sm:inline">
+                {t(($) => $.page.platform.all_agents)}
+              </span>
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-caption text-muted-foreground transition-colors group-hover:border-foreground/20 group-hover:text-foreground">
+                <FileText className="h-3 w-3" aria-hidden="true" />
+                {t(($) => $.actions.view_source)}
+              </span>
+              <ChevronRight
+                className="h-3.5 w-3.5 shrink-0 text-faint-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+                aria-hidden="true"
+              />
+            </button>
           </li>
         ))}
       </ul>
@@ -655,6 +688,10 @@ export default function SkillsPage() {
   );
 
   const [createOpen, setCreateOpen] = useState(false);
+  // Which platform skill's source sheet is open, by its `builtin:<name>` id.
+  // Null closes it; platform skills have no route, so the sheet IS the detail
+  // view.
+  const [sourceSkillId, setSourceSkillId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -888,7 +925,10 @@ export default function SkillsPage() {
         </div>
       ) : showEmpty ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <PlatformSkillsSection skills={platformSkills} />
+          <PlatformSkillsSection
+            skills={platformSkills}
+            onOpen={setSourceSkillId}
+          />
           <div className="flex flex-1 items-center justify-center">
             <EmptyState
               workspaceOnly={platformSkills.length > 0}
@@ -898,7 +938,10 @@ export default function SkillsPage() {
         </div>
       ) : (
         <>
-          <PlatformSkillsSection skills={platformSkills} />
+          <PlatformSkillsSection
+            skills={platformSkills}
+            onOpen={setSourceSkillId}
+          />
           <SkillListToolbar
             search={search}
             onSearchChange={setSearch}
@@ -1012,6 +1055,11 @@ export default function SkillsPage() {
           onCreated={handleCreated}
         />
       )}
+
+      <SkillSourceSheet
+        skillId={sourceSkillId}
+        onClose={() => setSourceSkillId(null)}
+      />
     </div>
   );
 }

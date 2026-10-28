@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
-import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
@@ -25,6 +25,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
+import { ProjectWorkflowControl, ProjectWorkflowMenu } from "../../issue-workflows";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectModulesSection } from "./project-modules-section";
 import { ProjectRolePlaybooksSection } from "./project-role-playbooks-section";
@@ -96,6 +97,16 @@ function PropRow({
         {children}
       </div>
     </div>
+  );
+}
+
+// The project's workflow (MUL-7420).
+function ProjectWorkflowPropRow({ project }: { project: Project }) {
+  const { t } = useT("issues");
+  return (
+    <PropRow label={t(($) => $.workflows.project.label)}>
+      <ProjectWorkflowControl project={project} />
+    </PropRow>
   );
 }
 
@@ -416,6 +427,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
           </PropRow>
+          <ProjectWorkflowPropRow project={project} />
         </div>}
       </div>
 
@@ -493,6 +505,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             leaf={<span className="truncate font-medium text-foreground">{project.title}</span>}
             actions={
               <>
+              {/* The project's workflow (MUL-7420): whose column hands to whom, and
+                  the same handoff form the column header opens. */}
+              <ProjectWorkflowMenu project={project} />
               <Button
                 variant="ghost"
                 size="icon-sm"

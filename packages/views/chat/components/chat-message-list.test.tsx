@@ -786,7 +786,11 @@ describe("ChatMessageList conversation order", () => {
     id: string,
     at: number,
     agentId: string,
-    taskId: string,
+    // Deliberately unused: a group's user message owns no task
+    // (chat_message.task_id IS NULL), so the fixture keeps `task_id: null` and
+    // the call sites still read naturally. The underscore keeps
+    // noUnusedParameters quiet.
+    _taskId: string,
     dispatches?: ChatMessage["dispatches"],
   ): ChatMessage {
     return {

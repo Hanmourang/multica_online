@@ -33,6 +33,7 @@ import type assets from "../locales/en/assets.json";
 import type sprints from "../locales/en/sprints.json";
 import type workflow from "../locales/en/workflow.json";
 import type conversations from "../locales/en/conversations.json";
+import type modulePrototype from "../locales/en/module-prototype.json";
 
 // Module augmentation enables i18next v26 selector API across the monorepo:
 // `t($ => $.signin.title)` resolves to the value in en/auth.json.
@@ -80,6 +81,7 @@ declare global {
     sprints: typeof sprints;
     workflow: typeof workflow;
     conversations: typeof conversations;
+    "module-prototype": typeof modulePrototype;
   }
 }
 

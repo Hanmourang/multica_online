@@ -30,6 +30,7 @@ import enAssets from "./en/assets.json";
 import enSprints from "./en/sprints.json";
 import enWorkflow from "./en/workflow.json";
 import enConversations from "./en/conversations.json";
+import enModulePrototype from "./en/module-prototype.json";
 import zhHansCommon from "./zh-Hans/common.json";
 import zhHansAuth from "./zh-Hans/auth.json";
 import zhHansSettings from "./zh-Hans/settings.json";
@@ -61,6 +62,7 @@ import zhHansAssets from "./zh-Hans/assets.json";
 import zhHansSprints from "./zh-Hans/sprints.json";
 import zhHansWorkflow from "./zh-Hans/workflow.json";
 import zhHansConversations from "./zh-Hans/conversations.json";
+import zhHansModulePrototype from "./zh-Hans/module-prototype.json";
 import koCommon from "./ko/common.json";
 import koAuth from "./ko/auth.json";
 import koSettings from "./ko/settings.json";
@@ -92,6 +94,7 @@ import koAssets from "./ko/assets.json";
 import koSprints from "./ko/sprints.json";
 import koWorkflow from "./ko/workflow.json";
 import koConversations from "./ko/conversations.json";
+import koModulePrototype from "./ko/module-prototype.json";
 import jaCommon from "./ja/common.json";
 import jaAuth from "./ja/auth.json";
 import jaSettings from "./ja/settings.json";
@@ -123,6 +126,7 @@ import jaAssets from "./ja/assets.json";
 import jaSprints from "./ja/sprints.json";
 import jaWorkflow from "./ja/workflow.json";
 import jaConversations from "./ja/conversations.json";
+import jaModulePrototype from "./ja/module-prototype.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -160,6 +164,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     sprints: enSprints,
     workflow: enWorkflow,
     conversations: enConversations,
+    "module-prototype": enModulePrototype,
   },
   "zh-Hans": {
     common: zhHansCommon,
@@ -193,6 +198,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     sprints: zhHansSprints,
     workflow: zhHansWorkflow,
     conversations: zhHansConversations,
+    "module-prototype": zhHansModulePrototype,
   },
   ko: {
     common: koCommon,
@@ -226,6 +232,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     sprints: koSprints,
     workflow: koWorkflow,
     conversations: koConversations,
+    "module-prototype": koModulePrototype,
   },
   ja: {
     common: jaCommon,
@@ -259,5 +266,6 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     sprints: jaSprints,
     workflow: jaWorkflow,
     conversations: jaConversations,
+    "module-prototype": jaModulePrototype,
   },
 };

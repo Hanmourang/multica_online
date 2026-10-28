@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   ExternalLink,
+  FileText,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -51,7 +52,7 @@ import {
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
-import { useIntentNavigate } from "../../navigation";
+import { useIntentNavigate, useNavigation } from "../../navigation";
 import { isRefreshableOrigin, readOrigin } from "../lib/origin";
 import { RefreshSkillDialog } from "./refresh-skill-dialog";
 import type { SkillRow } from "./skills-page";
@@ -664,6 +665,7 @@ export function SkillRowActions({
   const { t: tCommon } = useT("common");
   const paths = useWorkspacePaths();
   const intentNavigate = useIntentNavigate();
+  const navigation = useNavigation();
   const [addOpen, setAddOpen] = useState(false);
   const [refreshOpen, setRefreshOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -700,6 +702,17 @@ export function SkillRowActions({
           >
             <ExternalLink className="size-3.5" />
             {tCommon(($) => $.navigation.open_in_new_tab)}
+          </DropdownMenuItem>
+          {/* Jumps straight to the file rail. The row already opens the detail
+              page, so this exists for readers who came for the source: one
+              click instead of "open, then guess which tab holds the files". */}
+          <DropdownMenuItem
+            onClick={() =>
+              navigation.push(`${paths.skillDetail(row.skill.id)}?view=files`)
+            }
+          >
+            <FileText className="size-3.5" />
+            {t(($) => $.actions.view_source)}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setAddOpen(true)}>

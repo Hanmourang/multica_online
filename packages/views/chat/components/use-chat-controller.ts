@@ -291,7 +291,25 @@ export function useChatController(opts?: { isActive?: boolean }) {
       ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
       : 0;
   const pendingTaskId = pendingTask?.task_id ?? null;
+  // Group parallel-dispatch set (§6). Non-group responses never carry
+  // agent_tasks. Declared next to pendingTaskId rather than at the tail of the
+  // hook because the running signal and Stop handler below both read it — a
+  // group runs N independent tasks and carries no root task_id, which is what
+  // used to leave the composer with no Stop affordance at all.
+  const groupPendingTasks: GroupPendingAgentTask[] | undefined =
+    activeSessionKind === "group"
+      ? visibleGroupPendingTasks(pendingTask?.agent_tasks, messages)
+      : undefined;
+  // "Something is running right now" for the composer. Agent/direct chats key
+  // off the single pending task; a group keys off its live per-agent set.
+  const isRunning =
+    !!pendingTaskId || (groupPendingTasks?.length ?? 0) > 0;
   const stopRequestedBeforeTaskRef = useRef(false);
+  // Session whose Stop was pressed before the server had assigned a task id
+  // (the send is still being accepted). Kept so the press can be honoured once
+  // the real id lands instead of evaporating — see the effect next to
+  // handleStop.
+  const stopPendingSessionRef = useRef<string | null>(null);
   // Durable deferred-cancellation draft restores (#5219). The whole lifecycle —
   // fetch, offer, skip-and-re-offer, apply, consume, reconcile — lives in this
   // hook, shared with the floating chat window.
@@ -306,11 +324,20 @@ export function useChatController(opts?: { isActive?: boolean }) {
     useChatDraftRestore(activeSessionId, isActive && appForeground);
   const {
     cancelChatTask,
+    cancellingTaskIds,
     handleEditQueuedTask,
     handleRemoveQueuedTask,
     handleClearQueuedTasks,
     handleSendQueuedTaskNow,
   } = useChatTaskActions(activeSessionId, enqueueLocalRestore);
+  // "The user already pressed Stop and we are waiting on the server for that
+  // task." Lets the composer answer the press immediately (spinner + label)
+  // instead of looking unresponsive while the request is in flight.
+  const isCancellingTask = useCallback(
+    (taskId: string | null | undefined) =>
+      !!taskId && cancellingTaskIds.includes(taskId),
+    [cancellingTaskIds],
+  );
   // Nonce handed to ChatInput to pull focus into the compose box when a new
   // chat starts. Bumped by handleNewChat / handleStartNewChat only, so
   // selecting an existing chat or a deep link never steals focus.
@@ -846,24 +873,94 @@ export function useChatController(opts?: { isActive?: boolean }) {
     ],
   );
 
+  // Stop one agent's run inside a group. Each agent owns an independent task,
+  // so the per-pill affordance cancels exactly that task and leaves its peers
+  // running. Draft restore is off on purpose: a group's triggering message
+  // owns no task (chat_message.task_id IS NULL), so there is nothing to put
+  // back, and pulling a message out of a shared transcript would be wrong.
+  const handleStopAgentTask = useCallback(
+    (taskId: string) => {
+      if (!activeSessionId || !taskId) return;
+      void cancelChatTask(taskId, activeSessionId, {
+        restoreDraftToInput: false,
+        source: "group-agent-stop",
+        reportFailure: true,
+      });
+    },
+    [activeSessionId, cancelChatTask],
+  );
+
   const handleStop = useCallback(() => {
+    // Group: there is no single pending task to stop. Cancel every live agent
+    // task — the composer's Stop is the "stop everything running here" door,
+    // and per-agent pills exist for surgical stops.
+    if (activeSessionKind === "group") {
+      const taskIds = (groupPendingTasks ?? [])
+        .map((task) => task.task_id)
+        .filter(Boolean);
+      if (!activeSessionId || taskIds.length === 0) {
+        apiLogger.debug("cancelTask skipped: no running group agent");
+        return;
+      }
+      apiLogger.info("cancelTask.groupStopAll", {
+        sessionId: activeSessionId,
+        taskCount: taskIds.length,
+      });
+      for (const taskId of taskIds) {
+        void cancelChatTask(taskId, activeSessionId, {
+          restoreDraftToInput: false,
+          source: "group-stop-all",
+          reportFailure: true,
+        });
+      }
+      return;
+    }
     if (!pendingTaskId || !activeSessionId) {
       apiLogger.debug("cancelTask skipped: no pending task");
       return;
     }
     if (!isTaskMessageTaskId(pendingTaskId)) {
+      // The send has not been accepted yet, so there is no id to cancel. Keep
+      // the intent and fire it from the effect below the moment the real id
+      // arrives; the old silent return made Stop look broken at exactly the
+      // moment a user reaches for it ("启动中").
       stopRequestedBeforeTaskRef.current = true;
+      stopPendingSessionRef.current = activeSessionId;
       apiLogger.info("cancelTask.deferred until server task id", {
         taskId: pendingTaskId,
         sessionId: activeSessionId,
       });
+      toast.info(t(($) => $.input.stop_pending_toast));
       return;
     }
     void cancelChatTask(pendingTaskId, activeSessionId, {
       restoreDraftToInput: true,
       source: "active-input",
+      reportFailure: true,
     });
-  }, [pendingTaskId, activeSessionId, cancelChatTask]);
+  }, [
+    activeSessionId,
+    activeSessionKind,
+    groupPendingTasks,
+    pendingTaskId,
+    cancelChatTask,
+    t,
+  ]);
+
+  // Honour a Stop that was pressed before the task id existed. Without this the
+  // flag was only consumed by the NEXT send, so the press was lost.
+  useEffect(() => {
+    const sessionId = stopPendingSessionRef.current;
+    if (!sessionId || sessionId !== activeSessionId) return;
+    if (!pendingTaskId || !isTaskMessageTaskId(pendingTaskId)) return;
+    stopPendingSessionRef.current = null;
+    stopRequestedBeforeTaskRef.current = false;
+    void cancelChatTask(pendingTaskId, sessionId, {
+      restoreDraftToInput: true,
+      source: "deferred-stop",
+      reportFailure: true,
+    });
+  }, [activeSessionId, pendingTaskId, cancelChatTask]);
 
   const handleNewChat = useCallback(() => {
     uiLogger.info("newChat", {
@@ -999,13 +1096,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
   const hasMessages = messages.length > 0 || !!pendingTaskId;
 
-  // Group parallel-dispatch set for the footer stage pills (§6). Non-group
-  // responses never carry agent_tasks.
-  const groupPendingTasks: GroupPendingAgentTask[] | undefined =
-    activeSessionKind === "group"
-      ? visibleGroupPendingTasks(pendingTask?.agent_tasks, messages)
-      : undefined;
-
   return {
     // identity / lists
     wsId,
@@ -1039,6 +1129,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
     pendingTask,
     pendingTaskId,
     groupPendingTasks,
+    isRunning,
+    isCancellingTask,
     memberRole,
     showSkeleton,
     hasMessages,
@@ -1057,6 +1149,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
     // actions
     handleSend,
     handleStop,
+    handleStopAgentTask,
+    cancellingTaskIds,
     handleSendQueuedTaskNow,
     handleEditQueuedTask,
     handleRemoveQueuedTask,

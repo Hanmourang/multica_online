@@ -57,6 +57,7 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import { mergeChatResourceSnapshots, rememberPendingChatResources, upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { extractMentionsFromContent } from "../lib/mention-extract";
+import { isLiveTaskStatus, isStopForbidden, isTaskGone } from "../lib/stop-feedback";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
@@ -167,6 +168,9 @@ export function ChatWindow() {
     : 0;
   const pendingTaskId = pendingTask?.task_id ?? null;
   const stopRequestedBeforeTaskRef = useRef(false);
+  // Session whose Stop was pressed before the server had assigned a task id —
+  // see the effect next to handleStop.
+  const stopPendingSessionRef = useRef<string | null>(null);
   // Durable deferred-cancellation draft restores (#5219). Same hook as the chat
   // page controller — the skip/apply/consume/reconcile state machine must not
   // diverge between the two composers.
@@ -183,11 +187,19 @@ export function ChatWindow() {
     useChatDraftRestore(activeSessionId, isOpen && appForeground);
   const {
     cancelChatTask,
+    cancellingTaskIds,
     handleEditQueuedTask,
     handleRemoveQueuedTask,
     handleClearQueuedTasks,
     handleSendQueuedTaskNow,
   } = useChatTaskActions(activeSessionId, enqueueLocalRestore);
+  // Same "stop already pressed, waiting on the server" signal the Chat tab's
+  // controller exposes — the two composers must not diverge on it.
+  const isCancellingTask = useCallback(
+    (taskId: string | null | undefined) =>
+      !!taskId && cancellingTaskIds.includes(taskId),
+    [cancellingTaskIds],
+  );
   // Nonce handed to ChatInput to pull focus into the compose box: when a new
   // chat starts (⊕ or switching agent), and whenever the window itself opens.
   const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen);
@@ -263,6 +275,15 @@ export function ChatWindow() {
   }, [currentSession?.participants]);
   const conversationKind = currentSession?.kind ?? "agent";
   const isConversationSession = conversationKind === "dm" || conversationKind === "group";
+  // Group fan-out runs N independent tasks and carries no root task_id, so the
+  // composer's running signal has to read the per-agent set — keying it off
+  // pendingTaskId alone left a group with no Stop affordance. Same signal the
+  // Chat tab's controller exposes (use-chat-controller.ts).
+  const groupPendingTasks =
+    conversationKind === "group"
+      ? visibleGroupPendingTasks(pendingTask?.agent_tasks, messages)
+      : undefined;
+  const isRunning = !!pendingTaskId || (groupPendingTasks?.length ?? 0) > 0;
   const sessionAgent = !isConversationSession && currentSession
     ? agents.find((a) => a.id === currentSession.agent_id) ?? null
     : null;
@@ -750,24 +771,91 @@ export function ChatWindow() {
     ],
   );
 
+  // Stop one agent's run inside a group. Every pill is an independent task, so
+  // the per-pill affordance cancels exactly that task. Draft restore is off on
+  // purpose: a group's triggering message owns no task, so there is nothing to
+  // put back, and removing a line from a shared transcript would be wrong.
+  const handleStopAgentTask = useCallback(
+    (taskId: string) => {
+      if (!activeSessionId || !taskId) return;
+      void cancelChatTask(taskId, activeSessionId, {
+        restoreDraftToInput: false,
+        source: "group-agent-stop",
+        reportFailure: true,
+      });
+    },
+    [activeSessionId, cancelChatTask],
+  );
+
   const handleStop = useCallback(() => {
+    // Group: no single pending task exists. The composer's Stop cancels every
+    // live agent task in this room; the per-agent pills cover surgical stops.
+    if (conversationKind === "group") {
+      const taskIds = (groupPendingTasks ?? [])
+        .map((task) => task.task_id)
+        .filter(Boolean);
+      if (!activeSessionId || taskIds.length === 0) {
+        apiLogger.debug("cancelTask skipped: no running group agent");
+        return;
+      }
+      apiLogger.info("cancelTask.groupStopAll", {
+        sessionId: activeSessionId,
+        taskCount: taskIds.length,
+      });
+      for (const taskId of taskIds) {
+        void cancelChatTask(taskId, activeSessionId, {
+          restoreDraftToInput: false,
+          source: "group-stop-all",
+          reportFailure: true,
+        });
+      }
+      return;
+    }
     if (!pendingTaskId || !activeSessionId) {
       apiLogger.debug("cancelTask skipped: no pending task");
       return;
     }
     if (!isTaskMessageTaskId(pendingTaskId)) {
+      // The send has not been accepted yet, so there is no id to cancel. Keep
+      // the intent and fire it once the real id lands; the old silent return
+      // made Stop look dead at the exact moment a user reaches for it.
       stopRequestedBeforeTaskRef.current = true;
+      stopPendingSessionRef.current = activeSessionId;
       apiLogger.info("cancelTask.deferred until server task id", {
         taskId: pendingTaskId,
         sessionId: activeSessionId,
       });
+      toast.info(t(($) => $.input.stop_pending_toast));
       return;
     }
     void cancelChatTask(pendingTaskId, activeSessionId, {
       restoreDraftToInput: true,
       source: "active-input",
+      reportFailure: true,
     });
-  }, [pendingTaskId, activeSessionId, cancelChatTask]);
+  }, [
+    activeSessionId,
+    conversationKind,
+    groupPendingTasks,
+    pendingTaskId,
+    cancelChatTask,
+    t,
+  ]);
+
+  // Honour a Stop that was pressed before the task id existed. Without this the
+  // flag was only consumed by the NEXT send, so the press was lost.
+  useEffect(() => {
+    const sessionId = stopPendingSessionRef.current;
+    if (!sessionId || sessionId !== activeSessionId) return;
+    if (!pendingTaskId || !isTaskMessageTaskId(pendingTaskId)) return;
+    stopPendingSessionRef.current = null;
+    stopRequestedBeforeTaskRef.current = false;
+    void cancelChatTask(pendingTaskId, sessionId, {
+      restoreDraftToInput: true,
+      source: "deferred-stop",
+      reportFailure: true,
+    });
+  }, [activeSessionId, pendingTaskId, cancelChatTask]);
 
   const handleNewChat = useCallback(() => {
     uiLogger.info("newChat", {
@@ -1039,6 +1127,7 @@ export function ChatWindow() {
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}
           onLoadOlderMessages={() => void fetchOlderMessages()}
+          onStopGroupTask={handleStopAgentTask}
           onQuickAction={(action) => handleSend(action.prompt)}
           onRegenerateQuickActions={(message) =>
             activeSessionId
@@ -1111,8 +1200,17 @@ export function ChatWindow() {
         onRestoreDraftApplied={handleRestoreDraftApplied}
         uploadEnabled={isConversationSession || (!!activeAgent && !isAgentAccessRevoked)}
         onStop={handleStop}
-        isRunning={!!pendingTaskId}
-        allowSubmitWhileRunning={pendingTask?.supports_queue === true}
+        isRunning={isRunning}
+        stopping={isCancellingTask(pendingTaskId)}
+        cancellingTaskIds={cancellingTaskIds}
+        // A group send never queues — the server fans it out as fresh per-agent
+        // tasks, so composing while agents run is how you add a clarification
+        // rather than a queue slot. The server has always accepted it; only
+        // this UI gate kept the group composer locked.
+        allowSubmitWhileRunning={
+          pendingTask?.supports_queue === true || conversationKind === "group"
+        }
+        runningSendKind={conversationKind === "group" ? "supplement" : "queue"}
         disabled={
           isConversationSession
             ? isSessionArchived
@@ -1158,12 +1256,9 @@ export function ChatWindow() {
         }
         contextItems={contextItems}
         focusRequest={focusRequest}
-        groupRuns={
-          conversationKind === "group"
-            ? visibleGroupPendingTasks(pendingTask?.agent_tasks, messages)
-            : undefined
-        }
+        groupRuns={groupPendingTasks}
         groupAgentNames={groupAgentNames}
+        onStopGroupTask={handleStopAgentTask}
       />
     </motion.div>
   );
@@ -1351,14 +1446,28 @@ function SessionDropdown({
         if (restored?.restore_to_input) {
           removeChatMessageFromCaches(queryClient, restored.chat_session_id, restored.message_id);
         }
+        // A 200 does not prove the run stopped — see ../lib/stop-feedback.
+        if (isLiveTaskStatus(result.status)) {
+          toast.error(t(($) => $.input.stop_failed_toast));
+        }
         apiLogger.info("cancelTask.success (history row)", { taskId: task.task_id, sessionId: session.id });
       },
-      (err) =>
-        apiLogger.warn("cancelTask.error (history row; task may have already finished)", {
+      (err) => {
+        apiLogger.warn("cancelTask.error (history row)", {
           taskId: task.task_id,
           sessionId: session.id,
           err,
-        }),
+        });
+        // A 404 just means it already finished — the invalidation below settles
+        // the row, no error copy needed.
+        if (!isTaskGone(err)) {
+          toast.error(
+            isStopForbidden(err)
+              ? t(($) => $.input.stop_forbidden_toast)
+              : t(($) => $.input.stop_failed_toast),
+          );
+        }
+      },
     ).finally(() => {
       queryClient.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
       queryClient.invalidateQueries({ queryKey: chatKeys.pendingTask(session.id) });
@@ -1574,7 +1683,9 @@ function SessionDropdown({
                 showStatusDot
               />
             )}
-            <span className="min-w-0 truncate text-body font-medium">{title}</span>
+            {/* Same weight/size as ChatSessionHeader's title so the floating
+                window and the docked pane read as one surface. */}
+            <span className="min-w-0 truncate text-title-sm font-semibold">{title}</span>
             {currentSessionRunning && (
               <Loader2
                 aria-label={t(($) => $.session_history.row_subtitle.working)}

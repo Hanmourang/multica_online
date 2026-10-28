@@ -82,6 +82,12 @@ vi.mock("@multica/core/auth", async () => {
 
 import { PreferencesTab } from "./preferences-tab";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
+import {
+  DEFAULT_FONT_SCALE,
+  FONT_SCALE_ATTRIBUTE,
+  FontScaleSync,
+  useFontScaleStore,
+} from "@multica/core/preferences/font-scale";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, auth: enAuth, settings: enSettings },
@@ -310,6 +316,60 @@ describe("PreferencesTab — Timezone section", () => {
       // so the picker switches back to "(browser)" without a refetch.
       expect(mockSetUser).toHaveBeenCalledWith(clearedUser);
     });
+  });
+});
+
+describe("PreferencesTab — Font size", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+    useFontScaleStore.setState({ scale: DEFAULT_FONT_SCALE });
+    document.documentElement.removeAttribute(FONT_SCALE_ATTRIBUTE);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  // FontScaleSync is mounted by CoreProvider in the real shells; render it
+  // alongside the tab so this covers the whole "setting → root variable" path.
+  function renderWithSync() {
+    return render(
+      <>
+        <FontScaleSync />
+        <PreferencesTab />
+      </>,
+      { wrapper: I18nWrapper },
+    );
+  }
+
+  it("publishes the picked scale on the document root and confirms the save", async () => {
+    const user = userEvent.setup();
+    renderWithSync();
+
+    const trigger = screen.getByRole("combobox", { name: "Font size" });
+    expect(trigger.textContent).toContain("Default");
+
+    await user.click(trigger);
+    await user.click(await screen.findByRole("option", { name: "Large" }));
+
+    expect(useFontScaleStore.getState().scale).toBe("lg");
+    expect(
+      document.documentElement.getAttribute(FONT_SCALE_ATTRIBUTE),
+    ).toBe("lg");
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores a previously saved scale on mount", () => {
+    useFontScaleStore.setState({ scale: "xl" });
+    renderWithSync();
+
+    expect(
+      screen.getByRole("combobox", { name: "Font size" }).textContent,
+    ).toContain("Extra large");
+    expect(
+      document.documentElement.getAttribute(FONT_SCALE_ATTRIBUTE),
+    ).toBe("xl");
   });
 });
 

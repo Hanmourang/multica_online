@@ -162,7 +162,7 @@ vi.mock("@multica/core/logger", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "x" }) }));
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
@@ -197,6 +197,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 
 import { useChatController } from "./use-chat-controller";
 import { api, ApiError } from "@multica/core/api";
+import { toast } from "sonner";
 
 // --- Fixtures ---------------------------------------------------------------
 function makeSession(
@@ -842,6 +843,123 @@ describe("useChatController queued task actions", () => {
   });
 });
 
+// A Stop that fails, or that the server silently ignores, must NEVER look like
+// a stop that worked: every one of these used to be swallowed (log only), which
+// is exactly the "I clicked Stop and nothing happened" report.
+describe("useChatController stop feedback", () => {
+  const taskId = "22222222-2222-4222-8222-222222222222";
+  const runningTask: ChatPendingTask = {
+    task_id: taskId,
+    status: "running",
+    supports_queue: true,
+    queued_tasks: [],
+  };
+
+  beforeEach(() => {
+    vi.mocked(api.cancelTaskById).mockReset();
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.info).mockClear();
+    h.queryClient.getQueryData.mockReset();
+    h.queryClient.setQueryData.mockReset();
+    h.queryClient.invalidateQueries.mockReset();
+    h.queryClient.cancelQueries.mockReset();
+    h.queryClient.getQueryData.mockReturnValue(runningTask);
+  });
+
+  it("surfaces a server refusal and keeps the Stop affordance", async () => {
+    vi.mocked(api.cancelTaskById).mockRejectedValue(new ApiError("not your task", 403));
+    const result = setup("sA", [sA], [agentA], runningTask);
+
+    act(() => result.current.handleStop());
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    // The run is still live on the server, so the pill must stay and stay
+    // clickable — restoring the snapshot is what keeps Stop retryable.
+    expect(h.queryClient.setQueryData).toHaveBeenCalledWith(
+      expect.anything(),
+      runningTask,
+    );
+  });
+
+  it("drops the pending task on 404 instead of re-pinning the composer", async () => {
+    vi.mocked(api.cancelTaskById).mockRejectedValue(new ApiError("task not found", 404));
+    const result = setup("sA", [sA], [agentA], runningTask);
+
+    act(() => result.current.handleStop());
+
+    await waitFor(() => expect(api.cancelTaskById).toHaveBeenCalledTimes(1));
+    // Restoring a task the server does not know would wedge the composer on a
+    // phantom run, so the optimistic removal has to stand.
+    expect(h.queryClient.setQueryData).not.toHaveBeenCalledWith(
+      expect.anything(),
+      runningTask,
+    );
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("reports a 200 that left the task running as a failed stop", async () => {
+    // waiting_module_lock sits outside CancelAgentTaskByUser's status set, so
+    // the server answers 200 with the untouched row instead of an error.
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: taskId,
+      status: "waiting_module_lock",
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA], runningTask);
+
+    act(() => result.current.handleStop());
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(h.queryClient.setQueryData).toHaveBeenCalledWith(
+      expect.anything(),
+      runningTask,
+    );
+  });
+
+  it("fires one cancel per press and exposes the in-flight state", async () => {
+    let release: ((value: unknown) => void) | undefined;
+    vi.mocked(api.cancelTaskById).mockReturnValue(
+      new Promise<never>((resolve) => {
+        release = resolve as (value: unknown) => void;
+      }),
+    );
+    const result = setup("sA", [sA], [agentA], runningTask);
+
+    act(() => result.current.handleStop());
+    act(() => result.current.handleStop());
+
+    await waitFor(() => expect(api.cancelTaskById).toHaveBeenCalledTimes(1));
+    // The second press landed while the first was still on the wire.
+    expect(api.cancelTaskById).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(result.current.isCancellingTask(taskId)).toBe(true));
+
+    await act(async () => {
+      release?.({ id: taskId, status: "cancelled" });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.isCancellingTask(taskId)).toBe(false));
+  });
+
+  it("honours a Stop pressed before the server assigned the task id", async () => {
+    h.store.activeSessionId = "sA";
+    h.sessions = [sA];
+    h.agents = [agentA];
+    h.projects = [];
+    // "pending" is not a task uuid: the send has not been accepted yet.
+    h.pendingTask = { task_id: "pending", status: "queued", queued_tasks: [] };
+    const { result, rerender } = renderHook(() => useChatController());
+
+    act(() => result.current.handleStop());
+    // Acknowledged instead of silently discarded.
+    expect(toast.info).toHaveBeenCalledTimes(1);
+    expect(api.cancelTaskById).not.toHaveBeenCalled();
+
+    h.pendingTask = runningTask;
+    rerender();
+
+    await waitFor(() => expect(api.cancelTaskById).toHaveBeenCalledWith(taskId, undefined));
+  });
+});
+
 // MUL-4360 mount race: `activeSessionId` is persisted, so on a bare `/chat`
 // navigation the page restores the last session as active for one frame before
 // its URL→store effect clears it back to null. The auto-mark-read must NOT fire
@@ -1381,5 +1499,82 @@ describe("useChatController dm conversation (plan 20261025)", () => {
     expect((seed as (old: undefined) => unknown)(undefined)).toEqual([
       expect.objectContaining({ resources, has_resources: true }),
     ]);
+  });
+});
+
+// A group runs N independent agent tasks and its /pending-task response carries
+// no root task_id. Before this, the composer derived "running" from
+// pendingTaskId alone, so a group with a 100+ step runaway agent showed no Stop
+// affordance at all (and handleStop returned early).
+describe("useChatController group stop", () => {
+  const groupSession = makeSession({ id: "gA", agent_id: null, kind: "group" });
+  const groupPending: ChatPendingTask = {
+    supports_queue: false,
+    agent_tasks: [
+      {
+        agent_id: "agent-a",
+        task_id: "task-a",
+        status: "running",
+        created_at: new Date(0).toISOString(),
+      },
+      {
+        agent_id: "agent-b",
+        task_id: "task-b",
+        status: "queued",
+        created_at: new Date(0).toISOString(),
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.mocked(api.cancelTaskById).mockReset();
+    vi.mocked(api.cancelTaskById).mockResolvedValue({} as Awaited<
+      ReturnType<typeof api.cancelTaskById>
+    >);
+    h.queryClient.getQueryData.mockReset();
+    h.queryClient.setQueryData.mockReset();
+    h.queryClient.invalidateQueries.mockReset();
+    h.queryClient.cancelQueries.mockReset();
+  });
+
+  it("reports running from the per-agent set when there is no root task id", () => {
+    const result = setup("gA", [groupSession], [agentA, agentB], groupPending);
+
+    expect(result.current.pendingTaskId).toBeNull();
+    expect(result.current.isRunning).toBe(true);
+  });
+
+  it("is not running when the group has no in-flight agent", () => {
+    const result = setup("gA", [groupSession], [], {
+      supports_queue: false,
+      agent_tasks: [],
+    });
+
+    expect(result.current.isRunning).toBe(false);
+  });
+
+  it("stops every live agent from the composer", async () => {
+    const result = setup("gA", [groupSession], [agentA, agentB], groupPending);
+
+    act(() => result.current.handleStop());
+
+    await waitFor(() => {
+      expect(api.cancelTaskById).toHaveBeenCalledTimes(2);
+    });
+    // Neither cancel claims a queued slot: a group has no queue, and the
+    // triggering message owns no task so nothing is restored to the composer.
+    expect(api.cancelTaskById).toHaveBeenCalledWith("task-a", undefined);
+    expect(api.cancelTaskById).toHaveBeenCalledWith("task-b", undefined);
+  });
+
+  it("stops only the named agent from a stage pill", async () => {
+    const result = setup("gA", [groupSession], [agentA, agentB], groupPending);
+
+    act(() => result.current.handleStopAgentTask("task-b"));
+
+    await waitFor(() => {
+      expect(api.cancelTaskById).toHaveBeenCalledWith("task-b", undefined);
+    });
+    expect(api.cancelTaskById).toHaveBeenCalledTimes(1);
   });
 });

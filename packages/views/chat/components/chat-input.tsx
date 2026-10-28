@@ -1,9 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ReactNode, SyntheticEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { TriangleAlert, X } from "lucide-react";
+import { Loader2, SendHorizontal, Square, TriangleAlert, X } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { Button } from "@multica/ui/components/ui/button";
 import {
   ContentEditor,
   type ContentEditorRef,
@@ -22,6 +23,8 @@ import { ChatAddMenu } from "./chat-add-menu";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { GroupPendingPills } from "./group-pending-pills";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
+import { useFeatureEnabled } from "@multica/core/config";
+import { MODULE_PROTOTYPE_CHAT_FLAG } from "@multica/core/feature-flags";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
@@ -31,16 +34,19 @@ import type {
   ChatResourceRefInput,
   GroupPendingAgentTask,
   Project,
+  ProjectModule,
 } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
 import { pageSurfaceChip, usePageSurfaceContext } from "../lib/page-surface-context";
 import { useChatFanout } from "../lib/fanout-agents";
-import { ResourcePickerDialog } from "./resource-picker-dialog";
+import { ResourcePickerDialog, type ResourceTab } from "./resource-picker-dialog";
 import {
+  addChatResourceDraft,
   canSubmitChatComposer,
   CHAT_RESOURCE_DRAFT_LIMIT,
+  chatModuleResource,
   chatResourceDraftKey,
   chatResourceMark,
   chatResourceRef,
@@ -49,8 +55,14 @@ import {
 const logger = createLogger("chat.ui");
 const EMPTY_UPLOADS: DraftUpload[] = [];
 const EMPTY_RESOURCES: ChatMessageResource[] = [];
+const EMPTY_TASK_IDS: string[] = [];
 /** Editor identity for the chat composer — see the editorKey note below. */
 const CHAT_COMPOSER_EDITOR_KEY = "chat-composer";
+
+/** Keep the composer focused so Send and Stop do not dismiss Android's keyboard. */
+function keepComposerFocus(event: SyntheticEvent<HTMLButtonElement>) {
+  event.preventDefault();
+}
 
 function attachmentReferenceUrls(attachment: Attachment): string[] {
   const withUploadFields = attachment as Attachment & {
@@ -116,8 +128,18 @@ interface ChatInputProps {
   uploadEnabled?: boolean;
   onStop?: () => void;
   isRunning?: boolean;
+  /** A cancel for this conversation's task is already on the wire. Keeps the
+   *  Stop button from re-firing and turns it into "stopping…" so the press is
+   *  visibly acknowledged instead of looking dead. */
+  stopping?: boolean;
+  /** Task ids with a cancel in flight; used to gate the group "stop all" door. */
+  cancellingTaskIds?: string[];
   /** Enabled only after the server explicitly advertises follow-up queues. */
   allowSubmitWhileRunning?: boolean;
+  /** What a submit does while a run is in flight. `queue` is the direct-chat
+   *  follow-up queue; `supplement` is a group message that fans out as a fresh
+   *  per-agent task (no queue exists there). Drives the button tooltip only. */
+  runningSendKind?: "queue" | "supplement";
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
@@ -172,6 +194,8 @@ interface ChatInputProps {
   /** In-flight group agent tasks, shown as a dock above the composer. */
   groupRuns?: GroupPendingAgentTask[];
   groupAgentNames?: Map<string, string>;
+  /** Stop one agent's run inside a group (per-pill affordance). */
+  onStopGroupTask?: (taskId: string) => void;
   /** Optional controlled resource draft used by tests and embedded hosts. */
   resources?: ChatMessageResource[];
   onResourcesChange?: (resources: ChatMessageResource[]) => void;
@@ -187,7 +211,10 @@ export function ChatInput({
   uploadEnabled: uploadAllowed,
   onStop,
   isRunning,
+  stopping = false,
+  cancellingTaskIds,
   allowSubmitWhileRunning,
+  runningSendKind = "queue",
   disabled,
   noAgent,
   agentArchived,
@@ -210,6 +237,7 @@ export function ChatInput({
   editorKeyOverride,
   groupRuns,
   groupAgentNames,
+  onStopGroupTask,
   resources: controlledResources,
   onResourcesChange,
   resourceSharingEnabled = false,
@@ -255,11 +283,19 @@ export function ChatInput({
   const draftKey = draftKeyOverride ?? activeSessionId ?? DRAFT_NEW_SESSION;
   const [resourceDrafts, setResourceDrafts] = useState<Record<string, ChatMessageResource[]>>({});
   const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
+  const [resourcePickerTab, setResourcePickerTab] = useState<ResourceTab>("task");
   const resources = controlledResources ?? resourceDrafts[draftKey] ?? EMPTY_RESOURCES;
+  // 模块挂载是独立灰度的：flag 关闭时入口与 tab 都不渲染，服务端也会拒收这两类引用。
+  // 模块列表由 ChatModuleMenu 在子菜单展开时才拉取，这里不持有查询。
+  const moduleAttachEnabled = useFeatureEnabled(MODULE_PROTOTYPE_CHAT_FLAG, false) && resourceSharingEnabled;
   const changeResources = useCallback((next: ChatMessageResource[]) => {
     if (controlledResources) onResourcesChange?.(next);
     else setResourceDrafts((current) => ({ ...current, [draftKey]: next }));
   }, [controlledResources, draftKey, onResourcesChange]);
+  // 从「+」菜单选模块 = 直接落到草稿 chip；额度已满时不动（与选择器一致）。
+  const attachModule = useCallback((module: ProjectModule) => {
+    changeResources(addChatResourceDraft(resources, chatModuleResource(module)));
+  }, [changeResources, resources]);
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const storeUploads = useChatStore(
@@ -569,7 +605,12 @@ export function ChatInput({
       // at the new session and leave the old draft orphaned.
       const keyAtSend = draftKey;
       const resourcesAtSend = resources;
-      const resourceRefs = resourcesAtSend.map(chatResourceRef);
+      // D1：模块是主上下文，固定排在前面，让服务端把 position=0 给它。
+      const orderedResources = [
+        ...resourcesAtSend.filter((item) => item.type === "module"),
+        ...resourcesAtSend.filter((item) => item.type !== "module"),
+      ];
+      const resourceRefs = orderedResources.map(chatResourceRef);
       // Stale-submit guard (MUL-5181 P0): snapshot the sent draft's persisted
       // value, flushing the editor's pending debounce first so pre-submit
       // typing is inside the snapshot. A late success may only clear what it
@@ -649,7 +690,17 @@ export function ChatInput({
     },
   });
 
-  const placeholder = isHumanConversation
+  // While a run is in flight the composer stops being "the next message" and
+  // becomes either a clarification (group: a fresh per-agent task) or a queue
+  // slot. Spell that out in the placeholder rather than leaving the user to
+  // guess what typing here will do — the ambiguity was the whole complaint.
+  const runningComposer =
+    !!isRunning && !!allowSubmitWhileRunning && !disabled && !noAgentGate;
+  const placeholder = runningComposer
+    ? conversationKind === "group"
+      ? t(($) => $.input.placeholder_group_running)
+      : t(($) => $.input.placeholder_queue_running)
+    : isHumanConversation
     ? conversationKind === "dm"
       ? tConv(($) => $.dm.composer_placeholder)
       : tConv(($) => $.group.composer_placeholder)
@@ -671,6 +722,33 @@ export function ChatInput({
             })
           : t(($) => $.input.placeholder_named, { name: agentName })
         : t(($) => $.input.placeholder_default);
+
+  // Explicit verbs for the two actions available while a run is in flight.
+  // `supplement` is a group message that fans out as a fresh per-agent task;
+  // `queue` is the direct-chat follow-up slot. Neither is an icon-only swap
+  // any more: an icon that changes shape under the cursor was unreadable.
+  const runningSendLabel =
+    runningSendKind === "supplement"
+      ? t(($) => $.input.supplement_send_label)
+      : t(($) => $.input.queue_send_label);
+  const runningSendTooltip =
+    runningSendKind === "supplement"
+      ? t(($) => $.input.supplement_send_tooltip)
+      : t(($) => $.input.queue_send_tooltip);
+  const groupRunning = (groupRuns?.length ?? 0) > 0;
+  // The bulk dock door is only useful until every run in it is already being
+  // cancelled; past that point it is a dead control.
+  const groupStopAllInFlight =
+    groupRunning &&
+    (groupRuns ?? []).every((task) =>
+      (cancellingTaskIds ?? EMPTY_TASK_IDS).includes(task.task_id),
+    );
+  // The composer's Stop only renders outside a group: there the dock above it
+  // owns both stop doors (per agent + "stop all"), so this one stays the plain
+  // single-task verb.
+  const stopActionLabel = stopping
+    ? t(($) => $.input.stop_in_progress)
+    : t(($) => $.input.stop_tooltip);
 
   const uploadEnabled = !!uploadAllowed && !disabled && !noAgentGate;
   // Lock only while the send request itself is creating/resolving the target
@@ -710,8 +788,43 @@ export function ChatInput({
       )}
     >
       {groupRuns && groupRuns.length > 0 && (
-        <div className={cn(CHAT_COLUMN, "mb-2 rounded-lg border border-border bg-card px-3 py-2")}>
-          <GroupPendingPills tasks={groupRuns} agentNames={groupAgentNames} variant="dock" />
+        <div
+          className={cn(
+            CHAT_COLUMN,
+            "mb-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-2",
+          )}
+        >
+          <span className="inline-flex shrink-0 items-center gap-1 text-caption font-medium text-muted-foreground">
+            <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+            {t(($) => $.status_pill.group.running_count, { count: groupRuns.length })}
+          </span>
+          <GroupPendingPills
+            tasks={groupRuns}
+            agentNames={groupAgentNames}
+            onStop={onStopGroupTask}
+            variant="dock"
+          />
+          {onStop && (
+            // The bulk door, stated as a verb. Per-agent pills cover surgical
+            // stops; this is the "everything here is running away" button.
+            <Button
+              variant="outline"
+              size="xs"
+              className="ml-auto shrink-0 gap-1 border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={onStop}
+              disabled={groupStopAllInFlight}
+              aria-busy={groupStopAllInFlight || undefined}
+              aria-label={t(($) => $.status_pill.group.stop_all)}
+              title={t(($) => $.input.stop_all_tooltip)}
+            >
+              {groupStopAllInFlight ? (
+                <Loader2 className="size-2.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Square className="size-2.5 fill-current" aria-hidden="true" />
+              )}
+              {t(($) => $.status_pill.group.stop_all)}
+            </Button>
+          )}
         </div>
       )}
       {conversationKind === "group" && (
@@ -746,6 +859,9 @@ export function ChatInput({
               const key = chatResourceDraftKey(resource);
               const title = resource.title
                 ?? resource.issue?.title
+                ?? resource.module?.name
+                ?? resource.prototype?.name
+                ?? resource.prototype?.issue_title
                 ?? resource.artifact?.rel_path
                 ?? resource.attachment?.filename
                 ?? resource.id;
@@ -757,12 +873,19 @@ export function ChatInput({
                   className={cn(
                     "inline-flex max-w-60 items-center gap-1.5 rounded-lg border py-1 pl-1.5 pr-1 text-[11px]",
                     resource.type === "document" && "border-violet-200 bg-violet-50 text-violet-950 dark:border-violet-400/30 dark:bg-violet-500/10 dark:text-violet-100",
+                    resource.type === "module" && "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-100",
+                    resource.type === "module_prototype" && "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-950 dark:border-fuchsia-400/30 dark:bg-fuchsia-500/10 dark:text-fuchsia-100",
                     resource.kind === "requirement" && "border-sky-200 bg-sky-50 text-sky-950 dark:border-sky-400/30 dark:bg-sky-500/10 dark:text-sky-100",
                     resource.type === "issue" && resource.kind !== "requirement" && "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100",
                   )}
                 >
                   <b className="font-mono text-[9px] font-extrabold">{chatResourceMark(resource)}</b>
                   <span className="truncate">{label}</span>
+                  {resource.type === "module" && (resource.module?.spec_version ?? 0) > 0 && (
+                    <span className="shrink-0 text-[10px] opacity-70">
+                      {t(($) => $.resources.spec_version, { version: resource.module?.spec_version })}
+                    </span>
+                  )}
                   <button
                     type="button"
                     className="grid size-5 shrink-0 place-items-center rounded hover:bg-muted disabled:opacity-50"
@@ -866,8 +989,12 @@ export function ChatInput({
                 projectsLoading={projectsLoading}
                 projectsError={projectsError}
                 projectId={projectId}
+                onSelectModule={moduleAttachEnabled && !disabled && !noAgentGate ? attachModule : undefined}
                 onSelectProject={projectSelectionEnabled ? onProjectChange : undefined}
-                onSelectResource={resourceSharingEnabled && !disabled && !noAgentGate ? () => setResourcePickerOpen(true) : undefined}
+                onSelectResource={resourceSharingEnabled && !disabled && !noAgentGate ? () => {
+                  setResourcePickerTab("task");
+                  setResourcePickerOpen(true);
+                } : undefined}
                 projectContextUnsupported={projectContextUnsupported}
               />
             )}
@@ -875,37 +1002,80 @@ export function ChatInput({
           </div>
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
-          <SubmitButton
-            variant="brand"
-            className="shadow-[0_6px_16px_-8px_var(--brand)]"
-            onClick={submit}
-            disabled={hasNothingToSend || submitting || !!disabled || !!noAgentGate}
-            loading={submitting}
-            busy={gate.uploading}
-            // Queue-capable runs reuse this one action slot: an empty composer
-            // offers Stop, while live content swaps it to Queue Send. Older
-            // servers cannot accept follow-ups, so they remain stop-only. An
-            // upload blocks submit, so it also falls back to Stop rather than
-            // removing chat's only cancellation path; the attachment node
-            // remains the visible upload-progress surface in the editor.
-            running={
-              !!isRunning &&
-              (!allowSubmitWhileRunning || hasNothingToSend || gate.uploading)
-            }
-            onStop={onStop}
-            tooltip={gate.uploading
-              ? tEditor(($) => $.upload.in_progress)
-              : isRunning
-                ? t(($) => $.input.queue_send_tooltip)
+          {isRunning && onStop ? (
+            // While the run is live both intents are on screen and named:
+            // "send a clarification" and "stop". The old single slot swapped an
+            // icon under the cursor (empty ⇒ square, typing ⇒ arrow), which
+            // read as Stop disappearing exactly when the user reached for it.
+            // In a group the dock above the composer already carries both
+            // stop doors (per agent + all), so the composer only adds the
+            // clarification send there instead of duplicating them.
+            <>
+              {allowSubmitWhileRunning && (
+                <Button
+                  variant="brand"
+                  size="sm"
+                  className="gap-1 rounded-full px-3 shadow-[0_6px_16px_-8px_var(--brand)]"
+                  onPointerDown={keepComposerFocus}
+                  onMouseDown={keepComposerFocus}
+                  onClick={submit}
+                  disabled={
+                    hasNothingToSend || submitting || !!disabled || !!noAgentGate || gate.uploading
+                  }
+                  aria-busy={submitting || gate.uploading || undefined}
+                  aria-label={runningSendLabel}
+                  title={runningSendTooltip}
+                >
+                  {submitting || gate.uploading ? (
+                    <Loader2 className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <SendHorizontal aria-hidden="true" />
+                  )}
+                  {runningSendLabel}
+                </Button>
+              )}
+              {!groupRunning && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  // `pointer-events-auto` is load-bearing: the card above drops
+                  // pointer events when the composer is locked (noAgentGate),
+                  // and Stop lives inside it — a live run used to become
+                  // un-stoppable the moment the composer locked.
+                  className="pointer-events-auto gap-1 rounded-full border-destructive/35 px-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onPointerDown={keepComposerFocus}
+                  onMouseDown={keepComposerFocus}
+                  onClick={onStop}
+                  disabled={stopping}
+                  aria-busy={stopping || undefined}
+                  aria-label={stopActionLabel}
+                  title={stopActionLabel}
+                >
+                  {stopping ? (
+                    <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Square className="size-3 fill-current" aria-hidden="true" />
+                  )}
+                  {stopActionLabel}
+                </Button>
+              )}
+            </>
+          ) : (
+            <SubmitButton
+              variant="brand"
+              className="shadow-[0_6px_16px_-8px_var(--brand)]"
+              onClick={submit}
+              disabled={hasNothingToSend || submitting || !!disabled || !!noAgentGate}
+              loading={submitting}
+              busy={gate.uploading}
+              tooltip={gate.uploading
+                ? tEditor(($) => $.upload.in_progress)
                 : tConv(($) => $.message.enter_send)}
-            ariaLabel={gate.uploading
-              ? tEditor(($) => $.upload.in_progress)
-              : isRunning
-                ? t(($) => $.input.queue_send_tooltip)
-              : t(($) => $.input.send_tooltip)}
-            stopTooltip={t(($) => $.input.stop_tooltip)}
-            stopAriaLabel={t(($) => $.input.stop_tooltip)}
-          />
+              ariaLabel={gate.uploading
+                ? tEditor(($) => $.upload.in_progress)
+                : t(($) => $.input.send_tooltip)}
+            />
+          )}
         </div>
         {uploadEnabled && isDragOver && <FileDropOverlay />}
       </div>
@@ -914,6 +1084,9 @@ export function ChatInput({
           open={resourcePickerOpen}
           onOpenChange={setResourcePickerOpen}
           selected={resources}
+          projectId={projectId}
+          initialTab={resourcePickerTab}
+          moduleTabEnabled={moduleAttachEnabled}
           onApply={(next) => changeResources(next.slice(0, CHAT_RESOURCE_DRAFT_LIMIT))}
         />
       )}

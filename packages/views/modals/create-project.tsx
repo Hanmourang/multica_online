@@ -64,6 +64,7 @@ import {
 import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
 import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
 import { PillButton } from "../common/pill-button";
+import { WorkflowPill } from "../issue-workflows/workflow-pill";
 import { githubShortLabel } from "../common/github-url";
 import {
   isDesktopShell,
@@ -314,6 +315,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
+  /** Workflow the new project starts on; null leaves it on Default. */
+  const [workflowId, setWorkflowId] = useState<string | null>(null);
 
   const leadQuery = leadFilter.toLowerCase();
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
@@ -369,6 +372,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
         template,
+        ...(workflowId ? { workflow_id: workflowId } : {}),
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -587,6 +591,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <WorkflowPill value={workflowId} onChange={setWorkflowId} />
 
           <Popover
             open={leadOpen}

@@ -235,7 +235,7 @@ export function ChatSessionHeader({
                 setEditing(false);
               }
             }}
-            className="w-full rounded-sm bg-background px-1 py-0.5 text-body font-semibold outline-none ring-1 ring-border focus-visible:ring-brand"
+            className="w-full rounded-sm bg-background px-1 py-0.5 text-title-sm font-semibold outline-none ring-1 ring-border focus-visible:ring-brand"
           />
         ) : (
           <button
@@ -243,7 +243,9 @@ export function ChatSessionHeader({
             onClick={canRename ? startRename : undefined}
             title={canRename ? t(($) => $.header.rename) : undefined}
             className={cn(
-              "block max-w-full truncate text-left text-body font-semibold text-foreground",
+              // The pane's headline, so it sits a step above body copy: 16px
+              // matches every other pane/section heading in the app.
+              "block max-w-full truncate text-left text-title-sm font-semibold text-foreground",
               canRename && "outline-none hover:text-foreground focus-visible:text-foreground",
             )}
           >

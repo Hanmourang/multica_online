@@ -639,20 +639,23 @@ describe("ChatInput project context", () => {
     expect(onProjectChange).toHaveBeenCalledWith(null);
   });
 
-  it("swaps Stop for Queue Send when the running composer has content", async () => {
+  it("keeps a labelled Stop next to the clarification send while running", async () => {
     const onSend = vi.fn<ChatInputOnSend>(async () => true);
     const onStop = vi.fn();
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend, onStop });
 
+    // Both intents are on screen and named: the send affordance never swaps
+    // into the Stop slot (which used to make Stop vanish as soon as the user
+    // started typing the clarification they wanted to send).
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Queue send" })).toBeDisabled();
 
     fireEvent.change(screen.getByTestId("editor"), {
       target: { value: "follow-up" },
     });
 
-    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
-    const queueButton = screen.getByRole("button", { name: "Queue message" });
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    const queueButton = screen.getByRole("button", { name: "Queue send" });
     expect(queueButton).not.toBeDisabled();
     fireEvent.click(queueButton);
 
@@ -660,10 +663,9 @@ describe("ChatInput project context", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
   });
 
-  it("keeps Stop available while queued content is uploading", async () => {
+  it("keeps Stop clickable while the clarification is uploading", async () => {
     let resolveUpload!: (value: UploadResult) => void;
     mockApiUploadFile.mockImplementation(
       () => new Promise<UploadResult>((resolve) => (resolveUpload = resolve)),
@@ -674,7 +676,7 @@ describe("ChatInput project context", () => {
     fireEvent.change(screen.getByTestId("editor"), {
       target: { value: "follow-up with attachment" },
     });
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Queue send" })).not.toBeDisabled();
 
     await act(async () => {
       dropHandlers.onDrop?.([
@@ -683,10 +685,12 @@ describe("ChatInput project context", () => {
       await Promise.resolve();
     });
 
+    // The upload blocks the submit button; Stop must stay a live control
+    // rather than being swapped away by the busy state.
     const stopButton = await screen.findByRole("button", { name: "Stop" });
-    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
     fireEvent.click(stopButton);
     expect(onStop).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: "Queue send" })).toBeDisabled();
 
     await act(async () => {
       resolveUpload(
@@ -699,14 +703,100 @@ describe("ChatInput project context", () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByRole("button", { name: "Queue message" })).not.toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Queue send" })).not.toBeDisabled();
   });
 
-  it("shows only Stop while an older server is running", () => {
+  it("shows only the labelled Stop while an older server is running", () => {
     renderInput({ isRunning: true, onStop: vi.fn() });
 
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Queue send" })).not.toBeInTheDocument();
+  });
+
+  it("names the group bulk stop and exposes one stop per running agent", () => {
+    const onStop = vi.fn();
+    const onStopGroupTask = vi.fn();
+    renderInput({
+      isRunning: true,
+      allowSubmitWhileRunning: true,
+      conversationKind: "group",
+      runningSendKind: "supplement",
+      onStop,
+      onStopGroupTask,
+      groupRuns: [
+        { task_id: "t1", agent_id: "a1", status: "running", created_at: "2026-10-26T00:00:00Z" },
+        { task_id: "t2", agent_id: "a2", status: "queued", created_at: "2026-10-26T00:00:00Z" },
+      ],
+      groupAgentNames: new Map([
+        ["a1", "Bob"],
+        ["a2", "Eve"],
+      ]),
+    });
+
+    expect(screen.getByText("2 agents running")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop Bob" }));
+    expect(onStopGroupTask).toHaveBeenCalledTimes(1);
+    expect(onStopGroupTask).toHaveBeenCalledWith("t1");
+
+    // Two doors, both stated as verbs: one bulk, one per agent.
+    fireEvent.click(screen.getByRole("button", { name: "Stop all" }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    expect(screen.getByRole("button", { name: "Send note" })).toBeDisabled();
+  });
+
+  it("reports a Stop that is already in flight instead of re-arming the button", () => {
+    const onStop = vi.fn();
+    const { rerender } = renderInput({ isRunning: true, onStop, stopping: true });
+
+    const stoppingButton = screen.getByRole("button", { name: "Stopping…" });
+    expect(stoppingButton).toBeDisabled();
+    expect(stoppingButton).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(stoppingButton);
+    expect(onStop).not.toHaveBeenCalled();
+
+    // The run came back (cancel refused): Stop must be live again.
+    rerender(element({ isRunning: true, onStop, stopping: false }));
+    expect(screen.getByRole("button", { name: "Stop" })).not.toBeDisabled();
+  });
+
+  it("keeps Stop outside the composer's pointer-events lock", () => {
+    // The card drops pointer events when the composer is locked (noAgent).
+    // Stop lives inside that card, so without its own opt-in a live run could
+    // become physically un-stoppable.
+    renderInput({ isRunning: true, onStop: vi.fn(), noAgent: true });
+
+    expect(screen.getByRole("button", { name: "Stop" }).className).toContain(
+      "pointer-events-auto",
+    );
+  });
+
+  it("disables the group bulk stop once every run is already cancelling", () => {
+    const onStop = vi.fn();
+    const groupRuns: React.ComponentProps<typeof ChatInput>["groupRuns"] = [
+      { task_id: "t1", agent_id: "a1", status: "running", created_at: "2026-10-26T00:00:00Z" },
+      { task_id: "t2", agent_id: "a2", status: "queued", created_at: "2026-10-26T00:00:00Z" },
+    ];
+    const { rerender } = renderInput({
+      isRunning: true,
+      conversationKind: "group",
+      onStop,
+      groupRuns,
+      cancellingTaskIds: ["t1"],
+    });
+
+    // One run still free: the bulk door stays available.
+    expect(screen.getByRole("button", { name: "Stop all" })).not.toBeDisabled();
+
+    rerender(element({
+      isRunning: true,
+      conversationKind: "group",
+      onStop,
+      groupRuns,
+      cancellingTaskIds: ["t1", "t2"],
+    }));
+    expect(screen.getByRole("button", { name: "Stop all" })).toBeDisabled();
   });
 
   it("locks the project control while a send is in flight so a mid-send switch cannot retarget the session", async () => {

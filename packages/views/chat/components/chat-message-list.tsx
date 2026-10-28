@@ -121,6 +121,13 @@ interface ChatMessageListProps {
    * query) — the list stays agnostic of where the roster came from.
    */
   groupAgentNames?: Map<string, string>;
+  /**
+   * Stop one agent's in-flight task. A group fans out one independent task per
+   * @-mentioned agent, so the inline pill for a still-running agent carries
+   * its own stop control — the runaway run can be cut without stopping the
+   * peers that are still producing useful work.
+   */
+  onStopGroupTask?: (taskId: string) => void;
   participants?: ChatParticipant[];
 }
 
@@ -236,6 +243,7 @@ export function ChatMessageList({
   conversationKind = "agent",
   currentUserId,
   groupAgentNames,
+  onStopGroupTask,
   participants,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -586,6 +594,7 @@ export function ChatMessageList({
                   : undefined
               }
               groupAgentNames={groupAgentNames}
+              onStopGroupTask={onStopGroupTask}
             />
           </div>
         )}
@@ -655,6 +664,7 @@ const MessageBubble = memo(function MessageBubble({
   currentUserId,
   participants,
   groupAgentNames,
+  onStopGroupTask,
   relatedTasks,
   relatedDispatches,
 }: {
@@ -671,6 +681,7 @@ const MessageBubble = memo(function MessageBubble({
   currentUserId?: string;
   participants?: ChatParticipant[];
   groupAgentNames?: Map<string, string>;
+  onStopGroupTask?: (taskId: string) => void;
   relatedTasks?: GroupPendingAgentTask[];
   relatedDispatches?: ChatMessageDispatch[];
 }) {
@@ -808,7 +819,12 @@ const MessageBubble = memo(function MessageBubble({
             />
             {tasksForMessage.length > 0 && (
               <div className="mt-1.5">
-                <GroupPendingPills tasks={tasksForMessage} agentNames={groupAgentNames} variant="dock" />
+                <GroupPendingPills
+                  tasks={tasksForMessage}
+                  agentNames={groupAgentNames}
+                  onStop={onStopGroupTask}
+                  variant="dock"
+                />
               </div>
             )}
             {dispatchRows.length > 0 && (

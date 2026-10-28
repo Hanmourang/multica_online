@@ -704,6 +704,7 @@ vi.mock("sonner", () => ({
 import {
   CreateIssueModal,
   ManualCreatePanel,
+  resolveRequirementStartAt,
 } from "./create-issue";
 
 function renderModal(element: React.ReactElement) {
@@ -1573,7 +1574,7 @@ describe("CreateIssueModal", () => {
     expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "proj-1");
   });
 
-  it("顶层需求选项目后渲染 git 库选择器（线上 + 本地），创建带 repo_resource_id", async () => {
+  it("顶层需求选项目后渲染 git 库选择器（GitHub 仓库 + 本地目录 + 内联地址），创建带 repo_resource_id", async () => {
     const user = userEvent.setup();
     mockDraftStore.draft.shared.projectId = "proj-1";
     mockProjectRoleDefaults.roles = [
@@ -1602,8 +1603,11 @@ describe("CreateIssueModal", () => {
     const repo = (await screen.findByTestId("create-issue-repo")) as HTMLSelectElement;
     await waitFor(() => expect(repo.textContent).toContain("multica/app"));
     expect(repo.textContent).toContain("local-dir");
+    // The picker owns the group labels now (shared with the requirement editor);
+    // a GitHub URL can be bound inline instead of pre-registering a resource.
     const groups = [...repo.querySelectorAll("optgroup")].map((g) => g.label);
-    expect(groups).toEqual(expect.arrayContaining(["Online", "Local"]));
+    expect(groups).toEqual(["GitHub repos", "Local folders"]);
+    expect(repo.textContent).toContain("Use a GitHub URL…");
 
     fireEvent.change(screen.getByPlaceholderText("Requirement title"), {
       target: { value: "Refactor auth" },
@@ -2231,5 +2235,57 @@ describe("CreateIssueModal", () => {
       expect(create.parentElement).toBe(footer);
       expect(create.className).toContain("justify-self-end");
     });
+  });
+});
+
+// A top-level requirement is only recognised as one (and only lands on the
+// calendar sweep) when the server receives start_at. The datetime input is
+// clearable, so the create path must derive a start instead of dropping the
+// promotion signal and silently shipping a task_<n>.
+describe("resolveRequirementStartAt", () => {
+  const dayStart = (iso: string) => {
+    const d = new Date(iso);
+    return { day: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, hour: d.getHours(), minute: d.getMinutes() };
+  };
+
+  it("keeps an explicit start_at", () => {
+    const got = resolveRequirementStartAt({
+      startAt: "2026-10-30T14:30",
+      startDate: "2026-10-27",
+      dueAt: "2026-10-30T18:00",
+      dueDate: "2026-11-03",
+    });
+    expect(dayStart(got)).toEqual({ day: "2026-10-30", hour: 14, minute: 30 });
+  });
+
+  it("falls back to the start day at 09:00 when the datetime is cleared", () => {
+    const got = resolveRequirementStartAt({
+      startAt: "",
+      startDate: "2026-10-27",
+      dueAt: "2026-11-03T18:00",
+      dueDate: "2026-11-03",
+    });
+    expect(dayStart(got)).toEqual({ day: "2026-10-27", hour: 9, minute: 0 });
+  });
+
+  it("falls back to the due datetime day next", () => {
+    const got = resolveRequirementStartAt({
+      startAt: "",
+      startDate: null,
+      dueAt: "2026-11-03T18:00",
+      dueDate: null,
+    });
+    expect(dayStart(got)).toEqual({ day: "2026-11-03", hour: 9, minute: 0 });
+  });
+
+  it("falls back to today 09:00 when every date is empty", () => {
+    const got = resolveRequirementStartAt({
+      startAt: "",
+      startDate: null,
+      dueAt: "",
+      dueDate: null,
+    });
+    expect(dayStart(got).hour).toBe(9);
+    expect(Number.isNaN(new Date(got).getTime())).toBe(false);
   });
 });

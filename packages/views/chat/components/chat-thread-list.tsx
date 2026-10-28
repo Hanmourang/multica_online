@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   Archive,
   ArchiveRestore,
@@ -42,6 +43,7 @@ import {
 } from "../../common/row-actions-menu";
 import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
 import { createLogger } from "@multica/core/logger";
+import { isLiveTaskStatus, isStopForbidden, isTaskGone } from "../lib/stop-feedback";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useLocale, useT } from "../../i18n";
 
@@ -200,14 +202,28 @@ export function ChatThreadList({
         if (restored?.restore_to_input) {
           removeChatMessageFromCaches(queryClient, restored.chat_session_id, restored.message_id);
         }
+        // A 200 does not prove the run stopped — see ../lib/stop-feedback.
+        if (isLiveTaskStatus(result.status)) {
+          toast.error(t(($) => $.input.stop_failed_toast));
+        }
         apiLogger.info("cancelTask.success (list row)", { taskId: task.task_id, sessionId: session.id });
       },
-      (err) =>
-        apiLogger.warn("cancelTask.error (list row; task may have already finished)", {
+      (err) => {
+        apiLogger.warn("cancelTask.error (list row)", {
           taskId: task.task_id,
           sessionId: session.id,
           err,
-        }),
+        });
+        // A 404 just means it already finished — the refetch below settles the
+        // row, no error copy needed.
+        if (!isTaskGone(err)) {
+          toast.error(
+            isStopForbidden(err)
+              ? t(($) => $.input.stop_forbidden_toast)
+              : t(($) => $.input.stop_failed_toast),
+          );
+        }
+      },
     ).finally(() => {
       queryClient.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
       queryClient.invalidateQueries({ queryKey: chatKeys.pendingTask(session.id) });
@@ -563,19 +579,23 @@ export function ChatThreadList({
   }
 
   // History (default) view: active rows + a footer entry into the archive.
+  // mt-auto pins the entry to the bottom of the rail (it only eats the
+  // leftover space, so a long list keeps it right after the last row).
   const archivedEntry = archivedSessions.length > 0 && (
-    <button
-      type="button"
-      onClick={() => setView("archived")}
-      className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
-    >
-      <span className="flex size-9 shrink-0 items-center justify-center">
-        <Archive className="size-4" />
-      </span>
-      <span className="min-w-0 flex-1 truncate font-medium">{t(($) => $.list.archived_title)}</span>
-      <span className="shrink-0 tabular-nums text-muted-foreground">{archivedSessions.length}</span>
-      <ChevronRight className="size-4 shrink-0 text-faint-foreground" />
-    </button>
+    <div className="mt-auto shrink-0 pt-1">
+      <button
+        type="button"
+        onClick={() => setView("archived")}
+        className="flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        <span className="flex size-9 shrink-0 items-center justify-center">
+          <Archive className="size-4" />
+        </span>
+        <span className="min-w-0 flex-1 truncate font-medium">{t(($) => $.list.archived_title)}</span>
+        <span className="shrink-0 tabular-nums text-muted-foreground">{archivedSessions.length}</span>
+        <ChevronRight className="size-4 shrink-0 text-faint-foreground" />
+      </button>
+    </div>
   );
 
   const sessionMatches = (session: ChatSession) => {
@@ -610,7 +630,10 @@ export function ChatThreadList({
             aria-selected={railTab === kind}
             onClick={() => setRailTab(kind)}
             className={cn(
-              "flex-1 border-b-2 py-1.5 text-micro font-semibold",
+              // `text-label` not `text-micro`: the rail tabs are the list's primary
+              // navigation, and at 11px they read as timestamps next to the 14px
+              // rows they filter.
+              "flex-1 border-b-2 py-2 text-label font-semibold",
               railTab === kind
                 ? "border-foreground text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground",
@@ -630,9 +653,14 @@ export function ChatThreadList({
     </div>
   ) : null;
 
+  // Both history branches fill the rail (min-h-full) and keep their rows from
+  // shrinking, so the archived entry's mt-auto resolves against real leftover
+  // space. The wrapper is height-agnostic when the parent is not a flex column.
+  const historyFrame = "flex min-h-full flex-col [&>*]:shrink-0";
+
   if (visibleHistory.length === 0) {
     return (
-      <>
+      <div className={historyFrame}>
         {railFilters}
         <div className="px-2 py-1.5 text-caption text-muted-foreground">
           {railQuery.trim() || railTab !== "all"
@@ -640,16 +668,16 @@ export function ChatThreadList({
             : t(($) => $.window.no_previous)}
         </div>
         {archivedEntry}
-      </>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className={historyFrame}>
       {railFilters}
       {visibleHistory.map(renderRow)}
       {archivedEntry}
-    </>
+    </div>
   );
 }
 

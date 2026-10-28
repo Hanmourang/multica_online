@@ -23,16 +23,15 @@
   },
   "columns": {
     "name": "名前",
-    "category": "カテゴリ",
-    "subtype": "サブタイプ",
     "bound_to": "バインド先",
-    "source": "ソース",
     "created_at": "バインド日時",
     "actions": "操作",
     "stage": "ステージ",
     "role": "オブジェクト",
     "tags": "タグ",
-    "links": "関連"
+    "requirement": "要件",
+    "task": "タスク",
+    "view_links": "関連明細を表示（{{count}}）"
   },
   "bound_kind": {
     "work_item": "ワークアイテム",
@@ -65,7 +64,9 @@
   "empty": {
     "no_assets": "まだバインドされたアセットがありません。",
     "no_candidates": "一致する候補がありません。別のキーワードで検索するか、手動で追加してください。",
-    "no_source": "このカテゴリには接続可能なソースがまだありません。手動で追加してください。"
+    "no_source": "このカテゴリには接続可能なソースがまだありません。手動で追加してください。",
+    "go_manual": "手動入力へ",
+    "all_bound": "すべての候補は既にこのプロジェクトにバインドされています。"
   },
   "search_placeholder": "リポジトリ / アセットを検索…",
   "related_to_me": "自分関連のみ",
@@ -141,10 +142,13 @@
     "tags_label": "タグ",
     "tags_placeholder": "design, api-doc（カンマ区切り）",
     "tags_help": "最大20タグ。空・重複は自動除去されます。",
-    "links_label": "関連する要求 / バグ",
-    "links_search": "ワークアイテムを絞り込み…",
-    "links_none_linked": "まだ関連付けられたワークアイテムはありません。",
-    "links_no_candidates": "関連付けられる未クローズのワークアイテムがありません。"
+    "requirements_label": "関連する要件",
+    "tasks_label": "関連するタスク",
+    "requirements_search": "要件を絞り込み…",
+    "tasks_search": "タスクを絞り込み…",
+    "none_linked": "まだ関連付けがありません——この資産が消費・成果とする項目を選択してください。",
+    "no_candidates": "関連付けできる要件がありません。",
+    "no_task_candidates": "関連付けできるタスクがありません。"
   },
   "matrix": {
     "empty_col": "このステージにアセットはありません",
@@ -152,7 +156,9 @@
   },
   "issues_view": {
     "no_rows": "アセットとワークアイテムの関連がまだありません。行の「編集」から要求やバグを関連付けてください。",
-    "asset_count": "関連アセット {{count}} 件"
+    "asset_count": "関連アセット {{count}} 件",
+    "requirement_label": "要件",
+    "task_label": "タスク"
   },
   "toast": {
     "bound": "アセットをバインドしました",
@@ -170,12 +176,10 @@
   },
   "stats": {
     "total": "アセット合計",
-    "knowledge": "ナレッジドキュメント",
     "staged": "ステージ済み",
     "untagged": "未タグ",
     "unstaged": "ステージ未設定の資産",
-    "share": "カテゴリ分布",
-    "coverage": "ステージカバレッジ {{covered}}/5"
+    "stage_share": "ステージ構成（{{covered}}/5 カバー）"
   },
   "view_switch": {
     "list": "リストビュー",
@@ -186,6 +190,7 @@
     "position": "{{current}} / {{total}}",
     "prev": "前へ",
     "next": "次へ",
+    "open": "開く",
     "open_external": "新しいタブで開く",
     "download": "ダウンロード",
     "unavailable": "このアセットにプレビューできる内容はありません。",

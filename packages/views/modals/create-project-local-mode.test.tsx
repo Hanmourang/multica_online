@@ -39,6 +39,9 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey?: unknown[] }) => {
     const key = options?.queryKey?.[0];
     if (key === "members" || key === "agents") return { data: [] };
+    // The workflow pill (MUL-7420) reads the workspace's workflows; an empty
+    // list is the pre-existing state this suite does not exercise.
+    if (key === "issue-workflows") return { data: [] };
     return {
       data: [
         {
@@ -163,6 +166,9 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  // The workflow pill (MUL-7420) groups and labels its options.
+  DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuItem: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
     <button type="button" onClick={onClick}>
       {children}

@@ -23,16 +23,15 @@
   },
   "columns": {
     "name": "Name",
-    "category": "Category",
-    "subtype": "Subtype",
     "bound_to": "Bound to",
-    "source": "Source",
     "created_at": "Bound at",
     "actions": "Actions",
     "stage": "Stage",
     "role": "Object",
     "tags": "Tags",
-    "links": "Links"
+    "requirement": "Requirements",
+    "task": "Tasks",
+    "view_links": "View linked details ({{count}})"
   },
   "bound_kind": {
     "work_item": "Work item",
@@ -65,7 +64,9 @@
   "empty": {
     "no_assets": "No assets bound yet.",
     "no_candidates": "No matching candidates. Try another keyword, or add one manually.",
-    "no_source": "This category has no connected source yet — add it manually."
+    "no_source": "This category has no connected source yet — add it manually.",
+    "go_manual": "Go to manual entry",
+    "all_bound": "Every candidate is already bound to this project."
   },
   "search_placeholder": "Search repositories / assets…",
   "related_to_me": "Only mine",
@@ -141,10 +142,13 @@
     "tags_label": "Tags",
     "tags_placeholder": "design, api-doc — comma separated",
     "tags_help": "Up to 20 tags; blanks and duplicates are dropped.",
-    "links_label": "Linked requirements / bugs",
-    "links_search": "Filter work items…",
-    "links_none_linked": "Nothing linked yet — tick the work items this asset feeds or delivers.",
-    "links_no_candidates": "No open work items available to link."
+    "requirements_label": "Linked requirements",
+    "tasks_label": "Linked tasks",
+    "requirements_search": "Filter requirements…",
+    "tasks_search": "Filter tasks…",
+    "none_linked": "Nothing linked yet — tick the items this asset feeds or delivers.",
+    "no_candidates": "No requirements available to link.",
+    "no_task_candidates": "No tasks available to link."
   },
   "matrix": {
     "empty_col": "No assets in this stage",
@@ -152,7 +156,9 @@
   },
   "issues_view": {
     "no_rows": "No asset ↔ work-item links yet. Use “Edit” on a binding to link requirements or bugs.",
-    "asset_count": "{{count}} linked assets"
+    "asset_count": "{{count}} linked assets",
+    "requirement_label": "Requirement",
+    "task_label": "Task"
   },
   "toast": {
     "bound": "Asset bound",
@@ -170,12 +176,10 @@
   },
   "stats": {
     "total": "Total assets",
-    "knowledge": "Knowledge docs",
     "staged": "Stage-tagged",
     "untagged": "Untagged",
     "unstaged": "Stage unassigned",
-    "share": "Category mix",
-    "coverage": "Stage coverage {{covered}}/5"
+    "stage_share": "Stage mix ({{covered}}/5 covered)"
   },
   "view_switch": {
     "list": "List view",
@@ -186,6 +190,7 @@
     "position": "{{current}} / {{total}}",
     "prev": "Previous",
     "next": "Next",
+    "open": "Open",
     "open_external": "Open in new tab",
     "download": "Download",
     "unavailable": "No previewable content for this asset yet.",

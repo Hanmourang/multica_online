@@ -16,6 +16,7 @@ import {
   Rows3,
   Search,
   Trash2,
+  TriangleAlert,
   X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -817,7 +818,12 @@ export function ProjectsPage() {
   const isCompact = viewMode === "compact";
   const isColVisible = (key: ProjectColumnKey) => !hiddenColumns.includes(key);
 
-  const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
+  const {
+    data: projects = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery(projectListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: pins = [] } = useQuery({
     ...pinListOptions(wsId, currentUser?.id ?? ""),
@@ -931,7 +937,11 @@ export function ProjectsPage() {
             ? t(($) => $.table.issues)
             : t(($) => $.table.created);
 
-  const showEmpty = !isLoading && projects.length === 0;
+  // 查询失败绝不能落成「还没有项目」：那会让用户以为历史项目丢了
+  // （后端瞬时 500 时即会复现）。失败且无缓存数据 → 错误态 + 重试；
+  // 失败但仍有上轮数据 → 列表照常展示，顶部另给一条告警条。
+  const showError = isError && projects.length === 0;
+  const showEmpty = !isLoading && !isError && projects.length === 0;
   const countBadge = (n: number) => (
     <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
   );
@@ -952,7 +962,31 @@ export function ProjectsPage() {
         }
       />
 
-      {showEmpty ? (
+      {isError && projects.length > 0 && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 border-b border-surface-border px-4 py-2 text-caption text-destructive"
+        >
+          <span className="flex-1">{t(($) => $.page.load_failed)}</span>
+          <Button size="sm" variant="outline" onClick={() => refetch()}>
+            {t(($) => $.page.retry)}
+          </Button>
+        </div>
+      )}
+
+      {showError ? (
+        <CollectionPageState
+          icon={TriangleAlert}
+          tone="destructive"
+          title={t(($) => $.page.load_failed)}
+          description={t(($) => $.page.load_failed_hint)}
+          actions={
+            <Button size="sm" variant="outline" onClick={() => refetch()}>
+              {t(($) => $.page.retry)}
+            </Button>
+          }
+        />
+      ) : showEmpty ? (
         <CollectionPageState
           icon={FolderKanban}
           title={t(($) => $.page.empty)}

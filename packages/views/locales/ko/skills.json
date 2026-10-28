@@ -104,7 +104,8 @@
     "cancel": "취소",
     "add_confirm": "추가 ({{num}})",
     "adding": "추가 중...",
-    "added_multi_toast_other": "에이전트 {{count}}개에 추가했습니다"
+    "added_multi_toast_other": "에이전트 {{count}}개에 추가했습니다",
+    "view_source": "소스 보기"
   },
   "toolbar": {
     "result_count_title": "일치하는 스킬 / 전체 스킬",
@@ -373,5 +374,32 @@
     "markdown_placeholder": "Markdown 내용 작성...",
     "raw_placeholder": "파일 내용...",
     "raw_aria": "{{path}}의 일반 텍스트 내용"
+  },
+  "source_sheet": {
+    "open_hint": "상세 정보와 소스 보기",
+    "read_only": "읽기 전용",
+    "builtin_badge": "플랫폼 스킬",
+    "scope_all_agents": "모든 에이전트",
+    "source_label": "출처",
+    "source_builtin": "Multica에 내장",
+    "chars": "{{count}}자",
+    "files": "파일 {{count}}개",
+    "files_aria": "스킬 파일",
+    "resize_width": "드래그하여 너비 조절, 더블 클릭으로 기본값 복원",
+    "main": "스킬 본문",
+    "supporting": "보조 파일({{count}})",
+    "mode_aria": "표시 모드",
+    "mode_preview": "미리보기",
+    "mode_source": "소스",
+    "copy": "소스 복사",
+    "copied": "소스를 복사했습니다",
+    "copy_failed": "클립보드에 복사하지 못했습니다",
+    "empty_file": "이 파일은 비어 있습니다.",
+    "loading": "소스를 불러오는 중…",
+    "error_title": "이 스킬을 불러올 수 없습니다",
+    "error_missing": "이 스킬은 현재 버전에 없습니다",
+    "error_missing_hint": "실행 중인 빌드에서 이름이 바뀌었거나 제거되었을 수 있습니다. 페이지를 새로고침하고, Multica를 방금 업그레이드했다면 서버를 재시작하세요.",
+    "error_generic_hint": "네트워크 연결을 확인한 뒤 다시 시도하세요.",
+    "error_retry": "다시 시도"
   }
 }

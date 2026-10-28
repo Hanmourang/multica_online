@@ -37,6 +37,14 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ push: vi.fn() }),
 }));
 
+const channelState = vi.hoisted(() => ({
+  value: null as { available: boolean; lanURL?: string } | null,
+}));
+
+vi.mock("@multica/core/api", () => ({
+  api: { getLocalChannel: () => Promise.resolve(channelState.value) },
+}));
+
 function resetConfigStore() {
   configStore.setState({
     cdnDomain: "",
@@ -48,14 +56,18 @@ function resetConfigStore() {
   });
 }
 
-function renderDialog(config?: {
-  daemonServerUrl?: string;
-  daemonAppUrl?: string;
-}) {
+function renderDialog(
+  config?: {
+    daemonServerUrl?: string;
+    daemonAppUrl?: string;
+  },
+  channel: { available: boolean; lanURL?: string } | null = null,
+) {
   resetConfigStore();
   if (config) {
     configStore.getState().setDaemonConfig(config);
   }
+  channelState.value = channel;
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
@@ -69,6 +81,7 @@ function renderDialog(config?: {
 describe("ConnectRemoteDialog", () => {
   beforeEach(() => {
     wsEventState.handler = null;
+    channelState.value = null;
   });
 
   it("uses cloud setup commands by default", () => {
@@ -98,6 +111,44 @@ describe("ConnectRemoteDialog", () => {
     );
     expect(baseElement).toHaveTextContent(
       "multica config set app_url https://app.example.com",
+    );
+  });
+
+  it("points the self-host command at this computer's LAN address", async () => {
+    const { baseElement } = renderDialog(
+      {
+        daemonServerUrl: "http://localhost:18227",
+        daemonAppUrl: "http://localhost:13147",
+      },
+      { available: true, lanURL: "http://192.168.71.124:18227" },
+    );
+
+    // The command runs on another computer, where `localhost` is that
+    // computer — it has to name the address this machine is reachable at.
+    await waitFor(() => {
+      expect(baseElement).toHaveTextContent(
+        "multica setup self-host --server-url http://192.168.71.124:18227 --app-url http://192.168.71.124:13147",
+      );
+    });
+    // No URL in either command still points at loopback (the hint below the
+    // command is allowed to name it).
+    expect(baseElement).not.toHaveTextContent("http://localhost");
+    expect(baseElement).toHaveTextContent(
+      "Other devices reach this computer at 192.168.71.124",
+    );
+  });
+
+  it("keeps the addresses when the backend reports no LAN channel", () => {
+    const { baseElement } = renderDialog(
+      {
+        daemonServerUrl: "http://localhost:18227",
+        daemonAppUrl: "http://localhost:13147",
+      },
+      { available: false },
+    );
+
+    expect(baseElement).toHaveTextContent(
+      "multica setup self-host --server-url http://localhost:18227 --app-url http://localhost:13147",
     );
   });
 

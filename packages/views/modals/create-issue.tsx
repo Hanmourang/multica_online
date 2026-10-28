@@ -60,6 +60,9 @@ import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, As
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
+import { useProjectWorkflow, workflowStep } from "@multica/core/issue-workflows";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { stepHandlerActor, useStepHandlerLabel } from "../issue-workflows/step-handler";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { alignDueToStartDay, firstWorkbenchStage } from "../calendar/calendar-helpers";
@@ -89,7 +92,7 @@ import {
 } from "@multica/core/properties";
 import { projectRoleDefaultsOptions, projectRolePlaybooksOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions, projectResourcesOptions } from "@multica/core/projects";
-import type { ProjectResource, RoleAssignment, RolePlaybookBundle } from "@multica/core/types";
+import type { RoleAssignment, RolePlaybookBundle } from "@multica/core/types";
 import {
   ApiError,
   DuplicateIssueErrorBodySchema,
@@ -108,6 +111,7 @@ import {
 import { IssuePickerModal } from "./issue-picker-modal";
 import { ModulePicker } from "../issues/components/pickers/module-picker";
 import { DependencyPicker } from "../issues/components/pickers/dependency-picker";
+import { RepoResourcePicker } from "../issues/components/pickers/repo-resource-picker";
 import { RoleStrip } from "../issues/components/role-strip";
 import {
   rosterHasRequiredAssignees,
@@ -123,7 +127,6 @@ import {
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
-const REPO_RESOURCE_TYPES = new Set(["github_repo", "local_directory"]);
 const REQUIRED_ROLES = new Set(["pm", "developer"]);
 
 function toDatetimeLocal(d: Date): string {
@@ -140,14 +143,31 @@ function defaultRequirementTimes() {
   return { start: toDatetimeLocal(start), due: toDatetimeLocal(due) };
 }
 
-function repoOptionLabel(r: ProjectResource): string {
-  if (r.label) return r.label;
-  const ref = r.resource_ref as Record<string, unknown>;
-  if (r.resource_type === "github_repo" && typeof ref.url === "string") return ref.url;
-  if (r.resource_type === "local_directory" && typeof ref.local_path === "string") {
-    return ref.local_path;
+/**
+ * A top-level requirement only reaches the calendar when the server sees
+ * `start_at` — it is the one promotion signal the day fields cannot carry, so
+ * a requirement without it silently opens as `task_<n>` and stays off the
+ * sweep. The datetime input is clearable, hence the fallback chain: an explicit
+ * start wins, then the day fields at 09:00 local, then today 09:00.
+ */
+export function resolveRequirementStartAt(input: {
+  startAt: string;
+  startDate: string | null;
+  dueAt: string;
+  dueDate: string | null;
+}): string {
+  if (input.startAt) {
+    const explicit = new Date(input.startAt);
+    if (!Number.isNaN(explicit.getTime())) return explicit.toISOString();
   }
-  return r.id;
+  for (const raw of [input.startDate, input.dueAt, input.dueDate]) {
+    if (!raw) continue;
+    const dayStart = new Date(`${raw.slice(0, 10)}T09:00`);
+    if (!Number.isNaN(dayStart.getTime())) return dayStart.toISOString();
+  }
+  const today = new Date();
+  today.setHours(9, 0, 0, 0);
+  return today.toISOString();
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +269,30 @@ function CreateRunHint({
 }
 
 type CreateKind = "requirement" | "task";
+
+/**
+ * Names who the project workflow hands the new issue to at its starting
+ * status, so the create modal says where the issue goes before saving
+ * (MUL-7420). Nothing for a status that keeps the assignee.
+ */
+function WorkflowHandoffHint({ projectId, status }: { projectId?: string; status: IssueStatus }) {
+  const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const workflow = useProjectWorkflow(wsId, projectId);
+  const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: !!workflow });
+  const project = projects?.find((p) => p.id === projectId);
+  const handlerLabel = useStepHandlerLabel(project);
+  const step = workflowStep(workflow, status);
+  const label = handlerLabel(step);
+  if (!label) return null;
+  const actor = stepHandlerActor(step, project);
+  return (
+    <div aria-live="polite" className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground">
+      {actor && <ActorAvatar actorType={actor.type} actorId={actor.id} size="sm" profileLink={false} />}
+      <span className="truncate">{t(($) => $.workflows.create_handoff_hint, { name: label })}</span>
+    </div>
+  );
+}
 
 function resolveCreateKind(
   data: Record<string, unknown> | null | undefined,
@@ -524,11 +568,6 @@ export function ManualCreatePanel({
     fromCalendar && !!startAt && !Number.isNaN(new Date(startAt).getTime())
       ? new Date(startAt).getTime() < Date.now()
       : false;
-  const repoResources = projectResources.filter((r) =>
-    REPO_RESOURCE_TYPES.has(r.resource_type),
-  );
-  const onlineRepos = repoResources.filter((r) => r.resource_type === "github_repo");
-  const localRepos = repoResources.filter((r) => r.resource_type === "local_directory");
   // Sync server-fetched role defaults into local state (only when the user
   // hasn't customized yet — entries are empty until the first project load).
   // Required roles stay enabled even if the project default row is off.
@@ -775,7 +814,7 @@ export function ManualCreatePanel({
           // pipeline doesn't fire; an agent assignee still auto-runs.
           ...(showRequirementFields ? {
             goal: goal.trim() || undefined,
-            start_at: startAt ? new Date(startAt).toISOString() : undefined,
+            start_at: resolveRequirementStartAt({ startAt, startDate, dueAt, dueDate }),
             due_date: dueAt ? dueAt.slice(0, 10) : (dueDate || undefined),
             decompose_mode: decomposeMode,
             auto_trigger: autoTrigger,
@@ -1384,7 +1423,11 @@ export function ManualCreatePanel({
 
             {/* Pre-trigger preview — a passive caption above the toolbar; reveals
                 when an agent assignee will pick the issue up. */}
-            <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+            {assigneeId ? (
+              <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+            ) : (
+              <WorkflowHandoffHint projectId={projectId} status={status} />
+            )}
 
             {/* Property toolbar — each field renders per the Settings → Issue
                 selection (see showField above). */}
@@ -1393,6 +1436,7 @@ export function ManualCreatePanel({
               {showField.status && (
                 <StatusPicker
                   status={status}
+                  projectId={projectId ?? null}
                   onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
                   triggerRender={<PillButton />}
                   align="start"
@@ -1904,37 +1948,19 @@ export function ManualCreatePanel({
                   />
                 </div>
 
-                {/* Git repo — online (github_repo) and local (local_directory). */}
+                {/* Git repo — GitHub URLs (open-source included) and local
+                    directories both bind here; the picker owns the URL entry. */}
                 <div>
                   <label className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.create_issue.repo_label)}
                   </label>
-                  <select
-                    data-testid="create-issue-repo"
-                    className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-body focus:outline-none focus:ring-1 focus:ring-ring"
+                  <RepoResourcePicker
+                    className="mt-1"
+                    projectId={projectId ?? ""}
                     value={repoResourceId}
-                    onChange={(e) => setRepoResourceId(e.target.value)}
-                  >
-                    <option value="">{t(($) => $.create_issue.repo_none)}</option>
-                    {onlineRepos.length > 0 && (
-                      <optgroup label={t(($) => $.create_issue.repo_online)}>
-                        {onlineRepos.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {repoOptionLabel(r)}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {localRepos.length > 0 && (
-                      <optgroup label={t(($) => $.create_issue.repo_local)}>
-                        {localRepos.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {repoOptionLabel(r)}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
+                    testId="create-issue-repo"
+                    onChange={setRepoResourceId}
+                  />
                 </div>
 
                 {/* Start / due — minute precision, side by side (prototype f3). */}

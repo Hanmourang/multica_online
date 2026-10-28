@@ -152,6 +152,8 @@ vi.mock("./components/use-chat-controller", async () => {
       messages: [],
       pendingTask: null,
       pendingTaskId: null,
+      cancellingTaskIds: [],
+      isCancellingTask: () => false,
       showSkeleton: false,
       hasMessages: false,
       firstItemIndex: 0,

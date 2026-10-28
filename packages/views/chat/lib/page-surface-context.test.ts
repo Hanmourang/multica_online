@@ -5,6 +5,7 @@ import {
   PROTOTYPE_DIRECTORY_FILENAME,
   applyPageSurfaceContext,
   directoryFilesForPath,
+  formatModuleSurfaceContext,
   formatPageSurfaceContext,
   pageSurfaceChip,
   preparePageSurfaceSend,
@@ -12,6 +13,7 @@ import {
   prototypeDirectory,
   prototypeDirectoryListing,
   visiblePageSurfaceContent,
+  type ModulePageSurfaceContext,
   type PageSurfaceContext,
 } from "./page-surface-context";
 
@@ -88,5 +90,43 @@ describe("page surface context", () => {
 
   it("names the chip from the file", () => {
     expect(pageSurfaceChip(sample)).toBe("v3 · index.html");
+  });
+
+  describe("module surface", () => {
+    const moduleContext: ModulePageSurfaceContext = {
+      surface: "module",
+      projectId: "p1",
+      moduleId: "m1",
+      moduleName: "申报清单页",
+      specVersion: 3,
+      canonicalPrototypeVersion: 2,
+      coverage: 80,
+      featurePointCount: 5,
+    };
+
+    it("carries the module id and hides prototype file affordances", () => {
+      expect(pageSurfaceChip(moduleContext)).toBe("申报清单页 · v3");
+      expect(prototypeAttachmentFiles(moduleContext)).toEqual([]);
+      expect(prototypeDirectoryListing(moduleContext)).toBe("");
+    });
+
+    it("formats a compact module summary outside the html comment mark", () => {
+      const packed = formatModuleSurfaceContext(moduleContext);
+      expect(packed).toContain("module m1");
+      expect(packed).toContain("spec v3");
+      expect(packed).toContain("canonical prototype v2");
+      expect(packed).toContain("coverage 80%");
+      expect(formatPageSurfaceContext(moduleContext)).toBe(packed);
+      expect(packed).not.toContain(PAGE_CONTEXT_MARK);
+    });
+
+    it("keeps send content untouched and falls back without attachments", async () => {
+      const uploadFile = vi.fn(async (file: File) => ({ id: `att-${file.name}` }) as Attachment);
+      const prepared = await preparePageSurfaceSend({ uploadFile }, "这个模块还差什么", moduleContext, "s1");
+      expect(uploadFile).not.toHaveBeenCalled();
+      expect(prepared.attachmentIds).toEqual([]);
+      expect(prepared.content).toContain("这个模块还差什么");
+      expect(applyPageSurfaceContext("这个模块还差什么", null)).toBe("这个模块还差什么");
+    });
   });
 });

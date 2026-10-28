@@ -118,6 +118,14 @@
       "japanese": "日本語",
       "sync_failed": "このデバイスに言語を保存しましたが、アカウントへの同期に失敗しました。他のデバイスでは以前の言語が表示される場合があります。"
     },
+    "font_scale": {
+      "title": "文字サイズ",
+      "hint": "UI のテキストのみを拡大・縮小します。余白やアイコン、レイアウトは変わりません。",
+      "small": "小",
+      "default": "標準",
+      "large": "大",
+      "xlarge": "特大"
+    },
     "timezone": {
       "title": "表示タイムゾーン",
       "browser_suffix": " (ブラウザ)",
@@ -327,6 +335,7 @@
       "labs": "ラボ",
       "members": "メンバー",
       "labels": "ラベル",
+      "workflows": "ワークフロー",
       "issue_statuses": "タスクステータス",
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",

@@ -17,7 +17,6 @@ import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
-  ASSET_CATEGORIES,
   ASSET_LIFECYCLE_STAGES,
   type AssetBinding,
   type AssetCategory,
@@ -76,6 +75,11 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../i18n";
 import { AppLink } from "../navigation";
+import {
+  REQUIREMENT_DOT_CLASS,
+  TASK_DOT_CLASS,
+  statusToneClass,
+} from "../projects/components/assets/components/asset-status-tone";
 import { QueryError, QueryLoading } from "../projects/components/archive/query-states";
 import { BindAssetDialog } from "../projects/components/assets/asset-tab";
 import { AssetStatsBar } from "../projects/components/assets/components/asset-stats-bar";
@@ -83,7 +87,7 @@ import {
   AssetPreviewDialog,
   assetPreviewMode,
 } from "../projects/components/assets/components/asset-preview-dialog";
-import { AssetTable } from "../projects/components/assets/components/asset-table";
+import { AssetTable, type AssetIssueInfo } from "../projects/components/assets/components/asset-table";
 import { AssetCardGrid } from "../projects/components/assets/components/asset-card-grid";
 import { AssetSelectionToolbar } from "../projects/components/assets/components/asset-selection-toolbar";
 import { AssetBatchEditDialog } from "../projects/components/assets/components/asset-batch-edit-dialog";
@@ -136,7 +140,7 @@ export function WorkspaceAssetsPage() {
   // TAB's category / page selection).
   const storeKey = assetFilterKey(wsId, "__workspace__");
   const filters = useAssetFilters(storeKey);
-  const { setCategory, setName, setPage } = useAssetFilterStore();
+  const { setName, setPage } = useAssetFilterStore();
 
   const [view, setView] = useState<AssetView>("list");
   // 列表视图内部形态：表格（默认，分页）⇄ 卡片画廊，口径同项目 TAB。
@@ -250,6 +254,16 @@ export function WorkspaceAssetsPage() {
   const linksById = useMemo(() => {
     const map = new Map<string, AssetIssueLink[]>();
     for (const b of overview?.bindings ?? []) map.set(b.id, b.links ?? []);
+    return map;
+  }, [overview]);
+
+  // issue_id → 标题/状态/是否需求：供共享表格分「需求 / 任务」两列，
+  // 并支撑徽标点开 Popover 明细（标题深链 + 状态色徽）。
+  const issueInfoById = useMemo(() => {
+    const map = new Map<string, AssetIssueInfo>();
+    for (const i of overview?.issues ?? []) {
+      map.set(i.id, { title: i.title, status: i.status, is_requirement: i.is_requirement ?? false });
+    }
     return map;
   }, [overview]);
 
@@ -415,31 +429,10 @@ export function WorkspaceAssetsPage() {
         </ViewTab>
       </div>
 
-      {/* Filter toolbar：category + 名称走服务端（列表）/内存（矩阵、关联）；
-          stage / role 是 473 新维度，前端统一二次过滤两个数据面。 */}
+      {/* Filter toolbar：名称走服务端（列表）/内存（矩阵、关联）；
+          stage / role 是 473 新维度，前端统一二次过滤两个数据面。「分类」维度
+          已按产品要求从管理面下线（创建链路仍写默认分类）。 */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1">
-          <Button
-            type="button"
-            size="xs"
-            variant={filters.category === null ? "default" : "outline"}
-            onClick={() => setCategory(storeKey, null)}
-          >
-            {t(($) => $.categories.all)}
-          </Button>
-          {ASSET_CATEGORIES.map((cat) => (
-            <Button
-              key={cat}
-              type="button"
-              size="xs"
-              variant={filters.category === cat ? "default" : "outline"}
-              aria-pressed={filters.category === cat}
-              onClick={() => setCategory(storeKey, filters.category === cat ? null : cat)}
-            >
-              {categoryLabels[cat]}
-            </Button>
-          ))}
-        </div>
         <div className="relative min-w-48 max-w-sm flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -566,6 +559,7 @@ export function WorkspaceAssetsPage() {
             onUnbind={setUnbindTarget}
             unbindBusyId={unbindMutation.isPending ? unbindTarget?.id : undefined}
             linksById={linksById}
+            issueInfoById={issueInfoById}
             projectTitles={projectTitleById}
             onPreview={openPreview}
             showSync={Boolean(syncProjectId) && !filters.category && !filters.name.trim()}
@@ -733,12 +727,12 @@ function AssetsListView({
   error,
   errorMessage,
   onRetry,
-  categoryLabels,
   paths,
   onEdit,
   onUnbind,
   unbindBusyId,
   linksById,
+  issueInfoById,
   projectTitles,
   onPreview,
   showSync,
@@ -756,6 +750,7 @@ function AssetsListView({
   onUnbind: (row: AssetBinding) => void;
   unbindBusyId?: string;
   linksById: Map<string, AssetIssueLink[]>;
+  issueInfoById: Map<string, AssetIssueInfo>;
   projectTitles: Map<string, string>;
   onPreview: (row: AssetBinding) => void;
   showSync: boolean;
@@ -797,12 +792,13 @@ function AssetsListView({
   ) : (
     <AssetTable
       rows={rows}
-      categoryLabels={categoryLabels}
       features={{
         showLinks: true,
         showOwnership: true,
         onEdit,
         linksById,
+        issueInfoById,
+        issueHref: (issueId) => paths.issueDetail(issueId),
         ownershipLabel: (row) => (
           <AssetBoundToCell
             row={row}
@@ -1170,7 +1166,117 @@ function AssetsIssuesView({
 }
 
 /**
- * 编辑抽屉（473 meta）：阶段 / 角色 / 标签 / 需求·Bug 关联。
+ * 需求 / 任务关联分区（编辑抽屉内复用）：行首圆点按类型分色（需求 indigo /
+ * 任务 teal），状态徽标按状态类别分色；勾选后可选链型。候选由父级按
+ * is_requirement 分桶传入（已全量下发，含已关闭）。
+ */
+function IssueLinkSection({
+  title,
+  dotClass,
+  candidates,
+  query,
+  onQueryChange,
+  placeholder,
+  emptyText,
+  linkSel,
+  onToggle,
+  linkTypeItems,
+  onLinkType,
+}: {
+  title: string;
+  dotClass: string;
+  candidates: { id: string; title: string; status: string }[];
+  query: string;
+  onQueryChange: (value: string) => void;
+  placeholder: string;
+  emptyText: string;
+  linkSel: Record<string, AssetLinkType>;
+  onToggle: (issueId: string, on: boolean) => void;
+  linkTypeItems: { value: string; label: string }[];
+  onLinkType: (issueId: string, linkType: AssetLinkType) => void;
+}) {
+  const q = query.trim().toLowerCase();
+  const rows = candidates
+    .filter((i) => !q || i.title.toLowerCase().includes(q) || Boolean(linkSel[i.id]))
+    .sort(
+      (a, b) =>
+        Number(Boolean(linkSel[b.id])) - Number(Boolean(linkSel[a.id])) ||
+        a.title.localeCompare(b.title),
+    );
+  const linkedCount = candidates.filter((i) => linkSel[i.id]).length;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="flex items-center gap-1.5 text-caption font-medium">
+          <span className={`size-2 rounded-full ${dotClass}`} />
+          {title}
+        </label>
+        <span className="text-micro text-muted-foreground">{linkedCount}</span>
+      </div>
+      <div className="relative">
+        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          placeholder={placeholder}
+          className="pl-8"
+        />
+      </div>
+      {rows.length === 0 ? (
+        <p className="py-2 text-center text-caption text-muted-foreground">{emptyText}</p>
+      ) : (
+        <div className="max-h-60 space-y-1 overflow-y-auto rounded-md border border-surface-border p-1.5">
+          {rows.map((issue) => {
+            const checked = Boolean(linkSel[issue.id]);
+            return (
+              <div key={issue.id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-accent/40">
+                <Checkbox
+                  id={`link-${issue.id}`}
+                  checked={checked}
+                  onCheckedChange={(value) => onToggle(issue.id, value === true)}
+                />
+                <label
+                  htmlFor={`link-${issue.id}`}
+                  className="min-w-0 flex-1 cursor-pointer truncate text-caption"
+                  title={issue.title}
+                >
+                  {issue.title}
+                </label>
+                {issue.status ? (
+                  <Badge className={`shrink-0 border-0 text-micro ${statusToneClass(issue.status)}`}>
+                    {issue.status}
+                  </Badge>
+                ) : null}
+                {checked ? (
+                  <Select
+                    items={linkTypeItems}
+                    value={linkSel[issue.id]}
+                    onValueChange={(value) => value && onLinkType(issue.id, value as AssetLinkType)}
+                  >
+                    <SelectTrigger size="sm" className="w-30 shrink-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {linkTypeItems.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 编辑抽屉（473 meta）：阶段 / 角色 / 标签 / 需求与任务关联（分区展示全量候选，
+ * 行首圆点 + 状态徽标分色）。
  * stage/role 的 "none" 选项映射为 ""（服务端 = 清除）；links 全量替换，
  * 因此 overview 未就绪前禁止保存。
  */
@@ -1186,7 +1292,7 @@ function AssetMetaSheet({
 }: {
   target: AssetBinding;
   links: AssetIssueLink[];
-  candidates: { id: string; title: string; status: string }[];
+  candidates: { id: string; title: string; status: string; is_requirement?: boolean }[];
   overviewReady: boolean;
   wsId: string;
   stageLabels: Record<AssetLifecycleStage, string>;
@@ -1202,23 +1308,44 @@ function AssetMetaSheet({
     for (const l of links) init[l.issue_id] = l.link_type as AssetLinkType;
     return init;
   });
-  const [issueQuery, setIssueQuery] = useState("");
+  const [reqQuery, setReqQuery] = useState("");
+  const [taskQuery, setTaskQuery] = useState("");
+
+  const toggleLink = useCallback((issueId: string, on: boolean) => {
+    setLinkSel((prev) => {
+      const next = { ...prev };
+      if (on) next[issueId] = "produces";
+      else delete next[issueId];
+      return next;
+    });
+  }, []);
 
   const mutation = useUpdateAssetMeta(wsId);
 
-  const rows = useMemo(() => {
+  // 候选兼容集：已关联但不在候选集（如候选上限截断）的 issue 也要可见，
+  // 否则勾选态会丢；类型未知一律归任务桶。
+  const knownIssues = useMemo(() => {
     const known = new Map(candidates.map((i) => [i.id, i]));
-    // 已关联但不在候选集（如已关闭）的 issue 也要可见，否则勾选态会丢。
     for (const l of links) {
       if (!known.has(l.issue_id)) {
-        known.set(l.issue_id, { id: l.issue_id, title: l.issue_id.slice(0, 8), status: "" });
+        known.set(l.issue_id, {
+          id: l.issue_id,
+          title: l.issue_id.slice(0, 8),
+          status: "",
+          is_requirement: false,
+        });
       }
     }
-    const q = issueQuery.trim().toLowerCase();
-    return [...known.values()]
-      .filter((i) => !q || i.title.toLowerCase().includes(q) || Boolean(linkSel[i.id]))
-      .sort((a, b) => Number(Boolean(linkSel[b.id])) - Number(Boolean(linkSel[a.id])) || a.title.localeCompare(b.title));
-  }, [candidates, links, issueQuery, linkSel]);
+    return known;
+  }, [candidates, links]);
+  const requirementCandidates = useMemo(
+    () => [...knownIssues.values()].filter((i) => i.is_requirement ?? false),
+    [knownIssues],
+  );
+  const taskCandidates = useMemo(
+    () => [...knownIssues.values()].filter((i) => !(i.is_requirement ?? false)),
+    [knownIssues],
+  );
 
   const linkedCount = Object.keys(linkSel).length;
   const stageItems = useMemo(
@@ -1302,92 +1429,38 @@ function AssetMetaSheet({
             <Input value={tagsText} onChange={(e) => setTagsText(e.target.value)} placeholder={t(($) => $.edit.tags_placeholder)} />
             <p className="text-micro text-muted-foreground">{t(($) => $.edit.tags_help)}</p>
           </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-caption font-medium">{t(($) => $.edit.links_label)}</label>
-              <span className="text-micro text-muted-foreground">{t(($) => $.issues_view.asset_count, { count: linkedCount })}</span>
-            </div>
-            {!overviewReady ? (
-              <QueryLoading rows={3} />
-            ) : (
-              <>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={issueQuery}
-                    onChange={(e) => setIssueQuery(e.target.value)}
-                    placeholder={t(($) => $.edit.links_search)}
-                    className="pl-8"
-                  />
-                </div>
-                {rows.length === 0 ? (
-                  <p className="py-3 text-center text-caption text-muted-foreground">
-                    {candidates.length === 0 && linkedCount === 0
-                      ? t(($) => $.edit.links_no_candidates)
-                      : t(($) => $.edit.links_none_linked)}
-                  </p>
-                ) : (
-                  <div className="max-h-72 space-y-1 overflow-y-auto rounded-md border border-surface-border p-1.5">
-                    {rows.map((issue) => {
-                      const checked = Boolean(linkSel[issue.id]);
-                      return (
-                        <div key={issue.id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-accent/40">
-                          <Checkbox
-                            id={`link-${issue.id}`}
-                            checked={checked}
-                            onCheckedChange={(value) => {
-                              setLinkSel((prev) => {
-                                const next = { ...prev };
-                                if (value === true) next[issue.id] = "produces";
-                                else delete next[issue.id];
-                                return next;
-                              });
-                            }}
-                          />
-                          <label
-                            htmlFor={`link-${issue.id}`}
-                            className="min-w-0 flex-1 cursor-pointer truncate text-caption"
-                            title={issue.title}
-                          >
-                            {issue.title}
-                          </label>
-                          {issue.status ? (
-                            <Badge variant="outline" className="shrink-0 text-micro">
-                              {issue.status}
-                            </Badge>
-                          ) : null}
-                          {checked ? (
-                            <Select
-                              items={linkTypeItems}
-                              value={linkSel[issue.id]}
-                              onValueChange={(value) =>
-                                value && setLinkSel((prev) => ({ ...prev, [issue.id]: value as AssetLinkType }))
-                              }
-                            >
-                              <SelectTrigger size="sm" className="w-30 shrink-0">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {linkTypeItems.map((item) => (
-                                  <SelectItem key={item.value} value={item.value}>
-                                    {item.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+          <IssueLinkSection
+            title={t(($) => $.edit.requirements_label)}
+            dotClass={REQUIREMENT_DOT_CLASS}
+            candidates={requirementCandidates}
+            query={reqQuery}
+            onQueryChange={setReqQuery}
+            placeholder={t(($) => $.edit.requirements_search)}
+            emptyText={reqQuery ? t(($) => $.edit.none_linked) : t(($) => $.edit.no_candidates)}
+            linkSel={linkSel}
+            onToggle={toggleLink}
+            linkTypeItems={linkTypeItems}
+            onLinkType={(id, lt) => setLinkSel((prev) => ({ ...prev, [id]: lt }))}
+          />
+          <IssueLinkSection
+            title={t(($) => $.edit.tasks_label)}
+            dotClass={TASK_DOT_CLASS}
+            candidates={taskCandidates}
+            query={taskQuery}
+            onQueryChange={setTaskQuery}
+            placeholder={t(($) => $.edit.tasks_search)}
+            emptyText={taskQuery ? t(($) => $.edit.none_linked) : t(($) => $.edit.no_task_candidates)}
+            linkSel={linkSel}
+            onToggle={toggleLink}
+            linkTypeItems={linkTypeItems}
+            onLinkType={(id, lt) => setLinkSel((prev) => ({ ...prev, [id]: lt }))}
+          />
         </div>
         <SheetFooter className="border-t border-surface-border sm:justify-between">
           <span className="text-micro text-muted-foreground">
-            {overviewReady ? "" : t(($) => $.edit.links_label)}
+            {overviewReady
+              ? t(($) => $.issues_view.asset_count, { count: linkedCount })
+              : t(($) => $.edit.requirements_label)}
           </span>
           <div className="flex items-center gap-2">
             <Button type="button" size="xs" variant="outline" onClick={onClose}>

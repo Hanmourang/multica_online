@@ -23,6 +23,9 @@ vi.mock("@multica/core/projects", () => ({
     queryKey: ["project-resources", "ws-1", "proj-1"],
     queryFn: async () => [],
   }),
+  // The repo field is the shared RepoResourcePicker, which binds a pasted
+  // GitHub URL by creating a project resource.
+  useCreateProjectResource: () => ({ mutateAsync: vi.fn() }),
 }));
 
 function issue(overrides: Partial<Issue> = {}): Issue {

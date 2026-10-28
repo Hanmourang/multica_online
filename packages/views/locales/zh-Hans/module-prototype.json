@@ -1,0 +1,28 @@
+{
+  "coverage": {
+    "title": "规格覆盖率",
+    "total": "功能点",
+    "covered": "已覆盖",
+    "changed": "待覆盖",
+    "missing": "空位",
+    "unregistered": "待登记",
+    "deprecated": "已废弃",
+    "rate": "覆盖率",
+    "denominator": "计入分母"
+  },
+  "matrix": {
+    "title": "结构对账矩阵",
+    "col_feature": "功能点",
+    "col_state": "状态",
+    "col_anchor": "锚点",
+    "empty": "尚无功能点——发布规格后即可开始对账。",
+    "need_parse": "该版本还没有解析缓存——原型解析前所有规格功能点都显示为空位。"
+  },
+  "states": {
+    "covered": "已覆盖",
+    "changed": "待覆盖",
+    "missing": "空位",
+    "unregistered": "待登记",
+    "deprecated": "已废弃"
+  }
+}

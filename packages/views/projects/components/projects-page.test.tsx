@@ -9,6 +9,9 @@ import { ProjectsPage } from "./projects-page";
 
 const mocks = vi.hoisted(() => ({
   projects: [] as Project[],
+  // 项目列表查询失败（后端瞬时 500 / 不可达）时的开关与重试回调。
+  projectsError: false,
+  refetchProjects: vi.fn(),
   members: [] as Array<{ user_id: string; name: string; role: string }>,
   agents: [] as Array<{ id: string; name: string; archived_at: string | null }>,
   pins: [] as Array<{ item_type: string; item_id: string }>,
@@ -37,7 +40,12 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
     const key = options.queryKey?.[0];
     if (key === "projects") {
-      return { data: mocks.projects, isLoading: false };
+      return {
+        data: mocks.projects,
+        isLoading: false,
+        isError: mocks.projectsError,
+        refetch: mocks.refetchProjects,
+      };
     }
     if (key === "members") {
       return { data: mocks.members, isLoading: false };
@@ -233,6 +241,8 @@ function projectRow() {
 
 beforeEach(() => {
   mocks.projects = [PROJECT];
+  mocks.projectsError = false;
+  mocks.refetchProjects.mockClear();
   mocks.members = [
     { user_id: "user-1", name: "User One", role: "admin" },
   ];
@@ -248,6 +258,31 @@ beforeEach(() => {
   mocks.projectViewState.sortDirection = "asc";
   mocks.projectViewState.hiddenColumns = [];
   mocks.projectViewState.filters = { statuses: [], priorities: [], leads: [] };
+});
+
+// 查询失败必须与「真的没有项目」区分开：后端瞬时不可用时曾把失败渲染成
+// 「还没有项目」空态，让用户以为历史项目丢了。
+describe("ProjectsPage load failure", () => {
+  it("shows a retryable error state instead of the empty state", async () => {
+    const user = userEvent.setup();
+    mocks.projects = [];
+    mocks.projectsError = true;
+    renderProjects();
+
+    expect(screen.getByText("Failed to load projects")).toBeInTheDocument();
+    expect(screen.queryByText("No projects yet")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mocks.refetchProjects).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the cached list visible with a warning banner on background failure", () => {
+    mocks.projectsError = true;
+    renderProjects();
+
+    expect(screen.getByText(PROJECT.title)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load projects");
+  });
 });
 
 describe("ProjectsPage compact row navigation", () => {

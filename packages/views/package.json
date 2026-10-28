@@ -55,6 +55,7 @@
     "./i18n": "./i18n/index.ts",
     "./assets": "./assets/index.ts",
     "./workflows": "./workflows/index.ts",
+    "./issue-workflows": "./issue-workflows/index.ts",
     "./attachments": "./attachments/index.ts",
     "./locales": "./locales/index.ts",
     "./locales/*": "./locales/*"

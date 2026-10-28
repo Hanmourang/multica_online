@@ -85,40 +85,69 @@
  * Landing-page display type (rem/clamp, 2.2-6.4rem) is marketing typography on
  * a separate ramp and stays out of this scale on purpose. */
 @theme {
+    /* Every step is multiplied by --ui-font-scale, published on <html> by the
+       "Font size" preference (Settings → Preferences). The px base stays here
+       so this block remains the single source of truth for which sizes exist;
+       the multiplier reflows type only — spacing, radii, and icon sizes are
+       untouched, which is why we scale the tokens instead of html font-size. */
     /* counters, badges, timestamps, overline labels */
-    --text-micro: 11px;
-    --text-micro--line-height: 15px;
+    --text-micro: calc(11px * var(--ui-font-scale, 1));
+    --text-micro--line-height: calc(15px * var(--ui-font-scale, 1));
     /* secondary and helper text — was text-xs */
-    --text-caption: 12px;
-    --text-caption--line-height: 16px;
+    --text-caption: calc(12px * var(--ui-font-scale, 1));
+    --text-caption--line-height: calc(16px * var(--ui-font-scale, 1));
     /* dense labels: table headers, metadata rows */
-    --text-label: 13px;
-    --text-label--line-height: 18px;
+    --text-label: calc(13px * var(--ui-font-scale, 1));
+    --text-label--line-height: calc(18px * var(--ui-font-scale, 1));
     /* UI body, the workhorse — was text-sm */
-    --text-body: 14px;
-    --text-body--line-height: 20px;
+    --text-body: calc(14px * var(--ui-font-scale, 1));
+    --text-body--line-height: calc(20px * var(--ui-font-scale, 1));
     /* roomier body: dialog copy, onboarding prose */
-    --text-body-lg: 15px;
-    --text-body-lg--line-height: 22px;
+    --text-body-lg: calc(15px * var(--ui-font-scale, 1));
+    --text-body-lg--line-height: calc(22px * var(--ui-font-scale, 1));
     /* small headings — was text-base */
-    --text-title-sm: 16px;
-    --text-title-sm--line-height: 24px;
+    --text-title-sm: calc(16px * var(--ui-font-scale, 1));
+    --text-title-sm--line-height: calc(24px * var(--ui-font-scale, 1));
     /* section headings — was text-lg */
-    --text-title: 18px;
-    --text-title--line-height: 28px;
+    --text-title: calc(18px * var(--ui-font-scale, 1));
+    --text-title--line-height: calc(28px * var(--ui-font-scale, 1));
     /* card and dialog titles — was text-xl */
-    --text-title-lg: 20px;
-    --text-title-lg--line-height: 28px;
+    --text-title-lg: calc(20px * var(--ui-font-scale, 1));
+    --text-title-lg--line-height: calc(28px * var(--ui-font-scale, 1));
     /* page titles — was text-2xl */
-    --text-display-sm: 24px;
-    --text-display-sm--line-height: 32px;
+    --text-display-sm: calc(24px * var(--ui-font-scale, 1));
+    --text-display-sm--line-height: calc(32px * var(--ui-font-scale, 1));
     /* hero numbers and empty-state headlines — was text-3xl (30px) */
-    --text-display: 36px;
-    --text-display--line-height: 40px;
+    --text-display: calc(36px * var(--ui-font-scale, 1));
+    --text-display--line-height: calc(40px * var(--ui-font-scale, 1));
+}
+
+/* Font size preference (Settings → Preferences → Font size).
+ *
+ * The tier → multiplier mapping lives here rather than in JS so the
+ * pre-hydration replay in apps/web/app/layout.tsx only has to carry the tier
+ * name from localStorage. :root below holds the 1x default for anything that
+ * renders before a tier is published; these attribute rules (specificity
+ * 0,1,1) win over it (0,1,0) wherever they are written in the file. */
+html[data-font-scale="sm"] {
+    --ui-font-scale: 0.9;
+}
+html[data-font-scale="md"] {
+    --ui-font-scale: 1;
+}
+html[data-font-scale="lg"] {
+    --ui-font-scale: 1.1;
+}
+html[data-font-scale="xl"] {
+    --ui-font-scale: 1.25;
 }
 
 :root {
     color-scheme: light;
+    /* 1x until <html data-font-scale> publishes a tier (see the tier rules
+       above). Declared here so every --text-* token resolves even before the
+       preference store hydrates. */
+    --ui-font-scale: 1;
     /* Surface system: the app shell is the quiet outer frame; the page canvas
        is where lists, boards, and conversations live; surfaces are reserved
        for bounded content groups; raised surfaces are ephemeral overlays. */

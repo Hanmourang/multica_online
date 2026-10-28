@@ -8,6 +8,7 @@ import {
   Monitor,
   Plus,
   Server,
+  Smartphone,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -19,7 +20,7 @@ import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
-import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
+import { runtimeListOptions, runtimeKeys, localChannelOptions } from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import type { AgentRuntime } from "@multica/core/types";
@@ -49,6 +50,7 @@ import {
   pickContentLang,
 } from "../../onboarding/templates";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
+import { PhoneChannelDialog } from "./phone-channel-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
@@ -93,6 +95,11 @@ export function RuntimesPage({
   const qc = useQueryClient();
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
+  const [showPhoneChannelDialog, setShowPhoneChannelDialog] = useState(false);
+  // Only a self-hosted backend answers with usable addresses; the managed cloud
+  // answers `available: false`, so the entry point does not exist there.
+  const { data: localChannel } = useQuery(localChannelOptions());
+  const phoneChannelAvailable = localChannel?.available === true;
 
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
@@ -168,6 +175,11 @@ export function RuntimesPage({
       <PageHeaderBar
         totalCount={machines.length}
         onConnectRemote={() => setShowConnectDialog(true)}
+        onOpenPhoneChannel={
+          phoneChannelAvailable
+            ? () => setShowPhoneChannelDialog(true)
+            : undefined
+        }
         cloudRuntimeEnabled={cloudRuntimeEnabled}
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
       />
@@ -212,6 +224,9 @@ export function RuntimesPage({
       )}
       {cloudRuntimeEnabled && showCloudRuntimeDialog && (
         <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
+      )}
+      {showPhoneChannelDialog && phoneChannelAvailable && (
+        <PhoneChannelDialog onClose={() => setShowPhoneChannelDialog(false)} />
       )}
     </div>
   );
@@ -375,11 +390,13 @@ function OrphanRuntimeProfiles({
 function PageHeaderBar({
   totalCount,
   onConnectRemote,
+  onOpenPhoneChannel,
   cloudRuntimeEnabled,
   onOpenCloudRuntime,
 }: {
   totalCount: number;
   onConnectRemote: () => void;
+  onOpenPhoneChannel?: () => void;
   cloudRuntimeEnabled: boolean;
   onOpenCloudRuntime: () => void;
 }) {
@@ -401,6 +418,13 @@ function PageHeaderBar({
               icon={Cloud}
               label={t(($) => $.cloud_runtime.action)}
               onClick={onOpenCloudRuntime}
+            />
+          )}
+          {onOpenPhoneChannel && (
+            <CollectionPageHeaderAction
+              icon={Smartphone}
+              label={t(($) => $.phone_channel.action)}
+              onClick={onOpenPhoneChannel}
             />
           )}
           <CollectionPageHeaderAction

@@ -118,6 +118,14 @@
       "japanese": "日本語",
       "sync_failed": "이 기기에는 언어가 저장되었지만 계정 동기화에 실패했습니다. 다른 기기에서는 이전 언어가 표시될 수 있습니다."
     },
+    "font_scale": {
+      "title": "글자 크기",
+      "hint": "인터페이스 텍스트만 확대/축소합니다. 여백, 아이콘, 레이아웃은 그대로 유지됩니다.",
+      "small": "작게",
+      "default": "기본",
+      "large": "크게",
+      "xlarge": "아주 크게"
+    },
     "timezone": {
       "title": "표시 시간대",
       "browser_suffix": " (브라우저)",
@@ -327,6 +335,7 @@
       "labs": "실험실",
       "members": "멤버",
       "labels": "레이블",
+      "workflows": "워크플로",
       "issue_statuses": "태스크 상태",
       "properties": "속성",
       "quick_actions": "퀵 액션",

@@ -111,7 +111,8 @@
     "add_confirm": "Add ({{num}})",
     "adding": "Adding...",
     "added_multi_toast_one": "Added to {{count}} agent",
-    "added_multi_toast_other": "Added to {{count}} agents"
+    "added_multi_toast_other": "Added to {{count}} agents",
+    "view_source": "View source"
   },
   "toolbar": {
     "result_count_title": "Matching skills / all skills",
@@ -390,5 +391,32 @@
     "markdown_placeholder": "Write markdown content...",
     "raw_placeholder": "File content...",
     "raw_aria": "Plain text content of {{path}}"
+  },
+  "source_sheet": {
+    "open_hint": "View details and source",
+    "read_only": "Read-only",
+    "builtin_badge": "Platform skill",
+    "scope_all_agents": "All agents",
+    "source_label": "Source",
+    "source_builtin": "Embedded in Multica",
+    "chars": "{{count}} characters",
+    "files": "{{count}} files",
+    "files_aria": "Skill files",
+    "resize_width": "Drag to resize, double-click to reset",
+    "main": "Skill",
+    "supporting": "Supporting files ({{count}})",
+    "mode_aria": "File mode",
+    "mode_preview": "Preview",
+    "mode_source": "Source",
+    "copy": "Copy source",
+    "copied": "Source copied",
+    "copy_failed": "Couldn't copy to clipboard",
+    "empty_file": "This file is empty.",
+    "loading": "Loading source…",
+    "error_title": "Couldn't load this skill",
+    "error_missing": "This skill is no longer available",
+    "error_missing_hint": "It may have been renamed or removed in the running build. Refresh the page, and restart the server if you just upgraded Multica.",
+    "error_generic_hint": "Check your connection and try again.",
+    "error_retry": "Try again"
   }
 }

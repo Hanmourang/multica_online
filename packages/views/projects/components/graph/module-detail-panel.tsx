@@ -10,6 +10,8 @@ import {
   TabsTrigger,
 } from "@multica/ui/components/ui/tabs";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { MODULE_SPEC_CENTER_FLAG } from "@multica/core/feature-flags";
 import {
   graphModulesOptions,
   projectIssuesForModulesOptions,
@@ -23,8 +25,9 @@ import { ModuleObjectsTab } from "./sub-tabs/module-objects";
 import { ModuleStrategiesTab } from "./sub-tabs/module-strategies";
 import { GraphNeighborhoodTab } from "./sub-tabs/graph-neighborhood";
 import { ModulePrototypesTab } from "./sub-tabs/module-prototypes";
+import { PrototypeWorkbench } from "./prototype-workbench";
 
-type FeatureSubTab = "prototypes" | "changes" | "objects" | "strategies" | "neighborhood";
+type FeatureSubTab = "prototypes" | "changes" | "objects" | "strategies" | "neighborhood" | "reconcile";
 
 /**
  * f10 右栏 · 模块详情（4 个子 Tab，原型标注 4：原型平铺、实现为切换式）。
@@ -37,7 +40,11 @@ type FeatureSubTab = "prototypes" | "changes" | "objects" | "strategies" | "neig
  */
 export function ModuleDetailPanel() {
   const { t } = useT("archive");
+  const { t: tt } = useT("module-prototype");
   const wsId = useWorkspaceId();
+  // 结构对账子 TAB 与后端中枢同受 FF_MODULE_SPEC_CENTER 门控：关闭时 TAB 隐藏，
+  // 且后端叶子未注册（双层门控，记忆「flag 双层门控」）。
+  const specCenterEnabled = useFeatureEnabled(MODULE_SPEC_CENTER_FLAG, false);
   const { projectId, snapshot, selectedNodeId } = useGraphData();
   const deferredNodeId = useDeferredValue(selectedNodeId);
   const [tab, setTab] = useState<FeatureSubTab>("prototypes");
@@ -87,7 +94,8 @@ export function ModuleDetailPanel() {
           value === "changes" ||
           value === "objects" ||
           value === "strategies" ||
-          value === "neighborhood"
+          value === "neighborhood" ||
+          value === "reconcile"
         ) {
           setTab(value);
         }
@@ -137,6 +145,14 @@ export function ModuleDetailPanel() {
         >
           {t(($) => $.features.sub_neighborhood)}
         </TabsTrigger>
+        {specCenterEnabled && selectedModule ? (
+          <TabsTrigger
+            value="reconcile"
+            className="rounded-none border-b-2 border-transparent px-3 py-2 text-[11.5px] font-semibold data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+          >
+            {tt(($) => $.coverage.title)}
+          </TabsTrigger>
+        ) : null}
       </TabsList>
       <TabsContent value="prototypes" className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden">
         {tab === "prototypes" ? (
@@ -155,6 +171,18 @@ export function ModuleDetailPanel() {
       <TabsContent value="neighborhood" className="mt-3 min-h-0 flex-1 overflow-auto">
         {tab === "neighborhood" ? <GraphNeighborhoodTab nodeId={activeNodeId} /> : null}
       </TabsContent>
+      {specCenterEnabled && selectedModule ? (
+        <TabsContent value="reconcile" className="mt-3 min-h-0 flex-1 overflow-auto">
+          {tab === "reconcile" ? (
+            <PrototypeWorkbench
+              key={selectedModule.id}
+              wsId={wsId}
+              projectId={projectId}
+              moduleId={selectedModule.id}
+            />
+          ) : null}
+        </TabsContent>
+      ) : null}
     </Tabs>
   );
 }

@@ -6,6 +6,7 @@ import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
 import { RESOURCES } from "@multica/views/locales";
+import { FONT_SCALE_RESTORE_SCRIPT } from "@multica/core/preferences/font-scale-script";
 import { getRequestLocale } from "@/lib/request-locale";
 import { HTML_LANG } from "@/lib/html-lang";
 import { SITE_TITLE, TITLE_TEMPLATE } from "@/platform/document-title";
@@ -135,7 +136,19 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
-      <body className="h-full overflow-hidden">
+      {/* Extensions mutate <body> before React hydrates — Grammarly adds
+          data-gr-ext-installed and data-new-gr-c-s-check-loaded, whose values
+          change per extension version. That is a mismatch React can neither
+          patch nor should complain about, so silence it on this one element the
+          way <html> above already does; everything below is still checked. */}
+      <body className="h-full overflow-hidden" suppressHydrationWarning>
+        {/* Replay the saved font tier before hydration. The type scale is a
+            CSS-only multiplier, so without this the first paint uses 1x and
+            jumps once React mounts. Desktop has no SSR and applies it from
+            the store's rehydrate hook instead. */}
+        <Script id="font-scale-restore" strategy="beforeInteractive">
+          {FONT_SCALE_RESTORE_SCRIPT}
+        </Script>
         {/*
           react-grab: dev-only element inspector. Hold ⌘C (Mac) / Ctrl+C and click
           any element to copy its source path + line + component stack for pasting

@@ -4,9 +4,11 @@ import type { Attachment } from "@multica/core/types";
 export const PAGE_CONTEXT_MARK = "<!-- multica-page-context -->";
 export const PROTOTYPE_DIRECTORY_FILENAME = "prototype-directory.txt";
 
-export type PageSurfaceContext = {
+export type PrototypePageSurfaceContext = {
   surface: "prototype";
   projectId: string;
+  /** 模块 id：原型挂在模块下时带上，用作写库主键（moduleName 只用于显示）。 */
+  moduleId?: string;
   moduleName?: string;
   version?: number;
   htmlPath?: string;
@@ -14,6 +16,23 @@ export type PageSurfaceContext = {
   /** 与原型文件同目录的档案相对路径。 */
   directoryFiles?: string[];
 };
+
+/**
+ * 模块上下文（不挂具体原型版本）。聊天侧只读展示，写库靠消息的 resource_refs，
+ * 所以这里不落库、不带 HTML。coverage 是百分比 0–100；模块对账（07）未上线时为 null。
+ */
+export type ModulePageSurfaceContext = {
+  surface: "module";
+  projectId: string;
+  moduleId: string;
+  moduleName: string;
+  specVersion: number;
+  canonicalPrototypeVersion: number | null;
+  coverage?: number | null;
+  featurePointCount?: number;
+};
+
+export type PageSurfaceContext = PrototypePageSurfaceContext | ModulePageSurfaceContext;
 
 type PageSurfaceStore = {
   context: PageSurfaceContext | null;
@@ -50,6 +69,7 @@ export function directoryFilesForPath(htmlPath: string | undefined, paths: strin
 }
 
 export function prototypeDirectoryListing(context: PageSurfaceContext): string {
+  if (context.surface !== "prototype") return "";
   const path = context.htmlPath?.replace(/\\/g, "/");
   const dir = prototypeDirectory(path);
   const files = context.directoryFiles?.length
@@ -64,6 +84,7 @@ export function prototypeDirectoryListing(context: PageSurfaceContext): string {
 }
 
 export function prototypeAttachmentFiles(context: PageSurfaceContext): File[] {
+  if (context.surface !== "prototype") return [];
   const files: File[] = [];
   const listing = prototypeDirectoryListing(context);
   if (listing) {
@@ -87,8 +108,27 @@ export function visiblePageSurfaceContent(content: string): string {
   return [before, after].filter(Boolean).join("\n\n");
 }
 
+/** 模块上下文的紧凑形态：一段可读文本，不进 HTML 注释（模块不挂文件）。 */
+export function formatModuleSurfaceContext(context: ModulePageSurfaceContext): string {
+  const parts = [
+    `${context.moduleName} (module ${context.moduleId})`,
+    `spec v${context.specVersion}`,
+    context.canonicalPrototypeVersion != null
+      ? `canonical prototype v${context.canonicalPrototypeVersion}`
+      : "no canonical prototype",
+  ];
+  if (context.featurePointCount != null && context.featurePointCount > 0) {
+    parts.push(`${context.featurePointCount} feature points`);
+  }
+  if (context.coverage != null) parts.push(`coverage ${Math.round(context.coverage)}%`);
+  return parts.join(" · ");
+}
+
 /** 上传失败时的兜底：只留路径 + 目录，不灌 HTML。 */
 export function formatPageSurfaceContext(context: PageSurfaceContext): string {
+  if (context.surface === "module") {
+    return formatModuleSurfaceContext(context);
+  }
   const listing = prototypeDirectoryListing(context);
   const path = context.htmlPath?.replace(/\\/g, "/");
   const lines = [PAGE_CONTEXT_MARK];
@@ -149,6 +189,11 @@ export async function preparePageSurfaceSend(
 }
 
 export function pageSurfaceChip(context: PageSurfaceContext): string {
+  if (context.surface === "module") {
+    return context.specVersion > 0
+      ? `${context.moduleName} · v${context.specVersion}`
+      : context.moduleName;
+  }
   if (context.htmlPath) {
     const name = context.htmlPath.split("/").pop() ?? context.htmlPath;
     return context.version != null ? `v${context.version} · ${name}` : name;

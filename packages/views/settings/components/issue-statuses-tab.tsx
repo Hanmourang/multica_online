@@ -119,7 +119,7 @@ const EMPTY_DRAFT: StatusDraft = {
   color: COLOR_PICKER_PRESETS[6]!,
 };
 
-export function IssueStatusesTab() {
+export function IssueStatusesTab({ embedded }: { embedded?: boolean } = {}) {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
 
@@ -156,11 +156,8 @@ export function IssueStatusesTab() {
 
   const archivedCount = statuses.filter((s) => !s.is_system && s.archived_at).length;
 
-  return (
-    <SettingsTab
-      title={t(($) => $.issue_statuses.title)}
-      description={t(($) => $.issue_statuses.description)}
-    >
+  const body = (
+    <>
       <div className="space-y-4">
         {/* Offered only once the workspace has something archived. A permanently
             disabled "Show archived (0)" is a control that can never do
@@ -209,6 +206,27 @@ export function IssueStatusesTab() {
         status={editing}
       />
       <ArchiveStatusDialog status={pendingArchive} onClose={() => setPendingArchive(null)} />
+    </>
+  );
+
+  // Embedded under another tab (Settings → Workflows), the library is a section
+  // rather than a page: it keeps its own heading so its rows stay groupable,
+  // but gives up the page chrome.
+  if (embedded) {
+    return (
+      <section id="status-library" className="space-y-4">
+        <h3 className="text-title-sm font-semibold">{t(($) => $.issue_statuses.title)}</h3>
+        {body}
+      </section>
+    );
+  }
+
+  return (
+    <SettingsTab
+      title={t(($) => $.issue_statuses.title)}
+      description={t(($) => $.issue_statuses.description)}
+    >
+      {body}
     </SettingsTab>
   );
 }

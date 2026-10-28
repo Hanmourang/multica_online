@@ -48,7 +48,7 @@
     "leave_failed": "无法退出群聊",
     "leave_last_admin": "你是唯一管理员——请先转让管理员再退出",
     "composer_placeholder": "在群里说点什么，用 @ 呼叫成员或 Agent",
-    "composer_hint": "只有 @Agent 才会执行；普通发言和 @成员不会创建任务",
+    "composer_hint": "只有 @Agent 才会执行；普通发言和 @成员不会创建任务。Agent 运行中也能继续发言纠偏：点「补充发送」，内容会作为新任务交给 @ 的 Agent。要停某个 Agent 点它标签上的「停止」，要全部停下点「全部停止」。",
     "empty_title": "群聊还没有消息",
     "empty_body": "@Agent 才会执行，普通发言不会创建任务",
     "member_limit": "群成员最多 50 人（含你）",

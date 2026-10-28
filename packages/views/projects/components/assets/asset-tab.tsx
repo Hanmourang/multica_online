@@ -99,7 +99,7 @@ export function AssetTab({
   // project TAB's category / page choice (and vice versa).
   const storeKey = assetFilterKey(wsId, issueId ? `${projectId}#issue:${issueId}` : projectId);
   const filters = useAssetFilters(storeKey);
-  const { setCategory, setName, setPage } = useAssetFilterStore();
+  const { setName, setPage } = useAssetFilterStore();
 
   const [bindOpen, setBindOpen] = useState(false);
   const [unbindTarget, setUnbindTarget] = useState<AssetBinding | null>(null);
@@ -252,28 +252,8 @@ export function AssetTab({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1">
-          <Button
-            type="button"
-            size="xs"
-            variant={filters.category === null ? "default" : "outline"}
-            onClick={() => setCategory(storeKey, null)}
-          >
-            {t(($) => $.categories.all)}
-          </Button>
-          {ASSET_CATEGORIES.map((cat) => (
-            <Button
-              key={cat}
-              type="button"
-              size="xs"
-              variant={filters.category === cat ? "default" : "outline"}
-              aria-pressed={filters.category === cat}
-              onClick={() => setCategory(storeKey, filters.category === cat ? null : cat)}
-            >
-              {categoryLabels[cat]}
-            </Button>
-          ))}
-        </div>
+        {/* 「分类」筛选已随字段下线移除（后端字段保留，创建链路写默认分类）；
+            名称检索与视图切换不变。 */}
         <div className="relative min-w-48 max-w-sm flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -364,7 +344,6 @@ export function AssetTab({
         ) : (
           <AssetTable
             rows={rows}
-            categoryLabels={categoryLabels}
             features={{ inlineEdit: true }}
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
@@ -505,6 +484,8 @@ export function BindAssetDialog({
   const [category, setCategory] = useState<AssetCategory>(defaultCategory);
   const [query, setQuery] = useState("");
   const [relatedOnly, setRelatedOnly] = useState(false);
+  // 候选为空时要能把人送进手动表单，Tabs 必须受控（原先非受控，等于没有去路）。
+  const [tab, setTab] = useState<"candidates" | "manual" | "batch">("candidates");
 
   const [manualName, setManualName] = useState("");
   const [manualUrl, setManualUrl] = useState("");
@@ -547,6 +528,10 @@ export function BindAssetDialog({
     if (key === "hot") return t(($) => $.reason.hot);
     return "";
   };
+
+  const candidates = candidatesQuery.data?.candidates ?? [];
+  // 整列都是置灰行时同样无法绑定：除了把未绑定项提上来（后端排序），还要说清楚原因。
+  const allBound = candidates.length > 0 && candidates.every((item) => item.already_bound);
 
   const submit = async (data: BindAssetRequest) => {
     try {
@@ -636,7 +621,7 @@ export function BindAssetDialog({
           ))}
         </div>
 
-        <Tabs defaultValue="candidates">
+        <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
           <TabsList variant="line">
             <TabsTrigger value="candidates">{t(($) => $.tabs.candidates)}</TabsTrigger>
             <TabsTrigger value="manual">{t(($) => $.actions.add_manual)}</TabsTrigger>
@@ -671,15 +656,21 @@ export function BindAssetDialog({
                 <div className="p-3">
                   <QueryLoading rows={3} />
                 </div>
-              ) : (candidatesQuery.data?.candidates ?? []).length === 0 ? (
-                <div className="p-6 text-center text-caption text-muted-foreground">
-                  {category === "knowledge_repo" || category === "knowledge_group"
-                    ? t(($) => $.empty.no_source)
-                    : t(($) => $.empty.no_candidates)}
+              ) : candidates.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 p-6 text-center text-caption text-muted-foreground">
+                  <span>
+                    {category === "knowledge_repo" || category === "knowledge_group"
+                      ? t(($) => $.empty.no_source)
+                      : t(($) => $.empty.no_candidates)}
+                  </span>
+                  <Button type="button" size="xs" variant="outline" onClick={() => setTab("manual")}>
+                    <Plus />
+                    {t(($) => $.empty.go_manual)}
+                  </Button>
                 </div>
               ) : (
                 <ul className="divide-y divide-surface-border">
-                  {candidatesQuery.data?.candidates.map((candidate, idx) => (
+                  {candidates.map((candidate, idx) => (
                     <CandidateRow
                       key={`${candidate.resource_id ?? candidate.asset_name}-${idx}`}
                       candidate={candidate}
@@ -691,6 +682,16 @@ export function BindAssetDialog({
                 </ul>
               )}
             </div>
+
+            {allBound ? (
+              <div className="flex items-center justify-between gap-2 rounded-md border border-surface-border bg-muted/40 px-3 py-2 text-caption text-muted-foreground">
+                <span>{t(($) => $.empty.all_bound)}</span>
+                <Button type="button" size="xs" variant="outline" onClick={() => setTab("manual")}>
+                  <Plus />
+                  {t(($) => $.empty.go_manual)}
+                </Button>
+              </div>
+            ) : null}
           </TabsContent>
 
           <TabsContent value="manual" className="space-y-3">

@@ -118,6 +118,14 @@
       "japanese": "日本語",
       "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
     },
+    "font_scale": {
+      "title": "Font size",
+      "hint": "Scales interface text only — spacing, icons, and layout stay the same.",
+      "small": "Small",
+      "default": "Default",
+      "large": "Large",
+      "xlarge": "Extra large"
+    },
     "timezone": {
       "title": "Viewing Timezone",
       "browser_suffix": " (browser)",
@@ -327,6 +335,7 @@
       "labs": "Labs",
       "members": "Members",
       "labels": "Labels",
+      "workflows": "Workflows",
       "issue_statuses": "Issue Statuses",
       "properties": "Properties",
       "quick_actions": "Quick Actions",

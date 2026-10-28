@@ -3,15 +3,13 @@
  * create-only: goal, git repo, start_at, due_date, decompose_mode, auto_trigger.
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useWorkspaceId } from "@multica/core/hooks";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
-import { projectResourcesOptions } from "@multica/core/projects";
-import type { Issue, ProjectResource, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { RepoResourcePicker } from "./pickers/repo-resource-picker";
 
 const DECOMPOSE_MODES = ["auto", "confirm", "manual"] as const;
 
@@ -21,10 +19,6 @@ export function toDatetimeLocal(iso: string | null | undefined): string {
   if (Number.isNaN(date.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function repoOptionLabel(resource: ProjectResource): string {
-  return resource.label || resource.id.slice(0, 8);
 }
 
 export function RequirementConfigEditor({
@@ -37,12 +31,7 @@ export function RequirementConfigEditor({
   compact?: boolean;
 }) {
   const { t } = useT("issues");
-  const wsId = useWorkspaceId();
   const updateIssue = useUpdateIssue();
-  const { data: resources = [] } = useQuery({
-    ...projectResourcesOptions(wsId, issue.project_id ?? ""),
-    enabled: Boolean(issue.project_id),
-  });
 
   const [title, setTitle] = useState(issue.title);
   const [goal, setGoal] = useState(issue.goal ?? "");
@@ -59,8 +48,6 @@ export function RequirementConfigEditor({
   }, [issue.id, issue.title, issue.goal, issue.repo_resource_id, issue.start_at, issue.due_date]);
 
   const triggered = Boolean(issue.triggered_at);
-  const onlineRepos = resources.filter((r) => r.resource_type === "github_repo");
-  const localRepos = resources.filter((r) => r.resource_type === "local_directory");
 
   const save = async (patch: UpdateIssueRequest) => {
     try {
@@ -109,38 +96,17 @@ export function RequirementConfigEditor({
         />
       </Field>
       <Field label={t(($) => $.requirement_config.repo)}>
-        <select
-          data-testid="requirement-config-repo"
-          className="w-full rounded-md border bg-transparent px-2 py-1"
+        <RepoResourcePicker
+          projectId={issue.project_id ?? ""}
           value={repoId}
-          onChange={(e) => {
-            const next = e.target.value;
+          testId="requirement-config-repo"
+          onChange={(next) => {
             setRepoId(next);
             if (next !== (issue.repo_resource_id ?? "")) {
               void save({ repo_resource_id: next || null });
             }
           }}
-        >
-          <option value="">{t(($) => $.requirement_config.repo_none)}</option>
-          {onlineRepos.length > 0 && (
-            <optgroup label={t(($) => $.requirement_config.repo_online)}>
-              {onlineRepos.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {repoOptionLabel(r)}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          {localRepos.length > 0 && (
-            <optgroup label={t(($) => $.requirement_config.repo_local)}>
-              {localRepos.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {repoOptionLabel(r)}
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
+        />
       </Field>
       <div className={cn("grid gap-2", compact ? "grid-cols-1" : "grid-cols-2")}>
         <Field label={t(($) => $.requirement_config.start_at)}>

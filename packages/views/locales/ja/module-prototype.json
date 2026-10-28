@@ -1,0 +1,28 @@
+{
+  "coverage": {
+    "title": "仕様のカバー率",
+    "total": "機能ポイント",
+    "covered": "カバー済み",
+    "changed": "変更不要",
+    "missing": "未実装",
+    "unregistered": "未登録",
+    "deprecated": "廃止済み",
+    "rate": "カバー率",
+    "denominator": "分母対象"
+  },
+  "matrix": {
+    "title": "構造突合マトリクス",
+    "col_feature": "機能ポイント",
+    "col_state": "状態",
+    "col_anchor": "アンカー",
+    "empty": "機能ポイントがまだありません——仕様が公開されると突合が始まります。",
+    "need_parse": "このバージョンの解析キャッシュがありません——プロトタイプを解析するまで全ての仕様ポイントは未実装と表示されます。"
+  },
+  "states": {
+    "covered": "カバー済み",
+    "changed": "変更不要",
+    "missing": "未実装",
+    "unregistered": "未登録",
+    "deprecated": "廃止済み"
+  }
+}

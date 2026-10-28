@@ -104,7 +104,8 @@
     "cancel": "キャンセル",
     "add_confirm": "追加（{{num}}）",
     "adding": "追加中...",
-    "added_multi_toast_other": "{{count}} 件のエージェントに追加しました"
+    "added_multi_toast_other": "{{count}} 件のエージェントに追加しました",
+    "view_source": "ソースを表示"
   },
   "toolbar": {
     "result_count_title": "該当スキル / 全スキル",
@@ -373,5 +374,32 @@
     "markdown_placeholder": "Markdown の内容を記述...",
     "raw_placeholder": "ファイルの内容...",
     "raw_aria": "{{path}} のプレーンテキスト"
+  },
+  "source_sheet": {
+    "open_hint": "詳細とソースを表示",
+    "read_only": "読み取り専用",
+    "builtin_badge": "プラットフォームスキル",
+    "scope_all_agents": "すべてのエージェント",
+    "source_label": "ソース",
+    "source_builtin": "Multica に組み込み",
+    "chars": "{{count}} 文字",
+    "files": "{{count}} ファイル",
+    "files_aria": "スキルファイル",
+    "resize_width": "ドラッグで幅を変更、ダブルクリックで既定に戻す",
+    "main": "スキル本体",
+    "supporting": "補助ファイル（{{count}}）",
+    "mode_aria": "表示モード",
+    "mode_preview": "プレビュー",
+    "mode_source": "ソース",
+    "copy": "ソースをコピー",
+    "copied": "ソースをコピーしました",
+    "copy_failed": "クリップボードにコピーできませんでした",
+    "empty_file": "このファイルは空です。",
+    "loading": "ソースを読み込み中…",
+    "error_title": "このスキルを読み込めませんでした",
+    "error_missing": "このスキルは現在のバージョンに存在しません",
+    "error_missing_hint": "実行中のビルドで名前が変更または削除された可能性があります。ページを再読み込みし、Multica を更新した直後ならサーバーを再起動してください。",
+    "error_generic_hint": "ネットワーク接続を確認して再試行してください。",
+    "error_retry": "再試行"
   }
 }

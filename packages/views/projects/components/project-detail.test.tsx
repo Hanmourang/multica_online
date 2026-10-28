@@ -24,6 +24,8 @@ vi.mock("@multica/ui/lib/clipboard", () => ({
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
   queryOptions: (options: unknown) => options,
+  // The project's workflow control (MUL-7420) writes through a mutation.
+  useMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
     switch (options.queryKey?.[0]) {
       case "project-detail":
@@ -44,6 +46,8 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@multica/core/projects/queries", () => ({
   projectDetailOptions: () => ({ queryKey: ["project-detail"] }),
+  // The workflow control reads the workspace's projects for its sharing copy.
+  projectListOptions: () => ({ queryKey: ["projects"] }),
 }));
 
 vi.mock("@multica/core/projects/mutations", () => ({
@@ -141,6 +145,9 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
     </button>
   ),
   DropdownMenuSeparator: () => <hr />,
+  // The project's workflow control (MUL-7420) groups and labels its options.
+  DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock("@multica/ui/components/ui/popover", () => ({

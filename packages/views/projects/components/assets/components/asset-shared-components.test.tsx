@@ -46,13 +46,16 @@ function renderUi(ui: React.ReactElement) {
 describe("AssetTable", () => {
   it("renders the shared column set without a selection column", () => {
     renderUi(
-      <AssetTable rows={[binding("1"), binding("2")]} categoryLabels={categoryLabels} />,
+      <AssetTable rows={[binding("1"), binding("2")]} />,
     );
     const header = screen.getByRole("columnheader", { name: "Name" });
     expect(header).toBeTruthy();
     screen.getByRole("columnheader", { name: "Stage" });
     screen.getByRole("columnheader", { name: "Object" });
-    screen.getByRole("columnheader", { name: "Source" });
+    // 「分类」列已按产品要求下线
+    expect(screen.queryByRole("columnheader", { name: "Category" })).toBeNull();
+    // 「来源」列同步下线（字段仅作数据属性，不再占列宽）
+    expect(screen.queryByRole("columnheader", { name: "Source" })).toBeNull();
     // 未传选择态 → 无勾选列
     expect(screen.queryAllByRole("checkbox").length).toBe(0);
     expect(screen.getAllByRole("row")).toHaveLength(3); // header + 2 rows
@@ -64,7 +67,6 @@ describe("AssetTable", () => {
     renderUi(
       <AssetTable
         rows={[binding("1"), binding("2")]}
-        categoryLabels={categoryLabels}
         selectedIds={new Set(["1"])}
         onToggleSelect={onToggleSelect}
         onToggleAll={onToggleAll}
@@ -87,7 +89,6 @@ describe("AssetTable", () => {
           binding("1", { external_ref: { artifact_id: "art-1" } }),
           binding("2", { external_ref: { url: "https://example.com" } }),
         ]}
-        categoryLabels={categoryLabels}
         onPreview={onPreview}
         onUnbind={onUnbind}
       />,
@@ -103,16 +104,21 @@ describe("AssetTable", () => {
     renderUi(
       <AssetTable
         rows={[binding("1", { links: [{ issue_id: "issue-1234567890", link_type: "produces" }] })]}
-        categoryLabels={categoryLabels}
         features={{
           showLinks: true,
           showOwnership: true,
+          issueInfoById: new Map([["issue-1234567890", { title: "登录改造", status: "in_progress", is_requirement: true }]]),
+          issueHref: (id) => `/ws/issues/${id}`,
           onEdit,
           ownershipLabel: (row) => <span data-testid="own">bound:{row.project_id}</span>,
         }}
       />,
     );
-    screen.getByRole("columnheader", { name: "Links" });
+    // 原单列「Links」已拆为「Requirements / Tasks」两列
+    expect(screen.queryByRole("columnheader", { name: "Links" })).toBeNull();
+    screen.getByRole("columnheader", { name: "Requirements" });
+    screen.getByRole("columnheader", { name: "Tasks" });
+    screen.getByText("Requirements 1");
     screen.getByRole("columnheader", { name: "Bound to" });
     screen.getByTestId("own");
     fireEvent.click(screen.getByLabelText("Edit"));
@@ -121,16 +127,15 @@ describe("AssetTable", () => {
 
   it("keeps read-only badges when inlineEdit is off and inline selects when on", () => {
     const rows = [binding("1", { lifecycle_stage: "S5", asset_role: "input", tags: ["prd"] })];
-    const { unmount } = renderUi(<AssetTable rows={rows} categoryLabels={categoryLabels} />);
+    const { unmount } = renderUi(<AssetTable rows={rows} />);
     screen.getByText("S5 Requirement Iteration"); // 只读阶段徽标（五阶段新名）
     unmount();
 
-    renderUi(
-      <AssetTable rows={rows} categoryLabels={categoryLabels} features={{ inlineEdit: true }} />,
-    );
-    // 行内编辑：阶段/对象/分类列渲染为 Select（combobox），标签列为编辑按钮
+    renderUi(<AssetTable rows={rows} features={{ inlineEdit: true }} />);
+    // 行内编辑：阶段/对象列渲染为 Select（combobox），标签列为编辑按钮；
+    // 分类列下线后仅剩阶段+对象两个行内 combobox。
     const comboboxes = screen.getAllByRole("combobox");
-    expect(comboboxes.length).toBeGreaterThanOrEqual(3);
+    expect(comboboxes.length).toBeGreaterThanOrEqual(2);
   });
 });
 

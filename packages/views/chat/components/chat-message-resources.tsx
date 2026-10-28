@@ -69,28 +69,142 @@ function ResourceCard({
 }) {
   const { t } = useT("chat");
   if (resource.access !== "granted") {
+    const denied = resource.access === "denied";
+    let text: string;
+    switch (resource.type) {
+      case "issue":
+        text = resource.kind === "requirement"
+          ? (denied ? t(($) => $.resources.denied_requirement) : t(($) => $.resources.missing_requirement))
+          : (denied ? t(($) => $.resources.denied_task) : t(($) => $.resources.missing_task));
+        break;
+      case "module":
+        text = denied ? t(($) => $.resources.denied_module) : t(($) => $.resources.missing_module);
+        break;
+      case "module_prototype":
+        text = denied ? t(($) => $.resources.denied_prototype) : t(($) => $.resources.missing_prototype);
+        break;
+      default:
+        text = denied ? t(($) => $.resources.denied_document) : t(($) => $.resources.missing_document);
+    }
     return (
       <div className="flex items-center gap-2 rounded-xl border border-dashed border-border bg-muted/30 px-3 py-2.5 text-caption text-muted-foreground">
         <LockKeyhole className="size-4 shrink-0" />
-        {resource.access === "denied"
-          ? resource.type === "issue"
-            ? resource.kind === "requirement"
-              ? t(($) => $.resources.denied_requirement)
-              : t(($) => $.resources.denied_task)
-            : t(($) => $.resources.denied_document)
-          : resource.type === "issue"
-            ? resource.kind === "requirement"
-              ? t(($) => $.resources.missing_requirement)
-              : t(($) => $.resources.missing_task)
-            : t(($) => $.resources.missing_document)}
+        {text}
       </div>
     );
   }
   if (resource.type === "issue") {
     return <IssueResourceCard resource={resource} />;
   }
+  if (resource.type === "module") {
+    return <ModuleResourceCard resource={resource} />;
+  }
+  if (resource.type === "module_prototype") {
+    return <PrototypeResourceCard resource={resource} />;
+  }
 
   return <DocumentResourceCard resource={resource} onPreview={onPreview} />;
+}
+
+function ModuleResourceCard({ resource }: { resource: ChatMessageResource }) {
+  const { t } = useT("chat");
+  const paths = useWorkspacePaths();
+  const wsId = useWorkspaceId();
+  const snapshot = resource.module;
+  const projectId = snapshot?.project_id || resource.project_id || "";
+  const projectsQuery = useQuery({
+    ...projectListOptions(wsId),
+    enabled: Boolean(wsId && projectId),
+  });
+  if (!snapshot) return <UnavailableResource />;
+
+  const project = projectsQuery.data?.find((item) => item.id === projectId)?.title;
+  const href = projectId ? paths.projectView(projectId, "features") : paths.projects();
+  return (
+    <article className="relative overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-xs before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-emerald-500">
+      <div className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-2.5 px-3 py-3 pl-3.5">
+        <span className="flex size-9 items-center justify-center rounded-lg bg-emerald-500/10 font-mono text-[10px] font-extrabold text-emerald-700 dark:text-emerald-400">
+          {chatResourceMark(resource)}
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-micro text-muted-foreground">
+            <span>{t(($) => $.resources.module)}</span>
+            {snapshot.color && (
+              <span className="size-2 rounded-full" style={{ backgroundColor: snapshot.color }} aria-hidden />
+            )}
+            {project && <span className="truncate">· {project}</span>}
+          </div>
+          <div className="mt-1 truncate text-caption font-semibold text-foreground" title={snapshot.name}>{snapshot.name}</div>
+          <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-1 text-micro text-muted-foreground">
+            <span className={snapshot.spec_version > 0 ? undefined : "italic"}>
+              {snapshot.spec_version > 0
+                ? t(($) => $.resources.spec_version, { version: snapshot.spec_version })
+                : t(($) => $.resources.no_spec)}
+            </span>
+            {snapshot.feature_point_count > 0 && (
+              <span>{t(($) => $.resources.feature_points, { count: snapshot.feature_point_count })}</span>
+            )}
+            {snapshot.canonical_prototype_version != null && (
+              <span>{t(($) => $.resources.canonical_prototype, { version: snapshot.canonical_prototype_version })}</span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2">
+        <AppLink
+          href={href}
+          className="ml-auto rounded-md border border-border px-2 py-0.5 text-micro font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          {t(($) => $.resources.open_module)}
+        </AppLink>
+      </div>
+    </article>
+  );
+}
+
+function PrototypeResourceCard({ resource }: { resource: ChatMessageResource }) {
+  const { t } = useT("chat");
+  const paths = useWorkspacePaths();
+  const snapshot = resource.prototype;
+  if (!snapshot) return <UnavailableResource />;
+
+  const projectId = resource.project_id || "";
+  const title = snapshot.issue_title || snapshot.name || t(($) => $.resources.prototype);
+  const href = snapshot.issue_id
+    ? paths.issueDetail(snapshot.issue_id)
+    : projectId
+      ? paths.projectView(projectId, "features")
+      : paths.projects();
+  return (
+    <article className="relative overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-xs before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-fuchsia-500">
+      <div className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-2.5 px-3 py-3 pl-3.5">
+        <span className="flex size-9 items-center justify-center rounded-lg bg-fuchsia-500/10 font-mono text-[10px] font-extrabold text-fuchsia-700 dark:text-fuchsia-400">
+          {chatResourceMark(resource)}
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-micro text-muted-foreground">
+            <span>{t(($) => $.resources.prototype)}</span>
+            <span>{t(($) => $.resources.prototype_version, { version: snapshot.version })}</span>
+            {snapshot.status && (
+              <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium">{snapshot.status}</span>
+            )}
+          </div>
+          <div className="mt-1 truncate text-caption font-semibold text-foreground" title={title}>{title}</div>
+          {snapshot.name && snapshot.name !== title && (
+            <div className="mt-1 truncate text-micro text-muted-foreground">{snapshot.name}</div>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2">
+        <AppLink
+          href={href}
+          className="ml-auto rounded-md border border-border px-2 py-0.5 text-micro font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          {t(($) => $.resources.open_details)}
+        </AppLink>
+      </div>
+    </article>
+  );
 }
 
 function DocumentResourceCard({

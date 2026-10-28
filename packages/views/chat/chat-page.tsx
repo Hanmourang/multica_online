@@ -242,7 +242,10 @@ export function ChatPage() {
   );
 
   const listBody = (
-    <div className="px-2 py-1">
+    // min-h-full + flex-col: the thread list stretches to the rail's height so
+    // its last item (the archived entry) can be pinned to the bottom instead of
+    // floating right under the last chat.
+    <div className="flex min-h-full flex-col px-2 py-1">
       <ChatThreadList
         sessions={c.sessions}
         agents={c.agents}
@@ -317,6 +320,7 @@ export function ChatPage() {
           hasOlderMessages={c.hasOlderMessages}
           isFetchingOlderMessages={c.isFetchingOlderMessages}
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
+          onStopGroupTask={c.handleStopAgentTask}
           onQuickAction={(action) => c.handleSend(action.prompt)}
           quickActionsDisabled={
             c.isConversationSession ||
@@ -384,8 +388,17 @@ export function ChatPage() {
         onRestoreDraftApplied={c.handleRestoreDraftApplied}
         uploadEnabled={c.uploadEnabled && !c.isAgentAccessRevoked}
         onStop={c.handleStop}
-        isRunning={!!c.pendingTaskId}
-        allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
+        isRunning={c.isRunning}
+        stopping={c.isCancellingTask(c.pendingTaskId)}
+        cancellingTaskIds={c.cancellingTaskIds}
+        // A group send never queues: the server fans it out to the mentioned
+        // agents as a fresh task, so composing while agents run is the
+        // "add a clarification" door rather than a queue slot. The server has
+        // always accepted it — only this UI gate kept the composer locked.
+        allowSubmitWhileRunning={
+          c.pendingTask?.supports_queue === true || c.activeSessionKind === "group"
+        }
+        runningSendKind={c.activeSessionKind === "group" ? "supplement" : "queue"}
         disabled={
           c.isSessionArchived ||
           c.isAgentArchived ||
@@ -412,6 +425,7 @@ export function ChatPage() {
         focusRequest={c.focusInputRequest}
         groupRuns={c.groupPendingTasks}
         groupAgentNames={groupAgentNames}
+        onStopGroupTask={c.handleStopAgentTask}
         leftAdornment={
           c.isConversationSession ? undefined : (
           <AgentDropdown

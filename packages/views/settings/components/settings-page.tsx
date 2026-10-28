@@ -20,6 +20,7 @@ import {
   Blocks,
   CreditCard,
   Server,
+  Workflow,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -45,6 +46,7 @@ import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { IssueStatusesTab } from "./issue-statuses-tab";
+import { IssueWorkflowsTab } from "../../issue-workflows";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
@@ -74,6 +76,7 @@ const WORKSPACE_TAB_KEYS = [
   "members",
   "billing",
   "labels",
+  "workflows",
   "issue_statuses",
   "properties",
   "quick_actions",
@@ -89,6 +92,7 @@ const WORKSPACE_TAB_VALUES = {
   members: "members",
   billing: "billing",
   labels: "labels",
+  workflows: "workflows",
   issue_statuses: "issue-statuses",
   properties: "properties",
   quick_actions: "quick-actions",
@@ -104,6 +108,7 @@ const WORKSPACE_TAB_ICONS = {
   members: Users,
   billing: CreditCard,
   labels: Tags,
+  workflows: Workflow,
   issue_statuses: CircleDot,
   properties: SlidersHorizontal,
   quick_actions: Zap,
@@ -264,7 +269,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
 
       {/* Right content */}
       <div className="min-w-0 flex-1 md:overflow-y-auto">
-        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "issue-statuses" || activeTab === "properties" || activeTab === "quick-actions"
+        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "workflows" || activeTab === "issue-statuses" || activeTab === "properties" || activeTab === "quick-actions"
               ? "max-w-5xl"
               : "max-w-3xl"}`}>
           <TabsContent value="profile"><AccountTab /></TabsContent>
@@ -284,6 +289,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
             <TabsContent value="billing"><BillingTab /></TabsContent>
           ) : null}
           <TabsContent value="labels"><LabelsTab /></TabsContent>
+          <TabsContent value="workflows"><IssueWorkflowsTab /></TabsContent>
           <TabsContent value="issue-statuses"><IssueStatusesTab /></TabsContent>
           <TabsContent value="properties"><PropertiesTab /></TabsContent>
           <TabsContent value="quick-actions"><QuickActionsTab /></TabsContent>

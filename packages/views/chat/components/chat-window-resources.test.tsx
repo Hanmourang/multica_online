@@ -171,6 +171,7 @@ vi.mock("./use-chat-draft-restore", () => ({
 vi.mock("./use-chat-task-actions", () => ({
   useChatTaskActions: () => ({
     cancelChatTask: vi.fn(),
+    cancellingTaskIds: [],
     handleEditQueuedTask: vi.fn(),
     handleRemoveQueuedTask: vi.fn(),
     handleClearQueuedTasks: vi.fn(),

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Sparkles, Unlink } from "lucide-react";
+import { Eye, ExternalLink, Plus, Sparkles, Unlink } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { type AssetBinding, type AssetCategory } from "@multica/core/types";
@@ -22,6 +22,10 @@ import {
 import { useT } from "../../../i18n";
 import { QueryLoading } from "../archive/query-states";
 import { BindAssetDialog } from "./asset-tab";
+import {
+  AssetPreviewDialog,
+  assetPreviewMode,
+} from "./components/asset-preview-dialog";
 
 /**
  * 独立工作项详情（IssueDetail）右栏的紧凑资产块 —— 补全「日历 → 任务」动线
@@ -42,11 +46,21 @@ export function IssueAssetSection({
   const wsId = useWorkspaceId();
   const [bindOpen, setBindOpen] = useState(false);
   const [unbindTarget, setUnbindTarget] = useState<AssetBinding | null>(null);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   const listQuery = useQuery(
     assetListOptions(wsId, projectId, { page: 1, pageSize: 50 }, issueId),
   );
   const rows = listQuery.data?.items ?? [];
+  // 右栏同样要能“看文档”：可预览子集复用工作区页同一套弹窗与翻页口径。
+  const previewable = useMemo(
+    () => rows.filter((row) => assetPreviewMode(row) !== null),
+    [rows],
+  );
+  const openPreview = (row: AssetBinding) => {
+    const idx = previewable.findIndex((item) => item.id === row.id);
+    if (idx >= 0) setPreviewIndex(idx);
+  };
 
   const categoryLabels = useMemo<Record<AssetCategory, string>>(
     () => ({
@@ -115,17 +129,43 @@ export function IssueAssetSection({
                   {row.asset_subtype ? ` · ${row.asset_subtype}` : ""}
                 </div>
               </div>
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost"
-                className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                aria-label={t(($) => $.actions.unbind)}
-                disabled={unbindMutation.isPending && unbindTarget?.id === row.id}
-                onClick={() => setUnbindTarget(row)}
-              >
-                <Unlink />
-              </Button>
+              <div className="flex shrink-0 items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+                {assetPreviewMode(row) !== null ? (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    aria-label={t(($) => $.preview.open)}
+                    title={t(($) => $.preview.open)}
+                    onClick={() => openPreview(row)}
+                  >
+                    <Eye />
+                  </Button>
+                ) : typeof row.external_ref?.url === "string" && row.external_ref.url ? (
+                  <a
+                    href={row.external_ref.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={t(($) => $.preview.open_external)}
+                    title={t(($) => $.preview.open_external)}
+                  >
+                    <Button type="button" size="xs" variant="ghost">
+                      <ExternalLink />
+                    </Button>
+                  </a>
+                ) : null}
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  className="shrink-0"
+                  aria-label={t(($) => $.actions.unbind)}
+                  disabled={unbindMutation.isPending && unbindTarget?.id === row.id}
+                  onClick={() => setUnbindTarget(row)}
+                >
+                  <Unlink />
+                </Button>
+              </div>
             </div>
           ))
         )}
@@ -137,6 +177,15 @@ export function IssueAssetSection({
         open={bindOpen}
         onOpenChange={setBindOpen}
         defaultCategory="code_repository"
+      />
+
+      <AssetPreviewDialog
+        projectId={projectId}
+        bindings={previewable}
+        index={previewIndex ?? 0}
+        onIndexChange={setPreviewIndex}
+        open={previewIndex !== null}
+        onOpenChange={(next) => !next && setPreviewIndex(null)}
       />
 
       <AlertDialog

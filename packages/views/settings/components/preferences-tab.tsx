@@ -17,6 +17,10 @@ import {
   type SupportedLocale,
 } from "@multica/core/i18n";
 import { useLocaleAdapter } from "@multica/core/i18n/react";
+import {
+  type FontScale,
+  useFontScaleStore,
+} from "@multica/core/preferences/font-scale";
 import { useAuthStore } from "@multica/core/auth";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
 import { api } from "@multica/core/api";
@@ -160,12 +164,64 @@ export function PreferencesTab() {
             </Select>
           </SettingsRow>
 
+          <FontScaleRow />
+
           <TimezoneRow />
 
           <StickyCommentBarRow />
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>
+  );
+}
+
+function FontScaleRow() {
+  const { t } = useT("settings");
+  const scale = useFontScaleStore((s) => s.scale);
+  const setScale = useFontScaleStore((s) => s.setScale);
+
+  const scaleOptions: { value: FontScale; label: string }[] = [
+    { value: "sm", label: t(($) => $.preferences.font_scale.small) },
+    { value: "md", label: t(($) => $.preferences.font_scale.default) },
+    { value: "lg", label: t(($) => $.preferences.font_scale.large) },
+    { value: "xl", label: t(($) => $.preferences.font_scale.xlarge) },
+  ];
+
+  return (
+    <SettingsRow
+      label={t(($) => $.preferences.font_scale.title)}
+      description={t(($) => $.preferences.font_scale.hint)}
+      size="select"
+    >
+      <Select
+        items={scaleOptions}
+        value={scale}
+        onValueChange={(next) => {
+          if (!next || next === scale) return;
+          setScale(next as FontScale);
+          toast.success(t(($) => $.auto_save.toast_saved), {
+            id: "settings-auto-save",
+          });
+        }}
+      >
+        <SelectTrigger
+          size="sm"
+          className="w-full"
+          aria-label={t(($) => $.preferences.font_scale.title)}
+        >
+          <SelectValue>
+            {scaleOptions.find((option) => option.value === scale)?.label}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent align="end">
+          {scaleOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </SettingsRow>
   );
 }
 

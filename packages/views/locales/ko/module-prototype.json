@@ -1,0 +1,28 @@
+{
+  "coverage": {
+    "title": "명세 커버리지",
+    "total": "기능 포인트",
+    "covered": "커버됨",
+    "changed": "변경 필요",
+    "missing": "미구현",
+    "unregistered": "미등록",
+    "deprecated": "폐기됨",
+    "rate": "커버율",
+    "denominator": "분모 포함"
+  },
+  "matrix": {
+    "title": "구조 대조 매트릭스",
+    "col_feature": "기능 포인트",
+    "col_state": "상태",
+    "col_anchor": "앵커",
+    "empty": "아직 기능 포인트가 없습니다——명세를 게시하면 대조를 시작할 수 있습니다.",
+    "need_parse": "이 버전의 분석 캐시가 없습니다——프로토타입을 분석할 때까지 모든 명세 포인트가 미구현으로 표시됩니다."
+  },
+  "states": {
+    "covered": "커버됨",
+    "changed": "변경 필요",
+    "missing": "미구현",
+    "unregistered": "미등록",
+    "deprecated": "폐기됨"
+  }
+}

@@ -25,6 +25,25 @@ vi.mock("../../i18n", () => ({
   useT: () => ({ t: () => "label" }),
 }));
 
+// The toolbar resolves the selection's shared workflow now (MUL-7420): stub the
+// workspace id and the workflow/project reads so no provider is needed.
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/issue-workflows", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/issue-workflows")>();
+  return {
+    ...actual,
+    useIssueWorkflows: () => ({ workflows: [], isLoaded: true }),
+  };
+});
+vi.mock("@multica/core/projects/queries", () => ({
+  projectListOptions: (wsId: string) => ({
+    queryKey: ["projects", wsId],
+    queryFn: async () => [],
+  }),
+}));
+// The toolbar's project list is the only react-query read on this surface.
+vi.mock("@tanstack/react-query", () => ({ useQuery: () => ({ data: [] }) }));
+
 // Render each picker as a probe that surfaces the value the toolbar passed in,
 // so the test asserts the wiring (real `commonIssueFields` runs underneath).
 vi.mock("./pickers", () => ({

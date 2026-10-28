@@ -162,6 +162,22 @@ describe("ChatThreadList archive delegation", () => {
     expect(setActiveSession).not.toHaveBeenCalled();
     expect(archiveMutate).not.toHaveBeenCalled();
   });
+
+  // The archived entry is pinned to the bottom of the rail: it must stay the
+  // last child of the history frame and keep the mt-auto that eats the slack,
+  // otherwise a short list floats it right under the last chat again.
+  it("keeps the archived entry pinned after every history row", () => {
+    renderList(null, {
+      renderedSessions: [...sessions, makeSession({ id: "s-archived", status: "archived" })],
+    });
+    const entry = screen.getByRole("button", {
+      name: new RegExp(`^${enChat.list.archived_title}`),
+    });
+    const holder = entry.parentElement!;
+
+    expect(holder.className).toContain("mt-auto");
+    expect(holder.parentElement!.lastElementChild).toBe(holder);
+  });
 });
 
 describe("ChatThreadList no_response preview (MUL-4351)", () => {

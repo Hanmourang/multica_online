@@ -5,7 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { workspaceAssetsOptions } from "@multica/core/assets/queries";
-import type { ChatMessageResource, Issue, WorkspaceAssetBinding } from "@multica/core/types";
+import { projectModulesOptions } from "@multica/core/modules/queries";
+import type { ChatMessageResource, Issue, ProjectModule, WorkspaceAssetBinding } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -21,31 +22,39 @@ import { formatTimestamp } from "../../projects/components/archive/query-states"
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { priorityLabel } from "../../issues/utils/priority-label";
 import { useT } from "../../i18n";
-import { CHAT_RESOURCE_DRAFT_LIMIT, chatResourceDraftKey, chatResourceMark } from "./chat-resource-drafts";
+import { CHAT_RESOURCE_DRAFT_LIMIT, chatModuleResource, chatResourceDraftKey, chatResourceMark } from "./chat-resource-drafts";
 
-type ResourceTab = "task" | "requirement" | "document";
+export type ResourceTab = "task" | "requirement" | "document" | "module";
 
 export function ResourcePickerDialog({
   open,
   onOpenChange,
   selected,
   onApply,
+  projectId,
+  initialTab = "task",
+  moduleTabEnabled = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   selected: ChatMessageResource[];
   onApply: (resources: ChatMessageResource[]) => void;
+  /** 当前对话挂的项目；「模块」tab 只在有项目时可列。 */
+  projectId?: string | null;
+  initialTab?: ResourceTab;
+  /** FF_MODULE_PROTOTYPE_CHAT 关闭时不渲染「模块」tab（与「+」菜单第 4 组同源）。 */
+  moduleTabEnabled?: boolean;
 }) {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
-  const [tab, setTab] = useState<ResourceTab>("task");
+  const [tab, setTab] = useState<ResourceTab>(initialTab);
   const [query, setQuery] = useState("");
   const [pending, setPending] = useState<ChatMessageResource[]>(selected);
   const deferredQuery = useDeferredValue(query.trim());
   const issueQuery = useQuery({
     queryKey: ["chat-resource-issues", wsId, tab, deferredQuery],
     queryFn: async () => {
-      if (tab === "document") return { issues: [] as Issue[] };
+      if (tab === "document" || tab === "module") return { issues: [] as Issue[] };
       // Search rejects an empty query. The open picker should still list the
       // workspace's recent tasks or requirements before the user types.
       if (!deferredQuery) {
@@ -64,21 +73,37 @@ export function ResourcePickerDialog({
         include_closed: true,
       });
     },
-    enabled: open && tab !== "document" && Boolean(wsId),
+    enabled: open && (tab === "task" || tab === "requirement") && Boolean(wsId),
   });
   const documentQuery = useQuery({
     ...workspaceAssetsOptions(wsId, { name: deferredQuery || undefined, pageSize: 50 }),
     enabled: open && tab === "document" && Boolean(wsId),
+  });
+  const modulesQuery = useQuery({
+    ...projectModulesOptions(wsId, projectId ?? ""),
+    enabled: open && tab === "module" && Boolean(wsId && projectId),
   });
 
   useEffect(() => {
     if (open) setPending(selected);
   }, [open, selected]);
 
+  // 重新打开时回到调用方要求的分区（「+」菜单的「模块」入口直接落在模块 tab）。
+  // flag 关闭时调用方仍可能带着 "module" 进来，这里降级到 task。
+  useEffect(() => {
+    if (!open) return;
+    setTab(initialTab === "module" && !moduleTabEnabled ? "task" : initialTab);
+  }, [open, initialTab, moduleTabEnabled]);
+
   const pendingKeys = new Set(pending.map(chatResourceDraftKey));
-  const issues = tab === "document" ? [] : issueQuery.data?.issues ?? [];
+  const issues = tab === "document" || tab === "module" ? [] : issueQuery.data?.issues ?? [];
   const documents = tab === "document" ? documentQuery.data?.items ?? [] : [];
-  const loading = tab === "document" ? documentQuery.isPending : issueQuery.isPending;
+  const moduleItems = tab === "module" ? moduleResources(modulesQuery.data, deferredQuery) : [];
+  const loading = tab === "document"
+    ? documentQuery.isPending
+    : tab === "module"
+      ? modulesQuery.isPending
+      : issueQuery.isPending;
   const atLimit = pending.length >= CHAT_RESOURCE_DRAFT_LIMIT;
 
   const toggle = (resource: ChatMessageResource) => {
@@ -128,23 +153,25 @@ export function ResourcePickerDialog({
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col px-5 py-4">
           <div className="mb-3 flex gap-1.5" role="tablist">
-            {(["task", "requirement", "document"] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                aria-selected={tab === value}
-                className={cn(
-                  "rounded-lg border px-3 py-1.5 text-caption font-semibold transition-colors",
-                  tab === value
-                    ? "border-foreground bg-foreground text-background"
-                    : "border-border bg-muted/60 text-muted-foreground hover:text-foreground",
-                )}
-                onClick={() => setTab(value)}
-              >
-                {t(($) => $.resources[value])}
-              </button>
-            ))}
+            {(["task", "requirement", "document", "module"] as const)
+              .filter((value) => value !== "module" || moduleTabEnabled)
+              .map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === value}
+                  className={cn(
+                    "rounded-lg border px-3 py-1.5 text-caption font-semibold transition-colors",
+                    tab === value
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border bg-muted/60 text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => setTab(value)}
+                >
+                  {t(($) => $.resources[value])}
+                </button>
+              ))}
           </div>
           <div className="relative mb-3">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -158,8 +185,46 @@ export function ResourcePickerDialog({
             />
           </div>
           <div className="flex min-h-56 flex-1 flex-col gap-1.5 overflow-y-auto" aria-live="polite">
-            {loading ? (
+            {tab === "module" && !projectId ? (
+              <p className="rounded-lg border border-dashed border-border p-8 text-center text-caption text-muted-foreground">
+                {t(($) => $.resources.module_needs_project)}
+              </p>
+            ) : loading ? (
               <p className="p-6 text-center text-caption text-muted-foreground">{t(($) => $.resources.loading)}</p>
+            ) : tab === "module" && modulesQuery.isError ? (
+              <button
+                type="button"
+                className="rounded-lg border border-dashed border-border p-8 text-center text-caption text-muted-foreground"
+                onClick={() => void modulesQuery.refetch()}
+              >
+                {t(($) => $.resources.retry)}
+              </button>
+            ) : tab === "module" ? (
+              moduleItems.length > 0 ? moduleItems.map((ref) => {
+                const isSelected = pendingKeys.has(chatResourceDraftKey(ref));
+                const meta = [
+                  t(($) => $.resources.module),
+                  ref.module?.spec_version
+                    ? t(($) => $.resources.spec_version, { version: ref.module.spec_version })
+                    : t(($) => $.resources.no_spec),
+                ].join(" · ");
+                return (
+                  <ResourceOption
+                    key={ref.id}
+                    mark={chatResourceMark(ref)}
+                    tone="module"
+                    title={ref.module?.name ?? ref.id}
+                    meta={meta}
+                    selected={isSelected}
+                    disabled={!isSelected && atLimit}
+                    onClick={() => toggle(ref)}
+                  />
+                );
+              }) : (
+                <p className="rounded-lg border border-dashed border-border p-8 text-center text-caption text-muted-foreground">
+                  {t(($) => $.resources.empty_module)}
+                </p>
+              )
             ) : tab !== "document" && issueQuery.isError ? (
               <button
                 type="button"
@@ -276,7 +341,7 @@ function ResourceOption({
   onClick,
 }: {
   mark: string;
-  tone: "task" | "requirement" | "document";
+  tone: "task" | "requirement" | "document" | "module";
   title: string;
   meta: string;
   selected: boolean;
@@ -302,6 +367,7 @@ function ResourceOption({
           "grid size-9 shrink-0 place-items-center rounded-lg font-mono text-[10px] font-extrabold",
           tone === "requirement" && "bg-emerald-500/10 text-emerald-700",
           tone === "document" && "bg-violet-500/10 text-violet-700",
+          tone === "module" && "bg-emerald-500/10 text-emerald-700",
           tone === "task" && "bg-primary/10 text-primary",
         )}
       >
@@ -327,4 +393,15 @@ function ResourceOption({
 function EmptyResources() {
   const { t } = useT("chat");
   return <p className="rounded-lg border border-dashed border-border p-8 text-center text-caption text-muted-foreground">{t(($) => $.resources.empty)}</p>;
+}
+
+/** 模块列表 → 可直接进输入区的资源对象。 */
+function moduleResources(
+  modules: ProjectModule[] | undefined,
+  query: string,
+): ChatMessageResource[] {
+  const needle = query.trim().toLowerCase();
+  return (modules ?? [])
+    .filter((module) => !needle || `${module.name} ${module.description ?? ""}`.toLowerCase().includes(needle))
+    .map(chatModuleResource);
 }

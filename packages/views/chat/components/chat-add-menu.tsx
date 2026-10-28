@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
-import { Check, FolderKanban, Image as ImageIcon, Paperclip, Plus, X } from "lucide-react";
+import { Check, FolderKanban, Image as ImageIcon, Layers, Paperclip, Plus, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -14,10 +14,11 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import type { Project } from "@multica/core/types";
+import type { Project, ProjectModule } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+import { ChatModuleMenu } from "./chat-module-menu";
 
 interface ChatAddMenuProps {
   /** Called with each selected file — the caller routes it through the
@@ -33,6 +34,8 @@ interface ChatAddMenuProps {
    *  project description. Selection stays enabled; the submenu only appends
    *  an explanatory hint so the user knows before choosing. */
   projectContextUnsupported?: boolean;
+  /** 第 4 组「功能模块」：模块列表由 ChatModuleMenu 在子菜单展开时才拉取。 */
+  onSelectModule?: (module: ProjectModule) => void;
   disabled?: boolean;
 }
 
@@ -46,7 +49,7 @@ function MenuGlyph({
   tone,
   children,
 }: {
-  tone: "sky" | "amber" | "violet";
+  tone: "sky" | "amber" | "violet" | "emerald";
   children: ReactNode;
 }) {
   return (
@@ -56,6 +59,7 @@ function MenuGlyph({
         tone === "sky" && "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200",
         tone === "amber" && "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200",
         tone === "violet" && "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200",
+        tone === "emerald" && "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200",
       )}
     >
       {children}
@@ -81,6 +85,7 @@ export function ChatAddMenu({
   projectId,
   onSelectProject,
   projectContextUnsupported,
+  onSelectModule,
   disabled,
 }: ChatAddMenuProps) {
   const { t } = useT("chat");
@@ -221,6 +226,25 @@ export function ChatAddMenu({
                 )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+          )}
+          {onSelectModule && (
+            projectId ? (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="gap-2.5 rounded-lg px-2 py-2">
+                  <MenuGlyph tone="emerald"><Layers className="size-4" /></MenuGlyph>
+                  <MenuCopy title={t(($) => $.input.module_group)} hint={t(($) => $.input.module_group_hint)} />
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="max-h-80 w-72 overflow-y-auto">
+                  <ChatModuleMenu projectId={projectId} onSelect={onSelectModule} />
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            ) : (
+              // 没有项目就没有模块可列：保留入口但提示前置条件（不隐藏，避免用户以为功能没了）。
+              <DropdownMenuItem className="gap-2.5 rounded-lg px-2 py-2" disabled>
+                <MenuGlyph tone="emerald"><Layers className="size-4" /></MenuGlyph>
+                <MenuCopy title={t(($) => $.input.module_group)} hint={t(($) => $.input.module_group_needs_project)} />
+              </DropdownMenuItem>
+            )
           )}
         </DropdownMenuContent>
       </DropdownMenu>

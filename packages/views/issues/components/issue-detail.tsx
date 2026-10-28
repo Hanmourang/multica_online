@@ -80,7 +80,7 @@ import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueCo
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
-import { ProjectPicker } from "../../projects/components/project-picker";
+import { IssueProjectPicker } from "../../projects/components/issue-project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { SourceContextBadge } from "./source-context-viewer";
@@ -126,6 +126,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useProjectWorkflow } from "@multica/core/issue-workflows";
 import { useFeatureEnabled } from "@multica/core/config";
 import { ASSET_MODULE_FLAG, SPRINT_MODULE_FLAG } from "@multica/core/feature-flags";
 import { useRecentContextStore } from "@multica/core/chat";
@@ -172,6 +173,8 @@ import { stageForRequirementStatus } from "../../calendar/calendar-helpers";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
+import { IssueFlowCard } from "../../issue-workflows/issue-flow-card";
+import { TimelineHandoff } from "../../issue-workflows/timeline-handoff";
 import { useInPageFind } from "../hooks/use-in-page-find";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
 import { FindBar } from "./find-bar";
@@ -675,53 +678,57 @@ function ActivityBlock({
           );
         }
 
+        const handoff = isStatusChange && !!details.handoff_to_id;
         return (
-          <div key={entry.id} className="flex items-center text-caption text-muted-foreground">
-            <div className="mr-2 flex w-4 shrink-0 justify-center">
-              {leadIcon}
-            </div>
-            <div className="flex min-w-0 flex-1 items-center gap-1">
-              <span className="shrink-0 font-medium">
-                {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
-              </span>
-              <span className="truncate">{formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}</span>
-              {(entry.coalesced_count ?? 1) > 1 &&
-                entry.action !== "task_completed" &&
-                entry.action !== "task_failed" && (
-                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-caption font-medium tabular-nums text-muted-foreground">
-                    {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
-                  </span>
-                )}
-              {(entry.action === "task_failed" || entry.action === "task_cancelled") &&
-                onOpenFailedRun &&
-                typeof (entry.details as { task_id?: string } | undefined)?.task_id ===
-                  "string" && (
-                  <button
-                    type="button"
-                    data-testid={`retry-open-exec-${entry.id}`}
-                    onClick={() =>
-                      onOpenFailedRun(
-                        (entry.details as { task_id: string }).task_id,
-                      )
-                    }
-                    className="shrink-0 text-micro text-primary hover:underline"
-                  >
-                    {t(($) => $.detail.retry_and_open_exec)}
-                  </button>
-                )}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span className="ml-auto shrink-0 cursor-default">
-                      {timeAgo(entry.created_at)}
+          <div key={entry.id} className="text-caption text-muted-foreground">
+            <div className="flex items-center">
+              <div className="mr-2 flex w-4 shrink-0 justify-center">
+                {leadIcon}
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+                <span className="shrink-0 font-medium">
+                  {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+                </span>
+                <span className="truncate">{formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}</span>
+                {(entry.coalesced_count ?? 1) > 1 &&
+                  entry.action !== "task_completed" &&
+                  entry.action !== "task_failed" && (
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-caption font-medium tabular-nums text-muted-foreground">
+                      {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
                     </span>
-                  }
-                />
-                <TooltipContent side="top">
-                  {new Date(entry.created_at).toLocaleString(locale)}
-                </TooltipContent>
-              </Tooltip>
+                  )}
+                {(entry.action === "task_failed" || entry.action === "task_cancelled") &&
+                  onOpenFailedRun &&
+                  typeof (entry.details as { task_id?: string } | undefined)?.task_id ===
+                    "string" && (
+                    <button
+                      type="button"
+                      data-testid={`retry-open-exec-${entry.id}`}
+                      onClick={() =>
+                        onOpenFailedRun(
+                          (entry.details as { task_id: string }).task_id,
+                        )
+                      }
+                      className="shrink-0 text-micro text-primary hover:underline"
+                    >
+                      {t(($) => $.detail.retry_and_open_exec)}
+                    </button>
+                  )}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="ml-auto shrink-0 cursor-default">
+                        {timeAgo(entry.created_at)}
+                      </span>
+                    }
+                  />
+                  <TooltipContent side="top">
+                    {new Date(entry.created_at).toLocaleString(locale)}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
             </div>
+            {handoff && <div className="ml-6"><TimelineHandoff details={details} /></div>}
           </div>
         );
       })}
@@ -732,6 +739,26 @@ function ActivityBlock({
 // ---------------------------------------------------------------------------
 // SubIssueRow — sub-issue list item with inline status & assignee editing
 // ---------------------------------------------------------------------------
+
+/** The workflow the issue follows through its project (MUL-7420). */
+function IssueWorkflowPropRow({
+  projectId,
+  status,
+  label,
+}: {
+  projectId: string | null;
+  status: string;
+  label: string;
+}) {
+  const wsId = useWorkspaceId();
+  const workflow = useProjectWorkflow(wsId, projectId);
+  if (!workflow) return null;
+  return (
+    <PropRow label={label}>
+      <IssueFlowCard projectId={projectId} currentStatus={status} />
+    </PropRow>
+  );
+}
 
 function SubIssueRow({
   child,
@@ -830,6 +857,8 @@ function SubIssueRow({
         <StatusPicker
           status={child.status}
           onUpdate={handleUpdate}
+          projectId={child.project_id}
+          issue={child}
           align="start"
           trigger={
             <StatusIcon
@@ -2529,17 +2558,29 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
-            <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
+            <StatusPicker
+              status={issue.status}
+              onUpdate={handleUpdateField}
+              align="start"
+              projectId={issue.project_id}
+              issue={issue}
+            />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_project)}>
-            <ProjectPicker
+            <IssueProjectPicker
+              issue={issue}
               projectId={issue.project_id}
               onUpdate={handleUpdateField}
             />
           </PropRow>
+          <IssueWorkflowPropRow
+            projectId={issue.project_id}
+            status={issue.status}
+            label={t(($) => $.workflows.project.label)}
+          />
           {issue.project_id && (
             <PropRow label={t(($) => $.detail.prop_module)}>
               <span className="flex min-w-0 items-center gap-1.5">

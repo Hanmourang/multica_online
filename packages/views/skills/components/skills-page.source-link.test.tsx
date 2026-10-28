@@ -83,6 +83,9 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   skillListOptions: () => ({ queryKey: ["skills"] }),
   builtinSkillListOptions: () => ({ queryKey: ["builtin-skills"] }),
+  // The page mounts the platform-skill source sheet; this test never opens it,
+  // so the options object only has to exist and stay disabled.
+  builtinSkillDetailOptions: () => ({ queryKey: ["builtin-skill"], enabled: false }),
   agentListOptions: () => ({ queryKey: ["agents"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
   selectSkillAssignments: () => new Map(),

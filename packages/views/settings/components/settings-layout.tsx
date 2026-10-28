@@ -8,21 +8,29 @@ export type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 export function SettingsTab({
   title,
   description,
+  actions,
   children,
 }: {
   title: ReactNode;
   description?: ReactNode;
+  /** Primary page-level action, aligned with the title. */
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="space-y-8">
       <header>
-        <h2 className="text-title-lg font-semibold tracking-tight">{title}</h2>
-        {description ? (
-          <p className="mt-1 max-w-2xl text-body leading-6 text-muted-foreground">
-            {description}
-          </p>
-        ) : null}
+        <div className="flex min-w-0 items-start gap-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-title-lg font-semibold tracking-tight">{title}</h2>
+            {description ? (
+              <p className="mt-1 max-w-2xl text-body leading-6 text-muted-foreground">
+                {description}
+              </p>
+            ) : null}
+          </div>
+          {actions ? <div className="shrink-0">{actions}</div> : null}
+        </div>
       </header>
       {children}
     </div>

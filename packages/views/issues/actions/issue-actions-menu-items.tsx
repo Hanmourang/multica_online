@@ -28,8 +28,10 @@ import {
   PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useModalStore } from "@multica/core/modals";
+import { stepHandsOff, workflowStep } from "@multica/core/issue-workflows";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { useStatusOptions } from "../utils/status-options";
+import { useIssueStatusOptions } from "../utils/status-options";
 import { issueKeys } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
@@ -107,7 +109,10 @@ export function IssueActionsMenuItems({
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const statusOptions = useStatusOptions(wsId);
+  // Only the statuses the issue's workflow allows; entering a step that hands
+  // the issue off confirms first, as in the status picker. (MUL-7420)
+  const { options: statusOptions, workflow } = useIssueStatusOptions(wsId, issue.project_id, issue.status);
+  const openModal = useModalStore((s) => s.open);
   const { categoryOf, colorOf } = useIssueStatuses(wsId);
   const {
     isPinned,
@@ -190,7 +195,21 @@ export function IssueActionsMenuItems({
           {statusOptions.map((option) => (
             <P.Item
               key={option.key}
-              onClick={() => updateField({ status: option.key })}
+              onClick={() => {
+                if (
+                  workflow &&
+                  option.key !== issue.status &&
+                  stepHandsOff(workflowStep(workflow, option.key))
+                ) {
+                  openModal("issue-workflow-handoff", {
+                    issueId: issue.id,
+                    identifier: issue.identifier,
+                    status: option.key,
+                  });
+                  return;
+                }
+                updateField({ status: option.key });
+              }}
             >
               <StatusIcon
                 status={option.key}

@@ -23,16 +23,15 @@
   },
   "columns": {
     "name": "名称",
-    "category": "分类",
-    "subtype": "子类型",
     "bound_to": "绑定于",
-    "source": "来源",
     "created_at": "绑定时间",
     "actions": "操作",
     "stage": "阶段",
     "role": "对象",
     "tags": "标签",
-    "links": "关联"
+    "requirement": "需求",
+    "task": "任务",
+    "view_links": "查看关联明细（{{count}}）"
   },
   "bound_kind": {
     "work_item": "工作项",
@@ -65,7 +64,9 @@
   "empty": {
     "no_assets": "尚未绑定任何资产。",
     "no_candidates": "没有匹配的候选。换个关键词试试，或手动添加。",
-    "no_source": "该分类暂无可对接的来源，请手动添加。"
+    "no_source": "该分类暂无可对接的来源，请手动添加。",
+    "go_manual": "前往手动填写",
+    "all_bound": "候选都已绑定到本项目。"
   },
   "search_placeholder": "搜索仓库 / 资产…",
   "related_to_me": "只看与我相关",
@@ -141,10 +142,13 @@
     "tags_label": "标签",
     "tags_placeholder": "design、api-doc，逗号分隔",
     "tags_help": "最多 20 个标签，空值与重复自动去除。",
-    "links_label": "关联需求 / Bug",
-    "links_search": "筛选工作项…",
-    "links_none_linked": "尚未关联工作项——勾选该资产消费或交付的工作项。",
-    "links_no_candidates": "没有可关联的未关闭工作项。"
+    "requirements_label": "关联需求",
+    "tasks_label": "关联任务",
+    "requirements_search": "筛选需求…",
+    "tasks_search": "筛选任务…",
+    "none_linked": "尚未关联——勾选该资产消费或交付的工作项。",
+    "no_candidates": "没有可关联的需求。",
+    "no_task_candidates": "没有可关联的任务。"
   },
   "matrix": {
     "empty_col": "该阶段暂无资产",
@@ -152,7 +156,9 @@
   },
   "issues_view": {
     "no_rows": "还没有资产 ↔ 工作项关联。点击行内「编辑」为资产关联需求或 Bug。",
-    "asset_count": "关联 {{count}} 个资产"
+    "asset_count": "关联 {{count}} 个资产",
+    "requirement_label": "需求",
+    "task_label": "任务"
   },
   "toast": {
     "bound": "资产已绑定",
@@ -170,12 +176,10 @@
   },
   "stats": {
     "total": "资产总数",
-    "knowledge": "知识文档",
     "staged": "已标阶段",
     "untagged": "未打标签",
     "unstaged": "未分阶资产",
-    "share": "分类分布",
-    "coverage": "阶段覆盖 {{covered}}/5"
+    "stage_share": "阶段分布（覆盖 {{covered}}/5）"
   },
   "view_switch": {
     "list": "列表视图",
@@ -186,6 +190,7 @@
     "position": "{{current}} / {{total}}",
     "prev": "上一篇",
     "next": "下一篇",
+    "open": "打开",
     "open_external": "新窗口打开",
     "download": "下载",
     "unavailable": "该资产暂无可预览的内容。",

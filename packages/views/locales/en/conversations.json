@@ -48,7 +48,7 @@
     "leave_failed": "Couldn't leave the group",
     "leave_last_admin": "You're the only admin — transfer admin before leaving",
     "composer_placeholder": "Say something. Use @ to call a person or Agent",
-    "composer_hint": "Only an @Agent runs. Ordinary messages and @people do not create tasks.",
+    "composer_hint": "Only an @Agent runs. Ordinary messages and @people do not create tasks. While Agents work you can still steer them: hit Send note and the @-mentioned Agents get it as a new task. Stop one Agent from the Stop on its pill, or use Stop all to end every run here.",
     "empty_title": "No messages yet",
     "empty_body": "An @Agent runs. Ordinary messages do not create tasks.",
     "member_limit": "A group can have at most 50 people, including you",

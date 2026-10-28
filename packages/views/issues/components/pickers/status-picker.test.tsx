@@ -21,6 +21,21 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog(catalogEntries),
 }));
 
+// The picker resolves the project's workflow now (MUL-7420). This suite is
+// about what it PAINTS, so both the workflow query and the handoff dialog
+// (which owns a preview query of its own) are stubbed: no provider, no network.
+vi.mock("@multica/core/issue-workflows", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/issue-workflows")>();
+  return {
+    ...actual,
+    useProjectWithWorkflow: () => ({ workflow: null, project: null, defaultWorkflow: null }),
+  };
+});
+
+vi.mock("../../../issue-workflows/handoff-confirm-dialog", () => ({
+  WorkflowHandoffConfirmDialog: () => null,
+}));
+
 function entry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
   return {
     id: overrides.key ?? "id",

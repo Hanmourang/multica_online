@@ -155,7 +155,8 @@ function AssetCard({
       ) : null}
       <div className="mt-auto flex items-center justify-between gap-2 border-t border-surface-border pt-2">
         <span className="min-w-0 truncate text-micro text-muted-foreground">
-          {row.source} · {formatAssetDate(row.created_at)}
+          {/* 「来源」展示面已随字段下线（与表格同口径），仅保留绑定时间 */}
+          {formatAssetDate(row.created_at)}
         </span>
         <div className="flex shrink-0 items-center gap-1">
           {canPreview && onPreview ? (

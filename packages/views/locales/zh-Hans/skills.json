@@ -104,7 +104,8 @@
     "cancel": "取消",
     "add_confirm": "添加（{{num}}）",
     "adding": "添加中...",
-    "added_multi_toast_other": "已添加到 {{count}} 个智能体"
+    "added_multi_toast_other": "已添加到 {{count}} 个智能体",
+    "view_source": "查看源码"
   },
   "toolbar": {
     "result_count_title": "当前结果 / 全部 skill",
@@ -373,5 +374,32 @@
     "markdown_placeholder": "输入 Markdown 内容...",
     "raw_placeholder": "文件内容...",
     "raw_aria": "{{path}} 的纯文本内容"
+  },
+  "source_sheet": {
+    "open_hint": "查看详情与源码",
+    "read_only": "只读",
+    "builtin_badge": "平台技能",
+    "scope_all_agents": "所有智能体",
+    "source_label": "来源",
+    "source_builtin": "随 Multica 内置",
+    "chars": "{{count}} 字符",
+    "files": "{{count}} 个文件",
+    "files_aria": "技能文件",
+    "resize_width": "拖动调整宽度，双击恢复默认",
+    "main": "技能主体",
+    "supporting": "附属文件（{{count}}）",
+    "mode_aria": "查看方式",
+    "mode_preview": "预览",
+    "mode_source": "源码",
+    "copy": "复制源码",
+    "copied": "源码已复制",
+    "copy_failed": "复制到剪贴板失败",
+    "empty_file": "该文件为空。",
+    "loading": "正在加载源码…",
+    "error_title": "无法加载该技能",
+    "error_missing": "该技能在当前版本中不存在",
+    "error_missing_hint": "它可能已在运行中的版本里被改名或移除。请刷新页面；如果刚升级过 Multica，请重启服务端后再试。",
+    "error_generic_hint": "请检查网络连接后重试。",
+    "error_retry": "重试"
   }
 }

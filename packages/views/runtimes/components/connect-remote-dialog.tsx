@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Check, ChevronRight, Copy, Terminal } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { Check, ChevronRight, Terminal } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { runtimeKeys } from "@multica/core/runtimes/queries";
+import { localChannelOptions, runtimeKeys } from "@multica/core/runtimes/queries";
+import { replaceLoopbackHost } from "@multica/core/runtimes/local-channel";
 import { useWSEvent } from "@multica/core/realtime";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
@@ -19,7 +20,6 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
-import { copyText } from "@multica/ui/lib/clipboard";
 import {
   UI_EASE_OUT,
   UI_MOTION_DURATION,
@@ -27,6 +27,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { CopyButton } from "./copy-button";
 
 type Step = "instructions" | "success";
 
@@ -39,16 +40,26 @@ function normalizeCommandURL(url: string | undefined) {
   return url?.trim().replace(/\/+$/, "") ?? "";
 }
 
-function daemonCommands(serverUrl: string | undefined, appUrl: string | undefined) {
+function daemonCommands(
+  serverUrl: string | undefined,
+  appUrl: string | undefined,
+  lanURL?: string,
+) {
   const normalizedServerUrl = normalizeCommandURL(serverUrl);
   const normalizedAppUrl = normalizeCommandURL(appUrl);
   if (normalizedServerUrl && normalizedAppUrl) {
+    // This command runs on ANOTHER computer, so `localhost` there points at
+    // that computer's own loopback — the daemon would find nothing. Point both
+    // URLs at the address the operator's machine is actually reachable on.
+    const serverURL = replaceLoopbackHost(normalizedServerUrl, lanURL) ?? normalizedServerUrl;
+    const appURL = replaceLoopbackHost(normalizedAppUrl, lanURL) ?? normalizedAppUrl;
     return {
-      setupCmd: `multica setup self-host --server-url ${normalizedServerUrl} --app-url ${normalizedAppUrl}`,
-      tokenCmd: `multica config set server_url ${normalizedServerUrl}
-multica config set app_url ${normalizedAppUrl}
+      setupCmd: `multica setup self-host --server-url ${serverURL} --app-url ${appURL}`,
+      tokenCmd: `multica config set server_url ${serverURL}
+multica config set app_url ${appURL}
 multica login --token <YOUR_TOKEN>
 multica daemon start`,
+      lanHost: lanHostOf(serverURL),
     };
   }
 
@@ -58,7 +69,17 @@ multica daemon start`,
 multica config set app_url ${CLOUD_APP_URL}
 multica login --token <YOUR_TOKEN>
 multica daemon start`,
+    lanHost: "",
   };
+}
+
+/** The host shown in the "reachable at …" hint, empty when nothing was swapped. */
+function lanHostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
 }
 
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
@@ -157,39 +178,8 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Copy button + code row — mirrors onboarding/CliInstallInstructions
+// Code row — mirrors onboarding/CliInstallInstructions
 // ---------------------------------------------------------------------------
-
-function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 2000);
-    return () => clearTimeout(t);
-  }, [copied]);
-
-  const handleCopy = () => {
-    void copyText(text).then((ok) => {
-      if (ok) setCopied(true);
-    });
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      aria-label={ariaLabel}
-      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      {copied ? (
-        <Check className="h-3.5 w-3.5 text-success" aria-hidden />
-      ) : (
-        <Copy className="h-3.5 w-3.5" aria-hidden />
-      )}
-    </button>
-  );
-}
 
 function CommandStep({
   n,
@@ -234,7 +224,14 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
   const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
   const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
-  const { setupCmd, tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
+  // Same probe the phone-channel panel uses, so both surfaces name the same
+  // address instead of falling back to `localhost` on this machine.
+  const { data: channel } = useQuery(localChannelOptions());
+  const { setupCmd, tokenCmd, lanHost } = daemonCommands(
+    daemonServerUrl,
+    daemonAppUrl,
+    channel?.available ? channel.lanURL : undefined,
+  );
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
@@ -265,6 +262,11 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
             <p className="mt-1.5 text-micro leading-[1.55] text-muted-foreground">
               {t(($) => $.connect.step2_hint)}
             </p>
+            {lanHost && (
+              <p className="mt-1 text-micro leading-[1.55] text-muted-foreground">
+                {t(($) => $.connect.lan_hint, { host: lanHost })}
+              </p>
+            )}
           </div>
 
           <LiveListening />

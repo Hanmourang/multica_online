@@ -53,6 +53,15 @@ import { ProgressRing } from "../issues/components/progress-ring";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * Column weights for both the weekday header and the day grid. Mon–Fri carry
+ * the requirement blocks, so they take ~16% each while Sat/Sun shrink to ~10%.
+ * Kept fractional (minmax(0, …)) so narrow viewports still fit all seven days
+ * without a horizontal scrollbar.
+ */
+const DAY_COLUMN_TEMPLATE =
+  "repeat(5, minmax(0, 1.15fr)) repeat(2, minmax(0, 0.72fr))";
+
 function startOfDayUTC(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
@@ -465,13 +474,16 @@ export function CalendarView({
       </div>
 
       {/* Weekday header (Monday-first). */}
-      <div className="grid grid-cols-7 border-y border-border px-0 text-center">
+      <div
+        className="grid border-y border-border px-0 text-center"
+        style={{ gridTemplateColumns: DAY_COLUMN_TEMPLATE }}
+      >
         {dowLabels.map((label, i) => (
           <div
             key={label}
             className={cn(
               "py-1 text-caption text-muted-foreground",
-              i >= 5 && "text-muted-foreground",
+              i >= 5 && "text-faint-foreground",
             )}
           >
             {label}
@@ -479,8 +491,11 @@ export function CalendarView({
         ))}
       </div>
 
-      {/* Day grid. */}
-      <div className="grid flex-1 auto-rows-fr grid-cols-7 overflow-y-auto">
+      {/* Day grid — same column template as the header so they stay aligned. */}
+      <div
+        className="grid flex-1 auto-rows-fr overflow-y-auto"
+        style={{ gridTemplateColumns: DAY_COLUMN_TEMPLATE }}
+      >
         {days.map((day) => {
           const key = dayKey(day);
           const outOfMonth =
@@ -666,9 +681,9 @@ function RequirementBlock({
               }
               onDragEnd={onDragEnd}
               className={cn(
-                "relative flex min-w-0 gap-1 border-l-2 px-1 text-2xs",
+                "relative flex min-w-0 gap-1 border-l-2 px-1 text-micro leading-tight",
                 week && segment === "start"
-                  ? "h-auto min-h-10 flex-col items-stretch py-1"
+                  ? "min-h-8 flex-col items-stretch gap-0.5 py-0.5"
                   : "h-5 items-center",
                 segment === "start" && "rounded-l-sm",
                 segment === "end" && "rounded-r-sm",
@@ -685,13 +700,20 @@ function RequirementBlock({
               {segment === "start" ? (
                 week ? (
                   <>
+                    {/*
+                     * 周视图：标题独占首行，状态名/触发时间/进度下沉到次行——
+                     * 窄列里被截断的永远是次要信息而不再是需求标题。
+                     */}
                     <div className="flex min-w-0 items-center gap-1">
-                      <span className={cn("shrink-0", tone)}>{icon}</span>
-                      <span className="min-w-0 truncate font-medium">
-                        {issue.identifier} {issue.title}
+                      <span className={cn("shrink-0 leading-none", tone)}>{icon}</span>
+                      <span className="min-w-0 flex-1 truncate text-caption font-medium">
+                        <span className="mr-1 text-muted-foreground">
+                          {issue.identifier}
+                        </span>
+                        {issue.title}
                       </span>
                       {issue.assignee_id && issue.assignee_type && (
-                        <span data-testid={`req-role-${issue.id}`} className="ml-auto shrink-0">
+                        <span data-testid={`req-role-${issue.id}`} className="shrink-0">
                           <ActorAvatar
                             actorType={issue.assignee_type}
                             actorId={issue.assignee_id}
@@ -700,15 +722,22 @@ function RequirementBlock({
                         </span>
                       )}
                     </div>
-                    <div className={cn("flex items-center gap-1 text-muted-foreground", tone)}>
-                      <span>
+                    <div className="flex min-w-0 items-center gap-1">
+                      <span className={cn("min-w-0 truncate text-muted-foreground", tone)}>
                         {status}
                       </span>
                       {triggerLabel ? (
-                        <span data-testid={`req-trigger-${issue.id}`}>{triggerLabel}</span>
+                        <span
+                          data-testid={`req-trigger-${issue.id}`}
+                          className="shrink-0 text-muted-foreground"
+                        >
+                          {triggerLabel}
+                        </span>
                       ) : null}
                       {parsedProgress && (
-                        <span className="ml-auto">{progress}</span>
+                        <span className="ml-auto shrink-0 text-muted-foreground">
+                          {progress}
+                        </span>
                       )}
                     </div>
                     {parsedProgress && (
@@ -723,39 +752,43 @@ function RequirementBlock({
                     )}
                   </>
                 ) : (
-                <>
-                  {issue.assignee_id && issue.assignee_type && (
-                    <span data-testid={`req-role-${issue.id}`} className="shrink-0">
-                      <ActorAvatar
-                        actorType={issue.assignee_type}
-                        actorId={issue.assignee_id}
-                        size="xs"
-                      />
+                  <>
+                    {issue.assignee_id && issue.assignee_type && (
+                      <span data-testid={`req-role-${issue.id}`} className="shrink-0">
+                        <ActorAvatar
+                          actorType={issue.assignee_type}
+                          actorId={issue.assignee_id}
+                          size="xs"
+                        />
+                      </span>
+                    )}
+                    <span className={cn("shrink-0 leading-none", tone)}>{icon}</span>
+                    {/* 月视图是总览：标题吃满剩余宽度，状态名只留给悬浮与读屏。 */}
+                    <span className="min-w-0 flex-1 truncate text-caption font-medium">
+                      <span className="mr-1 text-muted-foreground">
+                        {issue.identifier}
+                      </span>
+                      {issue.title}
                     </span>
-                  )}
-                  <span className={cn("shrink-0", tone)}>{icon}</span>
-                  <span className="min-w-0 truncate font-medium">
-                    {issue.identifier} {issue.title}
-                  </span>
-                  <span
-                    className={cn(
-                      "ml-auto flex shrink-0 items-center gap-0.5 text-muted-foreground",
-                      tone,
-                    )}
-                  >
-                    {parsedProgress && (
-                      <ProgressRing
-                        done={parsedProgress.done}
-                        total={parsedProgress.total}
-                      />
-                    )}
-                    {status}
-                    {progress ? ` ${progress}` : ""}
+                    <span className={cn("sr-only", tone)}>{status}</span>
                     {triggerLabel ? (
-                      <span data-testid={`req-trigger-${issue.id}`}> {triggerLabel}</span>
+                      <span
+                        data-testid={`req-trigger-${issue.id}`}
+                        className="shrink-0 text-micro text-muted-foreground"
+                      >
+                        {triggerLabel}
+                      </span>
                     ) : null}
-                  </span>
-                </>
+                    {parsedProgress && (
+                      <span className="flex shrink-0 items-center gap-0.5 text-micro text-muted-foreground">
+                        <ProgressRing
+                          done={parsedProgress.done}
+                          total={parsedProgress.total}
+                        />
+                        {progress}
+                      </span>
+                    )}
+                  </>
                 )
               ) : (
                 <span className={cn("shrink-0", tone)}>{icon}</span>
@@ -766,6 +799,8 @@ function RequirementBlock({
       />
       <TooltipContent>
         {issue.identifier} · {tooltipRange}
+        {status ? ` · ${status}` : ""}
+        {progress ? ` · ${progress}` : ""}
         {heldBy ? ` · ${heldBy}` : ""}
       </TooltipContent>
     </Tooltip>

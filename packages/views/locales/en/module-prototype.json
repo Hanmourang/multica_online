@@ -1,0 +1,28 @@
+{
+  "coverage": {
+    "title": "Spec coverage",
+    "total": "Feature points",
+    "covered": "Covered",
+    "changed": "Drifted",
+    "missing": "Gaps",
+    "unregistered": "Unregistered",
+    "deprecated": "Deprecated",
+    "rate": "Coverage",
+    "denominator": "In scope"
+  },
+  "matrix": {
+    "title": "Reconcile matrix",
+    "col_feature": "Feature point",
+    "col_state": "State",
+    "col_anchor": "Anchor",
+    "empty": "No feature points yet — publish a spec to start reconciling.",
+    "need_parse": "No parse cache for this version yet — all spec points show as gaps until the prototype is parsed."
+  },
+  "states": {
+    "covered": "Covered",
+    "changed": "Drifted",
+    "missing": "Gap",
+    "unregistered": "Unregistered",
+    "deprecated": "Deprecated"
+  }
+}
