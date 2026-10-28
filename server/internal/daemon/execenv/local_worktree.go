@@ -38,10 +38,14 @@ import (
 //     recorded as delivered.
 
 const (
-	// localWorktreeDirName is the env-root-relative directory holding the
+	// LocalWorktreeDirName is the env-root-relative directory holding the
 	// worktree. Kept short: on Windows the worktree path plus the deepest
 	// repo path must stay under MAX_PATH for tools that predate long paths.
-	localWorktreeDirName = "worktree"
+	//
+	// Exported because the daemon recognises a kept worktree by this name when
+	// it decides whether a prior directory may be reused, and the two halves of
+	// that decision must not be able to disagree.
+	LocalWorktreeDirName = "worktree"
 
 	// gitTimeout bounds every git invocation this file makes. These are all
 	// local-only operations (no network), so a slow one means a wedged index
@@ -106,6 +110,12 @@ type LocalWorktreeParams struct {
 	WorkspaceID    string
 	AgentID        string
 	ConversationID string
+	// Keep leaves the worktree on disk once Finalize has committed and recorded
+	// it, so the next turn of the same conversation adopts it (see
+	// AdoptLocalWorktree) instead of checking the repository out again. The
+	// trade: one disposable checkout per conversation rather than one per turn,
+	// at the cost of that directory living until the env-root GC reclaims it.
+	Keep bool
 }
 
 // owner is the identity a branch created for this task is recorded under.
@@ -132,7 +142,10 @@ func localWorktreeConversation(params PrepareParams) (key, id string) {
 		return taskKey(params.Task.IssueID), params.Task.IssueID
 	}
 	if params.Task.ChatSessionID != "" {
-		return "chat-" + taskKey(params.Task.ChatSessionID), params.Task.ChatSessionID
+		// Shared with the prewarm path (PrewarmEnvRoot's callers), which creates
+		// this conversation's branch before the first turn exists: both sides
+		// must name it identically or the prewarmed tree is useless.
+		return ChatWorktreeConversationKey(params.Task.ChatSessionID), params.Task.ChatSessionID
 	}
 	return "", ""
 }
@@ -205,6 +218,20 @@ type LocalWorktree struct {
 	// Set by the daemon when a pre-commit step failed in a way that would make
 	// the committed branch wrong (see AbortWithReason).
 	aborted error
+	// keep, when set, leaves the worktree on disk after Finalize commits, so the
+	// next turn of the same conversation can adopt it (see AdoptLocalWorktree)
+	// instead of paying for another full checkout of the user's repository.
+	//
+	// The disposable-worktree contract every task had before this was costing
+	// a whole `git worktree add` — 19s on a 52k-file repository, measured — on
+	// every single group-chat turn, and a group turn can never resume a
+	// provider session (its input is a per-agent snapshot), so the checkout was
+	// pure latency with nothing shared across turns.
+	//
+	// Only the group-chat path sets it. Its correctness does not depend on
+	// freshness: Finalize still commits and records, and AdoptLocalWorktree
+	// refuses to adopt a tree whose user-repo probe no longer matches.
+	keep bool
 }
 
 // MarshalJSON / UnmarshalJSON carry this struct's unexported state across the
@@ -231,6 +258,7 @@ func (w *LocalWorktree) MarshalJSON() ([]byte, error) {
 		Owner           branchOwner `json:"owner"`
 		TracksState     bool        `json:"tracks_state"`
 		SnapshotPending bool        `json:"snapshot_pending"`
+		Keep            bool        `json:"keep"`
 	}{
 		wire:            (*wire)(w),
 		CreatedBranch:   w.createdBranch,
@@ -239,6 +267,7 @@ func (w *LocalWorktree) MarshalJSON() ([]byte, error) {
 		Owner:           w.owner,
 		TracksState:     w.tracksState,
 		SnapshotPending: w.snapshotPending,
+		Keep:            w.keep,
 	})
 }
 
@@ -252,6 +281,7 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 		Owner           branchOwner `json:"owner"`
 		TracksState     bool        `json:"tracks_state"`
 		SnapshotPending bool        `json:"snapshot_pending"`
+		Keep            bool        `json:"keep"`
 	}{wire: (*wire)(w)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -262,6 +292,7 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 	w.owner = aux.Owner
 	w.tracksState = aux.TracksState
 	w.snapshotPending = aux.SnapshotPending
+	w.keep = aux.Keep
 	return nil
 }
 
@@ -320,7 +351,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		return nil, fmt.Errorf("execenv: %q is not inside its repository root %q", localPath, gitRoot)
 	}
 
-	worktreePath := filepath.Join(params.EnvRoot, localWorktreeDirName)
+	worktreePath := filepath.Join(params.EnvRoot, LocalWorktreeDirName)
 
 	// Everything below mutates the repo's worktree admin state or its refs, so
 	// take the per-repo lock first. It covers the stale-path cleanup, which runs
@@ -398,6 +429,10 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		// A branch a sibling task forked because the conversation's own branch
 		// was busy is delivered once and never continued, so it records nothing.
 		tracksState: plan.tracksState && actualBranch == plan.name,
+		// Set before anything can fail: the rollback below discards a worktree
+		// this prepare created, but a turn that never gets the tree it asked for
+		// has nothing to keep either way.
+		keep: params.Keep,
 	}
 
 	// Tear the worktree back down on every failure below. A half-replayed tree
@@ -680,6 +715,36 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 		}
 	}
 
+	if w.keep {
+		// Kept for the next turn of this conversation (see the keep field). The
+		// branch stays with it: it is the worktree's HEAD, and dropping it would
+		// leave an adopted tree on a branch that no longer exists. A turn that
+		// produced nothing therefore keeps its empty branch too — that is what
+		// the next turn continues.
+		if dropped {
+			outcome.Branch = ""
+		}
+		// The probe is what makes adoption safe: it pins the user's repository
+		// as this turn left it, so the next turn can prove nothing in the user's
+		// checkout moved since. Failing to write it costs the next turn its reuse
+		// and nothing else — the work is already committed and recorded.
+		if probeErr := w.writeReuseProbe(); probeErr != nil {
+			if logger != nil {
+				logger.Warn("execenv: could not record the reuse probe; the next turn will check the repo out again",
+					"path", w.Path, "error", probeErr)
+			}
+		}
+		if logger != nil {
+			logger.Info("execenv: local worktree kept for the next turn of this conversation",
+				"git_root", w.GitRoot,
+				"branch", w.Branch,
+				"auto_committed", outcome.AutoCommitted,
+				"produced_work", producedWork,
+			)
+		}
+		return outcome, nil
+	}
+
 	if removeErr := removeLocalWorktreeDir(w.GitRoot, w.Path, logger); removeErr != nil {
 		outcome.PreservedPath = w.Path
 		return outcome, fmt.Errorf(
@@ -704,6 +769,368 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 	return outcome, nil
 }
 
+// reuseProbeFileName is the adoption ticket a kept worktree leaves beside
+// itself, in its env root. Its absence is why a later turn checks the
+// repository out again.
+const reuseProbeFileName = ".multica_reuse_probe.json"
+
+// reuseProbe pins the user's repository at the moment a kept worktree finished.
+//
+// It exists because a kept tree is only worth adopting while it still shows the
+// user's code: the tree carries the snapshot the previous turn replayed, not the
+// repository as it is now. Everything here is therefore something that moving
+// the user's checkout would change — a commit, a branch switch, an edit, a new
+// untracked file — and a single difference sends the next turn back to a full
+// checkout, which is slow but never wrong.
+type reuseProbe struct {
+	// GitRoot is the user's repository root the worktree belongs to.
+	GitRoot string `json:"git_root"`
+	// Branch is the branch the worktree was left on.
+	Branch string `json:"branch"`
+	// Head is the user's own HEAD, and UserBranch the branch their checkout was
+	// on — empty when it was detached, which must not compare equal to a name.
+	Head       string `json:"head"`
+	UserBranch string `json:"user_branch"`
+	// Status is a digest of `git status --porcelain -z`: their uncommitted work,
+	// in a form that does not depend on quoting or locale.
+	Status string `json:"status"`
+	Dirty  bool   `json:"dirty"`
+}
+
+// userRepoProbe reads the user's repository as it is right now.
+func userRepoProbe(gitRoot string) (reuseProbe, error) {
+	head, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return reuseProbe{}, fmt.Errorf("git rev-parse HEAD: %w", err)
+	}
+	// -z: the value is compared for equality by a different process, possibly
+	// days later, so it must not depend on path quoting or locale.
+	status, err := runGitStdout(gitRoot, "status", "--porcelain", "-z")
+	if err != nil {
+		return reuseProbe{}, fmt.Errorf("git status: %w", err)
+	}
+	sum := sha256.Sum256([]byte(status))
+	probe := reuseProbe{
+		GitRoot: gitRoot,
+		Head:    head,
+		Status:  hex.EncodeToString(sum[:]),
+		Dirty:   status != "",
+	}
+	if branch, branchErr := runGitTrimmed(gitRoot, "symbolic-ref", "--short", "-q", "HEAD"); branchErr == nil {
+		probe.UserBranch = branch
+	}
+	return probe, nil
+}
+
+// writeReuseProbe records the probe beside the worktree this turn is keeping.
+func (w *LocalWorktree) writeReuseProbe() error {
+	probe, err := userRepoProbe(w.GitRoot)
+	if err != nil {
+		return err
+	}
+	probe.Branch = w.Branch
+	data, err := json.Marshal(probe)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(filepath.Dir(w.Path), reuseProbeFileName)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// ReuseProbeGitRoot returns the user's repository a kept checkout at envRoot was
+// made from, or "" when there is no readable reuse record beside it.
+//
+// Callers need it before they can name the directory a kept checkout hands its
+// next turn: the agent's cwd sits at the same depth inside the tree as the
+// project resource does inside the user's repository, and that depth can only be
+// measured against the repository root.
+func ReuseProbeGitRoot(envRoot string) string {
+	data, err := os.ReadFile(filepath.Join(envRoot, reuseProbeFileName))
+	if err != nil {
+		return ""
+	}
+	var probe reuseProbe
+	if json.Unmarshal(data, &probe) != nil {
+		return ""
+	}
+	return probe.GitRoot
+}
+
+// worktreeRepoRoot returns the repository a linked worktree belongs to. Inside
+// a worktree `--show-toplevel` answers with the worktree, so the common git dir
+// is the only way back to the user's own repository.
+func worktreeRepoRoot(worktreePath string) (string, error) {
+	commonDir, err := runGitTrimmed(worktreePath, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("execenv: %q is not inside a git worktree: %w", worktreePath, err)
+	}
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(worktreePath, commonDir)
+	}
+	root := filepath.Dir(filepath.Clean(commonDir))
+	if resolved, evalErr := filepath.EvalSymlinks(root); evalErr == nil {
+		root = resolved
+	}
+	return root, nil
+}
+
+// repoRelativePath is a path's location inside its repository, canonicalised the
+// same way resolveGitRoot canonicalises the root. "" means the repo root.
+func repoRelativePath(dir, gitRoot string) (string, error) {
+	resolved := dir
+	if canonical, evalErr := filepath.EvalSymlinks(dir); evalErr == nil {
+		resolved = canonical
+	}
+	rel, err := filepath.Rel(gitRoot, resolved)
+	if err != nil {
+		return "", fmt.Errorf("execenv: locate %q inside repo %q: %w", dir, gitRoot, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("execenv: %q is outside its repository root %q", dir, gitRoot)
+	}
+	if rel == "." {
+		return "", nil
+	}
+	return rel, nil
+}
+
+// AdoptLocalWorktree takes over the worktree the previous turn of a
+// conversation left behind, so this turn skips the checkout Prepare would
+// otherwise pay for (19s on a 52k-file repository, measured).
+//
+// Adoption never widens what the agent may see, because it refuses unless the
+// whole picture the previous turn left is still standing:
+//
+//   - the directory really is that conversation's env-root worktree of the
+//     repository the probe names — answered by git, not by the file we vet;
+//   - the repository, and the agent's place inside it, are the ones THIS task's
+//     project resource points at — the user may have re-pointed the resource in
+//     between, and a kept tree of the previous one must not be handed over;
+//   - the user's own checkout has not moved (same HEAD, same branch, same
+//     `git status`), so the tree in the worktree is still the tree they have;
+//   - the worktree is still on the delivered branch, at exactly the commit that
+//     turn recorded as delivered.
+//
+// The last check is what makes this a continuation rather than a guess. It also
+// covers the user merging or deleting the branch in between: the recorded
+// checkpoint no longer equals the worktree's tip, so the caller checks out
+// fresh instead. Any refusal returns an error naming the reason; none of them is
+// fatal.
+//
+// A refusal AFTER the tree is proven to be this conversation's also tears it
+// down. The fresh checkout that follows continues the same branch, and a kept
+// tree still holding that branch would force git to fork a sibling instead —
+// which every later turn would then continue, silently splitting the
+// conversation's work across two branches. The branch itself is never deleted:
+// it holds what earlier turns delivered.
+func AdoptLocalWorktree(workDir, localPath, workspaceID, agentID, conversationID string, logger *slog.Logger) (*LocalWorktree, error) {
+	kept, err := inspectKeptLocalWorktree(workDir, workspaceID, agentID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	// Everything below runs only once the directory is provably this
+	// conversation's worktree, so a refusal here may — and must — free it.
+	stale := func(err error) (*LocalWorktree, error) {
+		kept.tearDownStale(logger)
+		return nil, err
+	}
+
+	// The resource can be re-pointed between two turns. The kept tree is of the
+	// repository THIS turn asked for, or it is of nothing this turn may use.
+	expectedRoot, err := resolveGitRoot(localPath)
+	if err != nil {
+		return stale(err)
+	}
+	if kept.gitRoot != expectedRoot {
+		return stale(fmt.Errorf("execenv: the kept worktree is of %q, but this task's project resource points at %q", kept.gitRoot, expectedRoot))
+	}
+	// The agent's cwd has to sit at the same depth as the resource: a project
+	// pointed at <repo>/services/api must not be handed the worktree root.
+	expectedRel, err := repoRelativePath(localPath, expectedRoot)
+	if err != nil {
+		return stale(err)
+	}
+	if expectedRel != kept.reqRel {
+		return stale(fmt.Errorf("execenv: the kept worktree places the agent at %q, but this task's project resource is at %q", kept.reqRel, expectedRel))
+	}
+
+	current, err := userRepoProbe(kept.gitRoot)
+	if err != nil {
+		return stale(fmt.Errorf("execenv: could not re-read %q before adopting its worktree: %w", kept.gitRoot, err))
+	}
+	if current.Head != kept.probe.Head || current.UserBranch != kept.probe.UserBranch || current.Status != kept.probe.Status {
+		return stale(fmt.Errorf("execenv: %q moved since the previous turn of this conversation (HEAD %s on %q, now %s on %q); the kept worktree no longer matches your checkout",
+			kept.gitRoot, kept.probe.Head, kept.probe.UserBranch, current.Head, current.UserBranch))
+	}
+
+	branch, err := runGitTrimmed(kept.worktreePath, "symbolic-ref", "--short", "-q", "HEAD")
+	if err != nil || branch != kept.probe.Branch {
+		return stale(fmt.Errorf("execenv: worktree %s is no longer on branch %s", kept.worktreePath, kept.probe.Branch))
+	}
+	tip, err := runGitTrimmed(kept.worktreePath, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return stale(fmt.Errorf("execenv: worktree %s has no commit to continue: %w", kept.worktreePath, err))
+	}
+	if kept.record.checkpoint != tip {
+		return stale(fmt.Errorf("execenv: branch %s moved since the previous turn (recorded %s, now %s)", branch, kept.record.checkpoint, tip))
+	}
+
+	wt := &LocalWorktree{
+		GitRoot:    kept.gitRoot,
+		Path:       kept.worktreePath,
+		WorkDir:    kept.workDir,
+		Branch:     branch,
+		BaseCommit: tip,
+		Continued:  true,
+		// The record is both what this turn replays the user's edits from and
+		// what proves the branch is this conversation's, so this tree keeps
+		// tracking the conversation's state as any continued branch does.
+		userState:   kept.record.state,
+		priorState:  kept.record.state,
+		owner:       kept.record.owner,
+		tracksState: true,
+		// Adopted trees stay kept: the next turn should find this one, not a
+		// checkout this turn made and then deleted.
+		keep: true,
+	}
+	if logger != nil {
+		logger.Info("execenv: adopted the previous turn's worktree instead of checking the repository out again",
+			"git_root", kept.gitRoot, "path", kept.worktreePath, "branch", branch, "tip", tip,
+			"dirty_base_captured", kept.probe.Dirty)
+	}
+	return wt, nil
+}
+
+// keptLocalWorktree is a directory proven to be this conversation's kept
+// worktree, before anything has been proven about its contents.
+type keptLocalWorktree struct {
+	worktreePath string
+	workDir      string
+	gitRoot      string
+	// reqRel is the agent's cwd inside the worktree, "" at its root.
+	reqRel string
+	probe  reuseProbe
+	record branchRecord
+}
+
+// KeptLocalWorktreeRef answers the cheap half of AdoptLocalWorktree: whether
+// workDir still identifies itself as this conversation's kept worktree, judging
+// only from what the previous turn wrote. It deliberately does not read the
+// user's checkout — the daemon calls this while deciding whether reuse is worth
+// locking anything for, and the full check runs once, immediately before the
+// tree is used.
+func KeptLocalWorktreeRef(workDir, workspaceID, agentID, conversationID string) bool {
+	_, err := inspectKeptLocalWorktree(workDir, workspaceID, agentID, conversationID)
+	return err == nil
+}
+
+// inspectKeptLocalWorktree proves the directory is this conversation's kept
+// worktree: it lives at the daemon worktree slot, the reuse record beside it is
+// well formed, the repository git reports agrees with that record, and the
+// branch's own record names this conversation as its owner.
+func inspectKeptLocalWorktree(workDir, workspaceID, agentID, conversationID string) (keptLocalWorktree, error) {
+	var kept keptLocalWorktree
+	owner := branchOwner{WorkspaceID: workspaceID, AgentID: agentID, ConversationID: conversationID}
+	if !owner.valid() {
+		return kept, errors.New("execenv: adopting a worktree requires the conversation's workspace, agent and conversation id")
+	}
+	if strings.TrimSpace(workDir) == "" {
+		return kept, errors.New("execenv: adopting a worktree requires a workdir")
+	}
+	worktreePath, err := resolveGitRoot(workDir)
+	if err != nil {
+		return kept, err
+	}
+	if filepath.Base(worktreePath) != LocalWorktreeDirName {
+		return kept, fmt.Errorf("execenv: %q is not a task worktree", worktreePath)
+	}
+	if resolved, evalErr := filepath.EvalSymlinks(workDir); evalErr == nil {
+		workDir = resolved
+	}
+	reqRel, err := repoRelativePath(workDir, worktreePath)
+	if err != nil {
+		return kept, err
+	}
+
+	envRoot := filepath.Dir(worktreePath)
+	data, err := os.ReadFile(filepath.Join(envRoot, reuseProbeFileName))
+	if err != nil {
+		return kept, fmt.Errorf("execenv: no reuse record beside %s: %w", worktreePath, err)
+	}
+	var probe reuseProbe
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return kept, fmt.Errorf("execenv: reuse record in %s is unreadable: %w", envRoot, err)
+	}
+	if probe.GitRoot == "" || probe.Branch == "" || probe.Head == "" {
+		return kept, fmt.Errorf("execenv: reuse record in %s is incomplete", envRoot)
+	}
+	gitRoot, err := worktreeRepoRoot(worktreePath)
+	if err != nil {
+		return kept, err
+	}
+	if gitRoot != probe.GitRoot {
+		return kept, fmt.Errorf("execenv: worktree %s belongs to %q, but its reuse record names %q", worktreePath, gitRoot, probe.GitRoot)
+	}
+	recordCommit, err := readUserStateRef(gitRoot, probe.Branch)
+	if err != nil {
+		return kept, fmt.Errorf("execenv: branch %s has no recorded snapshot to continue from: %w", probe.Branch, err)
+	}
+	record, err := readBranchRecord(gitRoot, recordCommit)
+	if err != nil {
+		return kept, fmt.Errorf("execenv: could not read the record of branch %s: %w", probe.Branch, err)
+	}
+	if record.owner != owner {
+		return kept, fmt.Errorf("execenv: branch %s belongs to another conversation", probe.Branch)
+	}
+	return keptLocalWorktree{
+		worktreePath: worktreePath,
+		workDir:      workDir,
+		gitRoot:      gitRoot,
+		reqRel:       reqRel,
+		probe:        probe,
+		record:       record,
+	}, nil
+}
+
+// tearDownStale removes a kept worktree that has been proven this
+// conversation's but can no longer be continued, so the fresh checkout that
+// follows can take its branch. The branch survives: it is what earlier turns
+// delivered, and the new tree continues it.
+func (k keptLocalWorktree) tearDownStale(logger *slog.Logger) {
+	unlock, err := lockGitRoot(k.gitRoot, logger)
+	if err != nil {
+		// Best-effort, like every other teardown here: the next prepare's
+		// `worktree prune` reclaims a registration whose directory is gone, and a
+		// registration that stays is what the branch-unavailable fallback exists
+		// for.
+		if logger != nil {
+			logger.Warn("execenv: could not lock the repository to drop a stale worktree; the next checkout may have to fork a branch",
+				"git_root", k.gitRoot, "path", k.worktreePath, "error", err)
+		}
+		return
+	}
+	defer unlock()
+	if removeErr := removeLocalWorktreeDir(k.gitRoot, k.worktreePath, logger); removeErr != nil {
+		if logger != nil {
+			logger.Warn("execenv: could not remove the stale kept worktree",
+				"git_root", k.gitRoot, "path", k.worktreePath, "error", removeErr)
+		}
+	}
+	// The record only describes the directory just removed; a later turn must
+	// not read it and mistake a fresh checkout for an adoptable tree.
+	probePath := filepath.Join(filepath.Dir(k.worktreePath), reuseProbeFileName)
+	if err := os.Remove(probePath); err != nil && !errors.Is(err, os.ErrNotExist) && logger != nil {
+		logger.Warn("execenv: could not drop the stale reuse record", "path", probePath, "error", err)
+	}
+	if logger != nil {
+		logger.Info("execenv: dropped the previous turn's worktree; its branch stays in the repository",
+			"git_root", k.gitRoot, "branch", k.probe.Branch, "path", k.worktreePath)
+	}
+}
+
 // Discard tears a worktree down without delivering anything: unregister it,
 // delete its directory, drop its branch.
 //
@@ -712,6 +1139,17 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 // be sure nothing has run in the worktree yet.
 func (w *LocalWorktree) Discard(logger *slog.Logger) {
 	if w == nil {
+		return
+	}
+	// A kept worktree outlives its turn on purpose (see the keep field). This is
+	// reached when Prepare failed after adopting one; tearing it down would hand
+	// the next turn back the checkout this turn just saved, and the tree on disk
+	// is still the one that conversation left, not a half-built one.
+	if w.keep {
+		if logger != nil {
+			logger.Info("execenv: keeping the adopted worktree after a failed prepare",
+				"git_root", w.GitRoot, "path", w.Path, "branch", w.Branch)
+		}
 		return
 	}
 	unlock, err := lockGitRoot(w.GitRoot, logger)

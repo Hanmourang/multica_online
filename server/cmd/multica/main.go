@@ -47,7 +47,14 @@ func init() {
 	// Core commands
 	issueCmd.GroupID = groupCore
 	requirementCmd.GroupID = groupCore
+	moduleCmd.GroupID = groupCore
 	projectCmd.GroupID = groupCore
+	assetCmd.GroupID = groupCore
+	sprintCmd.GroupID = groupCore
+	artifactCmd.GroupID = groupCore
+	workflowCmd.GroupID = groupCore
+	filingCmd.GroupID = groupCore
+	graphCmd.GroupID = groupCore
 	labelCmd.GroupID = groupCore
 	propertyCmd.GroupID = groupCore
 	agentCmd.GroupID = groupCore
@@ -57,6 +64,15 @@ func init() {
 	skillCmd.GroupID = groupCore
 	squadCmd.GroupID = groupCore
 	chatCmd.GroupID = groupCore
+	inboxCmd.GroupID = groupCore
+	notificationCmd.GroupID = groupCore
+	dashboardCmd.GroupID = groupCore
+	pinCmd.GroupID = groupCore
+	issueViewCmd.GroupID = groupCore
+	quickActionCmd.GroupID = groupCore
+	issueStatusCatalogCmd.GroupID = groupCore
+	issueWorkflowCmd.GroupID = groupCore
+	pluginCmd.GroupID = groupCore
 
 	// Runtime commands
 	daemonCmd.GroupID = groupRuntime
@@ -75,6 +91,12 @@ func init() {
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(requirementCmd)
 	rootCmd.AddCommand(projectCmd)
+	rootCmd.AddCommand(assetCmd)
+	rootCmd.AddCommand(sprintCmd)
+	rootCmd.AddCommand(artifactCmd)
+	rootCmd.AddCommand(workflowCmd)
+	rootCmd.AddCommand(filingCmd)
+	rootCmd.AddCommand(graphCmd)
 	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(propertyCmd)
 	rootCmd.AddCommand(agentCmd)
@@ -84,6 +106,15 @@ func init() {
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(chatCmd)
+	rootCmd.AddCommand(inboxCmd)
+	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(dashboardCmd)
+	rootCmd.AddCommand(pinCmd)
+	rootCmd.AddCommand(issueViewCmd)
+	rootCmd.AddCommand(quickActionCmd)
+	rootCmd.AddCommand(issueStatusCatalogCmd)
+	rootCmd.AddCommand(issueWorkflowCmd)
+	rootCmd.AddCommand(pluginCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)

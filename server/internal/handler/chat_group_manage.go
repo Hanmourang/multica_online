@@ -165,6 +165,10 @@ func (h *Handler) AddGroupParticipants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 与建群同理：新 Agent 进群后可能在第一条消息里立刻被 @，此时就提前
+	// 把它的 checkout 做掉，避免首次 turn 在用户等待中付 worktree add。
+	h.requestGroupPrewarms(r.Context(), workspaceID, session.ProjectID, session.ID, validAgents)
+
 	audience, _ := h.humanParticipantIDs(r.Context(), nil, session.ID)
 	h.publishConversationEventToAudience(r, session, protocol.EventChatParticipantsChanged, "member", userID, audience, participantsChangedPayload{
 		WorkspaceID:   uuidToString(session.WorkspaceID),

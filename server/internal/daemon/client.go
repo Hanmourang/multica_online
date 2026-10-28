@@ -265,11 +265,16 @@ const batchClaimRequestTimeout = 5 * time.Second
 // (batchClaimRequestTimeout) rather than the shared 30s control-plane timeout so
 // one slow claim cannot stall the whole batch; the deadline propagates to the
 // server and cancels the in-flight query there too.
-func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+// The response also carries checkout prewarm hints (see PrewarmTarget): the
+// server queues them when a group conversation is created and hands them over on
+// whichever poll happens to be next, which for an idle daemon is the one right
+// after the user opens the group.
+func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) (*ClaimBatch, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, batchClaimRequestTimeout)
 	defer cancel()
 	var resp struct {
-		Tasks []*Task `json:"tasks"`
+		Tasks    []*Task         `json:"tasks"`
+		Prewarms []PrewarmTarget `json:"prewarms"`
 	}
 	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", map[string]any{
 		"daemon_id":   daemonID,
@@ -278,7 +283,7 @@ func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []s
 	}, &resp); err != nil {
 		return nil, err
 	}
-	return resp.Tasks, nil
+	return &ClaimBatch{Tasks: resp.Tasks, Prewarms: resp.Prewarms}, nil
 }
 
 // isBatchClaimUnsupported reports whether err is a 404 from the batch claim

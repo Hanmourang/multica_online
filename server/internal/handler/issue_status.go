@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -267,6 +268,41 @@ func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype
 	return entry, "", nil
 }
 
+// createIssueStatusEntryLocked is createIssueStatusEntry for a caller that
+// already holds the catalog lock inside its own transaction — the workflow
+// writes, which create the statuses a step names while they also rewrite the
+// workflow. The derivation below still reads the catalog, so the lock is not
+// optional; it is the caller's because their write has to see the new rows.
+func createIssueStatusEntryLocked(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, publicCategory string, arg db.CreateIssueStatusEntryParams) (db.IssueStatus, string, error) {
+	if arg.Key == "" {
+		// IncludeArchived, because idx_issue_status_workspace_key is NOT a
+		// partial index: a retired status still owns its key, so reusing it
+		// would fail on insert instead of producing a second candidate.
+		entries, err := qtx.ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{
+			WorkspaceID:     workspaceID,
+			IncludeArchived: true,
+		})
+		if err != nil {
+			return db.IssueStatus{}, "", err
+		}
+		taken := make(map[string]bool, len(entries))
+		for _, e := range entries {
+			taken[e.Key] = true
+		}
+		key, err := issuestatus.DeriveKey(arg.Name, publicCategory, taken)
+		if err != nil {
+			return db.IssueStatus{}, err.Error(), nil
+		}
+		arg.Key = key
+	}
+
+	entry, err := qtx.CreateIssueStatusEntry(ctx, arg)
+	if err != nil {
+		return db.IssueStatus{}, "", err
+	}
+	return entry, "", nil
+}
+
 // UpdateIssueStatus edits a custom status's presentation. Built-in statuses are
 // immutable in v1 — name and color included — so the default workspace looks
 // and behaves identically for everyone who never opens this settings page.
@@ -394,6 +430,28 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A status a project workflow lists must stay active, or that workflow's
+	// projects would lose a column. Workflow edits take the same exclusive
+	// catalog lock, so none can add the status back between this check and the
+	// archive. (MUL-7420)
+	workflowNames, err := qtx.ListIssueWorkflowNamesUsingStatusKey(r.Context(), db.ListIssueWorkflowNamesUsingStatusKeyParams{
+		WorkspaceID: wsUUID,
+		StatusKey:   entry.Key,
+	})
+	if err != nil {
+		slog.Warn("ArchiveIssueStatus workflow check failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to check workflows using status")
+		return
+	}
+	if len(workflowNames) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":     fmt.Sprintf("cannot archive status: workflow %q still uses it; remove it from the workflow first", workflowNames[0]),
+			"code":      "issue_status_in_workflow",
+			"workflows": workflowNames,
+		})
+		return
+	}
+
 	archived, err := qtx.ArchiveIssueStatusEntry(r.Context(), db.ArchiveIssueStatusEntryParams{
 		ID:          entry.ID,
 		WorkspaceID: wsUUID,
@@ -407,6 +465,19 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
 		return
 	}
+	// Drop the retired status from the workspace Default workflow in the same
+	// transaction: the Default lists the whole active catalog, so leaving it
+	// behind would point every project on Default at a column that no longer
+	// resolves. Named workflows are blocked above instead, because dropping a
+	// column there would silently rewrite someone's explicit layout.
+	if err := qtx.RemoveStatusFromDefaultIssueWorkflow(r.Context(), db.RemoveStatusFromDefaultIssueWorkflowParams{
+		WorkspaceID: wsUUID,
+		StatusKey:   entry.Key,
+	}); err != nil {
+		slog.Warn("ArchiveIssueStatus default workflow update failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		slog.Warn("ArchiveIssueStatus commit failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
@@ -416,6 +487,10 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 	// transaction then rolled back would have every other tab re-read the
 	// catalog and cache the pre-archive row as the new truth.
 	h.publishIssueStatusChanged(uuidToString(wsUUID), member, "archived")
+	// A named workflow's definition is untouched, but the catalog changed under
+	// it if it was derived from the active list; a re-read is cheap and keeps
+	// every client's workflow editor consistent with the catalog it shows.
+	h.publishIssueWorkflowChanged(uuidToString(wsUUID), member, "updated")
 	writeJSON(w, http.StatusOK, issueStatusToResponse(archived))
 }
 

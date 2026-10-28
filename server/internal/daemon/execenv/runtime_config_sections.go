@@ -546,6 +546,8 @@ func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
 	b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 	b.WriteString("- For projects, tasks, and requirements, read the `multica-requirements` skill first. Use `multica project`, `multica issue`, and `multica requirement`. Do not delete projects, tasks, or requirements from chat.\n")
+	b.WriteString("- When a question is about something inside a project — its archive, assets, data model (graph), requirements, tasks, acceptance, deliverables, workflows, sprints, or filing — read the `multica-project-tabs` skill first. `multica project tab list <project>` names each tab and the command that reads it.\n")
+	b.WriteString("- For a project's feature modules (功能模块) and their prototype screens, read the `multica-feature-modules` skill. `multica module prototype read <module>` prints the absolute HTML path; never assemble an `html_path` yourself, because those paths are repository-relative and joining them onto the working directory is why prototype reads fail.\n")
 	b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
 	b.WriteString("- Keep responses concise and direct\n\n")
 }

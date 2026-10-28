@@ -347,6 +347,27 @@ type builtinSkillSummary struct {
 	Description string `json:"description"`
 }
 
+// builtinSkillFile is one supporting file inside a platform skill. Platform
+// skills live in the binary (embedded FS), so there is no file id or
+// workspace row to reference — the path inside the skill directory is the
+// only identity a reader needs.
+type builtinSkillFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// builtinSkillDetail is the read-only inspection shape: the list endpoint's
+// summary plus the SKILL.md body and every supporting file. Mirrors
+// SkillResponse/SkillFileResponse so the same viewer components can render
+// either kind of skill.
+type builtinSkillDetail struct {
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Content     string             `json:"content"`
+	Files       []builtinSkillFile `json:"files"`
+}
+
 // ListBuiltinSkills returns the platform skills embedded in this binary.
 // They are not workspace rows: every agent receives them on claim, and the
 // Skills page lists them so that set is visible without a per-agent attach.
@@ -362,6 +383,51 @@ func (h *Handler) ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(resp, func(i, j int) bool { return resp[i].Name < resp[j].Name })
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetBuiltinSkill returns one platform skill with its full source.
+//
+// The list endpoint deliberately carries only name + description (14 skills x
+// up to 200KB of body would be a pointless download for a page that shows two
+// lines each), so "what does this skill actually tell the agent" was readable
+// nowhere. The id is the ref id from the list endpoint (`builtin:<name>`); a
+// bare `<name>` is accepted too so the same URL works when copied from a
+// runtime skill bundle log.
+func (h *Handler) GetBuiltinSkill(w http.ResponseWriter, r *http.Request) {
+	// Decode the segment before matching: chi routes on r.URL.RawPath whenever it
+	// differs from the decoded path, so a client that percent-escapes the ref id
+	// (`builtin%3A<name>`, exactly what encodeURIComponent produces) arrives here
+	// still escaped. Matching the raw form turned every click into a 404.
+	param := chi.URLParam(r, "id")
+	if decoded, err := url.PathUnescape(param); err == nil {
+		param = decoded
+	}
+	name := strings.TrimPrefix(param, "builtin:")
+	name = strings.TrimSpace(name)
+	if name == "" || strings.ContainsAny(name, "/\\") {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+
+	for _, s := range h.TaskService.BuiltinSkills() {
+		if s.Name != name {
+			continue
+		}
+		files := make([]builtinSkillFile, 0, len(s.Files))
+		for _, f := range s.Files {
+			files = append(files, builtinSkillFile{Path: f.Path, Content: f.Content})
+		}
+		writeJSON(w, http.StatusOK, builtinSkillDetail{
+			ID:          service.BuiltinSkillID(s.Name),
+			Name:        s.Name,
+			Description: s.Description,
+			Content:     s.Content,
+			Files:       files,
+		})
+		return
+	}
+
+	writeError(w, http.StatusNotFound, "skill not found")
 }
 
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {

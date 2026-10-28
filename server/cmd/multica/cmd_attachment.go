@@ -52,12 +52,24 @@ override it with --task when needed.`,
 	RunE: runAttachmentUpload,
 }
 
+var attachmentDeleteCmd = &cobra.Command{
+	Use:   "delete <attachment-id>",
+	Short: "Delete an attachment and its stored file (needs --yes)",
+	Long: `Removes the attachment row and its object in object storage. Any chat reply
+or issue that rendered it shows a broken card afterwards, so confirm the id
+belongs to something worth removing before passing --yes.`,
+	Args: exactArgs(1),
+	RunE: runAttachmentDelete,
+}
+
 func init() {
 	attachmentCmd.AddCommand(attachmentDownloadCmd)
 	attachmentCmd.AddCommand(attachmentUploadCmd)
+	attachmentCmd.AddCommand(attachmentDeleteCmd)
 
 	attachmentDownloadCmd.Flags().StringP("output-dir", "o", ".", "Directory to save the downloaded file")
 	attachmentUploadCmd.Flags().String("task", "", "Chat task id to attach to (defaults to MULTICA_TASK_ID)")
+	addDestructiveFlags(attachmentDeleteCmd)
 }
 
 func runAttachmentUpload(cmd *cobra.Command, args []string) error {
@@ -185,5 +197,41 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		"filename": filename,
 		"path":     abs,
 		"size":     strVal(att, "size_bytes"),
+	})
+}
+
+func runAttachmentDelete(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
+	defer cancel()
+
+	// Read the metadata first so the confirmation names the file instead of a
+	// bare UUID — deleting an attachment is irreversible and the id alone gives
+	// the person nothing to judge it by.
+	var att map[string]any
+	if err := client.GetJSON(ctx, "/api/attachments/"+args[0], &att); err != nil {
+		return fmt.Errorf("get attachment: %w", err)
+	}
+	name := filepath.Base(strVal(att, "filename"))
+	if name == "" || name == "." {
+		name = args[0]
+	}
+	if err := confirmDestructive(cmd, fmt.Sprintf(
+		"Delete attachment %q (%s) and its stored file. Replies or issues that rendered it will show a broken card.",
+		name, args[0])); err != nil {
+		return err
+	}
+
+	if err := client.DeleteJSON(ctx, "/api/attachments/"+args[0]); err != nil {
+		return fmt.Errorf("delete attachment: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "Deleted:", name)
+	return cli.PrintJSON(os.Stdout, map[string]any{
+		"deleted":       true,
+		"attachment_id": args[0],
+		"filename":      name,
 	})
 }

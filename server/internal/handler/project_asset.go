@@ -848,12 +848,8 @@ func (h *Handler) SearchAssetCandidates(w http.ResponseWriter, r *http.Request) 
 	nameQ := strings.ToLower(strings.TrimSpace(q.Get("q")))
 	relatedOnly := strings.EqualFold(q.Get("relatedToMe"), "true") || q.Get("relatedToMe") == "1"
 
-	// knowledge_* 暂无对接源：返回空（前端引导手填）。
-	if category == "knowledge_repo" || category == "knowledge_group" {
-		writeJSON(w, http.StatusOK, map[string]any{"candidates": []AssetCandidate{}})
-		return
-	}
-
+	// knowledge_* 不再短路：候选池 = 项目档案（见下方 archive 分支）。这里只挡
+	// 非法分类，合法分类即使没有候选也返回空列表而不是错误。
 	ctx := r.Context()
 	candidates, err := h.buildAssetCandidates(ctx, project, userID, category, nameQ, relatedOnly)
 	if err != nil {
@@ -862,6 +858,47 @@ func (h *Handler) SearchAssetCandidates(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})
+}
+
+// categoryUsesGithubCandidates 判定分类是否消费仓库类候选（项目 github_repo
+// 资源 + workspace.repos）。知识 / 文档分类只看档案，避免仓库混进知识列表。
+func categoryUsesGithubCandidates(category string) bool {
+	switch category {
+	case "code_repository", "application", "package":
+		return true
+	}
+	return false
+}
+
+// categoryUsesArchiveCandidates 判定分类是否消费项目档案候选。资产五分类里
+// 知识仓库 / 知识分组 / 其他 都是文档语义，候选池就是项目档案。
+func categoryUsesArchiveCandidates(category string) bool {
+	return archiveAssetCategories[category]
+}
+
+// archiveAssetCandidate 由档案行构造候选：名称取 rel_path 末段，subtype 取扩展名，
+// external_ref 带 artifact_id / attachment_id / rel_path，绑定后预览直接走档案分支。
+func archiveAssetCandidate(category, relPath, artifactID, attachmentID string, alreadyBound bool) AssetCandidate {
+	name := relPath
+	if i := strings.LastIndex(relPath, "/"); i >= 0 {
+		name = relPath[i+1:]
+	}
+	subtype := ""
+	if i := strings.LastIndex(name, "."); i >= 0 && i+1 < len(name) {
+		subtype = strings.ToLower(name[i+1:])
+	}
+	ref := map[string]string{"artifact_id": artifactID, "rel_path": relPath}
+	if attachmentID != "" {
+		ref["attachment_id"] = attachmentID
+	}
+	return AssetCandidate{
+		AssetCategory: category,
+		AssetName:     name,
+		Subtype:       subtype,
+		Source:        "archive",
+		ExternalRef:   mustJSON(ref),
+		AlreadyBound:  alreadyBound,
+	}
 }
 
 // buildAssetCandidates 聚合 github_repo 资源 + workspace.repos 两个源，去重、打标、评分。
@@ -902,6 +939,9 @@ func (h *Handler) buildAssetCandidates(ctx context.Context, project db.Project, 
 	creator, _ := h.parseUserUUIDOrZero(userID)
 
 	for _, res := range resources {
+		if !categoryUsesGithubCandidates(category) {
+			break
+		}
 		if res.ResourceType != "github_repo" {
 			continue
 		}
@@ -946,7 +986,7 @@ func (h *Handler) buildAssetCandidates(ctx context.Context, project db.Project, 
 	}
 
 	// workspace.repos：项目尚未挂为资源、但工作区可达的仓库 → 候选（无指针，评分低）。
-	if ws, err := h.Queries.GetWorkspace(ctx, project.WorkspaceID); err == nil && len(ws.Repos) > 0 {
+	if ws, err := h.Queries.GetWorkspace(ctx, project.WorkspaceID); err == nil && len(ws.Repos) > 0 && categoryUsesGithubCandidates(category) {
 		var repos []struct {
 			URL   string `json:"url"`
 			Label string `json:"label"`
@@ -978,10 +1018,10 @@ func (h *Handler) buildAssetCandidates(ctx context.Context, project db.Project, 
 		}
 	}
 
-	// 项目档案文档 → 反向作为「其他」类候选（migration 474 双向映射）。
+	// 项目档案文档 → 知识类 / 其他类候选（migration 474 双向映射的反向源）。
 	// external_ref 携 artifact_id：syncAssetToArchive 对此类 binding 跳过入档，防循环；
 	// source='asset' 的档案行本身就是资产同步产物，不再重复当候选。
-	if category == "other" {
+	if categoryUsesArchiveCandidates(category) {
 		rows, err := h.DB.Query(ctx, `
 			SELECT DISTINCT ON (rel_path) id, rel_path, attachment_id
 			FROM project_artifact
@@ -1005,36 +1045,37 @@ func (h *Handler) buildAssetCandidates(ctx context.Context, project db.Project, 
 				if relatedOnly {
 					continue // 档案文档无个人归属信号，「只看与我相关」下不展示
 				}
-				ref := map[string]string{"artifact_id": uuidToString(artifactID), "rel_path": relPath}
+				attachID := ""
 				if attachmentID.Valid {
-					ref["attachment_id"] = uuidToString(attachmentID)
+					attachID = uuidToString(attachmentID)
 				}
-				subtype := ""
-				if i := strings.LastIndex(name, "."); i >= 0 && i+1 < len(name) {
-					subtype = strings.ToLower(name[i+1:])
-				}
-				out = append(out, AssetCandidate{
-					AssetCategory:   category,
-					AssetName:       name,
-					Subtype:         subtype,
-					Source:          "archive",
-					ExternalRef:     json.RawMessage(mustJSON(ref)),
-					AlreadyBound:    boundNames[strings.ToLower(name)],
-					RecommendReason: "",
-				})
+				out = append(out, archiveAssetCandidate(
+					category, relPath, uuidToString(artifactID), attachID,
+					boundNames[strings.ToLower(name)],
+				))
 			}
 			rows.Close()
 		}
 	}
 
 	// 推荐项优先、分值降序（对齐 CoCo 候选列表观感）。
+	sortAssetCandidates(out)
+	return out, nil
+}
+
+// sortAssetCandidates 候选排序：未绑定在前，其次推荐，再次分值降序。
+// 项目档案全部已绑定时，候选列表仍会列出这些行（置灰），如果不把未绑定项提上来，
+// 用户只会看到一整列灰按钮，误以为「绑定坏了」。
+func sortAssetCandidates(out []AssetCandidate) {
 	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].AlreadyBound != out[j].AlreadyBound {
+			return !out[i].AlreadyBound
+		}
 		if out[i].Recommended != out[j].Recommended {
 			return out[i].Recommended
 		}
 		return out[i].Score > out[j].Score
 	})
-	return out, nil
 }
 
 // mustJSON 序列化辅助（候选构造用；失败返回空对象，不阻断列表）。
@@ -1575,12 +1616,15 @@ RETURNING ` + assetBindingColumns
 	})
 }
 
-// AssetOverviewIssue 是关联选择器/矩阵行的工作项条目（需求与 Bug 在 multica 同为 issue）。
+// AssetOverviewIssue 是关联选择器/矩阵行的工作项条目。multica 里需求与任务同为
+// issue：顶层（parent_issue_id 为空）= 需求，有父项 = 任务；is_requirement 直接
+// 下发该判别，供前端把候选分成「需求 / 任务」两区并分色。
 type AssetOverviewIssue struct {
-	ID        string  `json:"id"`
-	Title     string  `json:"title"`
-	Status    string  `json:"status"`
-	ProjectID *string `json:"project_id"`
+	ID            string  `json:"id"`
+	Title         string  `json:"title"`
+	Status        string  `json:"status"`
+	ProjectID     *string `json:"project_id"`
+	IsRequirement bool    `json:"is_requirement"`
 }
 
 // AssetOverviewResponse 是阶段矩阵/需求×资产视图的聚合面：全量 binding（含打标与
@@ -1656,20 +1700,20 @@ LIMIT 1000`, args...)
 		return
 	}
 
-	// 候选工作项：未关闭的（供新关联）∪ 已被任何 binding 关联的（供回显/矩阵行），
-	// 限定同 workspace（+可选 project），上限 300。
-	iconds := []string{"i.workspace_id = $1", `(i.status NOT IN ('done', 'cancelled')
-	OR EXISTS (SELECT 1 FROM asset_issue_link al WHERE al.issue_id = i.id))`}
+	// 候选工作项：编辑面要求「展示全部的任务和需求」——不再按未关闭/已关联收窄，
+	// 全量下发同 workspace（+可选 project）的 issue；顶层在前供分区渲染，上限 800。
+	iconds := []string{"i.workspace_id = $1"}
 	iargs := []any{wsUUID}
 	if pid := strings.TrimSpace(r.URL.Query().Get("projectId")); pid != "" {
 		pu, _ := parseUUIDLoose(pid)
 		iargs = append(iargs, pu)
 		iconds = append(iconds, "i.project_id = $"+strconv.Itoa(len(iargs)))
 	}
-	irows, err := h.DB.Query(ctx, `SELECT i.id, i.title, i.status, i.project_id FROM issue i
+	irows, err := h.DB.Query(ctx, `SELECT i.id, i.title, i.status, i.project_id,
+	(i.parent_issue_id IS NULL) AS is_requirement FROM issue i
 WHERE `+strings.Join(iconds, " AND ")+`
-ORDER BY i.updated_at DESC
-LIMIT 300`, iargs...)
+ORDER BY is_requirement DESC, i.updated_at DESC
+LIMIT 800`, iargs...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list asset overview issues")
 		return
@@ -1679,12 +1723,14 @@ LIMIT 300`, iargs...)
 	for irows.Next() {
 		var id, projectID pgtype.UUID
 		var title, status string
-		if err := irows.Scan(&id, &title, &status, &projectID); err != nil {
+		var isRequirement bool
+		if err := irows.Scan(&id, &title, &status, &projectID, &isRequirement); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list asset overview issues")
 			return
 		}
 		issues = append(issues, AssetOverviewIssue{
 			ID: uuidToString(id), Title: title, Status: status, ProjectID: uuidToPtr(projectID),
+			IsRequirement: isRequirement,
 		})
 	}
 	writeJSON(w, http.StatusOK, AssetOverviewResponse{Bindings: bindings, Issues: issues})

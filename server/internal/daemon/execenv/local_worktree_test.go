@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -2090,5 +2091,263 @@ func TestIsolatedPrepareKeepsTheReadOnlyBranchDrop(t *testing.T) {
 	}
 	if _, err := gitTry(t, repo, "rev-parse", "--verify", "agent/j/mul-6881"); err == nil {
 		t.Error("a turn that changed nothing left its branch behind")
+	}
+}
+
+// prepareKeptTurn is prepareTurn with the flag the daemon sets for group-chat
+// turns: the tree outlives Finalize so the next turn can adopt it.
+func prepareKeptTurn(t *testing.T, localPath, conversationKey, taskID string) *LocalWorktree {
+	t.Helper()
+	wt, err := PrepareLocalWorktree(LocalWorktreeParams{
+		LocalPath:       localPath,
+		EnvRoot:         t.TempDir(),
+		AgentName:       "J",
+		TaskID:          taskID,
+		ConversationKey: conversationKey,
+		WorkspaceID:     testBranchOwner.WorkspaceID,
+		AgentID:         testBranchOwner.AgentID,
+		ConversationID:  testBranchOwner.ConversationID,
+		Keep:            true,
+	}, worktreeTestLogger())
+	if err != nil {
+		t.Fatalf("PrepareLocalWorktree(keep, %s): %v", taskID, err)
+	}
+	return wt
+}
+
+// chatConversationKey mirrors what the daemon derives for a chat session, so
+// these tests exercise the branch a group turn actually writes.
+func chatConversationKey() string {
+	return "chat-" + taskKey(testBranchOwner.ConversationID)
+}
+
+func readReuseProbe(t *testing.T, wt *LocalWorktree) reuseProbe {
+	t.Helper()
+	var probe reuseProbe
+	data := readFile(t, filepath.Join(filepath.Dir(wt.Path), reuseProbeFileName))
+	if err := json.Unmarshal([]byte(data), &probe); err != nil {
+		t.Fatalf("parse reuse probe: %v", err)
+	}
+	return probe
+}
+
+func sameDirectory(t *testing.T, a, b string) bool {
+	t.Helper()
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
+}
+
+// TestFinalizeKeptWorktreeStaysOnDiskWithAReuseProbe is the group-chat contract:
+// the checkout the turn just paid for outlives it, and says enough about the
+// user's repository for the next turn to decide whether it may still be used.
+func TestFinalizeKeptWorktreeStaysOnDiskWithAReuseProbe(t *testing.T) {
+	repo := newTestRepo(t)
+
+	wt := prepareKeptTurn(t, repo, chatConversationKey(), turnOneTask)
+	writeFile(t, filepath.Join(wt.WorkDir, "turn-one.txt"), "work from turn one\n")
+	outcome := finalizeOK(t, wt)
+
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("kept worktree is gone after Finalize: %v", err)
+	}
+	if outcome.Branch == "" {
+		t.Fatal("a turn that produced work reported no branch")
+	}
+	probe := readReuseProbe(t, wt)
+	if probe.Branch != outcome.Branch {
+		t.Errorf("probe branch = %q, want the delivered branch %q", probe.Branch, outcome.Branch)
+	}
+	if probe.GitRoot == "" || probe.Head == "" {
+		t.Errorf("probe does not pin the repository: %+v", probe)
+	}
+	if probe.UserBranch != "main" {
+		t.Errorf("probe user branch = %q, want main", probe.UserBranch)
+	}
+	if probe.Dirty {
+		t.Error("probe reports the user's clean checkout as dirty")
+	}
+	if _, err := gitTry(t, repo, "rev-parse", "--verify", outcome.Branch); err != nil {
+		t.Fatal("the kept worktree's branch was dropped")
+	}
+}
+
+// TestAdoptLocalWorktreeContinuesTheKeptTree is the latency fix itself: the
+// second turn must land in the same directory, on the same branch, at the
+// commit the first turn delivered — without a checkout in between.
+func TestAdoptLocalWorktreeContinuesTheKeptTree(t *testing.T) {
+	repo := newTestRepo(t)
+	// Keeps the marker below out of the agent's delivery: it exists to prove
+	// the directory survived, not to be committed.
+	writeFile(t, filepath.Join(repo, ".gitignore"), "scratch/\n")
+	gitRun(t, repo, "add", ".gitignore")
+	gitRun(t, repo, "commit", "-m", "ignore scratch")
+
+	wt := prepareKeptTurn(t, repo, chatConversationKey(), turnOneTask)
+	writeFile(t, filepath.Join(wt.WorkDir, "turn-one.txt"), "work from turn one\n")
+	outcome := finalizeOK(t, wt)
+
+	// Ignored by git, never committed, and absent from any fresh checkout — so
+	// its survival is what proves the tree on disk was reused rather than
+	// rebuilt.
+	marker := filepath.Join(wt.Path, "scratch", "marker.txt")
+	writeFile(t, marker, "only in the kept tree\n")
+
+	adopted, err := AdoptLocalWorktree(wt.WorkDir, repo,
+		testBranchOwner.WorkspaceID, testBranchOwner.AgentID, testBranchOwner.ConversationID,
+		worktreeTestLogger())
+	if err != nil {
+		t.Fatalf("AdoptLocalWorktree: %v", err)
+	}
+	if !sameDirectory(t, adopted.Path, wt.Path) {
+		t.Fatalf("adopted %q, want the kept tree %q", adopted.Path, wt.Path)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("the kept tree was checked out again instead of adopted: %v", err)
+	}
+	if adopted.Branch != outcome.Branch {
+		t.Errorf("adopted branch = %q, want the conversation's %q", adopted.Branch, outcome.Branch)
+	}
+	if want := gitRun(t, repo, "rev-parse", outcome.Branch); adopted.BaseCommit != want {
+		t.Errorf("adopted base = %s, want the delivered tip %s", adopted.BaseCommit, want)
+	}
+	if !adopted.Continued {
+		t.Error("an adopted tree must continue the conversation's branch")
+	}
+	if !adopted.keep {
+		t.Error("an adopted tree must stay kept, or the turn after it pays for the checkout again")
+	}
+	if adopted.userState == "" || adopted.userState != adopted.priorState {
+		t.Errorf("adopted state = %q / prior %q, want the recorded snapshot", adopted.userState, adopted.priorState)
+	}
+}
+
+// TestAdoptTearsDownAKeptTreeWhenTheUserCheckoutMoved pins the fail-closed
+// half, and the teardown that makes the fallback correct: the tree shows code
+// the user no longer has, so it must not be used — and it must release the
+// branch, or the fresh checkout would fork a sibling and split the
+// conversation's work across two branches.
+func TestAdoptTearsDownAKeptTreeWhenTheUserCheckoutMoved(t *testing.T) {
+	repo := newTestRepo(t)
+
+	wt := prepareKeptTurn(t, repo, chatConversationKey(), turnOneTask)
+	writeFile(t, filepath.Join(wt.WorkDir, "turn-one.txt"), "work from turn one\n")
+	finalizeOK(t, wt)
+
+	// The user edits between the two turns: the kept tree no longer matches
+	// their checkout.
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "edited after the turn\n")
+
+	if _, err := AdoptLocalWorktree(wt.WorkDir, repo,
+		testBranchOwner.WorkspaceID, testBranchOwner.AgentID, testBranchOwner.ConversationID,
+		worktreeTestLogger()); err == nil {
+		t.Fatal("adopted a tree whose user checkout moved")
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("stale kept worktree still on disk: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(wt.Path), reuseProbeFileName)); !os.IsNotExist(err) {
+		t.Fatalf("stale reuse probe still on disk: %v", err)
+	}
+	if _, err := gitTry(t, repo, "rev-parse", "--verify", wt.Branch); err != nil {
+		t.Fatal("tearing down the stale tree deleted the branch that carries its work")
+	}
+}
+
+// TestAdoptRefusesAnotherConversationsKeptTree is the isolation half. Nothing
+// has been proven here, so nothing may be torn down either.
+func TestAdoptRefusesAnotherConversationsKeptTree(t *testing.T) {
+	repo := newTestRepo(t)
+
+	wt := prepareKeptTurn(t, repo, chatConversationKey(), turnOneTask)
+	writeFile(t, filepath.Join(wt.WorkDir, "turn-one.txt"), "work from turn one\n")
+	finalizeOK(t, wt)
+
+	other := testBranchOwner
+	other.ConversationID = "11112222-3333-4444-5555-000000000099"
+	if _, err := AdoptLocalWorktree(wt.WorkDir, repo,
+		other.WorkspaceID, other.AgentID, other.ConversationID, worktreeTestLogger()); err == nil {
+		t.Fatal("adopted another conversation's worktree")
+	}
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("a worktree this conversation never proved ownership of was torn down: %v", err)
+	}
+}
+
+// TestKeptLocalWorktreeRefOnlyAnswersForItsOwnConversation covers the cheap
+// check the daemon runs before locking anything.
+func TestKeptLocalWorktreeRefOnlyAnswersForItsOwnConversation(t *testing.T) {
+	repo := newTestRepo(t)
+
+	wt := prepareKeptTurn(t, repo, chatConversationKey(), turnOneTask)
+	writeFile(t, filepath.Join(wt.WorkDir, "turn-one.txt"), "work from turn one\n")
+	finalizeOK(t, wt)
+
+	if !KeptLocalWorktreeRef(wt.WorkDir, testBranchOwner.WorkspaceID, testBranchOwner.AgentID, testBranchOwner.ConversationID) {
+		t.Fatal("the conversation's own kept worktree was not recognised")
+	}
+	if KeptLocalWorktreeRef(wt.WorkDir, testBranchOwner.WorkspaceID, testBranchOwner.AgentID, "11112222-3333-4444-5555-000000000099") {
+		t.Error("another conversation was told this tree is its own")
+	}
+	if KeptLocalWorktreeRef(repo, testBranchOwner.WorkspaceID, testBranchOwner.AgentID, testBranchOwner.ConversationID) {
+		t.Error("the user's own checkout was reported as a kept worktree")
+	}
+}
+
+// Reuse's root must not be derived with filepath.Dir for a worktree task: the
+// agent's cwd is envRoot/worktree[/sub], so deriving it would put the refreshed
+// sidecars and the per-task config INSIDE the worktree — committing them to the
+// delivered branch and handing the next turn a tree that is not the one it
+// left.
+func TestReuseTakesTheEnvRootFromRootDirForAWorktreeTask(t *testing.T) {
+	t.Parallel()
+
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, LocalWorktreeDirName, "services", "api")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("seed worktree cwd: %v", err)
+	}
+	task := TaskContextForEnv{IssueID: "reuse-worktree"}
+
+	env := Reuse(ReuseParams{
+		RootDir:  envRoot,
+		WorkDir:  workDir,
+		Provider: "claude",
+		Task:     task,
+	}, worktreeTestLogger())
+	if env == nil {
+		t.Fatal("Reuse returned nil for an existing worktree")
+	}
+	if env.RootDir != envRoot {
+		t.Fatalf("env root = %q, want %q", env.RootDir, envRoot)
+	}
+	if _, err := os.Stat(filepath.Join(envRoot, "multica-config")); err != nil {
+		t.Fatalf("per-task config was not created in the env root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(envRoot, LocalWorktreeDirName, "multica-config")); !os.IsNotExist(err) {
+		t.Fatalf("per-task config landed inside the worktree (stat err = %v)", err)
+	}
+
+	// The daemon's teardown needs the adopted worktree back from Reuse: without
+	// it Finalize never runs, and the turn's work is never committed.
+	adopted := &LocalWorktree{Path: filepath.Join(envRoot, LocalWorktreeDirName), keep: true}
+	reused := Reuse(ReuseParams{
+		RootDir:       envRoot,
+		WorkDir:       workDir,
+		Provider:      "claude",
+		Task:          task,
+		LocalWorktree: adopted,
+	}, worktreeTestLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil for an adopted worktree")
+	}
+	if reused.LocalWorktree != adopted {
+		t.Fatal("Reuse dropped the adopted worktree, so nothing would finalize it")
 	}
 }

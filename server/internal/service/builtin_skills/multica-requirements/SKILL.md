@@ -51,20 +51,23 @@ multica issue comment add <id> --content "<text>" --output json
 ```
 
 Status keys: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`,
-`cancelled`. Do not run `issue delete`, `comment delete`, or `resource remove`
-unless the user explicitly asked to remove that one record and a delete command
-already exists. Prefer status `cancelled` for work that should stop.
+`cancelled`. There is no `issue delete` command — for work that should stop, set
+`cancelled`. Anything that removes data follows the three approval levels in
+`multica-module-map`; do not delete on your own initiative.
 
 ## Requirements
 
-Create one with `--start-at`. Without that timestamp the server stores a task.
+Create one with `--start-at`, or name the window with `--start-date` /
+`--due-date` (the day becomes 09:00 local). Some start time is required: without
+it the issue is a task and stays off the requirement calendar.
 
 ```bash
 multica requirement create \
   --title "<title>" \
   --project <project-id> \
   --goal "<goal>" \
-  --start-at 2026-11-02T09:00:00Z \
+  --start-date 2026-11-02 \
+  --due-date 2026-11-06 \
   --decompose-mode confirm \
   --output json
 multica requirement list --project <project-id> --output json
@@ -97,8 +100,14 @@ Order when the user asks to move a requirement forward:
 6. Record acceptance criteria, then a verdict.
 
 `issue list --kind requirement` is the same filter as `requirement list`.
-`issue create --start-at <RFC3339>` also creates a requirement; prefer
-`requirement create` so the timestamp cannot be omitted.
+`issue create --start-at <RFC3339>` also creates a requirement, but plain
+`issue create --start-date <YYYY-MM-DD>` creates a **task** with a due date and
+nothing on the calendar — prefer `requirement create` so the start time cannot
+be omitted.
+
+Feature modules (功能模块) and their prototype screens are a different domain: use
+`multica module` and read the `multica-feature-modules` skill. Which tab of a
+project holds what is in the `multica-project-tabs` skill.
 
 ## When the command fails
 

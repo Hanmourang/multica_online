@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -1037,5 +1038,229 @@ func TestRunTaskDeclinesReuseWhenTheClaimedDirectoryIsSwappedBeforeUse(t *testin
 	}
 	if secondResult.WorkDir == "" {
 		t.Fatal("second task produced no environment at all")
+	}
+}
+
+const (
+	groupReuseWorkspaceID   = "ws-group"
+	groupReuseAgentID       = "agent-group"
+	groupReuseChatSessionID = "11112222-3333-4444-5555-cccccccccccc"
+)
+
+// groupWorktreeReuseFixture leaves behind exactly what a group turn leaves
+// behind in worktree mode: a kept worktree under the conversation's env root,
+// with the reuse record Finalize writes beside it.
+func groupWorktreeReuseFixture(t *testing.T) (root, repo string, wt *execenv.LocalWorktree) {
+	t.Helper()
+
+	repo = newGroupReuseRepo(t)
+
+	root = t.TempDir()
+	// The daemon creates the env root before Prepare; the snapshot index
+	// Prepare writes lives in it.
+	envRoot := filepath.Join(root, groupReuseWorkspaceID, "0123456789ab")
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		t.Fatalf("seed env root: %v", err)
+	}
+	wt, err := execenv.PrepareLocalWorktree(execenv.LocalWorktreeParams{
+		LocalPath:       repo,
+		EnvRoot:         envRoot,
+		AgentName:       "J",
+		TaskID:          "11112222-3333-4444-5555-aaaaaaaaaaaa",
+		ConversationKey: "chat-" + groupReuseChatSessionID,
+		WorkspaceID:     groupReuseWorkspaceID,
+		AgentID:         groupReuseAgentID,
+		ConversationID:  groupReuseChatSessionID,
+		Keep:            true,
+	}, discardLogger())
+	if err != nil {
+		t.Fatalf("PrepareLocalWorktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.WorkDir, "turn-one.txt"), []byte("work from turn one\n"), 0o644); err != nil {
+		t.Fatalf("write turn work: %v", err)
+	}
+	if _, err := wt.Finalize(discardLogger()); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	return root, repo, wt
+}
+
+// newGroupReuseRepo is the user's repository in these tests: one commit and its
+// own identity config, so every git command works without depending on the
+// machine's global setup.
+func newGroupReuseRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	runGitForGC(t, repo, "init", "-b", "main")
+	runGitForGC(t, repo, "config", "user.name", "Test User")
+	runGitForGC(t, repo, "config", "user.email", "test@test.com")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGitForGC(t, repo, "add", "README.md")
+	runGitForGC(t, repo, "commit", "-m", "initial commit")
+	return repo
+}
+
+func groupReuseTask(wt *execenv.LocalWorktree) Task {
+	return Task{
+		ID:              "11112222-3333-4444-5555-bbbbbbbbbbbb",
+		WorkspaceID:     groupReuseWorkspaceID,
+		AgentID:         groupReuseAgentID,
+		ChatSessionID:   groupReuseChatSessionID,
+		ChatSessionKind: "group",
+		PriorWorkDir:    wt.WorkDir,
+	}
+}
+
+func groupReuseAssignment(repo string) *localDirectoryAssignment {
+	return &localDirectoryAssignment{
+		Ref:     localDirectoryRef{ExecutionMode: localDirectoryModeWorktree},
+		AbsPath: repo,
+	}
+}
+
+// TestShouldReusePriorWorkdirGroupTurnAcceptsItsKeptWorktree is the gate the
+// latency fix depends on: without it the daemon never reaches Reuse and every
+// group message pays for a full checkout again.
+func TestShouldReusePriorWorkdirGroupTurnAcceptsItsKeptWorktree(t *testing.T) {
+	t.Parallel()
+
+	root, repo, wt := groupWorktreeReuseFixture(t)
+	got, ok := shouldReusePriorWorkdir(groupReuseTask(wt), groupReuseAssignment(repo), root)
+	if !ok {
+		t.Fatal("a group turn refused the worktree its previous turn kept for it")
+	}
+	if !sameDir(t, got, wt.WorkDir) {
+		t.Fatalf("reused %q, want the kept worktree %q", got, wt.WorkDir)
+	}
+}
+
+// A single-chat turn must not inherit a tree kept for a group turn, even when
+// the path looks right and the task carries the same conversation id.
+func TestShouldReusePriorWorkdirGroupKeptTreeIsRefusedToNonGroupTurn(t *testing.T) {
+	t.Parallel()
+
+	root, repo, wt := groupWorktreeReuseFixture(t)
+	task := groupReuseTask(wt)
+	task.ChatSessionKind = ""
+	if _, ok := shouldReusePriorWorkdir(task, groupReuseAssignment(repo), root); ok {
+		t.Fatal("a non-group turn reused a worktree kept for a group turn")
+	}
+}
+
+// In-place resources run in the user's own directory. A kept worktree is not
+// that directory, and offering it would move the agent's work somewhere the
+// user never asked for.
+func TestShouldReusePriorWorkdirGroupKeptTreeIsRefusedForInPlaceMode(t *testing.T) {
+	t.Parallel()
+
+	root, repo, wt := groupWorktreeReuseFixture(t)
+	assignment := groupReuseAssignment(repo)
+	assignment.Ref.ExecutionMode = localDirectoryModeInPlace
+	if _, ok := shouldReusePriorWorkdir(groupReuseTask(wt), assignment, root); ok {
+		t.Fatal("an in-place resource reused a kept worktree")
+	}
+}
+
+// The reuse record is the ticket. Without it the tree is just a directory that
+// happens to sit at the right path.
+func TestShouldReusePriorWorkdirGroupKeptTreeWithoutRecordIsRefused(t *testing.T) {
+	t.Parallel()
+
+	root, repo, wt := groupWorktreeReuseFixture(t)
+	if err := os.Remove(filepath.Join(filepath.Dir(wt.Path), ".multica_reuse_probe.json")); err != nil {
+		t.Fatalf("remove reuse probe: %v", err)
+	}
+	if _, ok := shouldReusePriorWorkdir(groupReuseTask(wt), groupReuseAssignment(repo), root); ok {
+		t.Fatal("reused a kept worktree with no reuse record")
+	}
+}
+
+// groupRunTask builds a claimed group turn on a worktree-mode local_directory
+// resource, the shape the server hands the daemon.
+func groupRunTask(t *testing.T, repo, daemonID, taskID string) Task {
+	t.Helper()
+	raw, err := json.Marshal(localDirectoryRef{
+		LocalPath:     repo,
+		DaemonID:      daemonID,
+		ExecutionMode: localDirectoryModeWorktree,
+	})
+	if err != nil {
+		t.Fatalf("marshal local directory ref: %v", err)
+	}
+	return Task{
+		ID:              taskID,
+		WorkspaceID:     groupReuseWorkspaceID,
+		RuntimeID:       "rt-leader",
+		AgentID:         groupReuseAgentID,
+		ChatSessionID:   groupReuseChatSessionID,
+		ChatSessionKind: "group",
+		AuthToken:       "mat_group_reuse",
+		Agent:           &AgentData{ID: groupReuseAgentID, Name: "group-agent"},
+		ProjectResources: []ProjectResourceData{{
+			ID:           "res-group",
+			ResourceType: localDirectoryResourceType,
+			ResourceRef:  raw,
+		}},
+	}
+}
+
+// TestRunTaskGroupTurnAdoptsTheWorktreeItsPreviousTurnKept is the end-to-end
+// latency fix: the second message of a group conversation must run in the
+// checkout the first message left behind. A regression shows up as a different
+// directory, or as the same path rebuilt from scratch (different inode), which
+// is exactly what the removed 19s checkout looks like.
+func TestRunTaskGroupTurnAdoptsTheWorktreeItsPreviousTurnKept(t *testing.T) {
+	d, argsFile, cleanup := newLeaderReuseTestDaemon(t)
+	defer cleanup()
+	const daemonID = "d-group"
+	d.cfg.DaemonID = daemonID
+	d.envRootBusyWait = 5 * time.Second
+	d.moduleLocks = NewModuleLocker()
+	d.localPathLocks = NewLocalPathLocker()
+
+	repo := newGroupReuseRepo(t)
+	head := runGitForGC(t, repo, "rev-parse", "HEAD")
+
+	first := groupRunTask(t, repo, daemonID, "task-group-1")
+	firstResult, err := d.runTask(context.Background(), first, "claude", 0, d.logger)
+	if err != nil {
+		t.Fatalf("first group runTask: %v", err)
+	}
+	if firstResult.WorkDir == "" {
+		t.Fatalf("first group turn produced no workdir: %+v", firstResult)
+	}
+	if sameDir(t, firstResult.WorkDir, repo) {
+		t.Fatal("the group turn ran in the user's own directory instead of its worktree")
+	}
+	before, err := os.Stat(firstResult.WorkDir)
+	if err != nil {
+		t.Fatalf("stat the kept worktree: %v", err)
+	}
+
+	second := groupRunTask(t, repo, daemonID, "task-group-2")
+	second.PriorWorkDir = firstResult.WorkDir
+	secondResult, err := d.runTask(context.Background(), second, "claude", 0, d.logger)
+	if err != nil {
+		t.Fatalf("second group runTask: %v", err)
+	}
+	if !sameDir(t, secondResult.WorkDir, firstResult.WorkDir) {
+		t.Fatalf("second turn ran in %q, want the kept worktree %q", secondResult.WorkDir, firstResult.WorkDir)
+	}
+	after, err := os.Stat(firstResult.WorkDir)
+	if err != nil {
+		t.Fatalf("stat the kept worktree after turn two: %v", err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("the worktree was checked out again instead of adopted")
+	}
+	if got := runGitForGC(t, repo, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("the user's HEAD moved: %s -> %s", head, got)
+	}
+	// A group turn's input is the server's snapshot; resuming a provider
+	// session would feed the same history twice.
+	if args, readErr := os.ReadFile(argsFile); readErr == nil && strings.Contains(string(args), "--resume") {
+		t.Fatalf("a group turn resumed a provider session:\n%s", args)
 	}
 }

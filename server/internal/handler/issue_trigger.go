@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -120,6 +121,9 @@ type IssueTriggerPreviewRequest struct {
 	AssigneeType *string `json:"assignee_type"`
 	AssigneeID   *string `json:"assignee_id"`
 	Status       *string `json:"status"`
+	// ProjectID places a create preview in a project, so its workflow's
+	// starting status and starting-step handoff apply. (MUL-7420)
+	ProjectID *string `json:"project_id,omitempty"`
 }
 
 // IssueTriggerPreviewItem is one issue that WILL start a run under the
@@ -210,6 +214,20 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 			Status:       status,
 			AssigneeType: newAssigneeType,
 			AssigneeID:   newAssigneeID,
+		}
+		// Mirror CreateIssue's workflow handling: the starting column's
+		// handoff when no assignee was picked. (MUL-7420)
+		if req.ProjectID != nil && *req.ProjectID != "" {
+			if projectUUID, err := util.ParseUUID(*req.ProjectID); err == nil {
+				if def, project, err := issueworkflow.ForProject(r.Context(), h.Queries, wsUUID, projectUUID); err == nil && def != nil {
+					if step, ok := def.Step(candidate.Status); ok && step.HandsOff() && !hasNewAssignee {
+						if t, id, ok := issueworkflow.ResolveHandler(step, project, actorType, parseUUID(actorID)); ok {
+							candidate.AssigneeType = pgtype.Text{String: t, Valid: true}
+							candidate.AssigneeID = id
+						}
+					}
+				}
+			}
 		}
 		appendTrigger(candidate, service.IssueTriggerInput{Issue: candidate, IsCreate: true})
 		resp.TotalCount = len(resp.Triggers)

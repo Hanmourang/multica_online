@@ -1069,3 +1069,118 @@ func TestGroupPendingExposesPerAgentTasks(t *testing.T) {
 		t.Fatalf("after cancel want only ag2 pending, got %+v", pending2.AgentTasks)
 	}
 }
+
+// ---- 终止：群内成员是否都能停掉跑飞的 Agent ----
+
+// TestGroupParticipantCanStopAnyAgentTask 固化「群是共享房间」的取消权限模型：
+// 终止权跟着可见性走，而不是跟着发起人走。此前 creator-only 意味着 Alice 派发的
+// 任务跑到 100+ 步时，同在群里的 Bob 只能看着，这正是「压根无法终止」的现场。
+func TestGroupParticipantCanStopAnyAgentTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Fatal("database not available for group test")
+	}
+	ctx := context.Background()
+	alice := dmNewMember(t, "gstopA") // 建群并派发任务
+	bob := dmNewMember(t, "gstopB")   // 群参与者，但不是派发人
+	carol := dmNewMember(t, "gstopC") // 工作区成员，但不在群里
+	ag1 := groupNewAgent(t, "gstopAg1")
+	ag2 := groupNewAgent(t, "gstopAg2")
+
+	code, sessionID := groupCreate(t, alice, map[string]any{
+		"title": "runaway room", "member_ids": []string{bob},
+		"agent_ids": []string{ag1, ag2},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create group: want 201, got %d: %s", code, sessionID)
+	}
+	defer groupCleanupTasks(ctx, sessionID)
+	defer dmCleanupSession(ctx, sessionID)
+
+	// 两个 Agent 各自在跑，复刻 fan-out 之后进入 running 的现场。
+	seedRunning := func(agentID string) string {
+		t.Helper()
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, chat_session_id)
+			VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, NULL, $2)
+			RETURNING id::text
+		`, agentID, sessionID).Scan(&taskID); err != nil {
+			t.Fatalf("seed running task for %s: %v", agentID, err)
+		}
+		return taskID
+	}
+	ag1Task := seedRunning(ag1)
+	ag2Task := seedRunning(ag2)
+
+	// ① 参与者 Bob 停掉 Alice 派发的任务 → 200 且状态真的落到 cancelled。
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, cancelTaskByUserRequest(t, bob, ag1Task))
+	if w.Code != http.StatusOK {
+		t.Fatalf("participant stop: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := taskStatus(t, ag1Task); got != "cancelled" {
+		t.Fatalf("participant stop left status=%q, want cancelled", got)
+	}
+
+	// ② 非参与者 Carol 被拒，且任务未被改动（404 而非 403，不泄露会话存在性）。
+	w2 := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w2, cancelTaskByUserRequest(t, carol, ag2Task))
+	if w2.Code != http.StatusNotFound {
+		t.Fatalf("non-participant stop: want 404, got %d: %s", w2.Code, w2.Body.String())
+	}
+	if got := taskStatus(t, ag2Task); got != "running" {
+		t.Fatalf("non-participant stop mutated task: status=%q, want running", got)
+	}
+}
+
+// TestGroupClaimOffersTheAgentsPreviousWorkDir pins the server half of the
+// group-chat latency fix. A group turn still never resumes a provider session
+// — its input is the immutable per-agent snapshot — but it does hand the daemon
+// the worktree the same agent finished its previous turn in, which is what lets
+// the daemon adopt that checkout instead of paying for a full one per message.
+func TestGroupClaimOffersTheAgentsPreviousWorkDir(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Fatal("database not available")
+	}
+	ctx := context.Background()
+	fx := newGroupClaimFixture(t, "gwd")
+
+	task1 := groupFanoutSend(t, fx, "first question")
+	claimed1 := groupClaimOne(t, fx)
+	resp1, failure1 := groupBuildClaim(t, fx, claimed1)
+	if failure1 != nil {
+		t.Fatalf("claim build 1: %+v", failure1)
+	}
+	if resp1.PriorWorkDir != "" || resp1.PriorSessionID != "" {
+		t.Fatalf("the agent's first group turn inherited something: workdir=%q session=%q",
+			resp1.PriorWorkDir, resp1.PriorSessionID)
+	}
+
+	// The daemon reports the worktree it ran in when it completes the turn.
+	// Completing it also frees the agent's concurrency slot.
+	workDir := "/tmp/multica-group-kept-worktree"
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue
+		SET status = 'completed', completed_at = now(), work_dir = $2
+		WHERE id = $1`, task1, workDir); err != nil {
+		t.Fatalf("complete turn one: %v", err)
+	}
+
+	task2 := groupFanoutSend(t, fx, "second question")
+	if task2 == task1 {
+		t.Fatal("second send must create a second task")
+	}
+	claimed2 := groupClaimOne(t, fx)
+	resp2, failure2 := groupBuildClaim(t, fx, claimed2)
+	if failure2 != nil {
+		t.Fatalf("claim build 2: %+v", failure2)
+	}
+	if resp2.ChatSessionKind != "group" {
+		t.Fatalf("claim kind = %q, want group", resp2.ChatSessionKind)
+	}
+	if resp2.PriorWorkDir != workDir {
+		t.Fatalf("group claim offered workdir %q, want %q", resp2.PriorWorkDir, workDir)
+	}
+	if resp2.PriorSessionID != "" {
+		t.Fatalf("group claim resumed a provider session: %q", resp2.PriorSessionID)
+	}
+}

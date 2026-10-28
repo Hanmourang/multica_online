@@ -1668,7 +1668,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.MaxTasks == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+		h.writeClaimBatch(w, r, req.DaemonID, nil)
 		return
 	}
 	maxTasks := req.MaxTasks
@@ -1690,7 +1690,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		idByKey[util.UUIDToString(ruid)] = ruid
 	}
 	if len(idByKey) == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+		h.writeClaimBatch(w, r, req.DaemonID, nil)
 		return
 	}
 	ids := make([]pgtype.UUID, 0, len(idByKey))
@@ -1723,7 +1723,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		authorized = append(authorized, rt.ID)
 	}
 	if len(authorized) == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+		h.writeClaimBatch(w, r, req.DaemonID, nil)
 		return
 	}
 
@@ -1823,7 +1823,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			"runtimes", len(authorized), "requested_max", maxTasks, "claimed", len(out),
 			"total_ms", time.Since(start).Milliseconds())
 	}
-	writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": out})
+	h.writeClaimBatch(w, r, req.DaemonID, out)
 }
 
 // claimBuildFailure captures a pre-response failure from
@@ -2506,6 +2506,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// (No FK on squad_id — see migration 127.) We append (not replace)
 		// so per-agent instructions stay authoritative; the squad briefing
 		// stacks on top as task-specific squad context.
+		// Project workflow (MUL-7420): best-effort, like the status catalog
+		// below — a failure degrades to the workspace-wide status rules. A
+		// project on the Default workflow with no handoffs sends nothing, so
+		// every workspace that never adopts a workflow keeps the old brief.
+		legacyRuntimeRules := !requestHasClientCapability(r, protocol.DaemonCapabilityWorkflowStatusRulesV1)
+		resp.ProjectWorkflow = h.claimProjectWorkflow(r.Context(), issue, task, legacyRuntimeRules)
+
 		if task.IsLeaderTask {
 			injected := false
 			if resp.Agent != nil && task.SquadID.Valid {
@@ -2867,6 +2874,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
+		resp.ChatSessionKind = cs.Kind
 		// 群轮次定义上不是单一 Agent 的续聊：cs.SessionID/WorkDir 指针属于旧单
 		// Agent/DM 语义，群任务即使带着脏的 fresh 标记也绝不据此 resume（plan 02 §5）。
 		if cs.Kind != "group" && !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
@@ -2883,6 +2891,35 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 			if cs.WorkDir.Valid {
 				resp.PriorWorkDir = cs.WorkDir.String
+			}
+		}
+		if cs.Kind == "group" {
+			// 群里每个 Agent 的「上一轮」只由它自己在同一个群里完成的任务决定。
+			// cs.WorkDir 是会话级指针，可能是别的 Agent 的目录，对本轮没有意义。
+			//
+			// 只下发 work_dir，绝不下发 session：群轮次的输入来自服务端的不可变
+			// 快照（chat_group_task_input），再 resume 一次会话等于把同一段历史喂
+			// 两遍。work_dir 的用途只有一个——让 daemon 认出并接管这个 Agent 上一
+			// 轮留下的 worktree，省掉每消息一次的全量 checkout。
+			var priorWorkDir string
+			err := h.DB.QueryRow(r.Context(), `
+				SELECT work_dir FROM agent_task_queue
+				 WHERE chat_session_id = $1 AND agent_id = $2
+				   AND status = 'completed'
+				   AND work_dir IS NOT NULL AND work_dir <> ''
+				 ORDER BY completed_at DESC NULLS LAST
+				 LIMIT 1`, cs.ID, task.AgentID).Scan(&priorWorkDir)
+			switch {
+			case err == nil:
+				resp.PriorWorkDir = priorWorkDir
+			case errors.Is(err, pgx.ErrNoRows):
+				// 这个 Agent 在这个群里的第一轮，没有可接管的工作区。
+			default:
+				// 降级：没有 prior workdir 只是本轮多付一次 checkout，不应拦下一轮对话。
+				slog.Warn("chat claim: look up the agent's previous group workdir failed",
+					"task_id", uuidToString(task.ID),
+					"chat_session_id", uuidToString(cs.ID),
+					"error", err)
 			}
 		}
 		// Resolve the user-message input batch for this run. A task-owned

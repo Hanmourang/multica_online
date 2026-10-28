@@ -70,7 +70,7 @@ VALUES (
     (SELECT COALESCE(MAX(v.version), 0) + 1 FROM issue_prototype_version v WHERE v.issue_id = $1),
     $3, $4, $5, $6
 )
-RETURNING id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at
+RETURNING id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at, module_id
 `
 
 type CreatePrototypeVersionParams struct {
@@ -106,6 +106,7 @@ func (q *Queries) CreatePrototypeVersion(ctx context.Context, arg CreatePrototyp
 		&i.CreatedByType,
 		&i.CreatedByID,
 		&i.CreatedAt,
+		&i.ModuleID,
 	)
 	return i, err
 }
@@ -153,7 +154,7 @@ func (q *Queries) DeleteProjectRolePlaybooks(ctx context.Context, projectID pgty
 }
 
 const getLatestPrototypeVersion = `-- name: GetLatestPrototypeVersion :one
-SELECT id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at FROM issue_prototype_version
+SELECT id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at, module_id FROM issue_prototype_version
 WHERE issue_id = $1
 ORDER BY version DESC
 LIMIT 1
@@ -174,12 +175,13 @@ func (q *Queries) GetLatestPrototypeVersion(ctx context.Context, issueID pgtype.
 		&i.CreatedByType,
 		&i.CreatedByID,
 		&i.CreatedAt,
+		&i.ModuleID,
 	)
 	return i, err
 }
 
 const getPrototypeVersion = `-- name: GetPrototypeVersion :one
-SELECT id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at FROM issue_prototype_version
+SELECT id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at, module_id FROM issue_prototype_version
 WHERE issue_id = $1 AND version = $2
 `
 
@@ -204,6 +206,7 @@ func (q *Queries) GetPrototypeVersion(ctx context.Context, arg GetPrototypeVersi
 		&i.CreatedByType,
 		&i.CreatedByID,
 		&i.CreatedAt,
+		&i.ModuleID,
 	)
 	return i, err
 }
@@ -514,7 +517,7 @@ func (q *Queries) ListProjectRolePlaybooks(ctx context.Context, projectID pgtype
 }
 
 const listPrototypeVersions = `-- name: ListPrototypeVersions :many
-SELECT id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at FROM issue_prototype_version
+SELECT id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at, module_id FROM issue_prototype_version
 WHERE issue_id = $1
 ORDER BY version DESC
 `
@@ -540,6 +543,7 @@ func (q *Queries) ListPrototypeVersions(ctx context.Context, issueID pgtype.UUID
 			&i.CreatedByType,
 			&i.CreatedByID,
 			&i.CreatedAt,
+			&i.ModuleID,
 		); err != nil {
 			return nil, err
 		}
@@ -804,7 +808,7 @@ UPDATE issue_prototype_version
 SET html_path = $1,
     prompt = CASE WHEN $2::text = '' THEN prompt ELSE $2::text END
 WHERE issue_id = $3 AND version = $4
-RETURNING id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at
+RETURNING id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at, module_id
 `
 
 type UpdatePrototypeHtmlPathParams struct {
@@ -834,6 +838,7 @@ func (q *Queries) UpdatePrototypeHtmlPath(ctx context.Context, arg UpdatePrototy
 		&i.CreatedByType,
 		&i.CreatedByID,
 		&i.CreatedAt,
+		&i.ModuleID,
 	)
 	return i, err
 }
@@ -842,7 +847,7 @@ const updatePrototypeMarks = `-- name: UpdatePrototypeMarks :one
 UPDATE issue_prototype_version
 SET marks = $1::jsonb
 WHERE issue_id = $2 AND version = $3
-RETURNING id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at
+RETURNING id, issue_id, workspace_id, version, html_path, prompt, marks, status, created_by_type, created_by_id, created_at, module_id
 `
 
 type UpdatePrototypeMarksParams struct {
@@ -866,6 +871,7 @@ func (q *Queries) UpdatePrototypeMarks(ctx context.Context, arg UpdatePrototypeM
 		&i.CreatedByType,
 		&i.CreatedByID,
 		&i.CreatedAt,
+		&i.ModuleID,
 	)
 	return i, err
 }

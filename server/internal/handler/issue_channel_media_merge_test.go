@@ -81,10 +81,32 @@ func TestRefreshUntouchedNullableIssueParamsKeepsValidatedAssigneePair(t *testin
 
 	refreshUntouchedNullableIssueParams(&params, current, map[string]json.RawMessage{
 		"assignee_id": json.RawMessage(`"77777777-7777-4777-8777-777777777777"`),
-	})
+	}, false)
 
 	if params.AssigneeType.String != "member" || params.AssigneeID != oldID {
 		t.Fatalf("validated assignee pair was recombined: type=%#v id=%#v", params.AssigneeType, params.AssigneeID)
+	}
+}
+
+// A workflow handoff writes the assignee without the caller sending assignee
+// fields, so the untouched-field reconciliation must not restore the old pair
+// over it (MUL-7420).
+func TestRefreshUntouchedNullableIssueParamsKeepsWorkflowAssignee(t *testing.T) {
+	handlerID := pgtype.UUID{Bytes: uuid.MustParse("99999999-9999-4999-8999-999999999999"), Valid: true}
+	concurrentID := pgtype.UUID{Bytes: uuid.MustParse("88888888-8888-4888-8888-888888888888"), Valid: true}
+	params := db.UpdateIssueParams{
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   handlerID,
+	}
+	current := db.Issue{
+		AssigneeType: pgtype.Text{String: "member", Valid: true},
+		AssigneeID:   concurrentID,
+	}
+
+	refreshUntouchedNullableIssueParams(&params, current, map[string]json.RawMessage{}, true)
+
+	if params.AssigneeType.String != "agent" || params.AssigneeID != handlerID {
+		t.Fatalf("workflow assignee was overwritten: type=%#v id=%#v", params.AssigneeType, params.AssigneeID)
 	}
 }
 

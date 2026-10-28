@@ -198,7 +198,9 @@ func init() {
 	requirementCreateCmd.Flags().String("description", "", "Requirement description")
 	requirementCreateCmd.Flags().String("project", "", "Project id or title")
 	requirementCreateCmd.Flags().String("goal", "", "Requirement goal")
-	requirementCreateCmd.Flags().String("start-at", "", "Planned start time, RFC3339 (required; this marks the issue as a requirement)")
+	requirementCreateCmd.Flags().String("start-at", "", "Planned start time, RFC3339 (required unless --start-date/--due-date is given; this marks the issue as a requirement)")
+	requirementCreateCmd.Flags().String("start-date", "", "Planned start day, YYYY-MM-DD — derived into start_at at 09:00 local")
+	requirementCreateCmd.Flags().String("due-date", "", "Due day, YYYY-MM-DD")
 	requirementCreateCmd.Flags().String("repo-resource", "", "Project resource id of the git repo")
 	requirementCreateCmd.Flags().String("decompose-mode", "confirm", "auto, confirm, or manual")
 	requirementCreateCmd.Flags().Bool("auto-trigger", false, "Trigger automatically when start-at is reached")
@@ -255,9 +257,19 @@ func runRequirementCreate(cmd *cobra.Command, _ []string) error {
 	if strings.TrimSpace(title) == "" {
 		return fmt.Errorf("--title is required")
 	}
+	// Day-granularity callers (and the requirements skill, which speaks in
+	// dates) can name the window instead of a timestamp; derive the promoting
+	// start_at so the requirement actually lands on the calendar.
 	startAt, _ := cmd.Flags().GetString("start-at")
 	if strings.TrimSpace(startAt) == "" {
-		return fmt.Errorf("--start-at is required (RFC3339); it is what makes this issue a requirement")
+		derived, ok, err := deriveRequirementDayStartAt(cmd)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("--start-at (RFC3339) or --start-date/--due-date (YYYY-MM-DD) is required; it is what makes this issue a requirement")
+		}
+		startAt = derived
 	}
 	client, ctx, cancel, err := requirementClient(cmd)
 	if err != nil {
@@ -297,6 +309,12 @@ func runRequirementCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("repo-resource"); v != "" {
 		body["repo_resource_id"] = v
+	}
+	if v, _ := cmd.Flags().GetString("start-date"); v != "" {
+		body["start_date"] = v
+	}
+	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
+		body["due_date"] = v
 	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {

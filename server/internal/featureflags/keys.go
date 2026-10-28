@@ -65,6 +65,20 @@ const (
 	// Chat behaves exactly as before; route registration is gated too, so a
 	// disabled flag 404s the new endpoints cleanly and hides the front-end entry.
 	ChatConversations = "chat_conversations"
+	// ModulePrototypeChat gates the chat-side module attachment surface (plan
+	// 20261026 §06): the composer「+」module group, the module tab in the
+	// resource picker, and accepting module / module_prototype resource refs.
+	// Default off so existing composers behave exactly as before; the frontend
+	// hides the module affordances and the server rejects the two new ref
+	// types while it is closed. Requires migration 489.
+	ModulePrototypeChat = "module_prototype_chat"
+	// ModuleSpecCenter gates the functional-module spec center (plan 20261026 §07):
+	// the /modules/{moduleId}/spec, /prototype-versions, /prototype-reconcile,
+	// /coverage and /prototype-plans HTTP surface backed by migrations 484–488.
+	// Default off so existing module CRUD is unchanged; route registration is
+	// gated too, so a disabled flag 404s cleanly and the front-end workbench stays
+	// hidden. Requires migrations 484–488.
+	ModuleSpecCenter = "module_spec_center"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -93,6 +107,8 @@ var frontendPublicFlags = []string{
 	WorkflowPullContext,
 	WorkflowStageSpec,
 	ChatConversations,
+	ModulePrototypeChat,
+	ModuleSpecCenter,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -137,6 +153,19 @@ func WorkflowStageSpecEnabled(ctx context.Context, flags *featureflag.Service) b
 // the unified conversation list are on. nil flags → off (zero regression).
 func ChatConversationsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, ChatConversations, false)
+}
+
+// ModulePrototypeChatEnabled reports whether a chat message may reference a
+// project module or one of its prototype versions. nil flags → off (zero
+// regression).
+func ModulePrototypeChatEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, ModulePrototypeChat, false)
+}
+
+// ModuleSpecCenterEnabled reports whether the module spec center / prototype
+// workbench HTTP surface is registered. nil flags → off (zero regression).
+func ModuleSpecCenterEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, ModuleSpecCenter, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

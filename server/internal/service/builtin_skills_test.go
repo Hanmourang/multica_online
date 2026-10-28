@@ -596,6 +596,86 @@ func TestProjectsAndResourcesSkillCoversDurableContext(t *testing.T) {
 	}
 }
 
+func TestFeatureModulesSkillCoversPrototypeChain(t *testing.T) {
+	skill, ok := findSkill(t, "multica-feature-modules")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
+		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
+	}
+
+	mustContain := []string{
+		// 模块不拥有原型：文件挂在需求的 prototype version 上，agent 必须走这条链。
+		"module → requirements → prototype versions → file",
+		"multica module list --project <project-id> --output json",
+		"multica module get <module> --output json",
+		"multica module prototype list <module> --output json",
+		"multica module prototype read <module>",
+		"multica module prototype read <module> --version 2",
+		// html_path 是仓库相对路径，拼接/查找会导致读不到文件。
+		"repository-relative",
+		"change_logs/...",
+		// 被 flag 门控的模块级端点必须明确劝退。
+		"module_spec_center",
+		// 与 project-tabs 技能的分工。
+		"multica-project-tabs",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("feature-modules skill missing %q", want)
+		}
+	}
+}
+
+func TestProjectTabsSkillCoversTabMap(t *testing.T) {
+	skill, ok := findSkill(t, "multica-project-tabs")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
+		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
+	}
+
+	mustContain := []string{
+		"multica project tab list <project>",
+		"multica project tab get <project> <tab>",
+		"--all-tabs",
+		// 这 11 个 key 是前端的 PROJECT_VIEWS 契约，任何一个掉出表格，
+		// agent 就会退回猜端点。
+		"| `archive` |",
+		"| `assets` |",
+		"| `features` |",
+		"| `data-model` |",
+		"| `requirements` |",
+		"| `tasks` |",
+		"| `acceptance` |",
+		"| `deliverables` |",
+		"| `filing` |",
+		"| `workflows` |",
+		"| `sprints` |",
+		// 两类最容易误读的资源。
+		"Template decides visibility",
+		"`project resource list` is **not** the archive or the asset tab",
+		"`issue list --project` returns requirements *and* tasks",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("project-tabs skill missing %q", want)
+		}
+	}
+}
+
 func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	t.Helper()
 	for _, s := range loadBuiltinSkills() {

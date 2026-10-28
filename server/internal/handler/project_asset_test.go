@@ -88,6 +88,97 @@ func TestScoreAssetCandidate_ClampsOutOfRange(t *testing.T) {
 	}
 }
 
+// 知识 / 文档类分类必须让项目档案参与候选；代码 / 应用 / 制品包不参与。
+// 回归：这三个分类曾被硬编码短路成空列表，导致任务右栏「绑定资产」对话框
+// 永远没有可选项（用户只能看到「暂无来源」）。
+func TestCategoryUsesArchiveCandidates(t *testing.T) {
+	for _, cat := range []string{"knowledge_repo", "knowledge_group", "other"} {
+		if !categoryUsesArchiveCandidates(cat) {
+			t.Fatalf("%s should include archive candidates", cat)
+		}
+	}
+	for _, cat := range []string{"code_repository", "application", "package", ""} {
+		if categoryUsesArchiveCandidates(cat) {
+			t.Fatalf("%s must not include archive candidates", cat)
+		}
+	}
+}
+
+// 仓库类候选只服务代码 / 应用 / 制品包分类：knowledge_* 放开档案候选后，
+// 不能把项目里的 github 仓库混进「知识仓库」列表。
+func TestCategoryUsesGithubCandidates(t *testing.T) {
+	for _, cat := range []string{"code_repository", "application", "package"} {
+		if !categoryUsesGithubCandidates(cat) {
+			t.Fatalf("%s should include github candidates", cat)
+		}
+	}
+	for _, cat := range []string{"knowledge_repo", "knowledge_group", "other", ""} {
+		if categoryUsesGithubCandidates(cat) {
+			t.Fatalf("%s must not include github candidates", cat)
+		}
+	}
+}
+
+// 档案候选：名称取末段文件名、subtype 取扩展名、source=archive，external_ref
+// 必须携带 artifact_id + rel_path（预览弹窗据此走档案分支）。
+func TestArchiveAssetCandidate(t *testing.T) {
+	c := archiveAssetCandidate("knowledge_repo", "projects/x/docs/spec.md", "art-1", "att-1", true)
+	if c.AssetName != "spec.md" {
+		t.Fatalf("asset name should be the basename, got %q", c.AssetName)
+	}
+	if c.Subtype != "md" {
+		t.Fatalf("subtype should be the extension, got %q", c.Subtype)
+	}
+	if c.Source != "archive" || c.AssetCategory != "knowledge_repo" {
+		t.Fatalf("unexpected candidate shape: %+v", c)
+	}
+	if !c.AlreadyBound {
+		t.Fatal("already_bound must be preserved")
+	}
+	var ref map[string]string
+	if err := json.Unmarshal(c.ExternalRef, &ref); err != nil {
+		t.Fatalf("external_ref must be json: %v", err)
+	}
+	if ref["artifact_id"] != "art-1" || ref["attachment_id"] != "att-1" || ref["rel_path"] != "projects/x/docs/spec.md" {
+		t.Fatalf("unexpected external_ref: %v", ref)
+	}
+}
+
+// 没有附件的档案候选不写空的 attachment_id（预览会误判为附件分支）。
+func TestArchiveAssetCandidate_WithoutAttachment(t *testing.T) {
+	c := archiveAssetCandidate("other", "notes/plain.txt", "art-2", "", false)
+	var ref map[string]string
+	if err := json.Unmarshal(c.ExternalRef, &ref); err != nil {
+		t.Fatalf("external_ref must be json: %v", err)
+	}
+	if _, ok := ref["attachment_id"]; ok {
+		t.Fatalf("empty attachment must be omitted: %v", ref)
+	}
+	if ref["artifact_id"] != "art-2" {
+		t.Fatalf("artifact_id lost: %v", ref)
+	}
+}
+
+// 候选排序：未绑定在前（可点的项不能被一堆置灰行埋掉），其次推荐，再次分值。
+func TestSortAssetCandidatesKeepsUnboundOnTop(t *testing.T) {
+	out := []AssetCandidate{
+		{AssetName: "bound-recommended", AlreadyBound: true, Recommended: true, Score: 1},
+		{AssetName: "free-plain", Score: 0},
+		{AssetName: "free-recommended", Recommended: true, Score: 0.5},
+		{AssetName: "bound-plain", AlreadyBound: true, Score: 0},
+	}
+	sortAssetCandidates(out)
+	if out[0].AssetName != "free-recommended" || out[1].AssetName != "free-plain" {
+		t.Fatalf("unbound candidates must come first, got %q then %q", out[0].AssetName, out[1].AssetName)
+	}
+	if !out[2].AlreadyBound || !out[3].AlreadyBound {
+		t.Fatalf("bound candidates must sink to the tail: %+v", out)
+	}
+	if out[2].AssetName != "bound-recommended" {
+		t.Fatalf("bound block still sorts by recommendation, got %q", out[2].AssetName)
+	}
+}
+
 func TestExtractRefURL(t *testing.T) {
 	if got := extractRefURL(json.RawMessage(`{"url":"https://x/y.git","extra":1}`)); got != "https://x/y.git" {
 		t.Fatalf("unexpected url: %q", got)

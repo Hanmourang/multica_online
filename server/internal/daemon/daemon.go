@@ -545,6 +545,13 @@ type Daemon struct {
 	// It deliberately includes preparation and local-directory waiters because
 	// restart/update barriers must not kill any claimed task.
 	activeTasks atomic.Int64
+	// prewarmOnce starts the single checkout prewarm worker on first use.
+	// One worker, not one per batch: a prewarm takes the same
+	// per-repository lock a real turn needs, so concurrency here would only
+	// move the wait around. Hints queue behind each other instead of being
+	// dropped when a batch arrives while an earlier one is still building.
+	prewarmOnce  sync.Once
+	prewarmQueue chan PrewarmTarget
 	// runningTasks counts live provider execution sessions, beginning only after
 	// backend.Execute returns. It can briefly lag the server-side running state,
 	// which starts during preparation before provider launch. resourceWaitTasks
@@ -5119,7 +5126,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			continue
 		}
 
-		tasks, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
+		batch, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
 		if err != nil {
 			d.exitClaim()
 			releaseSlots(slots)
@@ -5131,6 +5138,19 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			}
 			continue
 		}
+
+		if batch == nil {
+			// An uncertain WS outcome: the claim may have committed
+			// server-side, so this cycle retries nothing and carries no
+			// prewarm hints either. See ClaimTasksWSFirst.
+			d.exitClaim()
+			releaseSlots(slots)
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+		tasks := batch.Tasks
 
 		// Dispatch each claimed task into a slot. activeTasks is incremented for
 		// every dispatched task BEFORE exitClaim so the auto-update barrier never
@@ -5177,6 +5197,12 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 		d.exitClaim()
 		if dispatched < len(slots) {
 			releaseSlots(slots[dispatched:])
+		}
+
+		// Checkout prewarm hints ride the same response but are not tasks: they take no
+		// slot, and only start after a poll that left capacity unused.
+		if dispatched < len(slots) && len(batch.Prewarms) > 0 {
+			d.startPrewarms(parentCtx, batch.Prewarms)
 		}
 
 		// If we filled every slot, more work may be queued — loop immediately.
@@ -6380,10 +6406,18 @@ func sessionHomeReachable(provider string, env *execenv.Environment, envReused b
 // shouldReusePriorWorkdir keeps the local_directory lock and cross-agent
 // isolation invariants without forcing managed follow-ups onto a fresh
 // provider session. Every managed issue or chat task may reuse only directories
-// that resolve to the two-segment managed root shape, carry Prepare-time
-// managed-env provenance for the same workspace/scope/agent, and carry a
-// matching daemon task-context marker. Other task kinds have no durable scope
-// with which to prove ownership and therefore start fresh.
+// that resolve to the managed root shape (or, for a group turn, to the
+// conversation's kept worktree), carry Prepare-time managed-env provenance for
+// the same workspace/scope/agent, and carry a matching daemon task-context
+// marker. Other task kinds have no durable scope with which to prove ownership
+// and therefore start fresh.
+//
+// The one local_directory case that reaches here is a group-chat turn in
+// worktree mode. Its prior directory is envRoot/worktree, which belongs to the
+// daemon rather than to the user — the whole point of that mode — and its proof
+// of ownership is a different one: the reuse record Finalize writes beside the
+// worktree (see execenv.AdoptLocalWorktree), which also fails closed when the
+// user's own checkout moved between the two turns.
 //
 // Reuse eligibility is deliberately keyed off .managed_env.json (written by
 // execenv.Prepare) and NOT .gc_meta.json (written only after the task reaches
@@ -6394,7 +6428,20 @@ func sessionHomeReachable(provider string, env *execenv.Environment, envReused b
 // function reads — the env-root provenance and the workdir task-context marker
 // — are written at Prepare time, so neither depends on completion ordering.
 func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) (string, bool) {
-	if task.PriorWorkDir == "" || localAssignment != nil {
+	worktreeMode := localAssignment != nil
+	priorWorkDir := task.PriorWorkDir
+	if priorWorkDir == "" {
+		// First turn of this (conversation, agent): there is no previous turn to
+		// continue, but the group's creation may have prewarmed a checkout for
+		// exactly this turn. It has the same shape a prior turn would have left
+		// and proves ownership the same way, so it enters the checks below
+		// instead of bypassing them.
+		priorWorkDir = prewarmedWorkdir(task, localAssignment, workspacesRoot)
+	}
+	if priorWorkDir == "" {
+		return "", false
+	}
+	if worktreeMode && !(task.ChatSessionKind == "group" && localAssignment.UsesWorktree()) {
 		return "", false
 	}
 
@@ -6402,7 +6449,7 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 	if err != nil {
 		return "", false
 	}
-	workdir, err := filepath.EvalSymlinks(task.PriorWorkDir)
+	workdir, err := filepath.EvalSymlinks(priorWorkDir)
 	if err != nil {
 		return "", false
 	}
@@ -6415,11 +6462,26 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 		return "", false
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
-	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] != "workdir" {
+	if worktreeMode {
+		if len(parts) < 3 || parts[0] == "" || parts[1] == "" || parts[2] != execenv.LocalWorktreeDirName {
+			return "", false
+		}
+	} else if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] != "workdir" {
 		return "", false
 	}
 	if task.AgentID == "" || (task.IssueID == "" && task.ChatSessionID == "") {
 		return "", false
+	}
+	if worktreeMode {
+		// The worktree's own proof, and the only one that can tell "the tree this
+		// conversation left" from "a tree that looks like it": the reuse record
+		// Finalize wrote beside it, plus the owner recorded on the branch. The
+		// expensive half — whether the user's checkout still matches — runs in
+		// AdoptLocalWorktree, once, right before the tree is used.
+		if !execenv.KeptLocalWorktreeRef(workdir, task.WorkspaceID, task.AgentID, task.ChatSessionID) {
+			return "", false
+		}
+		return workdir, true
 	}
 	// Managed-env provenance is written only for non-local resumable envs, so
 	// its presence (plus the workspace/scope/agent match) proves this is a
@@ -7663,51 +7725,88 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if reuseBeforeUseTestHook != nil {
 			reuseBeforeUseTestHook()
 		}
-		var err error
-		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			Profile:        d.cfg.Profile,
-			// The canonical path the lock was taken on. Handing Reuse the raw
-			// PriorWorkDir instead would re-resolve it, so the directory we
-			// locked and the directory we use could differ.
-			WorkDir:               priorWorkDir,
-			Provider:              provider,
-			CodexVersion:          codexVersion,
-			ResumeSessionID:       task.PriorSessionID,
-			OpenclawBin:           openclawBin,
-			McpConfig:             effectiveMcpConfig,
-			CursorMcpAuthSource:   cursorMcpAuthSource,
-			OpenclawGateway:       openclawGateway,
-			HermesSourceHome:      hermesSourceHome,
-			HermesSourceMustExist: hermesSourceMustExist,
-			HermesEnv:             hermesEnv,
-			HermesMemoryStore:     hermesMemoryStore,
-			HermesSessionStore:    hermesSessionStore,
-			ReasonixEnv:           reasonixEnv,
-			CodexCustomArgs:       codexSandboxArgs,
-			Task:                  taskCtx,
-		})
-		if err != nil {
-			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("reuse execution environment: %w", err))
-		}
-		// Reuse resolves priorWorkDir by name, so confirm what it actually
-		// opened is still the directory we hold the lock on. An fd cannot cross
-		// into the preparation helper process, so the name is the only thing
-		// that can be handed over; this turns "silently ran somewhere else"
-		// into "declined and started clean". See lockReusablePriorEnvRoot for
-		// what remains uncovered.
-		if env != nil && lockedPriorInfo != nil {
-			usedInfo, statErr := os.Stat(filepath.Dir(env.WorkDir))
-			if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
-				// No "task" field here: taskLog already carries the full id.
-				taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment")
-				env = nil
+		// A group turn in worktree mode continues the tree the previous turn of
+		// this (conversation, agent) left behind. Adopting it is the whole point
+		// of the reuse: that env root already holds a full checkout of the user's
+		// repository, and paying for another one per group message is what made
+		// group turns slower than a direct chat.
+		//
+		// Adoption re-proves the tree is still this conversation's before
+		// anything runs in it. It can decline (the user committed, switched
+		// branch or edited a file since), in which case this turn falls through
+		// to the fresh Prepare below — slow, but never stale.
+		var adopted *execenv.LocalWorktree
+		if localAssignment.UsesWorktree() {
+			var adoptErr error
+			adopted, adoptErr = execenv.AdoptLocalWorktree(priorWorkDir, localAssignment.AbsPath,
+				task.WorkspaceID, task.AgentID, task.ChatSessionID, taskLog)
+			if adoptErr != nil {
+				taskLog.Info("the kept worktree can no longer be continued; checking the repository out again",
+					"reason", adoptErr)
 			}
 		}
-		// Reuse can decline (nil) and fall through to a fresh Prepare below.
-		// Whether it did decides whether an env-root-scoped session store — the
-		// Hermes overlay's task-local state.db — carried over from the prior task.
-		envReused = env != nil
+		// worktree-mode reuse exists only through adoption; without a tree there
+		// is nothing to run the group turn in.
+		if !localAssignment.UsesWorktree() || adopted != nil {
+			params := execenv.ReuseParams{
+				WorkspacesRoot: d.cfg.WorkspacesRoot,
+				Profile:        d.cfg.Profile,
+				// The canonical path the lock was taken on. Handing Reuse the raw
+				// PriorWorkDir instead would re-resolve it, so the directory we
+				// locked and the directory we use could differ.
+				WorkDir:               priorWorkDir,
+				Provider:              provider,
+				CodexVersion:          codexVersion,
+				ResumeSessionID:       task.PriorSessionID,
+				OpenclawBin:           openclawBin,
+				McpConfig:             effectiveMcpConfig,
+				CursorMcpAuthSource:   cursorMcpAuthSource,
+				OpenclawGateway:       openclawGateway,
+				HermesSourceHome:      hermesSourceHome,
+				HermesSourceMustExist: hermesSourceMustExist,
+				HermesEnv:             hermesEnv,
+				HermesMemoryStore:     hermesMemoryStore,
+				HermesSessionStore:    hermesSessionStore,
+				ReasonixEnv:           reasonixEnv,
+				CodexCustomArgs:       codexSandboxArgs,
+				Task:                  taskCtx,
+			}
+			if adopted != nil {
+				// The workdir sits inside the worktree, so Reuse cannot derive
+				// the env root with filepath.Dir; hand it over explicitly.
+				params.RootDir = filepath.Dir(adopted.Path)
+				params.LocalWorktree = adopted
+			}
+			var err error
+			env, err = d.reuseExecutionEnvironment(prepareCtx, params)
+			if err != nil {
+				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("reuse execution environment: %w", err))
+			}
+			// Reuse resolves priorWorkDir by name, so confirm what it actually
+			// opened is still the directory we hold the lock on. An fd cannot cross
+			// into the preparation helper process, so the name is the only thing
+			// that can be handed over; this turns "silently ran somewhere else"
+			// into "declined and started clean". See lockReusablePriorEnvRoot for
+			// what remains uncovered.
+			if env != nil && lockedPriorInfo != nil {
+				// A worktree's WorkDir is inside the tree, so the claimed directory
+				// is the tree itself, not WorkDir's parent.
+				usedRoot := filepath.Dir(env.WorkDir)
+				if adopted != nil {
+					usedRoot = filepath.Dir(adopted.Path)
+				}
+				usedInfo, statErr := os.Stat(usedRoot)
+				if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
+					// No "task" field here: taskLog already carries the full id.
+					taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment")
+					env = nil
+				}
+			}
+			// Reuse can decline (nil) and fall through to a fresh Prepare below.
+			// Whether it did decides whether an env-root-scoped session store — the
+			// Hermes overlay's task-local state.db — carried over from the prior task.
+			envReused = env != nil
+		}
 	}
 	if env == nil {
 		var err error
@@ -7738,7 +7837,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Task:                  taskCtx,
 		}
 		if localAssignment.UsesWorktree() {
-			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
+			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{
+				LocalPath: localAssignment.AbsPath,
+				// Group turns keep their tree. The conversation itself cannot be
+				// resumed (its input is the server's per-turn snapshot), so the
+				// checkout is the only thing that could carry over — and re-doing it
+				// is 19s on a large repository, paid again on every message.
+				Keep: task.ChatSessionKind == "group",
+			}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
 			// enough that worktree tasks still overlap for the run itself.

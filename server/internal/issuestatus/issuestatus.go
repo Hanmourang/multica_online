@@ -116,6 +116,30 @@ func CategoryRank(category string) int {
 	return len(canonicalOrder)
 }
 
+// ParseCategory normalizes a category value into one of the 7 canonical
+// categories. Rows in this catalog always hold a canonical key, so the
+// remaining cases exist for callers outside it: the four-value lifecycle
+// vocabulary (unstarted/started/done/closed) and the pre-consolidation wire
+// values (completed/canceled) are what a workflow editor and older clients
+// speak, and mapping them here keeps every caller from branching on two
+// vocabularies at once.
+func ParseCategory(value string) (string, bool) {
+	if IsCategory(value) {
+		return value, true
+	}
+	switch value {
+	case "unstarted":
+		return Todo, true
+	case "started":
+		return InProgress, true
+	case "completed":
+		return Done, true
+	case "canceled", "closed":
+		return Cancelled, true
+	}
+	return "", false
+}
+
 // ValidateKey checks a proposed custom status key against the storage
 // constraint and the reserved built-in names.
 func ValidateKey(key string) (string, error) {

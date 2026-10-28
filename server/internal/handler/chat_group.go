@@ -224,6 +224,10 @@ func (h *Handler) CreateGroupChatSession(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// 建群是唯一可用的"用户还在打字"窗口：此刻每个 Agent 的首次 checkout 可
+	// 提前在 daemon 侧完成，首条消息的 19s worktree add 就落在打字时间里。
+	h.requestGroupPrewarms(r.Context(), workspaceID, projectUUID, session.ID, validAgents)
+
 	resp := chatSessionToResponse(session)
 	resp.Participants = h.participantResponses(r, session.ID)
 

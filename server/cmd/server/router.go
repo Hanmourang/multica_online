@@ -1561,6 +1561,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/me/onboarding/runtime-bootstrap", h.BootstrapOnboardingRuntime)
 		r.Post("/api/me/onboarding/no-runtime-bootstrap", h.BootstrapOnboardingNoRuntime)
 		r.Post("/api/cli-token", h.IssueCliToken)
+		// Addresses other devices (the phone app, a second laptop) can dial to
+		// reach THIS backend: the same-Wi-Fi IPv4 plus, when a tunnel is
+		// running, its https/wss pair. User-scoped rather than workspace-scoped
+		// because it describes the deployment, not a tenant; the handler
+		// refuses on the managed cloud (operator infra, not tenant-reachable).
+		r.Get("/api/local-channel", h.GetLocalChannel)
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 		r.With(handler.RequireHumanActor).Post("/api/client-usage", h.UpsertClientUsage)
@@ -1937,6 +1943,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
+					r.Get("/workflow-handoff", h.PreviewWorkflowHandoff)
 					r.Get("/subscribers", h.ListIssueSubscribers)
 					r.Post("/subscribe", h.SubscribeToIssue)
 					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
@@ -2036,6 +2043,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Project workflows (MUL-7420). Reads and creates are open to any
+			// member; edits and deletes are gated inside the handlers to the
+			// workflow's owner and workspace owners/admins, and switching a
+			// project's workflow to admins and the project's lead.
+			r.Route("/api/issue-workflows", func(r chi.Router) {
+				r.Get("/", h.ListIssueWorkflows)
+				r.Post("/", h.CreateIssueWorkflow)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetIssueWorkflow)
+					r.Patch("/", h.UpdateIssueWorkflow)
+					r.Delete("/", h.DeleteIssueWorkflow)
+					r.Put("/handoffs/{status}", h.SetIssueWorkflowHandoff)
+					r.Post("/brief", h.PreviewIssueWorkflowBrief)
+				})
+			})
+
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
@@ -2045,6 +2068,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Post("/workflow", h.SetProjectWorkflow)
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
@@ -2053,6 +2077,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/modules", h.CreateProjectModule)
 					r.Patch("/modules/{moduleId}", h.UpdateProjectModule)
 					r.Delete("/modules/{moduleId}", h.DeleteProjectModule)
+					// 功能模块原型中枢（plan 20261026 §07 · M-08）：spec 读写 / 模块级
+					// 原型版本 / 四态对账 / 覆盖率。整块由 FF_MODULE_SPEC_CENTER 门控，
+					// 关闭时叶子路由不注册 → 干净 404，既有模块 CRUD 不受影响。
+					if featureflags.ModuleSpecCenterEnabled(context.Background(), h.FeatureFlags) {
+						r.Get("/modules/{moduleId}/spec", h.GetModuleSpec)
+						r.Post("/modules/{moduleId}/spec/draft", h.DraftModuleSpec)
+						r.Post("/modules/{moduleId}/spec/publish", h.PublishModuleSpec)
+						r.Get("/modules/{moduleId}/prototype-versions", h.ListModulePrototypeVersions)
+						r.Post("/modules/{moduleId}/prototype-versions", h.RegisterModulePrototypeVersion)
+						r.Post("/modules/{moduleId}/prototype-versions/{version}/parse", h.ParseModulePrototype)
+						r.Get("/modules/{moduleId}/prototype-reconcile", h.GetPrototypeReconcile)
+						r.Get("/modules/{moduleId}/coverage", h.GetModuleCoverage)
+						// 发布两段式（M-07 · 07 §2.5 D-D）：Agent 只产候选+计划，canonical 移动须人 apply。
+						r.Post("/modules/{moduleId}/prototype-plans", h.CreatePrototypePlan)
+						r.Get("/modules/{moduleId}/prototype-plans/{planId}", h.GetPrototypePlan)
+						r.Post("/modules/{moduleId}/prototype-plans/{planId}/apply", h.ApplyPrototypePlan)
+					}
 					r.Get("/role-defaults", h.ListProjectRoleDefaults)
 					r.Put("/role-defaults", h.ReplaceProjectRoleDefaults)
 					r.Get("/role-playbooks", h.ListProjectRolePlaybooks)
@@ -2388,6 +2429,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Platform skills ship with the binary and apply to every agent.
 			// Registered outside /api/skills/{id} so "builtin" is not an id.
 			r.Get("/api/builtin-skills", h.ListBuiltinSkills)
+			// Read-only source inspection for one platform skill (SKILL.md body
+			// plus supporting files). The id is `builtin:<name>`; the handler
+			// also accepts the bare name.
+			r.Get("/api/builtin-skills/{id}", h.GetBuiltinSkill)
 
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {

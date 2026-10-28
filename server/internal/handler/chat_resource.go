@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -70,8 +71,27 @@ func normalizeChatResourceRefs(input []protocol.ChatResourceRef) ([]protocol.Cha
 			default:
 				return nil, fmt.Errorf("document resource source must be artifact or attachment")
 			}
+		case "module":
+			// A module reference is always a first-class project module, never a
+			// document and never an issue stand-in. kind is normalized rather than
+			// required so older clients keep working after the upgrade.
+			if ref.Kind != "" && ref.Kind != "module" {
+				return nil, fmt.Errorf("module resource kind must be module")
+			}
+			ref.Kind = "module"
+			if ref.Source != "" {
+				return nil, fmt.Errorf("module resource cannot include document fields")
+			}
+		case "module_prototype":
+			if ref.Kind != "" && ref.Kind != "prototype" {
+				return nil, fmt.Errorf("module prototype resource kind must be prototype")
+			}
+			ref.Kind = "prototype"
+			if ref.Source != "" {
+				return nil, fmt.Errorf("module prototype resource cannot include document fields")
+			}
 		default:
-			return nil, fmt.Errorf("resource type must be issue or document")
+			return nil, fmt.Errorf("resource type must be issue, document, module or module_prototype")
 		}
 		key := ref.Type + "\x00" + ref.ID + "\x00" + ref.Kind + "\x00" + ref.Source + "\x00" + ref.ProjectID
 		if _, exists := seen[key]; exists {
@@ -123,6 +143,20 @@ func (h *Handler) resolveChatResource(r *http.Request, workspaceID pgtype.UUID, 
 				return nil, err
 			}
 		}
+	case "module":
+		if !featureflags.ModulePrototypeChatEnabled(r.Context(), h.FeatureFlags) {
+			return nil, errChatResourceMissing
+		}
+		if err := h.fillModuleResource(r.Context(), workspaceID, id, out); err != nil {
+			return nil, err
+		}
+	case "module_prototype":
+		if !featureflags.ModulePrototypeChatEnabled(r.Context(), h.FeatureFlags) {
+			return nil, errChatResourceMissing
+		}
+		if err := h.fillModulePrototypeResource(r.Context(), workspaceID, id, out); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -147,6 +181,119 @@ func (h *Handler) fillAttachmentResource(r *http.Request, workspaceID pgtype.UUI
 		return errChatResourceDenied
 	}
 	out.Attachment = h.attachmentToResponse(attachment, attachmentURLModeFromRequest(r))
+	return nil
+}
+
+// moduleSpecReady reports whether migration 484 (module spec + canonical
+// pointer) has landed. Chat ships ahead of the module spec centre, so the
+// snapshot degrades instead of failing on a column that does not exist yet.
+func (h *Handler) moduleSpecReady(ctx context.Context) bool {
+	var ok bool
+	err := h.DB.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema = current_schema()
+		  AND table_name = 'project_module'
+		  AND column_name = 'canonical_prototype_version')`).Scan(&ok)
+	return err == nil && ok
+}
+
+func (h *Handler) moduleFeatureTableReady(ctx context.Context) bool {
+	var ok bool
+	err := h.DB.QueryRow(ctx, `SELECT to_regclass('project_module_feature') IS NOT NULL`).Scan(&ok)
+	return err == nil && ok
+}
+
+// fillModuleResource resolves a module reference into a fresh snapshot. The
+// module must belong to the reader's workspace; the project id is taken from
+// the database rather than the client ref so a forged id cannot mislabel a card.
+func (h *Handler) fillModuleResource(ctx context.Context, workspaceID, id pgtype.UUID, out *protocol.ChatResourcePayload) error {
+	var (
+		moduleID  pgtype.UUID
+		name      string
+		projectID pgtype.UUID
+		color     string
+	)
+	snapshot := protocol.ChatModuleSnapshot{}
+	if h.moduleSpecReady(ctx) {
+		var (
+			specVersion int32
+			canonical   pgtype.Int4
+		)
+		if err := h.DB.QueryRow(ctx, `SELECT pm.id, pm.name, pm.project_id, pm.color,
+			pm.spec_version, pm.canonical_prototype_version
+			FROM project_module pm JOIN project p ON p.id = pm.project_id
+			WHERE pm.id = $1 AND p.workspace_id = $2`, id, workspaceID).
+			Scan(&moduleID, &name, &projectID, &color, &specVersion, &canonical); err != nil {
+			return errChatResourceMissing
+		}
+		snapshot.SpecVersion = int(specVersion)
+		if canonical.Valid {
+			value := int(canonical.Int32)
+			snapshot.CanonicalPrototypeVersion = &value
+		}
+	} else if err := h.DB.QueryRow(ctx, `SELECT pm.id, pm.name, pm.project_id, pm.color
+		FROM project_module pm JOIN project p ON p.id = pm.project_id
+		WHERE pm.id = $1 AND p.workspace_id = $2`, id, workspaceID).
+		Scan(&moduleID, &name, &projectID, &color); err != nil {
+		return errChatResourceMissing
+	}
+
+	if h.moduleFeatureTableReady(ctx) {
+		var count int
+		if err := h.DB.QueryRow(ctx,
+			`SELECT count(*) FROM project_module_feature WHERE module_id = $1`, moduleID).Scan(&count); err == nil {
+			snapshot.FeaturePointCount = count
+		}
+	}
+
+	snapshot.ModuleID = uuidToString(moduleID)
+	snapshot.Name = name
+	snapshot.ProjectID = uuidToString(projectID)
+	snapshot.Color = color
+	out.ProjectID = snapshot.ProjectID
+	out.Module = snapshot
+	return nil
+}
+
+// fillModulePrototypeResource resolves one prototype version by version id, so
+// it works before issue_prototype_version.module_id exists. Module attribution
+// is best-effort and only attached once migration 484 has run.
+func (h *Handler) fillModulePrototypeResource(ctx context.Context, workspaceID, id pgtype.UUID, out *protocol.ChatResourcePayload) error {
+	var (
+		version    int32
+		htmlPath   string
+		status     string
+		issueID    pgtype.UUID
+		issueTitle string
+	)
+	if err := h.DB.QueryRow(ctx, `SELECT v.version, v.html_path, v.status, i.id, i.title
+		FROM issue_prototype_version v JOIN issue i ON i.id = v.issue_id
+		WHERE v.id = $1 AND v.workspace_id = $2`, id, workspaceID).
+		Scan(&version, &htmlPath, &status, &issueID, &issueTitle); err != nil {
+		return errChatResourceMissing
+	}
+	snapshot := protocol.ChatModulePrototypeSnapshot{
+		VersionID:  uuidToString(id),
+		IssueID:    uuidToString(issueID),
+		IssueTitle: issueTitle,
+		Version:    int(version),
+		HTMLPath:   htmlPath,
+		Status:     status,
+	}
+	if h.moduleSpecReady(ctx) {
+		var (
+			moduleID   pgtype.UUID
+			moduleName string
+		)
+		if err := h.DB.QueryRow(ctx, `SELECT pm.id, pm.name
+			FROM project_module pm JOIN issue_prototype_version v ON v.module_id = pm.id
+			WHERE v.id = $1`, id).Scan(&moduleID, &moduleName); err == nil && moduleID.Valid {
+			snapshot.ModuleID = uuidToString(moduleID)
+			snapshot.ModuleName = moduleName
+		}
+	}
+	out.Kind = "prototype"
+	out.Prototype = snapshot
 	return nil
 }
 
@@ -215,6 +362,14 @@ func (h *Handler) chatResourcePrompt(r *http.Request, workspaceID pgtype.UUID, r
 			sawIssue = true
 			continue
 		}
+		if snapshot, ok := resource.Module.(protocol.ChatModuleSnapshot); ok {
+			lines = append(lines, formatSharedModuleResource(key, snapshot))
+			continue
+		}
+		if snapshot, ok := resource.Prototype.(protocol.ChatModulePrototypeSnapshot); ok {
+			lines = append(lines, formatSharedModulePrototypeResource(key, snapshot))
+			continue
+		}
 		title := ""
 		body := ""
 		if snapshot, ok := resource.Artifact.(ProjectArtifactResponse); ok {
@@ -250,6 +405,64 @@ func (h *Handler) chatResourcePrompt(r *http.Request, workspaceID pgtype.UUID, r
 }
 
 const chatDocumentBodyLimit = 20000
+
+// formatSharedModuleResource keeps module context deliberately small: name,
+// ids, spec version, canonical prototype version and feature-point count. Full
+// contracts stay out of the prompt, but the ids and the exact CLI chain that
+// pulls them are spelled out: "not inlined" without a next step is what left
+// chat agents trying `project`/`requirement` commands for dozens of steps
+// without ever reaching the prototype file.
+func formatSharedModuleResource(key string, snapshot protocol.ChatModuleSnapshot) string {
+	parts := []string{fmt.Sprintf("- %s — module %q", key, snapshot.Name)}
+	if snapshot.ModuleID != "" {
+		parts = append(parts, "module_id "+snapshot.ModuleID)
+	}
+	if snapshot.ProjectID != "" {
+		parts = append(parts, "project_id "+snapshot.ProjectID)
+	}
+	if snapshot.SpecVersion > 0 {
+		parts = append(parts, fmt.Sprintf("spec v%d", snapshot.SpecVersion))
+	}
+	if snapshot.CanonicalPrototypeVersion != nil {
+		parts = append(parts, fmt.Sprintf("canonical prototype v%d", *snapshot.CanonicalPrototypeVersion))
+	}
+	if snapshot.FeaturePointCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d feature points", snapshot.FeaturePointCount))
+	}
+	parts = append(parts, "full feature contracts are intentionally not inlined")
+	line := strings.Join(parts, " · ")
+	if snapshot.ModuleID != "" {
+		line += fmt.Sprintf("\n  read on demand: `multica module get %s` (requirements) → `multica module prototype list %s` (versions) → `multica module prototype read %s` (absolute file path of the live version)",
+			snapshot.ModuleID, snapshot.ModuleID, snapshot.ModuleID)
+	}
+	return clipPromptText(line, 1600)
+}
+
+func formatSharedModulePrototypeResource(key string, snapshot protocol.ChatModulePrototypeSnapshot) string {
+	name := snapshot.ModuleName
+	if name == "" {
+		name = snapshot.IssueTitle
+	}
+	line := fmt.Sprintf("- %s — prototype v%d", key, snapshot.Version)
+	if name != "" {
+		line += fmt.Sprintf(" of %q", name)
+	}
+	if snapshot.Status != "" {
+		line += " (" + snapshot.Status + ")"
+	}
+	if snapshot.HTMLPath != "" {
+		line += " · " + snapshot.HTMLPath
+	}
+	// html_path is repo-relative and the archive root is not the agent's
+	// workdir, so hand over the resolver instead of letting the agent guess
+	// where the file lives on this machine.
+	if snapshot.ModuleID != "" && snapshot.Version > 0 {
+		line += fmt.Sprintf("\n  read it with `multica module prototype read %s --version %d` (prints the absolute path)", snapshot.ModuleID, snapshot.Version)
+	} else if snapshot.IssueID != "" {
+		line += fmt.Sprintf("\n  html_path is repo-relative; list versions with `multica requirement prototype list %s`", snapshot.IssueID)
+	}
+	return clipPromptText(line, 1600)
+}
 
 // formatSharedDocumentResource inlines a chat-attached document so the agent
 // can summarize it without searching the workdir or the CLI. An empty body
@@ -833,6 +1046,22 @@ func (h *Handler) resolveChatResourceBatch(r *http.Request, workspaceID pgtype.U
 				err = errChatResourceMissing
 			} else {
 				err = h.fillAttachmentResource(r, workspaceID, attachment, resolved)
+			}
+		case ref.Type == "module":
+			if !featureflags.ModulePrototypeChatEnabled(r.Context(), h.FeatureFlags) {
+				err = errChatResourceMissing
+			} else if targetID, parseErr := util.ParseUUID(ref.ID); parseErr != nil {
+				err = errChatResourceMissing
+			} else {
+				err = h.fillModuleResource(r.Context(), workspaceID, targetID, resolved)
+			}
+		case ref.Type == "module_prototype":
+			if !featureflags.ModulePrototypeChatEnabled(r.Context(), h.FeatureFlags) {
+				err = errChatResourceMissing
+			} else if targetID, parseErr := util.ParseUUID(ref.ID); parseErr != nil {
+				err = errChatResourceMissing
+			} else {
+				err = h.fillModulePrototypeResource(r.Context(), workspaceID, targetID, resolved)
 			}
 		default:
 			err = errChatResourceMissing

@@ -14,7 +14,7 @@ import (
 const createProjectModule = `-- name: CreateProjectModule :one
 INSERT INTO project_module (project_id, workspace_id, name, color)
 VALUES ($1, $2, $3, $4)
-RETURNING id, project_id, workspace_id, name, color, created_at, graph_node_id
+RETURNING id, project_id, workspace_id, name, color, created_at, graph_node_id, spec, spec_version, canonical_prototype_version, spec_updated_at
 `
 
 type CreateProjectModuleParams struct {
@@ -40,6 +40,10 @@ func (q *Queries) CreateProjectModule(ctx context.Context, arg CreateProjectModu
 		&i.Color,
 		&i.CreatedAt,
 		&i.GraphNodeID,
+		&i.Spec,
+		&i.SpecVersion,
+		&i.CanonicalPrototypeVersion,
+		&i.SpecUpdatedAt,
 	)
 	return i, err
 }
@@ -128,7 +132,7 @@ func (q *Queries) GetIssuesModuleIDs(ctx context.Context, issueIds []pgtype.UUID
 }
 
 const getProjectModule = `-- name: GetProjectModule :one
-SELECT id, project_id, workspace_id, name, color, created_at, graph_node_id FROM project_module WHERE id = $1
+SELECT id, project_id, workspace_id, name, color, created_at, graph_node_id, spec, spec_version, canonical_prototype_version, spec_updated_at FROM project_module WHERE id = $1
 `
 
 func (q *Queries) GetProjectModule(ctx context.Context, id pgtype.UUID) (ProjectModule, error) {
@@ -142,6 +146,10 @@ func (q *Queries) GetProjectModule(ctx context.Context, id pgtype.UUID) (Project
 		&i.Color,
 		&i.CreatedAt,
 		&i.GraphNodeID,
+		&i.Spec,
+		&i.SpecVersion,
+		&i.CanonicalPrototypeVersion,
+		&i.SpecUpdatedAt,
 	)
 	return i, err
 }
@@ -237,7 +245,7 @@ func (q *Queries) ListIssueDependencies(ctx context.Context, issueID pgtype.UUID
 
 const listProjectModules = `-- name: ListProjectModules :many
 
-SELECT m.id, m.project_id, m.workspace_id, m.name, m.color, m.created_at, m.graph_node_id, COUNT(i.id)::int AS task_count
+SELECT m.id, m.project_id, m.workspace_id, m.name, m.color, m.created_at, m.graph_node_id, m.spec, m.spec_version, m.canonical_prototype_version, m.spec_updated_at, COUNT(i.id)::int AS task_count
 FROM project_module m
 LEFT JOIN issue i ON i.module_id = m.id
 WHERE m.project_id = $1
@@ -246,14 +254,18 @@ ORDER BY m.created_at ASC
 `
 
 type ListProjectModulesRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Color       string             `json:"color"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	GraphNodeID pgtype.Text        `json:"graph_node_id"`
-	TaskCount   int32              `json:"task_count"`
+	ID                        pgtype.UUID        `json:"id"`
+	ProjectID                 pgtype.UUID        `json:"project_id"`
+	WorkspaceID               pgtype.UUID        `json:"workspace_id"`
+	Name                      string             `json:"name"`
+	Color                     string             `json:"color"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	GraphNodeID               pgtype.Text        `json:"graph_node_id"`
+	Spec                      []byte             `json:"spec"`
+	SpecVersion               int32              `json:"spec_version"`
+	CanonicalPrototypeVersion pgtype.Int4        `json:"canonical_prototype_version"`
+	SpecUpdatedAt             pgtype.Timestamptz `json:"spec_updated_at"`
+	TaskCount                 int32              `json:"task_count"`
 }
 
 // 模块（project_module）与依赖（issue_dependency）查询。
@@ -276,6 +288,10 @@ func (q *Queries) ListProjectModules(ctx context.Context, projectID pgtype.UUID)
 			&i.Color,
 			&i.CreatedAt,
 			&i.GraphNodeID,
+			&i.Spec,
+			&i.SpecVersion,
+			&i.CanonicalPrototypeVersion,
+			&i.SpecUpdatedAt,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -289,7 +305,7 @@ func (q *Queries) ListProjectModules(ctx context.Context, projectID pgtype.UUID)
 }
 
 const updateProjectModule = `-- name: UpdateProjectModule :one
-UPDATE project_module SET name = $1, color = $2 WHERE id = $3 RETURNING id, project_id, workspace_id, name, color, created_at, graph_node_id
+UPDATE project_module SET name = $1, color = $2 WHERE id = $3 RETURNING id, project_id, workspace_id, name, color, created_at, graph_node_id, spec, spec_version, canonical_prototype_version, spec_updated_at
 `
 
 type UpdateProjectModuleParams struct {
@@ -310,6 +326,10 @@ func (q *Queries) UpdateProjectModule(ctx context.Context, arg UpdateProjectModu
 		&i.Color,
 		&i.CreatedAt,
 		&i.GraphNodeID,
+		&i.Spec,
+		&i.SpecVersion,
+		&i.CanonicalPrototypeVersion,
+		&i.SpecUpdatedAt,
 	)
 	return i, err
 }

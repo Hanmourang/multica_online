@@ -228,6 +228,22 @@ var issueStatusCmd = &cobra.Command{
 	RunE: runIssueStatus,
 }
 
+// issueDeleteCmd is the hard delete. It is deliberately separate from status
+// "cancelled": cancelling keeps the record and its history, deleting drops the
+// row, cancels running tasks and deletes its attachments from object storage.
+// Agents must not reach for it on their own (see multica-module-map).
+var issueDeleteCmd = &cobra.Command{
+	Use:   "delete <id>",
+	Short: "Permanently delete an issue (needs --yes; prefer status cancelled)",
+	Long: `Permanent. The issue row, its comments and its attachments are removed, and
+any task still running for it is cancelled. Children are detached, not deleted.
+
+If the work merely stopped, set the status instead:
+  multica issue status <id> cancelled`,
+	Args: exactArgs(1),
+	RunE: runIssueDelete,
+}
+
 var issueReorderCmd = &cobra.Command{
 	Use:   "reorder <id>",
 	Short: "Move an issue within its status column",
@@ -465,6 +481,7 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueDeleteCmd)
 	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
@@ -523,10 +540,11 @@ func init() {
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
-	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
-	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
+	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD). Plain scheduling only: this does NOT make the issue a requirement — pass --requirement or --start-at for that")
+	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD). Plain scheduling only: this does NOT make the issue a requirement")
 	issueCreateCmd.Flags().String("goal", "", "Requirement goal")
 	issueCreateCmd.Flags().String("start-at", "", "Planned start time (RFC3339). Setting this on a top-level issue makes it a requirement")
+	issueCreateCmd.Flags().Bool("requirement", false, "Create this as a top-level requirement so it lands on the requirement calendar. Without --start-at the start time is derived from --start-date (09:00 local), then --due-date, then now")
 	issueCreateCmd.Flags().String("repo-resource", "", "Project resource id bound as the requirement git repo")
 	issueCreateCmd.Flags().String("decompose-mode", "", "Requirement decompose mode: auto, confirm, or manual")
 	issueCreateCmd.Flags().Bool("auto-trigger", false, "Trigger the requirement automatically when start-at is reached")
@@ -550,6 +568,7 @@ func init() {
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("goal", "", "Requirement goal")
 	issueUpdateCmd.Flags().String("start-at", "", "Planned start time (RFC3339). Setting this on a top-level issue makes it a requirement")
+	issueUpdateCmd.Flags().Bool("requirement", false, "Promote a top-level issue to a requirement (derives start_at from --start-date/--due-date when --start-at is omitted)")
 	issueUpdateCmd.Flags().String("repo-resource", "", "Project resource id bound as the requirement git repo")
 	issueUpdateCmd.Flags().String("decompose-mode", "", "Requirement decompose mode: auto, confirm, or manual")
 	issueUpdateCmd.Flags().Bool("auto-trigger", false, "Trigger the requirement automatically when start-at is reached")
@@ -562,6 +581,9 @@ func init() {
 	// issue status
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	issueDeleteCmd.Flags().String("output", "json", "Output format: table or json")
+	addDestructiveFlags(issueDeleteCmd)
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
@@ -1247,6 +1269,7 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if err := applyRequirementFields(cmd, body); err != nil {
 		return err
 	}
+	warnTaskNotOnCalendar(cmd, body)
 	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
 		body["allow_duplicate"] = true
 	}
@@ -1365,6 +1388,21 @@ func applyRequirementFields(cmd *cobra.Command, body map[string]any) error {
 		}
 		body["start_at"] = startAt
 	}
+	// `--requirement` carries the intent the day flags cannot: start_date and
+	// due_date are plain scheduling, and only start_at (or a repo/decomposition
+	// timestamp) promotes a top-level issue to a requirement. Derive it here so
+	// `--requirement --start-date 2026-10-27` lands the block on that day.
+	if cmd.Flags().Lookup("requirement") != nil && cmd.Flags().Changed("requirement") {
+		if want, _ := cmd.Flags().GetBool("requirement"); want {
+			if _, ok := body["start_at"]; !ok {
+				startAt, err := deriveRequirementStartAt(cmd)
+				if err != nil {
+					return err
+				}
+				body["start_at"] = startAt
+			}
+		}
+	}
 	if cmd.Flags().Changed("repo-resource") {
 		repo, _ := cmd.Flags().GetString("repo-resource")
 		if strings.TrimSpace(repo) == "" {
@@ -1386,6 +1424,54 @@ func applyRequirementFields(cmd *cobra.Command, body map[string]any) error {
 		body["auto_trigger"] = auto
 	}
 	return nil
+}
+
+// deriveRequirementDayStartAt turns the calendar-day flags into the minute-level
+// start_at that actually promotes the issue. 09:00 local keeps the calendar
+// block on the day the caller named instead of drifting to the previous UTC day.
+// ok is false when neither day flag was given.
+func deriveRequirementDayStartAt(cmd *cobra.Command) (string, bool, error) {
+	for _, flag := range []string{"start-date", "due-date"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			continue
+		}
+		day, _ := cmd.Flags().GetString(flag)
+		if strings.TrimSpace(day) == "" {
+			continue
+		}
+		t, err := time.ParseInLocation("2006-01-02", day, time.Local)
+		if err != nil {
+			return "", false, fmt.Errorf("--%s must be a calendar day (YYYY-MM-DD)", flag)
+		}
+		return t.Add(9 * time.Hour).Format(time.RFC3339), true, nil
+	}
+	return "", false, nil
+}
+
+func deriveRequirementStartAt(cmd *cobra.Command) (string, error) {
+	if at, ok, err := deriveRequirementDayStartAt(cmd); ok || err != nil {
+		return at, err
+	}
+	return time.Now().Format(time.RFC3339), nil
+}
+
+// warnTaskNotOnCalendar names the one asymmetry the flags cannot show: a
+// top-level issue created with dates but no start_at opens as task_<n> and
+// never reaches the requirement calendar. Say it on stderr rather than leaving
+// the caller to discover it from an empty calendar cell.
+func warnTaskNotOnCalendar(cmd *cobra.Command, body map[string]any) {
+	if _, ok := body["start_at"]; ok {
+		return
+	}
+	_, hasStart := body["start_date"]
+	_, hasDue := body["due_date"]
+	if !hasStart && !hasDue {
+		return
+	}
+	if parent, _ := body["parent_issue_id"].(string); parent != "" {
+		return
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), "note: dates alone do not make this a requirement — it opens as task_<n> and stays off the requirement calendar. Add --requirement (or --start-at) to schedule it there.")
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
@@ -1632,6 +1718,44 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
+	}
+	return nil
+}
+
+func runIssueDelete(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	label := issueRef.Display
+	if label == "" {
+		label = issueRef.ID
+	}
+	if err := confirmDestructive(cmd, fmt.Sprintf(
+		"Permanently delete issue %s. Its comments and attachments are deleted too and any running task is cancelled. This cannot be undone — to merely stop the work use `multica issue status %s cancelled`.",
+		label, args[0])); err != nil {
+		return err
+	}
+
+	if err := client.DeleteJSON(ctx, "/api/issues/"+issueRef.ID); err != nil {
+		return fmt.Errorf("delete issue: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Issue %s deleted.\n", label)
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{
+			"deleted":  true,
+			"issue_id": issueRef.ID,
+		})
 	}
 	return nil
 }

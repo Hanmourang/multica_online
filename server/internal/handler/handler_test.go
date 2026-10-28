@@ -83,6 +83,11 @@ func TestMain(m *testing.M) {
 		pool.Close()
 		os.Exit(1)
 	}
+	if err := ensureChatResourceModuleTypes(ctx, pool); err != nil {
+		fmt.Printf("Failed to apply chat resource module types: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
 
 	queries := db.New(pool)
 	hub := realtime.NewHub()
@@ -319,6 +324,38 @@ func ensureChatResourceSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
 			return fmt.Errorf("apply chat resource migration %s: %w", name, err)
 		}
+	}
+	return nil
+}
+
+// ensureChatResourceModuleTypes 让模块引用的测试不依赖「本机已跑 489」：
+// 489 自身的约束重建写成了幂等的 DO 块，重复执行安全。约束已接受
+// 'module' 时直接跳过（CI 已跑过 migration，这里就是 no-op）。
+func ensureChatResourceModuleTypes(ctx context.Context, pool *pgxpool.Pool) error {
+	var allows bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_constraint
+			WHERE conrelid = 'chat_message_resource_ref'::regclass
+			  AND contype = 'c'
+			  AND pg_get_constraintdef(oid) LIKE '%''module''%'
+		)
+	`).Scan(&allows); err != nil {
+		return err
+	}
+	if allows {
+		return nil
+	}
+	sqlBytes, err := os.ReadFile("../migrations/489_chat_resource_module_ref.up.sql")
+	if err != nil {
+		sqlBytes, err = os.ReadFile("../../migrations/489_chat_resource_module_ref.up.sql")
+	}
+	if err != nil {
+		return fmt.Errorf("chat resource module migration not found: %w", err)
+	}
+	if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+		return fmt.Errorf("apply chat resource module migration: %w", err)
 	}
 	return nil
 }

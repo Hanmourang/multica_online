@@ -183,6 +183,7 @@ func init() {
 	workspaceCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceGetCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceMemberListCmd.Flags().String("output", "table", "Output format: table or json")
+	workspaceMemberListCmd.Flags().Bool("full-id", false, "Print full ids instead of 8-character prefixes")
 	workspaceMemberInviteCmd.Flags().String("role", "member", "Member role to grant: member or admin (owner is not allowed)")
 	workspaceMemberInviteCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -810,14 +811,25 @@ func runWorkspaceMembers(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, members)
 	}
 
-	headers := []string{"USER ID", "NAME", "EMAIL", "ROLE"}
+	// MEMBER ID is the membership row's own id, not the user id: `workspace
+	// member role/remove` take the former, so printing only USER ID used to
+	// leave no command-line path to obtain a usable argument.
+	fullID, _ := cmd.Flags().GetBool("full-id")
+	headers := []string{"MEMBER ID", "USER ID", "NAME", "EMAIL", "ROLE"}
 	rows := make([][]string, 0, len(members))
 	for _, m := range members {
+		memberID := strVal(m, "id")
+		userID := strVal(m, "user_id")
+		if !fullID {
+			memberID = shortID(memberID)
+			userID = shortID(userID)
+		}
 		rows = append(rows, []string{
-			strVal(m, "user_id"),
-			strVal(m, "name"),
-			strVal(m, "email"),
-			strVal(m, "role"),
+			memberID,
+			userID,
+			blankDash(strVal(m, "name")),
+			blankDash(strVal(m, "email")),
+			blankDash(strVal(m, "role")),
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)

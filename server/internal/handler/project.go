@@ -51,6 +51,9 @@ type ProjectResponse struct {
 	// (migration 455). Null means the project has not been bound yet —
 	// artifact create/sync return 404 until a local_directory is attached.
 	ArchiveResourceID *string `json:"archive_resource_id"`
+	// WorkflowID is the workflow this project uses; null means the workspace
+	// Default workflow (MUL-7420).
+	WorkflowID *string `json:"workflow_id"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -70,6 +73,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		UpdatedAt:         timestampToString(p.UpdatedAt),
 		Template:          p.Template,
 		ArchiveResourceID: uuidToPtr(p.ArchiveResourceID),
+		WorkflowID:        uuidToPtr(p.WorkflowID),
 	}
 }
 
@@ -119,6 +123,10 @@ type CreateProjectRequest struct {
 	DueDate     *string                               `json:"due_date"`
 	Template    string                                `json:"template,omitempty"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	// WorkflowID picks the project's workflow at creation; omitted or null
+	// uses the workspace Default workflow. A new project has no issues, so no
+	// status mapping is involved. (MUL-7420)
+	WorkflowID *string `json:"workflow_id,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -320,6 +328,25 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A named workflow is stored as-is; the workspace Default workflow is
+	// stored as NULL so the project keeps following the Default definition
+	// as it changes, instead of pinning today's snapshot. (MUL-7420)
+	var workflowID pgtype.UUID
+	if req.WorkflowID != nil && *req.WorkflowID != "" {
+		id, ok := parseUUIDOrBadRequest(w, *req.WorkflowID, "workflow_id")
+		if !ok {
+			return
+		}
+		row, err := h.Queries.GetIssueWorkflow(r.Context(), db.GetIssueWorkflowParams{ID: id, WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "workflow not found in this workspace")
+			return
+		}
+		if !row.IsDefault {
+			workflowID = id
+		}
+	}
+
 	// start_date / due_date are optional calendar days; an absent or empty
 	// value leaves the column NULL. Mirrors CreateIssue's date handling.
 	var startDate pgtype.Date
@@ -398,6 +425,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		StartDate:   startDate,
 		DueDate:     dueDate,
 		Template:    template,
+		WorkflowID:  workflowID,
 	}
 
 	// Without resources, keep the simple non-tx path.

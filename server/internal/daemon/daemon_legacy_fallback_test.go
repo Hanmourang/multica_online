@@ -42,10 +42,11 @@ func TestClaimTasksWSFirst_LegacyFallbackWhenBatchRouteMissing(t *testing.T) {
 
 	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
 
-	tasks, err := d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1", "rt2"}, 5)
+	batch, err := d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1", "rt2"}, 5)
 	if err != nil {
 		t.Fatalf("ClaimTasksWSFirst: %v", err)
 	}
+	tasks := batch.Tasks
 	if len(tasks) != 2 {
 		t.Fatalf("legacy fallback claimed %d tasks, want 2", len(tasks))
 	}
@@ -106,7 +107,11 @@ func TestClaimTasksWSFirst_NoDoubleClaimOnDetach(t *testing.T) {
 	var tasks []*Task
 	var err error
 	go func() {
-		tasks, err = d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+		var batch *ClaimBatch
+		batch, err = d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+		if batch != nil {
+			tasks = batch.Tasks
+		}
 		close(done)
 	}()
 
@@ -170,7 +175,11 @@ func TestClaimTasksWSFirst_HTTPFallbackAfterUncertainCooldown(t *testing.T) {
 	var tasks []*Task
 	var err error
 	go func() {
-		tasks, err = d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+		var batch *ClaimBatch
+		batch, err = d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+		if batch != nil {
+			tasks = batch.Tasks
+		}
 		close(done)
 	}()
 
@@ -205,22 +214,25 @@ func TestClaimTasksWSFirst_HTTPFallbackAfterUncertainCooldown(t *testing.T) {
 	})
 	d.wsRPC.markRPCV1Supported(reconnectGeneration)
 
-	tasks, err = d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+	cooldownBatch, err := d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
 	if err != nil {
 		t.Fatalf("cooldown ClaimTasksWSFirst: %v", err)
 	}
-	if len(tasks) != 0 {
-		t.Fatalf("cooldown claim returned %d tasks, want 0", len(tasks))
+	// Within the safety window the claim answers nothing at all — a nil batch —
+	// so the poller skips the cycle instead of claiming twice.
+	if cooldownBatch != nil {
+		t.Fatalf("cooldown claim returned a batch with %d tasks, want nil", len(cooldownBatch.Tasks))
 	}
 	if httpClaims.Load() != 0 || wsClaims.Load() != 0 {
 		t.Fatalf("cooldown attempted claims: http=%d ws=%d, want 0/0", httpClaims.Load(), wsClaims.Load())
 	}
 
 	time.Sleep(2 * wsClaimUncertainFallbackDelay)
-	tasks, err = d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+	postCooldownBatch, err := d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
 	if err != nil {
 		t.Fatalf("post-cooldown ClaimTasksWSFirst: %v", err)
 	}
+	tasks = postCooldownBatch.Tasks
 	if len(tasks) != 1 || tasks[0].ID != "http-t" {
 		t.Fatalf("tasks = %#v, want one HTTP fallback task", tasks)
 	}
@@ -258,10 +270,11 @@ func TestClaimTasksWSFirst_ReconnectToOldServerSkipsWSRPC(t *testing.T) {
 		return &wsOutbound{data: frame}, nil
 	})
 
-	tasks, err := d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 1)
+	batch, err := d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 1)
 	if err != nil {
 		t.Fatalf("ClaimTasksWSFirst: %v", err)
 	}
+	tasks := batch.Tasks
 	if len(tasks) != 1 || tasks[0].ID != "http-t" {
 		t.Fatalf("tasks = %#v, want HTTP task", tasks)
 	}

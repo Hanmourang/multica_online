@@ -2057,8 +2057,6 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if task.ChatSessionID.Valid {
-		// Chat privacy: only the member who opened the conversation may
-		// cancel its task, even though the workspace is shared.
 		cs, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
 			ID:          task.ChatSessionID,
 			WorkspaceID: wsUUID,
@@ -2067,7 +2065,20 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
 		}
-		if uuidToString(cs.CreatorID) != userID {
+		if cs.Kind == "group" {
+			// A group is a shared room: everyone in it reads the same transcript
+			// and watches the same runs, so the right to stop a runaway run must
+			// match visibility, not authorship. Creator-only here left the other
+			// members watching a 100+ step loop they could not interrupt.
+			if _, found := h.getChatParticipant(r.Context(), cs.ID, "member", parseUUID(userID)); !found {
+				// Non-participant: 404 like every other group endpoint, never
+				// revealing that the session exists.
+				writeError(w, http.StatusNotFound, "task not found")
+				return
+			}
+		} else if uuidToString(cs.CreatorID) != userID {
+			// 1:1 chat privacy: only the member who opened the conversation
+			// may cancel its task, even though the workspace is shared.
 			writeError(w, http.StatusForbidden, "not your task")
 			return
 		}

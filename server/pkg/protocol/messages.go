@@ -31,6 +31,13 @@ const (
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
 
+	// DaemonCapabilityWorkflowStatusRulesV1 advertises that the daemon's
+	// runtime brief drops its built-in in_progress / in_review rules for an
+	// issue whose claim carries a project workflow (MUL-7420). Only then may
+	// the server leave out the workflow brief's lines that override those
+	// rules; an older daemon still states them, so it keeps getting them.
+	DaemonCapabilityWorkflowStatusRulesV1 = "workflow-status-rules-v1"
+
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:
 	// chat:cancel_finalized as an invalidation hint plus the draft-restores
@@ -240,6 +247,38 @@ type ChatResourcePayload struct {
 	Issue      any    `json:"issue,omitempty"`
 	Artifact   any    `json:"artifact,omitempty"`
 	Attachment any    `json:"attachment,omitempty"`
+	// Module carries the snapshot for resource_type=module.
+	Module any `json:"module,omitempty"`
+	// Prototype carries the snapshot for resource_type=module_prototype.
+	Prototype any `json:"prototype,omitempty"`
+}
+
+// ChatModuleSnapshot is the read projection for a module reference. Version and
+// coverage fields stay zero until the module spec migration (484) lands; the
+// resolver probes for those columns instead of assuming them, so chat can ship
+// independently and upgrades itself once the columns exist.
+type ChatModuleSnapshot struct {
+	ModuleID                  string `json:"module_id"`
+	Name                      string `json:"name"`
+	ProjectID                 string `json:"project_id"`
+	Color                     string `json:"color,omitempty"`
+	SpecVersion               int    `json:"spec_version"`
+	CanonicalPrototypeVersion *int   `json:"canonical_prototype_version"`
+	FeaturePointCount         int    `json:"feature_point_count"`
+}
+
+// ChatModulePrototypeSnapshot is the read projection for one prototype version
+// referenced from a conversation. Resolved by version id, so it does not depend
+// on issue_prototype_version.module_id (added by migration 484).
+type ChatModulePrototypeSnapshot struct {
+	VersionID  string `json:"version_id"`
+	ModuleID   string `json:"module_id,omitempty"`
+	ModuleName string `json:"name,omitempty"`
+	IssueID    string `json:"issue_id,omitempty"`
+	IssueTitle string `json:"issue_title,omitempty"`
+	Version    int    `json:"version"`
+	HTMLPath   string `json:"html_path,omitempty"`
+	Status     string `json:"status,omitempty"`
 }
 
 // Chat message kinds (chat_message.message_kind). Additive: unknown values

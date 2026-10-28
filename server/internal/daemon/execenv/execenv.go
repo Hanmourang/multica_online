@@ -164,8 +164,8 @@ type TaskContextForEnv struct {
 	// ProjectIndex is the per-turn open-work snapshot for a chat bound to a
 	// project. It is written to ProjectIndexRelPath and is not part of the
 	// cached brief; the claim already includes the same text in the user message.
-	ProjectIndex string
-	ChatSessionID                 string                  // non-empty for chat tasks
+	ProjectIndex  string
+	ChatSessionID string // non-empty for chat tasks
 	// ChatIssueRecord is the authorized snapshot of issues the user attached
 	// to this chat turn. It is per-run data, so it is written to
 	// ChatSharedIssuesRelPath and never rendered into the cached brief.
@@ -762,8 +762,20 @@ type ReuseParams struct {
 	// task spawns, not only on the fresh-Prepare path.
 	WorkspacesRoot string
 	WorkDir        string
-	Provider       string
-	CodexVersion   string // only used when Provider == "codex"
+	// RootDir is the env root this WorkDir belongs to. Needed when WorkDir is
+	// not envRoot's immediate child: a worktree task runs at
+	// envRoot/worktree (or envRoot/worktree/<sub> when the resource points at a
+	// subdirectory), and deriving the root with filepath.Dir would land inside
+	// the worktree itself — putting the refreshed sidecars and per-task config
+	// in the wrong tree. Empty keeps the standard envRoot/workdir behaviour.
+	RootDir string
+	// LocalWorktree is set by a caller that is continuing the worktree a prior
+	// turn of the same conversation left behind (see AdoptLocalWorktree). Reuse
+	// then hands it back on the Environment so the daemon's teardown still
+	// commits, records and keeps it.
+	LocalWorktree *LocalWorktree
+	Provider      string
+	CodexVersion  string // only used when Provider == "codex"
 	// ResumeSessionID is the prior Codex thread/session ID this reused task
 	// intends to resume, when any. Only consulted when Provider == "codex" and
 	// only used while migrating a legacy per-task home whose sessions/ still
@@ -829,7 +841,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
-	rootDir := filepath.Dir(params.WorkDir)
+	rootDir := params.RootDir
+	if rootDir == "" {
+		rootDir = filepath.Dir(params.WorkDir)
+	}
 	if params.LocalDirectory {
 		// For local_directory tasks the user's WorkDir is unrelated to
 		// envRoot (envRoot still lives under workspacesRoot/{wsID}/...),
@@ -846,6 +861,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		RootDir:        rootDir,
 		WorkDir:        params.WorkDir,
 		LocalDirectory: params.LocalDirectory,
+		LocalWorktree:  params.LocalWorktree,
 		logger:         logger,
 	}
 	if env.RootDir != "" {

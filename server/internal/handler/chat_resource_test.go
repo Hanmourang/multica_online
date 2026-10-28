@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -522,6 +524,211 @@ func TestChatResourceHydrationBatchesDocumentLookups(t *testing.T) {
 	}
 }
 
+func TestNormalizeChatResourceRefsAcceptsModuleTypes(t *testing.T) {
+	refs, err := normalizeChatResourceRefs([]protocol.ChatResourceRef{
+		{Type: "module", ID: " module-1 "},
+		{Type: "module_prototype", ID: "version-1"},
+	})
+	if err != nil {
+		t.Fatalf("normalize module refs: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("expected two refs, got %#v", refs)
+	}
+	if refs[0].ID != "module-1" || refs[0].Kind != "module" {
+		t.Fatalf("module ref = %#v, want trimmed id and kind=module", refs[0])
+	}
+	if refs[1].Kind != "prototype" {
+		t.Fatalf("prototype ref = %#v, want kind=prototype", refs[1])
+	}
+
+	for _, bad := range [][]protocol.ChatResourceRef{
+		{{Type: "module", ID: "m", Kind: "task"}},
+		{{Type: "module", ID: "m", Source: "artifact"}},
+		{{Type: "module_prototype", ID: "v", Kind: "task"}},
+		{{Type: "module_prototype", ID: "v", Source: "attachment"}},
+	} {
+		if _, err := normalizeChatResourceRefs(bad); err == nil {
+			t.Fatalf("expected %#v to be rejected", bad)
+		}
+	}
+}
+
+// D2: a module enters the prompt as a compact summary. Inlining the full
+// feature contracts would burn the context window on every turn.
+func TestFormatSharedModuleResourceKeepsContractsOutOfPrompt(t *testing.T) {
+	canonical := 3
+	got := formatSharedModuleResource("module:mod-1", protocol.ChatModuleSnapshot{
+		ModuleID:                  "mod-1",
+		ProjectID:                 "proj-1",
+		Name:                      "线索分配",
+		SpecVersion:               4,
+		CanonicalPrototypeVersion: &canonical,
+		FeaturePointCount:         7,
+	})
+	for _, expected := range []string{
+		`- module:mod-1 — module "线索分配"`,
+		"module_id mod-1",
+		"project_id proj-1",
+		"spec v4",
+		"canonical prototype v3",
+		"7 feature points",
+		"full feature contracts are intentionally not inlined",
+		// The prompt must name the read path: "not inlined" alone is what sent
+		// chat agents through project/requirement commands without ever
+		// reaching the prototype file.
+		"multica module get mod-1",
+		"multica module prototype read mod-1",
+	} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("module prompt missing %q:\n%s", expected, got)
+		}
+	}
+
+	lean := formatSharedModuleResource("module:mod-2", protocol.ChatModuleSnapshot{Name: "空模块"})
+	for _, unexpected := range []string{"spec v", "canonical prototype", "feature points"} {
+		if strings.Contains(lean, unexpected) {
+			t.Fatalf("module without a spec centre must not claim %q:\n%s", unexpected, lean)
+		}
+	}
+}
+
+func TestFormatSharedModulePrototypeResourceNamesVersion(t *testing.T) {
+	got := formatSharedModulePrototypeResource("module_prototype:v-1", protocol.ChatModulePrototypeSnapshot{
+		VersionID:  "v-1",
+		ModuleID:   "mod-1",
+		Version:    3,
+		ModuleName: "线索分配",
+		Status:     "confirmed",
+		HTMLPath:   "prototypes/lead/v3.html",
+	})
+	for _, expected := range []string{
+		"prototype v3",
+		`of "线索分配"`,
+		"(confirmed)",
+		"prototypes/lead/v3.html",
+		"multica module prototype read mod-1 --version 3",
+	} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("prototype prompt missing %q:\n%s", expected, got)
+		}
+	}
+
+	// Modules only join the snapshot once migration 484 lands; until then the
+	// owning issue title is the best available label.
+	fallback := formatSharedModulePrototypeResource("module_prototype:v-2", protocol.ChatModulePrototypeSnapshot{
+		Version: 1, IssueTitle: "原型需求",
+	})
+	if !strings.Contains(fallback, `of "原型需求"`) {
+		t.Fatalf("prototype prompt must fall back to the issue title:\n%s", fallback)
+	}
+}
+
+// C-15: while the flag is closed the server rejects both new ref types instead
+// of resolving them, so a stale client cannot resurrect the surface.
+func TestChatResourceBatchHidesModulesWhileFlagIsOff(t *testing.T) {
+	if testHandler == nil {
+		t.Fatal("handler not available for chat resource test")
+	}
+	withFeatureFlag(t, testHandler, featureflags.ModulePrototypeChat, false)
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/sessions/x/messages", nil)
+	resolved := testHandler.resolveChatResourceBatch(req, parseUUID(testWorkspaceID), []protocol.ChatResourceRef{
+		{Type: "module", ID: "00000000-0000-0000-0000-000000000001", Kind: "module"},
+		{Type: "module_prototype", ID: "00000000-0000-0000-0000-000000000002", Kind: "prototype"},
+	})
+	if len(resolved) != 2 {
+		t.Fatalf("resolved = %#v, want one entry per ref", resolved)
+	}
+	for _, resource := range resolved {
+		if resource.Access != "missing" {
+			t.Fatalf("%s resource = %#v, want missing while the flag is closed", resource.Type, resource)
+		}
+		if resource.Module != nil || resource.Prototype != nil {
+			t.Fatalf("%s resource must not carry a snapshot while the flag is closed", resource.Type)
+		}
+	}
+}
+
+func TestChatResourceHydrationResolvesModuleAndPrototype(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Fatal("database not available for chat resource test")
+	}
+	withFeatureFlag(t, testHandler, featureflags.ModulePrototypeChat, true)
+	sender := dmNewMember(t, "gresModuleA")
+	peer := dmNewMember(t, "gresModuleB")
+	code, sessionID := groupCreate(t, sender, map[string]any{
+		"title": "module resources", "member_ids": []string{peer},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create group: %d %s", code, sessionID)
+	}
+	t.Cleanup(func() { dmCleanupSession(context.Background(), sessionID) })
+	code, body, sent := groupSend(t, sender, sessionID, map[string]any{"content": "module resources"})
+	if code != http.StatusCreated {
+		t.Fatalf("send message: %d %s", code, body)
+	}
+
+	projectID := dbfx.Project(t, "module resource project")
+	moduleID := dbfx.Insert(t, "project_module", testutil.Cols{
+		"project_id":   projectID,
+		"workspace_id": testWorkspaceID,
+		"name":         "线索分配",
+		"color":        "#10b981",
+	})
+	issueID := dbfx.Issue(t, "prototype bearing issue", testutil.Cols{"module_id": moduleID})
+	versionID := dbfx.Insert(t, "issue_prototype_version", testutil.Cols{
+		"issue_id":        issueID,
+		"workspace_id":    testWorkspaceID,
+		"version":         2,
+		"html_path":       "prototypes/lead/v2.html",
+		"prompt":          "第二版原型",
+		"status":          "confirmed",
+		"created_by_type": "member",
+		"created_by_id":   testUserID,
+	})
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO chat_message_resource_ref
+			(message_id, position, resource_type, resource_id, resource_kind)
+		VALUES
+			($1, 0, 'module', $2, 'module'),
+			($1, 1, 'module_prototype', $3, 'prototype')`, sent.MessageID, moduleID, versionID); err != nil {
+		t.Fatalf("insert module resource fixtures: %v", err)
+	}
+
+	req := dmAsRequest(t, http.MethodGet, "/api/chat/sessions/"+sessionID+"/messages", nil, sender, "sessionId", sessionID)
+	resources := testHandler.groupChatMessageResources(req, parseUUID(testWorkspaceID), []pgtype.UUID{parseUUID(sent.MessageID)})[sent.MessageID]
+	if len(resources) != 2 {
+		t.Fatalf("hydrated resources = %#v, want module and prototype", resources)
+	}
+	if resources[0].Access != "granted" || resources[0].Type != "module" {
+		t.Fatalf("module resource = %#v, want granted", resources[0])
+	}
+	module, ok := resources[0].Module.(protocol.ChatModuleSnapshot)
+	if !ok {
+		t.Fatalf("module snapshot = %#v, want ChatModuleSnapshot", resources[0].Module)
+	}
+	if module.Name != "线索分配" || module.ProjectID != projectID || module.ModuleID != moduleID {
+		t.Fatalf("module snapshot = %#v, want name/project/module from the database", module)
+	}
+	if resources[0].ProjectID != projectID {
+		t.Fatalf("module resource project = %q, want %q", resources[0].ProjectID, projectID)
+	}
+
+	if resources[1].Access != "granted" || resources[1].Type != "module_prototype" {
+		t.Fatalf("prototype resource = %#v, want granted", resources[1])
+	}
+	prototype, ok := resources[1].Prototype.(protocol.ChatModulePrototypeSnapshot)
+	if !ok {
+		t.Fatalf("prototype snapshot = %#v, want ChatModulePrototypeSnapshot", resources[1].Prototype)
+	}
+	if prototype.VersionID != versionID || prototype.Version != 2 || prototype.IssueID != issueID {
+		t.Fatalf("prototype snapshot = %#v, want version id/2/issue from the database", prototype)
+	}
+	if prototype.Status != "confirmed" || prototype.HTMLPath != "prototypes/lead/v2.html" {
+		t.Fatalf("prototype snapshot = %#v, want status and html path", prototype)
+	}
+}
+
 func TestNormalizeChatResourceRefsRejectsInvalidShapes(t *testing.T) {
 	tests := []struct {
 		name string
@@ -538,6 +745,9 @@ func TestNormalizeChatResourceRefsRejectsInvalidShapes(t *testing.T) {
 		{name: "document source missing", refs: []protocol.ChatResourceRef{{Type: "document", ID: "1"}}},
 		{name: "artifact project missing", refs: []protocol.ChatResourceRef{{Type: "document", ID: "1", Source: "artifact"}}},
 		{name: "document kind forbidden", refs: []protocol.ChatResourceRef{{Type: "document", ID: "1", Source: "attachment", Kind: "task"}}},
+		{name: "module kind mismatch", refs: []protocol.ChatResourceRef{{Type: "module", ID: "1", Kind: "task"}}},
+		{name: "module document fields", refs: []protocol.ChatResourceRef{{Type: "module", ID: "1", Source: "artifact"}}},
+		{name: "prototype kind mismatch", refs: []protocol.ChatResourceRef{{Type: "module_prototype", ID: "1", Kind: "issue"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
