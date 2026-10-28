@@ -32,3 +32,15 @@ export {
   useUpdateProjectResource,
   useDeleteProjectResource,
 } from "./resource-queries";
+export {
+  modulePrototypeKeys,
+  moduleSpecOptions,
+  modulePrototypeVersionsOptions,
+  moduleReconcileOptions,
+  moduleCoverageOptions,
+  usePublishModuleSpec,
+  useRegisterModulePrototype,
+  useParseModulePrototype,
+  useCreateModulePrototypePlan,
+  useApplyModulePrototypePlan,
+} from "./module-prototypes";

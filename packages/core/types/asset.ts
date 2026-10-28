@@ -180,15 +180,18 @@ export interface BatchUpdateAssetMetaResponse {
   bindings: AssetBinding[];
 }
 
-/** overview 面的工作项条目（需求与 Bug 在 multica 同为 issue）。 */
+/** overview 面的工作项条目：multica 里需求与任务同为 issue，is_requirement =
+ * 顶层（无父项）；任务（有父项）为 false。候选为全量下发（含已关闭）。 */
 export interface AssetOverviewIssue {
   id: string;
   title: string;
   status: string;
   project_id?: string | null;
+  is_requirement?: boolean;
 }
 
-/** GET /api/assets/overview 响应：全量 binding（含 links，不分页）+ 候选工作项。 */
+/** GET /api/assets/overview 响应：全量 binding（含 links，不分页）+ 全量候选工作项
+ *（需求与任务各按 is_requirement 分区）。 */
 export interface AssetOverviewResponse {
   bindings: AssetBinding[];
   issues: AssetOverviewIssue[];

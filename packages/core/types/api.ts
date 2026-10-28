@@ -238,6 +238,150 @@ export interface GeneratePrototypeRequest {
   prompt_append?: string;
 }
 
+// ── 功能模块原型中枢（plans/20261026 07 · M-13）──────────────────────────
+// 字段名与 server/internal/handler/module_*.go、service/module_reconcile.go 的
+// JSON tag 一一对应；四态与覆盖率唯一口径在后端，前端禁止二次自算（07 §六防漂移）。
+
+/** module_spec/v1 的功能点条目。 */
+export interface ModuleSpecFeature {
+  code: string;
+  title: string;
+  kind: "core" | "edge";
+  priority?: string;
+}
+
+/** project_module.spec 的反序列化形态（唯一真源，schema=module_spec/v1）。 */
+export interface ModuleSpec {
+  schema: string;
+  summary?: string;
+  features: ModuleSpecFeature[];
+}
+
+/** GET /modules/{moduleId}/spec 响应。 */
+export interface ModuleSpecResponse {
+  module_id: string;
+  name: string;
+  color: string;
+  spec: ModuleSpec | null;
+  spec_version: number;
+  canonical_prototype_version: number | null;
+  feature_count: number;
+  spec_updated_at: string;
+}
+
+/** POST /spec/publish 与 apply 返回的发布回执。 */
+export interface ModuleSpecPublishResponse {
+  module_id: string;
+  spec_version: number;
+  feature_count: number;
+}
+
+/** 模块级原型版本行（issue_prototype_version 的模块投影；Register 回执仅含子集字段）。 */
+export interface ModulePrototypeVersion {
+  id: string;
+  version: number;
+  html_path: string;
+  prompt: string;
+  status: "pending" | "confirmed" | "superseded";
+  /** 无需求原型为 null（硬伤 3 闭环）。 */
+  issue_id: string | null;
+  created_at: string;
+  module_id?: string;
+}
+
+/** GET /modules/{moduleId}/prototype-versions 响应。 */
+export interface ModulePrototypeVersionListResponse {
+  module_id: string;
+  canonical_prototype_version: number | null;
+  versions: ModulePrototypeVersion[];
+  total: number;
+}
+
+/** 四态 + 独立 deprecated（与后端 ReconcileState 同构）。 */
+export type ModuleReconcileState =
+  | "covered"
+  | "changed"
+  | "missing"
+  | "unregistered"
+  | "deprecated";
+
+/** 功能点处置（与后端 Decision 同构）。 */
+export type ModuleFeatureDecision = "keep" | "override" | "deprecate" | "add" | "skip";
+
+/** 对账矩阵的一行。 */
+export interface ModuleReconcileRowItem {
+  code: string;
+  title: string;
+  specTitle?: string;
+  kind: string;
+  state: ModuleReconcileState;
+  prototypeAnchor?: number;
+  requirementId?: string;
+  owner?: string;
+  decision?: ModuleFeatureDecision;
+}
+
+/** f4 五个 KPI 聚合（唯一口径）。 */
+export interface ModuleCoverage {
+  total: number;
+  deprecated: number;
+  covered: number;
+  changed: number;
+  missing: number;
+  unregistered: number;
+  denominator: number;
+  rate: number;
+}
+
+/** GET /modules/{moduleId}/prototype-reconcile 响应。 */
+export interface ModuleReconcileResponse {
+  module_id: string;
+  version: number;
+  coverage: ModuleCoverage;
+  rows: ModuleReconcileRowItem[];
+}
+
+/** 解析缓存 anchors（前端解析 data-fp 后回传）。 */
+export type ModuleProtoAnchorMap = Record<string, { count: number; title?: string }>;
+
+/** module_prototype_plan 状态机（07 §2.5）。 */
+export type ModulePrototypePlanStatus =
+  | "draft"
+  | "applying"
+  | "applied"
+  | "failed"
+  | "expired";
+
+/** 计划快照。 */
+export interface ModulePrototypePlanSnapshot {
+  newSpec?: ModuleSpec;
+  decisions?: Record<string, ModuleFeatureDecision>;
+}
+
+/** POST /prototype-plans 与 GET /prototype-plans/{planId} 响应。 */
+export interface ModulePrototypePlan {
+  id: string;
+  module_id: string;
+  status: ModulePrototypePlanStatus;
+  candidate_version: number;
+  base_version: number | null;
+  spec_version: number;
+  plan: ModulePrototypePlanSnapshot;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** POST /prototype-plans/{planId}/apply 成功回执。 */
+export interface ModulePrototypePlanApplyResponse {
+  plan_id: string;
+  module_id: string;
+  status: "applied";
+  canonical_prototype_version: number;
+  spec_version: number;
+  feature_count: number;
+}
+
 /** POST /issues/{id}/prototype/generate 的响应包：新版本行 + stage-1 子任务。 */
 export interface GeneratePrototypeResponse {
   version: PrototypeVersion;
@@ -299,6 +443,15 @@ export interface UpdateIssueRequest {
    *  MUL-3375). The assignee/status change still applies. Control field —
    *  strip from optimistic cache patches; never written onto the Issue. */
   suppress_run?: boolean;
+  /** When a status change hands the issue off to a workflow step's handler,
+   *  also stop the active runs of the agent it was taken from (MUL-7420).
+   *  Control field — strip from optimistic cache patches. */
+  stop_previous_assignee_runs?: boolean;
+  /** With a project move: enter the destination workflow's column the issue
+   *  lands on, handing it off like a status change (MUL-7420). Without it a
+   *  project move is administrative. Control field — strip from optimistic
+   *  cache patches. */
+  enter_workflow_step?: boolean;
 }
 
 /**
@@ -314,6 +467,7 @@ export interface MoveIssueRequest
     | "assignee_id"
     | "parent_issue_id"
     | "project_id"
+    | "stop_previous_assignee_runs"
   > {
   before_id: string | null;
   after_id: string | null;

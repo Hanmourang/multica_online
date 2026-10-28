@@ -146,6 +146,8 @@ export function useUpdateIssue() {
       // a rapid follow-up edit. mutationFn still sends the full payload.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousRuns,
+        enter_workflow_step: _enterWorkflowStep,
         description: _description,
         description_base: _descriptionBase,
         title_base: _titleBase,
@@ -256,6 +258,8 @@ export function useUpdateIssue() {
       // is the plain surgical patch it always was.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousRuns,
+        enter_workflow_step: _enterWorkflowStep,
         description_base: _descriptionBase,
         move_intent: _moveIntent,
         id: _id,
@@ -453,6 +457,8 @@ export function useBatchUpdateIssues() {
       // until a refetch returns the committed result.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousRuns,
+        enter_workflow_step: _enterWorkflowStep,
         description: _description,
         description_base: _descriptionBase,
         ...patch

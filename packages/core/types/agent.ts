@@ -833,6 +833,26 @@ export interface BuiltinSkillSummary {
   description: string;
 }
 
+/**
+ * One supporting file inside a platform skill. Platform skills live in the
+ * server binary, so the path inside the skill directory is the only identity
+ * — there is no workspace file row to reference.
+ */
+export interface BuiltinSkillFile {
+  path: string;
+  content: string;
+}
+
+/**
+ * Full source of a platform skill, from `GET /api/builtin-skills/{id}`. The
+ * list endpoint ships name + description only; the body and files are fetched
+ * on demand so the Skills page stays cheap.
+ */
+export interface BuiltinSkill extends BuiltinSkillSummary {
+  content: string;
+  files: BuiltinSkillFile[];
+}
+
 export interface SkillSummary {
   id: string;
   workspace_id: string;

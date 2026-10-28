@@ -88,6 +88,7 @@ export type WSEventType =
   | "property:created"
   | "property:updated"
   | "issue_status:changed"
+  | "issue_workflow:changed"
   | "pin:created"
   | "pin:deleted"
   | "pin:reordered"
@@ -112,7 +113,11 @@ export type WSEventType =
   // refreshMap），不做行级 merge，故载荷用宽松形状。
   | "asset:bound"
   | "asset:unbound"
-  | "asset:updated";
+  | "asset:updated"
+  // 功能模块模块（plan 20261026 §06/§07，对照 Go 的 project_module 广播）。
+  // 聊天侧只靠它把挂着的模块 chip 标成「有新版本」，列表/详情靠整片 invalidate。
+  | "project_module:spec_updated"
+  | "project_module:prototype_published";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -186,6 +191,17 @@ export interface PropertyChangedPayload {
  */
 export interface IssueStatusChangedPayload {
   action?: "created" | "updated" | "archived" | "reordered";
+}
+
+/**
+ * A workspace workflow was created, edited or deleted (MUL-7420).
+ *
+ * Same shape as the status catalog event and for the same reason: a workflow
+ * is a whole definition, so clients re-read the list instead of merging one
+ * row. Issue moves caused by the edit arrive as ordinary issue events.
+ */
+export interface IssueWorkflowChangedPayload {
+  action?: "created" | "updated" | "deleted";
 }
 
 export interface AgentStatusPayload {
@@ -598,6 +614,7 @@ export interface WSEventPayloadMap {
   "property:created": PropertyChangedPayload;
   "property:updated": PropertyChangedPayload;
   "issue_status:changed": IssueStatusChangedPayload;
+  "issue_workflow:changed": IssueWorkflowChangedPayload;
   "issue_reaction:added": IssueReactionAddedPayload;
   "issue_reaction:removed": IssueReactionRemovedPayload;
   "comment:created": CommentCreatedPayload;

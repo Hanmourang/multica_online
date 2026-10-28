@@ -25,6 +25,8 @@ export {
   WORKFLOW_MODULE_FLAG,
   SPRINT_MODULE_FLAG,
   CHAT_CONVERSATIONS_FLAG,
+  MODULE_PROTOTYPE_CHAT_FLAG,
+  MODULE_SPEC_CENTER_FLAG,
 } from "./keys";
 export {
   FeatureFlagsProvider,

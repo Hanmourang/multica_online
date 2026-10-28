@@ -13,6 +13,7 @@ import {
 } from "../i18n/react";
 import { WSProvider } from "../realtime";
 import { QueryProvider } from "../provider";
+import { FontScaleSync } from "../preferences/font-scale";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
@@ -113,6 +114,9 @@ export function CoreProvider({
   // through window.location.reload(), never client-side changeLanguage.
   const tree = (
     <QueryProvider>
+      {/* Published on <html> rather than inside a themed subtree so portals
+          (dialogs, menus, toasts) inherit the same type scale. */}
+      <FontScaleSync />
       <AuthInitializer
         onLogin={onLogin}
         onLogout={onLogout}

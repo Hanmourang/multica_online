@@ -840,6 +840,87 @@ describe("chat resource response schemas", () => {
     });
     expect(response.resources).toEqual([]);
   });
+  it("keeps a module snapshot with its spec pointers", () => {
+    const [message] = ChatMessageListSchema.parse([{
+      id: "message-1",
+      chat_session_id: "session-1",
+      role: "user",
+      content: "shared",
+      resources: [{
+        type: "module",
+        id: "module-1",
+        kind: "module",
+        project_id: "project-1",
+        access: "granted",
+        module: {
+          module_id: "module-1",
+          name: "线索分配",
+          project_id: "project-1",
+          color: "#10b981",
+          spec_version: 4,
+          canonical_prototype_version: 3,
+          feature_point_count: 7,
+        },
+      }],
+    }]);
+    const module = message?.resources?.[0]?.module;
+    expect(message?.resources?.[0]?.type).toBe("module");
+    expect(module?.name).toBe("线索分配");
+    expect(module?.spec_version).toBe(4);
+    expect(module?.canonical_prototype_version).toBe(3);
+    expect(module?.feature_point_count).toBe(7);
+  });
+
+  it("degrades a module snapshot that predates the spec centre", () => {
+    const [message] = ChatMessageListSchema.parse([{
+      id: "message-1",
+      chat_session_id: "session-1",
+      role: "user",
+      content: "shared",
+      resources: [{
+        type: "module",
+        id: "module-1",
+        kind: "module",
+        access: "granted",
+        module: { module_id: "module-1", name: "旧模块", color: null },
+      }],
+    }]);
+    const module = message?.resources?.[0]?.module;
+    expect(module?.project_id).toBe("");
+    expect(module?.color).toBeUndefined();
+    expect(module?.spec_version).toBe(0);
+    expect(module?.canonical_prototype_version).toBeNull();
+    expect(module?.feature_point_count).toBe(0);
+  });
+
+  it("parses a module prototype card by version", () => {
+    const [message] = ChatMessageListSchema.parse([{
+      id: "message-1",
+      chat_session_id: "session-1",
+      role: "user",
+      content: "shared",
+      resources: [{
+        type: "module_prototype",
+        id: "version-1",
+        kind: "prototype",
+        access: "granted",
+        prototype: {
+          version_id: "version-1",
+          issue_id: "issue-1",
+          issue_title: "原型需求",
+          version: 2,
+          html_path: "prototypes/lead/v2.html",
+          status: "confirmed",
+        },
+      }],
+    }]);
+    const prototype = message?.resources?.[0]?.prototype;
+    expect(message?.resources?.[0]?.type).toBe("module_prototype");
+    expect(prototype?.version_id).toBe("version-1");
+    expect(prototype?.version).toBe(2);
+    expect(prototype?.status).toBe("confirmed");
+    expect(prototype?.module_id).toBeUndefined();
+  });
 });
 
 describe("SendChatMessageResponseSchema", () => {

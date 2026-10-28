@@ -26,6 +26,8 @@ import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
+import { issueWorkflowKeys } from "../issue-workflows/queries";
+import { moduleKeys } from "../modules/queries";
 import {
   agentTaskSnapshotKeys,
   workspaceWorkingAgentsKeys,
@@ -693,6 +695,9 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     // 5-minute staleTime — long enough to offer a status the server already
     // archived, or to keep painting its old name.
     qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+    // Same reasoning for workflows: a handoff step missed while disconnected
+    // would let a status change skip its confirmation until the tab reloads.
+    qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -821,7 +826,12 @@ export function useRealtimeSync(
       },
       project: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+          // Workflow responses include the projects using them, so a project
+          // create/update/delete changes that usage list too. (MUL-7420)
+          qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
+        }
       },
       // asset:bound / asset:unbound (migration 471). The binding layer is a
       // projection over project rows + candidates; both are keyed under the
@@ -841,6 +851,13 @@ export function useRealtimeSync(
       sprint: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: sprintKeys.all(wsId) });
+      },
+      // project_module:spec_updated / prototype_published (plan 20261026 §06).
+      // 模块列表里的 spec_version / canonical 指针是派生的；整片失效即可，
+      // 不做行级 merge —— 这两类事件低频且载荷只带定位字段。
+      project_module: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: moduleKeys.all(wsId) });
       },
       squad: () => {
         const wsId = getCurrentWsId();
@@ -877,6 +894,12 @@ export function useRealtimeSync(
       issue_status: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+      },
+      // Workspace workflows (MUL-7420). Same contract as the status catalog:
+      // the event carries no row, so every write answers with one list read.
+      issue_workflow: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
       },
       pin: () => {
         const wsId = getCurrentWsId();

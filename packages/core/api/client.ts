@@ -67,6 +67,7 @@ import type {
   Skill,
   SkillSummary,
   BuiltinSkillSummary,
+  BuiltinSkill,
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
@@ -224,6 +225,13 @@ import type {
   IssueStatusEntry,
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,
+  IssueWorkflow,
+  IssueWorkflowWriteRequest,
+  IssueWorkflowDryRunResponse,
+  ListIssueWorkflowsResponse,
+  SetProjectWorkflowRequest,
+  SetWorkflowHandoffRequest,
+  WorkflowHandoffPreview,
   IssueLabelsResponse,
   LabelResourceType,
   ResourceLabelsResponse,
@@ -329,6 +337,17 @@ import type {
   GeneratePrototypeResponse,
   PrototypeMark,
   PrototypeVersion,
+  ModuleSpecResponse,
+  ModuleSpecPublishResponse,
+  ModuleSpec,
+  ModulePrototypeVersionListResponse,
+  ModulePrototypeVersion,
+  ModuleReconcileResponse,
+  ModuleCoverage,
+  ModuleProtoAnchorMap,
+  ModuleFeatureDecision,
+  ModulePrototypePlan,
+  ModulePrototypePlanApplyResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -345,6 +364,10 @@ import type {
   CreateCloudRuntimeNodeRequest,
   ListCloudRuntimeNodesParams,
 } from "../runtimes/cloud-runtime";
+import {
+  normalizeLocalChannel,
+  type LocalChannel,
+} from "../runtimes/local-channel";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -500,6 +523,15 @@ import {
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
+  IssueWorkflowSchema,
+  ListIssueWorkflowsResponseSchema,
+  EMPTY_LIST_ISSUE_WORKFLOWS_RESPONSE,
+  EMPTY_ISSUE_WORKFLOW,
+  IssueWorkflowDryRunResponseSchema,
+  EMPTY_ISSUE_WORKFLOW_DRY_RUN,
+  IssueWorkflowBriefPreviewSchema,
+  WorkflowHandoffPreviewSchema,
+  EMPTY_WORKFLOW_HANDOFF_PREVIEW,
   IssuePropertySchema,
   ListPropertiesResponseSchema,
   IssuePropertiesResponseSchema,
@@ -1405,6 +1437,139 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/modules/${moduleId}`, {
       method: "DELETE",
     });
+  }
+
+  // ── 功能模块原型中枢（plans/20261026 07 · M-13）─────────────────────
+  // 路由均受 FF_MODULE_SPEC_CENTER 门控；关闭时这些叶子不注册 → 404。
+
+  /** 读模块能力规格 + 版本 + 权威原型指针。 */
+  async getModuleSpec(projectId: string, moduleId: string): Promise<ModuleSpecResponse> {
+    return this.fetch(`/api/projects/${projectId}/modules/${moduleId}/spec`);
+  }
+
+  /** 暂存规格草稿（不 bump 版本、不重建投影）。 */
+  async draftModuleSpec(
+    projectId: string,
+    moduleId: string,
+    spec: ModuleSpec,
+  ): Promise<{ module_id: string; feature_count: number; spec: ModuleSpec }> {
+    return this.fetch(`/api/projects/${projectId}/modules/${moduleId}/spec/draft`, {
+      method: "POST",
+      body: JSON.stringify({ spec }),
+    });
+  }
+
+  /** 发布规格：事务内版本+1 + 重建投影；expected_version 过期 → 409。 */
+  async publishModuleSpec(
+    projectId: string,
+    moduleId: string,
+    body: { spec: ModuleSpec; expected_version?: number },
+  ): Promise<ModuleSpecPublishResponse> {
+    return this.fetch(`/api/projects/${projectId}/modules/${moduleId}/spec/publish`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** 模块级原型版本序列（optionally 仅 confirmed）；无需求模块亦可列（硬伤 3）。 */
+  async listModulePrototypeVersions(
+    projectId: string,
+    moduleId: string,
+    canonicalOnly = false,
+  ): Promise<ModulePrototypeVersionListResponse> {
+    const qs = canonicalOnly ? "?canonical=1" : "";
+    return this.fetch(
+      `/api/projects/${projectId}/modules/${moduleId}/prototype-versions${qs}`,
+    );
+  }
+
+  /** 登记模块级原型版本（issue_id 可空=无需求原型；set_canonical 需 confirmed）。 */
+  async registerModulePrototypeVersion(
+    projectId: string,
+    moduleId: string,
+    body: {
+      version: number;
+      html_path: string;
+      prompt?: string;
+      status?: "pending" | "confirmed" | "superseded";
+      issue_id?: string;
+      set_canonical?: boolean;
+    },
+  ): Promise<ModulePrototypeVersion> {
+    return this.fetch(`/api/projects/${projectId}/modules/${moduleId}/prototype-versions`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** 存前端解析的 data-fp anchors 缓存（后端不解析 HTML）。 */
+  async parseModulePrototype(
+    projectId: string,
+    moduleId: string,
+    version: number,
+    anchors: ModuleProtoAnchorMap,
+  ): Promise<{ module_id: string; version: number; anchor_count: number }> {
+    return this.fetch(
+      `/api/projects/${projectId}/modules/${moduleId}/prototype-versions/${version}/parse`,
+      { method: "POST", body: JSON.stringify({ anchors }) },
+    );
+  }
+
+  /** 四态对账矩阵 + 覆盖率（?version=N，缺省用 canonical）。 */
+  async getModulePrototypeReconcile(
+    projectId: string,
+    moduleId: string,
+    version?: number,
+  ): Promise<ModuleReconcileResponse> {
+    const qs = version != null ? `?version=${version}` : "";
+    return this.fetch(
+      `/api/projects/${projectId}/modules/${moduleId}/prototype-reconcile${qs}`,
+    );
+  }
+
+  /** 仅覆盖率 KPI（列表徽标与详情环同源）。 */
+  async getModuleCoverage(
+    projectId: string,
+    moduleId: string,
+    version?: number,
+  ): Promise<{ module_id: string; coverage: ModuleCoverage }> {
+    const qs = version != null ? `?version=${version}` : "";
+    return this.fetch(`/api/projects/${projectId}/modules/${moduleId}/coverage${qs}`);
+  }
+
+  /** 建发布计划（draft，不移动权威）；候选需已登记且 confirmed。 */
+  async createModulePrototypePlan(
+    projectId: string,
+    moduleId: string,
+    body: { candidate_version: number; new_spec?: ModuleSpec; decisions?: Record<string, ModuleFeatureDecision> },
+  ): Promise<ModulePrototypePlan> {
+    return this.fetch(`/api/projects/${projectId}/modules/${moduleId}/prototype-plans`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** 读单条计划。 */
+  async getModulePrototypePlan(
+    projectId: string,
+    moduleId: string,
+    planId: string,
+  ): Promise<ModulePrototypePlan> {
+    return this.fetch(
+      `/api/projects/${projectId}/modules/${moduleId}/prototype-plans/${planId}`,
+    );
+  }
+
+  /** 人确认后 apply：同事务移动 canonical + bump spec + 重建投影；重复 apply → 409。 */
+  async applyModulePrototypePlan(
+    projectId: string,
+    moduleId: string,
+    planId: string,
+  ): Promise<ModulePrototypePlanApplyResponse> {
+    return this.fetch(
+      `/api/projects/${projectId}/modules/${moduleId}/prototype-plans/${planId}/apply`,
+      { method: "POST" },
+    );
   }
 
   /** 依赖边：GET 读当前前置列表；PUT 全量置换（空数组 = 清空）。
@@ -2934,6 +3099,15 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Addresses other devices can dial to reach this backend (Settings →
+   * Runtimes → Phone channel). Answers `available: false` on the managed
+   * cloud, where the API node's private network is not tenant-reachable.
+   */
+  async getLocalChannel(): Promise<LocalChannel> {
+    return normalizeLocalChannel(await this.fetch<unknown>("/api/local-channel"));
+  }
+
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
     return this.fetch("/api/workspaces");
@@ -3411,6 +3585,15 @@ export class ApiClient {
 
   async listBuiltinSkills(): Promise<BuiltinSkillSummary[]> {
     return this.fetch("/api/builtin-skills");
+  }
+
+  /**
+   * Full source of one platform skill. The id is the ref id handed out by
+   * `listBuiltinSkills` (`builtin:<name>`); the server also accepts a bare
+   * name. Encoded because of the colon.
+   */
+  async getBuiltinSkill(id: string): Promise<BuiltinSkill> {
+    return this.fetch(`/api/builtin-skills/${encodeURIComponent(id)}`);
   }
 
   async getSkill(id: string): Promise<Skill> {
@@ -5096,6 +5279,133 @@ export class ApiClient {
 
   async deleteLabel(id: string): Promise<void> {
     await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
+  // Workspace workflows (MUL-7420). Any workspace member may read and create
+  // workflows; only the workflow owner and workspace admins may edit or delete.
+  async listIssueWorkflows(): Promise<ListIssueWorkflowsResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows`);
+    return parseWithFallback(raw, ListIssueWorkflowsResponseSchema, EMPTY_LIST_ISSUE_WORKFLOWS_RESPONSE, {
+      endpoint: "GET /api/issue-workflows",
+    });
+  }
+
+  async createIssueWorkflow(data: IssueWorkflowWriteRequest): Promise<IssueWorkflow> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
+      endpoint: "POST /api/issue-workflows",
+    });
+  }
+
+  /**
+   * Saves a workflow edit. When the edit removes statuses that issues of the
+   * workflow's projects still use, the server answers 409
+   * `workflow_status_mapping_required` with a plan; resend with
+   * `status_mapping`. `dryRunIssueWorkflowUpdate` fetches that plan up front.
+   */
+  async updateIssueWorkflow(id: string, data: IssueWorkflowWriteRequest): Promise<IssueWorkflow> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ...data, dry_run: false }),
+    });
+    return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
+      endpoint: "PATCH /api/issue-workflows/{id}",
+    });
+  }
+
+  async dryRunIssueWorkflowUpdate(id: string, data: IssueWorkflowWriteRequest): Promise<IssueWorkflowDryRunResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ...data, dry_run: true }),
+    });
+    return parseWithFallback(raw, IssueWorkflowDryRunResponseSchema, EMPTY_ISSUE_WORKFLOW_DRY_RUN, {
+      endpoint: "PATCH /api/issue-workflows/{id} (dry run)",
+    });
+  }
+
+  async deleteIssueWorkflow(id: string): Promise<void> {
+    await this.fetch(`/api/issue-workflows/${id}`, { method: "DELETE" });
+  }
+
+  /**
+   * Renders the brief a column's handler would receive, from an unsaved
+   * handoff. `project_id` names the project the preview is for, if any.
+   */
+  async previewWorkflowBrief(
+    workflowId: string,
+    data: SetWorkflowHandoffRequest & { status_key: string; project_id?: string },
+  ): Promise<string> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}/brief`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const parsed = parseWithFallback(raw, IssueWorkflowBriefPreviewSchema, { brief: "" }, {
+      endpoint: "POST /api/issue-workflows/{id}/brief",
+    });
+    return parsed.brief;
+  }
+
+  /**
+   * Saves a workflow's handoff for one column, for every project using it;
+   * handler "none" clears it. With `copyForProjectId` the workflow stays as
+   * it is: the handoff lands on a copy that project switches to, and the copy
+   * is returned. Admin only.
+   */
+  async setWorkflowHandoff(
+    workflowId: string,
+    statusKey: string,
+    data: SetWorkflowHandoffRequest,
+    copyForProjectId?: string,
+  ): Promise<IssueWorkflow> {
+    const body = copyForProjectId ? { ...data, copy_for_project_id: copyForProjectId } : data;
+    const raw = await this.fetch<unknown>(
+      `/api/issue-workflows/${workflowId}/handoffs/${encodeURIComponent(statusKey)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+    return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
+      endpoint: "PUT /api/issue-workflows/{id}/handoffs/{status}",
+    });
+  }
+
+  /**
+   * What moving an issue to `status` would do under its project's workflow:
+   * who it goes to, the current agent's active runs, and the brief. Writes
+   * nothing; a status outside the workflow answers 400. With `projectId` it
+   * previews moving the issue into that project instead, entering the column
+   * it lands on (`status` may then be empty).
+   */
+  async previewWorkflowHandoff(issueId: string, status: string, projectId?: string): Promise<WorkflowHandoffPreview> {
+    const query = new URLSearchParams();
+    if (status) query.set("status", status);
+    if (projectId) query.set("project_id", projectId);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/workflow-handoff?${query.toString()}`);
+    return parseWithFallback(raw, WorkflowHandoffPreviewSchema, EMPTY_WORKFLOW_HANDOFF_PREVIEW, {
+      endpoint: "GET /api/issues/{id}/workflow-handoff",
+    });
+  }
+
+  /**
+   * Switches a project's workflow; issues on unlisted statuses need a mapping.
+   * Callers refetch the project and its issues, so the response is not read.
+   */
+  async setProjectWorkflow(projectId: string, data: SetProjectWorkflowRequest): Promise<void> {
+    await this.fetch<unknown>(`/api/projects/${projectId}/workflow`, {
+      method: "POST",
+      body: JSON.stringify({ ...data, dry_run: false }),
+    });
+  }
+
+  async dryRunProjectWorkflow(projectId: string, workflowId: string | null): Promise<IssueWorkflowDryRunResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/workflow`, {
+      method: "POST",
+      body: JSON.stringify({ workflow_id: workflowId, dry_run: true }),
+    });
+    return parseWithFallback(raw, IssueWorkflowDryRunResponseSchema, EMPTY_ISSUE_WORKFLOW_DRY_RUN, {
+      endpoint: "POST /api/projects/{id}/workflow (dry run)",
+    });
   }
 
   // Issue status catalog (MUL-6243). Reads are open to any workspace member;

@@ -134,6 +134,20 @@ export function skillDetailOptions(wsId: string, skillId: string) {
 }
 
 /**
+ * Full source of one platform skill. Platform skills only change when the
+ * binary does, so a long staleTime keeps the inspector instant when the user
+ * flips between them; the list query already uses the same window.
+ */
+export function builtinSkillDetailOptions(wsId: string, skillId: string) {
+  return queryOptions({
+    queryKey: [...workspaceKeys.builtinSkills(wsId), skillId] as const,
+    queryFn: () => api.getBuiltinSkill(skillId),
+    enabled: !!wsId && !!skillId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
  * Builds a `Map<skillId, Agent[]>` from the cached agent list. The server
  * already returns each agent with its full skill list inline, so no extra
  * request is needed — "which agents use skill X" is pure client-side fold.

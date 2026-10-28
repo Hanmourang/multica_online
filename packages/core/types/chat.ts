@@ -33,13 +33,41 @@ export type ChatResourceRefInput =
       id: string;
       source: "artifact" | "attachment";
       project_id?: string;
-    };
+    }
+  | { type: "module"; id: string; kind?: "module"; project_id?: string }
+  | { type: "module_prototype"; id: string; kind?: "prototype"; project_id?: string };
+
+/**
+ * Server-resolved module card. The version fields stay at 0/null until the
+ * module spec migration lands; readers hide empty segments instead of showing
+ * "spec v0".
+ */
+export interface ChatModuleResourceSnapshot {
+  module_id: string;
+  name: string;
+  project_id: string;
+  color?: string;
+  spec_version: number;
+  canonical_prototype_version: number | null;
+  feature_point_count: number;
+}
+
+export interface ChatModulePrototypeResourceSnapshot {
+  version_id: string;
+  module_id?: string;
+  name?: string;
+  issue_id?: string;
+  issue_title?: string;
+  version: number;
+  html_path?: string;
+  status?: string;
+}
 
 /** Server-resolved resource card. No client-provided title/path is trusted. */
 export interface ChatMessageResource {
-  type: "issue" | "document";
+  type: "issue" | "document" | "module" | "module_prototype";
   id: string;
-  kind?: "task" | "requirement";
+  kind?: "task" | "requirement" | "module" | "prototype";
   source?: "artifact" | "attachment";
   project_id?: string;
   access: "granted" | "denied" | "missing";
@@ -48,6 +76,8 @@ export interface ChatMessageResource {
   issue?: Issue;
   artifact?: ProjectArtifact;
   attachment?: import("./attachment").Attachment;
+  module?: ChatModuleResourceSnapshot;
+  prototype?: ChatModulePrototypeResourceSnapshot;
 }
 
 /**
