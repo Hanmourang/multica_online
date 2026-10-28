@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 原型 · 功能模块原型（Module Prototype）2026-10-26</title>
+<style>
+/* ===== Multica 设计 token（packages/ui/styles/tokens.css 浅色主题抄录） ===== */
+:root {
+  --app-shell: oklch(0.964435 0.001327 286.375);
+  --page-canvas: oklch(0.988087 0 0);
+  --surface: oklch(1 0 0);
+  --surface-hover: oklch(0.967 0.001 286.375);
+  --surface-selected: oklch(0.95 0.002 286.375);
+  --surface-border: oklch(0.92 0.004 286.32);
+  --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
+  --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+  --foreground: oklch(0.141 0.005 285.823);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --faint-foreground: oklch(0.606 0.016 285.938);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --border: oklch(0.945 0.003 286.32);
+  --destructive: oklch(0.577 0.245 27.325);
+  --brand: oklch(0.55 0.16 255);
+  --success: oklch(0.55 0.16 145);
+  --warning: oklch(0.72 0.15 75);
+  --radius: 0.625rem;
+  --sidebar-accent: oklch(0.935 0.003 286.375);
+  --st1: oklch(0.6 0.15 300);
+  --st2: oklch(0.58 0.15 250);
+  --st3: oklch(0.62 0.14 55);
+  --st4: oklch(0.58 0.16 145);
+  --st0: oklch(0.55 0.1 265);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: oklch(0.93 0.004 286.32);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+/* ===== 画板框架（非产品 UI） ===== */
+.proto-nav {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 24px; background: oklch(0.16 0.005 285.823);
+  color: oklch(0.92 0.004 286.32);
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 12px; }
+.proto-nav .logo span { color: var(--brand); }
+.proto-nav a {
+  color: oklch(0.705 0.015 286.067); text-decoration: none;
+  padding: 5px 12px; border-radius: 6px; font-size: 12.5px;
+}
+.proto-nav a:hover, .proto-nav a.on { background: oklch(1 0 0 / 8%); color: #fff; }
+.proto-nav .nav-sep {
+  color: oklch(0.86 0.02 286); font-size: 11px; font-weight: 700;
+  padding: 4px 8px; border-left: 2px solid oklch(0.55 0.16 255 / 60%);
+  margin-left: 6px; letter-spacing: .03em;
+}
+.frame-wrap { max-width: 1560px; margin: 0 auto; padding: 32px 24px 80px; }
+.frame-head { margin-bottom: 14px; scroll-margin-top: 96px; }
+.frame-head h2 { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.frame-head p { color: var(--muted-foreground); font-size: 13px; margin-top: 5px; line-height: 1.75; max-width: 1180px; }
+.frame-head p b { color: var(--foreground); }
+.frame {
+  background: var(--page-canvas); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 0.16), 0 4px 16px rgb(15 23 42 / 0.08);
+  border: 1px solid oklch(0.85 0.005 286.32);
+  margin-bottom: 52px; position: relative;
+}
+.frame-bar {
+  height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+}
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: oklch(0.7 0.19 27); }
+.frame-bar i:nth-child(2) { background: oklch(0.8 0.16 85); }
+.frame-bar i:nth-child(3) { background: oklch(0.7 0.16 145); }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--faint-foreground); }
+.frame-bar em { margin-left: auto; font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--faint-foreground); }
+
+.anno {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700;
+  box-shadow: 0 0 0 2.5px oklch(0.55 0.16 255 / 20%);
+  position: relative; z-index: 5; flex: none;
+}
+.anno.ok { background: var(--success); box-shadow: 0 0 0 2.5px oklch(0.55 0.16 145 / 20%); }
+.anno.warn { background: oklch(0.65 0.16 60); box-shadow: 0 0 0 2.5px oklch(0.72 0.15 75 / 22%); }
+.new-el { outline: 1.5px dashed oklch(0.55 0.16 255 / 55%); outline-offset: 2px; border-radius: 6px; }
+
+/* ===== 应用外壳 ===== */
+.app { display: flex; background: var(--page-canvas); }
+.app.tall { height: 900px; }
+.app.mid { height: 780px; }
+.sidebar {
+  width: 196px; flex: none; background: var(--app-shell);
+  border-right: 1px solid var(--surface-border); padding: 10px 8px;
+}
+.ws { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 600; padding: 4px 6px 12px; }
+.ws-avatar {
+  width: 20px; height: 20px; border-radius: 6px; background: var(--primary); color: #fff;
+  display: grid; place-items: center; font-size: 10px; font-weight: 700;
+}
+.s-sec { font-size: 9.5px; font-weight: 700; letter-spacing: .06em; color: var(--faint-foreground); padding: 10px 8px 4px; }
+.s-item {
+  display: flex; align-items: center; gap: 8px; padding: 4.5px 8px; border-radius: 6px;
+  color: var(--muted-foreground); font-size: 12px;
+}
+.s-item.on { background: var(--sidebar-accent); color: var(--foreground); font-weight: 600; }
+.s-item .n {
+  margin-left: auto; font-size: 10.5px; background: var(--surface-selected);
+  color: var(--muted-foreground); border-radius: 8px; padding: 0 6px; line-height: 16px;
+}
+.s-item.on .n { background: var(--surface); }
+
+.topbar {
+  height: 38px; display: flex; align-items: center; gap: 8px;
+  padding: 0 14px; border-bottom: 1px solid var(--surface-border); background: var(--surface);
+}
+.crumb { color: var(--muted-foreground); display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.crumb b { color: var(--foreground); font-weight: 600; }
+.tab-pill { padding: 4px 10px; border-radius: 6px; color: var(--muted-foreground); font-size: 12px; }
+.tab-pill.active { background: var(--surface-selected); color: var(--foreground); font-weight: 500; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* ===== 通用控件 ===== */
+.seg {
+  display: inline-flex; border: 1px solid var(--border); border-radius: 7px;
+  overflow: hidden; background: var(--surface);
+}
+.seg span { padding: 3.5px 10px; font-size: 11.5px; color: var(--muted-foreground); white-space: nowrap; cursor: pointer; }
+.seg span.active { background: var(--surface-selected); color: var(--foreground); font-weight: 600; }
+.seg span[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.inp {
+  height: 26px; border: 1px solid var(--border); background: var(--surface); border-radius: 6px;
+  font-size: 11.5px; color: var(--foreground); padding: 0 8px; box-shadow: var(--surface-shadow);
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.inp .ar { color: var(--faint-foreground); font-size: 10px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
+  font-size: 11.5px; font-weight: 500; color: var(--foreground); box-shadow: var(--surface-shadow);
+  white-space: nowrap;
+}
+.btn.ghost { box-shadow: none; border-color: transparent; background: transparent; color: var(--muted-foreground); }
+.btn.pri { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+.btn.sm { height: 23px; padding: 0 7px; font-size: 10.5px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.pill {
+  display: inline-flex; align-items: center; gap: 4px; height: 17px; padding: 0 6px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+  font-size: 10px; font-weight: 600; color: var(--muted-foreground); white-space: nowrap;
+}
+.pill.mute { background: var(--surface-selected); color: var(--faint-foreground); border-color: transparent; }
+.pill.new { background: oklch(0.55 0.16 255 / 10%); color: var(--brand); border-color: oklch(0.55 0.16 255 / 25%); }
+.pill.ok { background: oklch(0.55 0.16 145 / 12%); color: oklch(0.45 0.14 145); border-color: oklch(0.55 0.16 145 / 25%); }
+.pill.warn { background: oklch(0.72 0.15 75 / 16%); color: oklch(0.5 0.13 60); border-color: oklch(0.72 0.15 75 / 30%); }
+.pill.bad { background: oklch(0.577 0.245 27 / 10%); color: oklch(0.5 0.2 27); border-color: oklch(0.577 0.245 27 / 22%); }
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
+
+/* ===== 产品功能 L1 ===== */
+.feat-toolbar {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  padding: 7px 12px; border-bottom: 1px solid var(--surface-border); background: var(--surface);
+}
+.feat-body { flex: 1; min-height: 0; display: flex; }
+.mod-list {
+  width: 228px; flex: none; border-right: 1px solid var(--surface-border);
+  background: var(--surface); padding: 8px 9px; overflow: auto;
+}
+.ml-head { display: flex; align-items: baseline; gap: 6px; padding: 2px 2px 8px; }
+.ml-head .t { font-size: 11.5px; font-weight: 700; }
+.ml-head .c { font-size: 10px; color: var(--faint-foreground); }
+.mod-row {
+  border: 1px solid transparent; border-radius: 8px; padding: 6px 7px;
+  display: flex; flex-direction: column; gap: 3px; cursor: pointer;
+}
+.mod-row:hover { background: var(--surface-hover); }
+.mod-row.on { background: var(--surface-selected); border-color: oklch(0.86 0.004 286.32); }
+.mr-1 { display: flex; align-items: center; gap: 5px; }
+.mr-1 .nm { font-size: 11.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-1 .pg {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 8.5px; font-weight: 700;
+  padding: 0 3px; border-radius: 3px; background: var(--surface-selected); color: var(--faint-foreground);
+}
+.mr-1 .h { margin-left: auto; }
+.mr-2 { font-size: 10px; color: var(--muted-foreground); display: flex; gap: 7px; }
+.mr-2 .sep { color: oklch(0.86 0.004 286.32); }
+.detail { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* ===== 模块详情：sub-tabs ===== */
+.msubtabs {
+  display: flex; align-items: center; gap: 1px; padding: 0 10px;
+  border-bottom: 1px solid var(--surface-border); background: var(--surface); flex: none;
+}
+.msubtab {
+  padding: 8px 10px; font-size: 11.5px; font-weight: 600; color: var(--muted-foreground);
+  border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 4px;
+}
+.msubtab .n {
+  font-size: 9px; font-weight: 700; background: var(--surface-selected);
+  border-radius: 8px; padding: 0 4.5px; line-height: 13px; color: var(--faint-foreground);
+}
+.msubtab.on { color: var(--foreground); border-bottom-color: var(--primary); }
+
+/* ===== 原型卡片（As-Is 复刻） ===== */
+.pcard { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 10px 12px 2px; overflow: hidden; }
+.pcard-head { display: flex; align-items: center; gap: 6px; padding-bottom: 8px; flex: none; }
+.ptag {
+  font-size: 8.5px; font-weight: 700; color: var(--brand);
+  background: oklch(0.55 0.16 255 / 12%); border-radius: 3px; padding: 1px 4px;
+}
+.pcard-head .ttl { font-size: 11px; font-weight: 700; }
+.pcard-head .rt { margin-left: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 9px; font-weight: 600; color: var(--muted-foreground); }
+.ptool {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: none;
+  border: 1px solid var(--surface-border); background: oklch(0.97 0.001 286.375);
+  border-radius: 10px; padding: 6px 9px; margin-bottom: 9px;
+}
+.ptool .rt { margin-left: auto; display: flex; gap: 5px; }
+.pbody { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.pview { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.pvbar {
+  height: 24px; flex: none; display: flex; align-items: center; gap: 5px;
+  border-bottom: 1px solid var(--surface-border); background: oklch(0.96 0.001 286.375); padding: 0 9px;
+}
+.pvbar i { width: 7px; height: 7px; border-radius: 50%; background: oklch(0.85 0.004 286.32); }
+.pvbar .f { margin-left: 5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10px; color: var(--muted-foreground); }
+.pvbar .b { margin-left: auto; font-size: 9px; font-weight: 700; color: var(--muted-foreground); }
+.pvbar .b.ok { color: oklch(0.45 0.14 145); }
+.pframe { flex: 1; min-height: 0; background: #fff; overflow: auto; border: 1px solid var(--surface-border); border-top: 0; }
+.hintline { font-size: 10.5px; color: var(--muted-foreground); line-height: 1.6; padding: 7px 2px 8px; flex: none; }
+
+/* ===== 检视器（As-Is 右栏） ===== */
+.insp {
+  width: 302px; flex: none; border-left: 1px solid var(--surface-border);
+  background: var(--surface); display: flex; flex-direction: column; overflow: auto;
+}
+.insp-head {
+  display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+  border-bottom: 1px solid var(--surface-border); font-size: 11px; font-weight: 700; flex: none;
+}
+.insp-sec { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.insp-sec:last-child { border-bottom: 0; }
+.insp-t { font-size: 10px; font-weight: 700; color: var(--faint-foreground); letter-spacing: .03em; margin-bottom: 5px; display: flex; align-items: center; gap: 4px; }
+.insp-goal {
+  font-size: 10.5px; line-height: 1.65; color: var(--foreground);
+  background: var(--surface-hover); border-radius: 7px; padding: 6px 7px;
+}
+.fprow {
+  display: flex; align-items: center; gap: 5px; padding: 5px 6px; border-radius: 6px;
+  border: 1px solid transparent; cursor: pointer; margin-bottom: 3px;
+}
+.fprow:hover { background: var(--surface-hover); }
+.fprow.on { background: oklch(0.55 0.16 255 / 8%); border-color: oklch(0.55 0.16 255 / 20%); }
+.fprow .id { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 9px; color: var(--faint-foreground); }
+.fprow .nm { font-size: 10.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fprow .mk { margin-left: auto; display: flex; gap: 3px; }
+.mk span { font-size: 9px; padding: 0 4px; line-height: 14px; border-radius: 4px; background: var(--surface-selected); color: var(--faint-foreground); }
+.mk span.y { background: oklch(0.55 0.16 145 / 14%); color: oklch(0.45 0.14 145); }
+.mk span.n { background: oklch(0.577 0.245 27 / 12%); color: oklch(0.5 0.2 27); }
+.bindrow {
+  display: flex; align-items: center; gap: 5px; font-size: 10.5px;
+  border: 1px dashed var(--surface-border); border-radius: 7px; padding: 5px 7px; color: var(--muted-foreground);
+}
+
+/* ===== 线框（原型画面） ===== */
+.wf { padding: 12px 14px; font-size: 11px; color: oklch(0.35 0.01 286); }
+.wf-h { display: flex; align-items: baseline; gap: 6px; margin-bottom: 9px; }
+.wf-h b { font-size: 13px; color: var(--foreground); }
+.wf-h .path { font-size: 9.5px; color: var(--faint-foreground); font-family: ui-monospace, Menlo, monospace; }
+.wf-bar { display: flex; gap: 5px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.wf-inp { flex: 1; min-width: 60px; height: 22px; border: 1px solid var(--border); border-radius: 5px; background: oklch(0.985 0 0); }
+.wf-btn { height: 22px; padding: 0 9px; border-radius: 5px; border: 1px solid var(--border); background: #fff; font-size: 10px; display: inline-flex; align-items: center; }
+.wf-btn.pri { background: oklch(0.21 0.006 285.885); color: #fff; border-color: transparent; }
+.wf-tbl { width: 100%; border-collapse: collapse; font-size: 10px; }
+.wf-tbl th {
+  text-align: left; font-size: 9px; font-weight: 700; color: var(--faint-foreground);
+  padding: 4px 5px; border-bottom: 1px solid var(--border); background: oklch(0.975 0 0);
+}
+.wf-tbl td { padding: 5px; border-bottom: 1px solid oklch(0.96 0.003 286.32); }
+.wf-tbl tr:hover td { background: oklch(0.985 0 0); }
+[data-fp] { position: relative; transition: box-shadow .12s, background .12s; border-radius: 4px; }
+[data-fp].hl { box-shadow: 0 0 0 1.5px oklch(0.55 0.16 255), 0 0 0 5px oklch(0.55 0.16 255 / 14%); background: oklch(0.55 0.16 255 / 6%); }
+[data-fp].chg::after {
+  content: ""; position: absolute; inset: -1px; border-radius: 4px;
+  border: 1px dashed oklch(0.72 0.15 75 / 80%); pointer-events: none;
+}
+[data-fp].gone { opacity: .38; text-decoration: line-through; }
+[data-fp].newf::after {
+  content: "新"; position: absolute; top: -6px; right: -4px;
+  font-size: 8px; font-weight: 700; color: #fff; background: var(--brand);
+  border-radius: 4px; padding: 0 3px; line-height: 12px;
+}
+
+/* ===== 原型总览条（To-Be 新增） ===== */
+.ovbar {
+  display: flex; align-items: center; gap: 0; flex: none; flex-wrap: wrap;
+  border-bottom: 1px solid var(--surface-border);
+  background: linear-gradient(180deg, oklch(0.995 0 0), oklch(0.975 0.001 286.375));
+}
+.ov-cell {
+  display: flex; align-items: center; gap: 7px; padding: 7px 12px;
+  border-right: 1px solid var(--border); min-width: 0;
+}
+.ov-k { font-size: 9.5px; font-weight: 700; letter-spacing: .04em; color: var(--faint-foreground); }
+.ov-v { font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+.ov-v small { font-size: 9.5px; font-weight: 500; color: var(--muted-foreground); }
+.ov-v.stack { display: block; }
+.ov-v.stack small { display: block; margin-top: 1px; }
+.ov-cell.pend { min-width: 196px; }
+.ov-cta { margin-left: auto; display: flex; gap: 6px; padding: 0 12px; }
+.ring {
+  width: 30px; height: 30px; border-radius: 50%; position: relative; flex: none;
+  background: conic-gradient(var(--st4) calc(var(--p) * 1%), oklch(0.9 0.004 286.32) 0);
+}
+.ring::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: #fff; }
+.ring b {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 8.5px; font-weight: 700; z-index: 1; color: oklch(0.4 0.12 145);
+}
+
+/* ===== 三段式：版本时间线 / 预览 / 对账 ===== */
+.tri { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.vt-rail {
+  width: 180px; flex: none; border-right: 1px solid var(--surface-border);
+  background: var(--surface); overflow: auto; padding: 8px;
+}
+.vt-sec { font-size: 9.5px; font-weight: 700; letter-spacing: .05em; color: var(--faint-foreground); padding: 2px 4px 6px; }
+.vt-row {
+  position: relative; border: 1px solid var(--surface-border); border-radius: 8px;
+  padding: 6px 7px 6px 18px; margin-bottom: 5px; cursor: pointer; background: var(--surface);
+}
+.vt-row:hover { border-color: oklch(0.86 0.004 286.32); background: var(--surface-hover); }
+.vt-row.on { border-color: oklch(0.55 0.16 255 / 45%); box-shadow: 0 0 0 2px oklch(0.55 0.16 255 / 10%); }
+.vt-row::before {
+  content: ""; position: absolute; left: 7px; top: 12px; width: 6px; height: 6px;
+  border-radius: 50%; background: oklch(0.86 0.004 286.32);
+}
+.vt-row.canon::before { background: var(--st4); box-shadow: 0 0 0 3px oklch(0.58 0.16 145 / 15%); }
+.vt-row.pend::before { background: var(--warning); }
+.vt-1 { display: flex; align-items: center; gap: 4px; }
+.vt-1 .v { font-size: 11px; font-weight: 700; font-family: ui-monospace, Menlo, monospace; }
+.vt-2 { font-size: 9.5px; color: var(--muted-foreground); margin-top: 2px; display: flex; gap: 4px; flex-wrap: wrap; }
+.vt-3 { font-size: 9.5px; color: var(--faint-foreground); margin-top: 2px; }
+.vt-3 .rd { color: oklch(0.5 0.2 27); font-weight: 600; }
+
+.consist { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.mat {
+  width: 304px; flex: none; border-left: 1px solid var(--surface-border);
+  background: var(--surface); display: flex; flex-direction: column; overflow: hidden;
+}
+.mat-head { padding: 8px 10px; border-bottom: 1px solid var(--border); flex: none; }
+.mat-t { font-size: 10px; font-weight: 700; color: var(--faint-foreground); letter-spacing: .03em; display: flex; align-items: center; gap: 4px; }
+.mat-sub { font-size: 10px; color: var(--muted-foreground); margin-top: 3px; line-height: 1.5; }
+.mat-body { flex: 1; overflow: auto; padding: 6px; }
+.mat-row {
+  display: grid; grid-template-columns: 46px 1fr 66px; align-items: center; gap: 5px;
+  padding: 5px 6px; border-radius: 6px; margin-bottom: 2px; cursor: pointer;
+}
+.mat-row .pill { justify-content: center; flex: none; }
+.mat-row:hover { background: var(--surface-hover); }
+.mat-row.on { background: oklch(0.55 0.16 255 / 8%); box-shadow: inset 0 0 0 1px oklch(0.55 0.16 255 / 20%); }
+.mat-row .c { font-family: ui-monospace, Menlo, monospace; font-size: 9px; color: var(--faint-foreground); }
+.mat-row .nm { font-size: 10.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mat-foot { padding: 7px 9px; border-top: 1px solid var(--border); font-size: 9.5px; color: var(--muted-foreground); line-height: 1.55; flex: none; background: oklch(0.985 0 0); }
+
+/* ===== 对账矩阵（画面 4） ===== */
+.mtxwrap { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; }
+.mtx { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 11px; }
+.mtx th {
+  position: sticky; top: 0; z-index: 2; text-align: left; font-size: 9.5px; font-weight: 700;
+  color: var(--faint-foreground); letter-spacing: .03em; padding: 7px 9px;
+  background: oklch(0.975 0.001 286.375); border-bottom: 1px solid var(--surface-border);
+  border-top: 1px solid var(--surface-border);
+}
+.mtx th:first-child { border-left: 1px solid var(--surface-border); border-radius: 8px 0 0 0; }
+.mtx th:last-child { border-right: 1px solid var(--surface-border); border-radius: 0 8px 0 0; }
+.mtx td {
+  padding: 7px 9px; border-bottom: 1px solid var(--border); background: var(--surface);
+  vertical-align: middle;
+}
+.mtx td:first-child { border-left: 1px solid var(--surface-border); }
+.mtx td:last-child { border-right: 1px solid var(--surface-border); }
+.mtx tr:last-child td { border-bottom: 1px solid var(--surface-border); border-radius: 0 0 8px 8px; }
+.mtx tr:last-child td:first-child { border-radius: 0 0 0 8px; }
+.mtx tr:hover td { background: oklch(0.985 0 0); }
+.mtx .fp { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--faint-foreground); }
+.mtx .c-ok { color: oklch(0.45 0.14 145); font-size: 10px; font-weight: 600; }
+.mtx .c-miss { color: oklch(0.5 0.2 27); font-size: 10px; font-weight: 600; }
+.mtx .c-new { color: var(--brand); font-size: 10px; font-weight: 600; }
+.mtx .c-chg { color: oklch(0.5 0.13 60); font-size: 10px; font-weight: 600; }
+.mtx .c-na { color: var(--faint-foreground); font-size: 10px; }
+.mtx-mini {
+  display: inline-block; width: 100%; font-size: 9.5px; line-height: 1.45;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px;
+}
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 10.5px; color: var(--muted-foreground); padding: 0 0 10px; }
+.legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 4px; }
+
+/* ===== 并排对比（画面 5） ===== */
+.cmp { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.cmp-col { flex: 1; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--surface-border); }
+.cmp-col:last-child { border-right: 0; }
+.cmp-top { flex: 1.25; min-height: 0; overflow: auto; background: #fff; }
+.cmp-bot { flex: 1; min-height: 0; overflow: auto; background: oklch(0.98 0.002 286); padding: 8px 9px; border-top: 1px solid var(--surface-border); }
+.cmp.faceonly .cmp-bot { display: none; }
+.cmp.faceonly .cmp-top { flex: 1; }
+.spot {
+  display: block; width: 100%; text-align: left; border: 1px solid var(--surface-border);
+  background: var(--surface); border-radius: 7px; padding: 6px 8px; margin-bottom: 5px; font-size: 10.5px;
+}
+.spot .k { font-family: ui-monospace, Menlo, monospace; font-size: 9px; color: var(--faint-foreground); display: block; margin-bottom: 2px; }
+.spot.sel { border-color: oklch(0.55 0.16 255 / 55%); box-shadow: 0 0 0 2px oklch(0.55 0.16 255 / 12%); }
+.spot.removed { border-color: oklch(0.577 0.245 27 / 30%); background: oklch(0.577 0.245 27 / 5%); }
+.spot.added { border-color: oklch(0.55 0.16 255 / 35%); background: oklch(0.55 0.16 255 / 5%); }
+.diff {
+  background: oklch(0.19 0.01 286); border-radius: 8px; padding: 8px 10px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 10px; line-height: 1.7;
+  color: oklch(0.85 0.01 286); overflow: auto; flex: 1; min-height: 0;
+}
+.diff .add { background: oklch(0.55 0.16 145 / 18%); color: oklch(0.85 0.13 145); }
+.diff .rem { background: oklch(0.577 0.245 27 / 22%); color: oklch(0.8 0.12 27); }
+.diff .skip { text-align: center; color: var(--faint-foreground); font-size: 9px; padding: 3px 0; }
+
+/* ===== 流程三联屏（画面 6） ===== */
+.flow { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.flow-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--surface-border); }
+.flow-pane:last-child { border-right: 0; }
+.fp-head {
+  height: 26px; flex: none; display: flex; align-items: center; gap: 5px; padding: 0 9px;
+  background: oklch(0.2 0.008 286); color: oklch(0.93 0.004 286); font-size: 10.5px; font-weight: 600;
+}
+.fp-head .st { margin-left: auto; font-size: 9px; color: oklch(0.72 0.015 286); }
+.fp-body { flex: 1; min-height: 0; overflow: auto; padding: 9px; display: flex; flex-direction: column; gap: 7px; background: var(--surface); }
+.chat-m { display: flex; gap: 6px; }
+.chat-m .av { width: 18px; height: 18px; border-radius: 5px; flex: none; display: grid; place-items: center; font-size: 9px; font-weight: 700; color: #fff; }
+.chat-m .bd { font-size: 10.5px; line-height: 1.6; min-width: 0; }
+.chat-m .nm { font-size: 9.5px; font-weight: 700; color: var(--muted-foreground); margin-bottom: 1px; }
+.chat-m.me .av { background: var(--primary); }
+.chat-m.ag .av { background: var(--brand); }
+.chat-sys {
+  font-size: 9.5px; color: var(--muted-foreground); background: var(--surface-hover);
+  border-radius: 6px; padding: 4px 7px; text-align: center;
+}
+.chat-card { border: 1px solid var(--surface-border); border-radius: 8px; background: var(--surface); box-shadow: var(--surface-shadow); overflow: hidden; }
+.chat-card .ch { display: flex; align-items: center; gap: 5px; padding: 5px 7px; border-bottom: 1px solid var(--border); font-size: 10px; font-weight: 700; }
+.chat-card .cb { padding: 6px 7px; font-size: 10px; color: var(--muted-foreground); line-height: 1.6; }
+.chat-card .cf { padding: 5px 7px; border-top: 1px solid var(--border); display: flex; gap: 5px; background: oklch(0.985 0 0); }
+.composer-mini { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 5px 6px; box-shadow: var(--surface-shadow); }
+.ctx-chip {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; font-weight: 600;
+  background: oklch(0.55 0.16 255 / 9%); color: var(--brand);
+  border: 1px solid oklch(0.55 0.16 255 / 25%); border-radius: 999px; padding: 1px 6px; margin-bottom: 4px;
+}
+.composer-mini .ln { font-size: 10px; color: var(--faint-foreground); padding: 2px 0 4px; }
+
+.pipe { display: flex; flex-direction: column; gap: 4px; }
+.pipe-step {
+  display: flex; gap: 6px; align-items: flex-start; border: 1px solid var(--surface-border);
+  border-radius: 7px; padding: 5px 7px; background: var(--surface); font-size: 10px; line-height: 1.5;
+}
+.pipe-step .i {
+  width: 15px; height: 15px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  font-size: 8.5px; font-weight: 700; background: var(--surface-selected); color: var(--faint-foreground);
+}
+.pipe-step.run { border-color: oklch(0.55 0.16 255 / 45%); background: oklch(0.55 0.16 255 / 5%); }
+.pipe-step.run .i { background: var(--brand); color: #fff; }
+.pipe-step.done .i { background: var(--success); color: #fff; }
+.pipe-step .nm { font-weight: 700; }
+.pipe-step .ds { color: var(--muted-foreground); font-size: 9px; }
+.receipt { border: 1px solid oklch(0.55 0.16 145 / 30%); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.receipt .rh {
+  display: flex; align-items: center; gap: 5px; padding: 5px 7px;
+  background: oklch(0.55 0.16 145 / 10%); font-size: 10px; font-weight: 700; color: oklch(0.42 0.14 145);
+}
+.receipt .rb { padding: 6px 7px; display: grid; grid-template-columns: 52px 1fr; gap: 3px 6px; font-size: 9.5px; }
+.receipt .rb .k { color: var(--faint-foreground); }
+.receipt .rb .v { font-family: ui-monospace, Menlo, monospace; }
+
+/* ===== 表格（规格画面） ===== */
+.spec-tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; background: var(--surface); }
+.spec-tbl th {
+  text-align: left; padding: 7px 10px; font-size: 9.5px; font-weight: 700; letter-spacing: .03em;
+  color: var(--faint-foreground); background: oklch(0.975 0.001 286.375);
+  border-bottom: 1px solid var(--surface-border);
+}
+.spec-tbl td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.6; }
+.spec-tbl td.mono, .spec-tbl td .mono { font-family: ui-monospace, Menlo, monospace; font-size: 10px; }
+.spec-tbl tr:hover td { background: oklch(0.99 0 0); }
+.pad { padding: 14px 16px; }
+.notes { list-style: none; margin: 10px 0 44px; display: flex; flex-direction: column; gap: 5px; }
+.notes li { font-size: 12px; color: var(--muted-foreground); line-height: 1.7; display: flex; gap: 8px; }
+.notes li .anno { margin-top: 2px; }
+.notes b { color: var(--foreground); }
+
+/* 卡片网格（画面 2 差距） */
+.gapgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 16px; }
+.gapcard {
+  border: 1px solid var(--surface-border); border-radius: 10px; background: var(--surface);
+  padding: 11px 12px; box-shadow: var(--surface-shadow); display: flex; flex-direction: column; gap: 6px;
+}
+.gapcard .gh { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; }
+.gapcard .gb { font-size: 11.5px; color: var(--muted-foreground); line-height: 1.65; }
+.gapcard .gd {
+  font-size: 10.5px; line-height: 1.6; color: oklch(0.42 0.1 255);
+  background: oklch(0.55 0.16 255 / 6%); border-radius: 6px; padding: 6px 7px; border-left: 2px solid var(--brand);
+}
+
+/* 对账工具条 / KPI / 对比页脚 */
+.mtxbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; border-bottom: 1px solid var(--surface-border);
+  background: var(--surface); flex: none;
+}
+.sumgrid {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;
+  padding: 11px 14px; border-top: 1px solid var(--surface-border);
+  background: oklch(0.985 0 0); flex: none;
+}
+.kpi { border: 1px solid var(--surface-border); border-radius: 9px; background: var(--surface); padding: 7px 10px; }
+.kpi .k { font-size: 9.5px; font-weight: 700; color: var(--faint-foreground); letter-spacing: .03em; }
+.kpi .v { font-size: 18px; font-weight: 700; margin-top: 1px; line-height: 1.15; }
+.kpi .d { font-size: 10px; color: var(--muted-foreground); margin-top: 1px; }
+.cmpfoot {
+  flex: none; border-top: 1px solid var(--surface-border); padding: 9px 12px;
+  background: var(--surface); display: grid; grid-template-columns: 1fr 300px; gap: 16px;
+}
+.subhead { display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; margin-bottom: 5px; }
+.sumline { font-size: 10.5px; color: var(--muted-foreground); line-height: 1.85; }
+.sumline b { color: var(--foreground); }
+.impchip {
+  display: flex; align-items: center; gap: 5px; border: 1px solid var(--surface-border);
+  border-radius: 7px; padding: 4px 7px; font-size: 10px; margin-bottom: 4px; background: var(--surface);
+}
+
+/* Toast */
+.toast {
+  position: fixed; left: 50%; bottom: 30px; transform: translate(-50%, 14px);
+  background: oklch(0.2 0.008 286); color: #fff; font-size: 12px;
+  padding: 8px 14px; border-radius: 8px; box-shadow: var(--floating-shadow);
+  opacity: 0; pointer-events: none; transition: .2s; z-index: 999;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* 弹层 */
+.scrim {
+  position: fixed; inset: 0; background: oklch(0.2 0.01 286 / 32%);
+  display: none; place-items: center; z-index: 300;
+}
+.scrim.show { display: grid; }
+.sheet {
+  width: 440px; background: var(--surface); border-radius: 12px; overflow: hidden;
+  box-shadow: var(--floating-shadow); border: 1px solid var(--surface-border);
+}
+.sheet-h { padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.sheet-b { padding: 12px 14px; font-size: 11.5px; line-height: 1.7; color: var(--muted-foreground); }
+.sheet-b .kv { display: grid; grid-template-columns: 96px 1fr; gap: 5px 8px; margin-top: 8px; }
+.sheet-b .kv .k { color: var(--faint-foreground); font-size: 10.5px; }
+.sheet-b .kv .v { font-size: 11px; color: var(--foreground); font-family: ui-monospace, Menlo, monospace; }
+.sheet-f { padding: 10px 14px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 6px; background: oklch(0.985 0 0); }
+</style>
+</head>
+<body>
+
+<nav class="proto-nav">
+  <div class="logo">Multica <span>原型</span> · 功能模块原型（Module Prototype）</div>
+  <span class="nav-sep">Ⅰ 现状与差距</span>
+  <a href="#f1">1 · 生产现状</a>
+  <a href="#f2">2 · 六条硬伤</a>
+  <span class="nav-sep">Ⅱ 优化后画面</span>
+  <a href="#f3">3 · 原型 Tab 新结构</a>
+  <a href="#f4">4 · 结构对账矩阵</a>
+  <a href="#f5">5 · 并排对比与联动</a>
+  <a href="#f6">6 · 模块 → 会话 → 发布</a>
+  <span class="nav-sep">Ⅲ 规格</span>
+  <a href="#f7">7 · 状态机与数据契约</a>
+  <a href="#f8">8 · 交互与边界</a>
+  <a href="./2026-09-12-Multica 原型 · 原型管理 + 设计 + Review.html#f1" style="margin-left:auto;opacity:.7">↩ 原型管理基线</a>
+</nav>
+
+<div class="frame-wrap">
+
+<!-- ================= 画面 1 · 生产现状 ================= -->
+<div class="frame-head" id="f1">
+  <h2>画面 1 · 生产现状：项目 → 产品功能 → 模块详情 →「原型图」子页</h2>
+  <p>严格复刻当前生产实现（<span class="mono">product-features-tab.tsx</span> 双栏 + <span class="mono">module-detail-panel.tsx</span> 五个 sub-tab + <span class="mono">sub-tabs/module-prototypes.tsx</span> 的工具栏 / 预览 / <span class="mono">PrototypeInspector</span>）。<b>关键事实：模块右侧详情区没有模块标题栏</b>，只有 sub-tab 与卡片，模块身份完全依赖左栏选中态；原型的版本来源被硬绑在<b>需求</b>上——先选需求，再选版本。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 代码本体平台 / 产品功能</span><em>AS-IS · 生产复刻</em></div>
+  <div class="app tall">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">M</span> Multica 工作区</div>
+      <div class="s-item">收件箱 <span class="n">3</span></div>
+      <div class="s-item">任务</div>
+      <div class="s-item">需求</div>
+      <div class="s-item on">项目 <span class="n">4</span></div>
+      <div class="s-sec">当前项目</div>
+      <div class="s-item on">代码本体平台</div>
+      <div class="s-item">项目档案</div>
+      <div class="s-item on">产品功能 <span class="n">9</span></div>
+      <div class="s-item">迭代</div>
+      <div class="s-item">设置</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb">代码本体平台 <span>/</span> <b>产品功能</b></div>
+        <span class="pill mute" style="margin-left:8px">flag · module_spec_v2 关</span>
+      </div>
+      <div class="feat-toolbar">
+        <div class="seg"><span class="active">模块列表</span><span>图谱视图</span><span>表格</span></div>
+        <span class="inp" style="width:104px;color:var(--faint-foreground)">搜索模块…</span>
+        <span class="inp">biz_kind · 全部 <span class="ar">▾</span></span>
+        <span class="pill">仅看未绑定 2</span>
+        <div style="margin-left:auto;display:flex;gap:5px">
+          <span class="btn pri sm">＋ 新建模块</span>
+          <span class="btn sm">⟳ 重新扫描</span>
+          <span class="btn sm">↓ 导出模块报告</span>
+        </div>
+      </div>
+      <div class="feat-body">
+        <div class="mod-list">
+          <div class="ml-head"><span class="t">功能模块（页面）</span><span class="c">9 · 对象 45 · 策略 12</span></div>
+
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#f97316"></span><span class="nm">本体对象页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>对象 12</span><span class="sep">·</span><span>策略 3</span><span class="sep">·</span><span>需求 9</span><span class="sep">·</span><span>任务 5/7</span></div></div>
+
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#64748b"></span><span class="nm">图谱浏览页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>对象 9</span><span class="sep">·</span><span>策略 2</span><span class="sep">·</span><span>需求 6</span><span class="sep">·</span><span>本期新增</span></div></div>
+
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#0ea5e9"></span><span class="nm">扫描任务页</span><span class="pg">page</span><span class="h pill warn">阻塞或待确认</span></div><div class="mr-2"><span>对象 4</span><span class="sep">·</span><span>策略 1</span><span class="sep">·</span><span>需求 4</span></div></div>
+
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#8b5cf6"></span><span class="nm">抽取配置页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>对象 11</span><span class="sep">·</span><span>策略 4</span><span class="sep">·</span><span>需求 5</span></div></div>
+
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#22c55e"></span><span class="nm">总线矩阵页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>对象 4</span><span class="sep">·</span><span>策略 1</span><span class="sep">·</span><span>需求 13</span><span class="sep">·</span><span>任务 9/11</span></div></div>
+
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#eab308"></span><span class="nm">档案浏览页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>对象 3</span><span class="sep">·</span><span>策略 1</span><span class="sep">·</span><span>需求 7</span></div></div>
+
+          <div class="mod-row on"><div class="mr-1"><span class="dot" style="background:#ef4444"></span><span class="nm">申报清单页</span><span class="pg">page</span><span class="h pill warn">阻塞或待确认</span></div><div class="mr-2"><span>对象 2</span><span class="sep">·</span><span>策略 1</span><span class="sep">·</span><span>需求 5</span><span class="sep">·</span><span>任务 2/5</span></div></div>
+
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#94a3b8"></span><span class="nm">legacy-import</span><span class="h pill bad">未绑定</span></div><div class="mr-2"><span>未绑定 → 手动绑定或忽略</span></div></div>
+
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#cbd5e1"></span><span class="nm">测试</span><span class="h pill bad">未绑定</span></div><div class="mr-2"><span>未绑定 → 手动绑定或忽略</span></div></div>
+        </div>
+
+        <div class="detail">
+          <!-- sub-tabs：详情区无模块标题栏 -->
+          <div class="msubtabs">
+            <div class="msubtab on">原型图</div>
+            <div class="msubtab">变更概览 <span class="n">2/6</span></div>
+            <div class="msubtab">模块对象 <span class="n">5</span></div>
+            <div class="msubtab">模块策略 <span class="n">3</span></div>
+            <div class="msubtab">图谱邻域</div>
+          </div>
+
+          <div class="pcard">
+            <div class="pcard-head">
+              <span class="ptag">子TAB 1</span>
+              <span class="ttl">模块原型图</span>
+              <span class="anno" title="模块身份只在左栏">1</span>
+              <span class="rt">MUL-455 · v3</span>
+            </div>
+
+            <div class="ptool">
+              <div class="seg"><span class="active">HTML 原型</span><span>Storybook 对照</span></div>
+              <span class="inp">需求 MUL-455 <span class="ar">▾</span></span>
+              <span class="anno" title="版本来源被硬绑在需求上">2</span>
+              <div class="seg"><span class="active">单版</span><span>并排对比</span></div>
+              <span class="inp">当前版本 v3 <span class="ar">▾</span></span>
+              <span class="inp">对比版本 v2 <span class="ar">▾</span></span>
+              <div class="rt">
+                <span class="btn sm">✦ 多 Agent 构建</span>
+                <span class="btn sm">⛓ 关联</span>
+                <span class="btn sm">✎ 更新文件</span>
+              </div>
+            </div>
+
+            <div class="pbody">
+              <div class="pview">
+                <div class="pvbar">
+                  <i></i><i></i><i></i>
+                  <span class="f">FILING-455.html · v3</span>
+                  <span class="b">当前</span>
+                </div>
+                <div class="pframe">
+                  <div class="wf">
+                    <div class="wf-h"><b>申报清单</b><span class="path">/filing/list · data-fp 已标注</span></div>
+                    <div class="wf-bar">
+                      <span class="wf-inp" style="max-width:120px"></span>
+                      <span class="wf-btn">状态 ▾</span>
+                      <span class="wf-btn">批量导出</span>
+                      <span class="wf-btn pri">＋ 新建申报</span>
+                    </div>
+                    <table class="wf-tbl">
+                      <thead><tr><th>申报单号</th><th>主体</th><th>状态</th><th>操作</th></tr></thead>
+                      <tbody>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0041</td><td>橙心科技</td><td>待受理</td><td>详情</td></tr>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0042</td><td>麦禾数据</td><td>已受理</td><td>详情</td></tr>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0043</td><td>云端物联</td><td>已撤回</td><td>详情</td></tr>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0044</td><td>极简软件</td><td>待受理</td><td>详情</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="hintline">优先用 data-fp；没有标注则按标题 / 导航自动抽模块。HTML 代码按行对比，相同行会折叠。</div>
+              </div>
+
+              <div class="insp">
+                <div class="insp-head">交付与详解 <span class="anno" style="margin-left:2px" title="检视器很全，但只服务当前需求">3</span><span class="btn ghost sm" style="margin-left:auto">收起详情</span></div>
+
+                <div class="insp-sec">
+                  <div class="insp-t">交付预期</div>
+                  <div class="insp-goal">申报清单页要支持「单条申报全生命周期」：提交 → 受理 → 撤回，撤回必填原因；列表需可按状态筛选并支持批量导出。</div>
+                </div>
+
+                <div class="insp-sec">
+                  <div class="insp-t">原型图功能详解 <span class="pill mute">4 个</span></div>
+                  <div class="fprow on"><span class="id">FP-101</span><span class="nm">申报清单列表</span><span class="mk"><span class="y">符合</span></span></div>
+                  <div class="fprow"><span class="id">FP-102</span><span class="nm">新建申报</span><span class="mk"><span>待定</span></span></div>
+                  <div class="fprow"><span class="id">FP-103</span><span class="nm">批量导出</span><span class="mk"><span class="y">符合</span></span></div>
+                  <div class="fprow"><span class="id">FP-104</span><span class="nm">申报状态筛选</span><span class="mk"><span class="n">不符</span></span></div>
+                  <div class="insp-goal" style="margin-top:5px;font-size:10px;color:var(--muted-foreground)">点预览热点或右侧条目，双向高亮同一 fp.id。</div>
+                </div>
+
+                <div class="insp-sec">
+                  <div class="insp-t">模块与细节绑定</div>
+                  <div class="bindrow">已绑定 <b style="color:var(--foreground)">申报清单页</b> · 任务 2/5 任务已在本模块</div>
+                </div>
+
+                <div class="insp-sec">
+                  <div class="insp-t">版本</div>
+                  <div class="bindrow" style="border-style:solid">原型 confirmed · v3 <span class="pill ok" style="margin-left:auto">issue_prototype_version</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="notes">
+  <li><span class="anno">1</span><span><b>详情区没有模块头</b>：切走再回来只能靠左栏高亮回忆自己看的是哪个模块；「原型」与模块名之间没有一次共同的落点。</span></li>
+  <li><span class="anno">2</span><span><b>原型主键是需求，不是模块</b>：<span class="mono">useIssuePrototypeVersions(reqIds)</span> 先取模块下需求、再取需求的 <span class="mono">issue_prototype_version</span>；换需求＝换原型，模块本身没有「当前原型」这个概念。</span></li>
+  <li><span class="anno">3</span><span><b>检视器只评「这一版」</b>：marks 是「符合 / 不符 / 待定」，但没有与模块功能点全集做差集，看不出「规格里有、原型里没有」的空位。</span></li>
+</ul>
+
+<!-- ================= 画面 2 · 六条硬伤 ================= -->
+<div class="frame-head" id="f2">
+  <h2>画面 2 · 现状的六条硬伤与优化取向</h2>
+  <p>逐条从代码取证，每条都给「改在哪一层」，避免把问题落到样式上。<b>核心判断：原型能力已经很强，缺的不是渲染，而是「模块作为第一主体的归属与对账」。</b></p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>差距分析</span><em>GAP → 取向</em></div>
+  <div class="gapgrid">
+    <div class="gapcard">
+      <div class="gh"><span class="anno">1</span>原型没有「模块权威指针」</div>
+      <div class="gb"><span class="mono">project_module</span> 只有 7 列，没有 canonical 版本；<span class="mono">issue_prototype_version.status</span> 的 confirmed 是<b>需求级</b>语义。同一模块挂 5 个需求时，谁是「这个页面现在的样子」没有答案。</div>
+      <div class="gd">加 <span class="mono">canonical_prototype_version</span> + 「提升为权威」动作；模块头常显「权威 vN」。</div>
+    </div>
+    <div class="gapcard">
+      <div class="gh"><span class="anno">2</span>没有规格 ↔ 原型对账</div>
+      <div class="gb">现有 <span class="mono">diffFeaturePoints</span> 比的是<b>两个 HTML 版本</b>；<span class="mono">marks</span> 只标当前版本内每个 fp 的符合度。缺「模块功能点全集」这一列，空位不可见。</div>
+      <div class="gd">新增「结构对账」视图：行＝规格 FP，列＝规格 / 权威原型 / 候选原型，产出覆盖率。</div>
+    </div>
+    <div class="gapcard">
+      <div class="gh"><span class="anno">3</span>无需求即无原型</div>
+      <div class="gb"><span class="mono">reqs.length === 0</span> → 空态「该模块还没有 HTML 原型版本」；<span class="mono">关联原型</span>按钮也依赖 reqs。模块无法自助长出一版原型。</div>
+      <div class="gd">空态给两条出路：从会话生成 / 从权威模块复制骨架；原型允许先挂模块再补需求。</div>
+    </div>
+    <div class="gapcard">
+      <div class="gh"><span class="anno">4</span>写回只到评论</div>
+      <div class="gb"><span class="mono">WriteSummaryButton</span> 把变更摘要 <span class="mono">createComment</span> 到需求；结构变更无法写回模块规格，需求评论成为唯一沉淀。</div>
+      <div class="gd">写回目标升级为「模块规格 + 权威指针」；评论降级为旁路通知。</div>
+    </div>
+    <div class="gapcard">
+      <div class="gh"><span class="anno">5</span>不能从模块发起会话</div>
+      <div class="gb"><span class="mono">setPageContext({surface:"prototype"})</span> 只把上下文塞进聊天，聊天产物回不到模块版本序列，模块侧看不到「待发布」。</div>
+      <div class="gd">模块侧增加「待发布变更」队列，会话产出先进队列、再一次性发布。</div>
+    </div>
+    <div class="gapcard">
+      <div class="gh"><span class="anno">6</span>版本选择器不可扫读</div>
+      <div class="gb">两个下拉（当前 / 对比）+ <span class="mono">pickPrototypePair</span> 自动配对；版本超过 4 个后无法一眼看出「哪版是谁产出的、为什么被替换」。</div>
+      <div class="gd">左侧改成纵向版本时间线：来源、产出者、功能点数、对齐率、替换原因。</div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 画面 3 · 原型 Tab 新结构 ================= -->
+<div class="frame-head" id="f3">
+  <h2>画面 3 · 优化后：模块详情「原型图」子页（主画面，可交互）</h2>
+  <p>三处结构性改动：<b>①</b> 详情区补<b>模块头</b>，把「模块名 · 权威原型 v2 · 规格 v3 · 覆盖率 80%」一次说清；<b>②</b> 左侧「版本下拉」改为<b>纵向版本时间线</b>，用来源 / 功能点数 / 对齐率 / 替换原因替代两个下拉；<b>③</b> 右侧检视器升级为<b>结构对账</b>——行是模块功能点全集，列是「规格 / 权威原型」的覆盖态，空位与残留一眼可见。点版本行、点功能点、点「提升为权威」都可试。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 代码本体平台 / 产品功能 / 申报清单页 / 原型图</span><em>TO-BE · 主画面</em></div>
+  <div class="app tall">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">M</span> Multica 工作区</div>
+      <div class="s-item">收件箱 <span class="n">3</span></div>
+      <div class="s-item">任务</div>
+      <div class="s-item">需求</div>
+      <div class="s-item on">项目 <span class="n">4</span></div>
+      <div class="s-sec">当前项目</div>
+      <div class="s-item on">代码本体平台</div>
+      <div class="s-item">项目档案</div>
+      <div class="s-item on">产品功能 <span class="n">9</span></div>
+      <div class="s-item">迭代</div>
+      <div class="s-item">设置</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb">代码本体平台 <span>/</span> 产品功能 <span>/</span> <b>申报清单页</b></div>
+        <span class="pill new" style="margin-left:8px">flag · module_spec_v2 开</span>
+      </div>
+      <div class="feat-toolbar">
+        <div class="seg"><span class="active">模块列表</span><span>图谱视图</span><span>表格</span></div>
+        <span class="inp" style="width:104px;color:var(--faint-foreground)">搜索模块…</span>
+        <span class="inp">biz_kind · 全部 <span class="ar">▾</span></span>
+        <span class="pill">仅看未绑定 2</span>
+        <div style="margin-left:auto;display:flex;gap:5px">
+          <span class="btn pri sm">＋ 新建模块</span>
+          <span class="btn sm">⟳ 重新扫描</span>
+          <span class="btn sm">↓ 导出模块报告</span>
+        </div>
+      </div>
+      <div class="feat-body">
+        <div class="mod-list">
+          <div class="ml-head"><span class="t">功能模块（页面）</span><span class="c">9 · 对象 45 · 策略 12</span></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#f97316"></span><span class="nm">本体对象页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>对象 12</span><span class="sep">·</span><span>需求 9</span><span class="sep">·</span><span>原型 v2</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#64748b"></span><span class="nm">图谱浏览页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>对象 9</span><span class="sep">·</span><span>需求 6</span><span class="sep">·</span><span>原型 v1</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#0ea5e9"></span><span class="nm">扫描任务页</span><span class="pg">page</span><span class="h pill warn">阻塞或待确认</span></div><div class="mr-2"><span>对象 4</span><span class="sep">·</span><span>需求 4</span><span class="sep">·</span><span style="color:oklch(0.5 0.2 27)">无原型</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#8b5cf6"></span><span class="nm">抽取配置页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>对象 11</span><span class="sep">·</span><span>需求 5</span><span class="sep">·</span><span>原型 v2</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#22c55e"></span><span class="nm">总线矩阵页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>对象 4</span><span class="sep">·</span><span>需求 13</span><span class="sep">·</span><span>原型 v3</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#eab308"></span><span class="nm">档案浏览页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>对象 3</span><span class="sep">·</span><span>需求 7</span><span class="sep">·</span><span>原型 v1</span></div></div>
+          <div class="mod-row on"><div class="mr-1"><span class="dot" style="background:#ef4444"></span><span class="nm">申报清单页</span><span class="pg">page</span><span class="h">待发布 1</span></div><div class="mr-2"><span>对象 2</span><span class="sep">·</span><span>需求 5</span><span class="sep">·</span><span>原型 v2</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#94a3b8"></span><span class="nm">legacy-import</span><span class="h pill bad">未绑定</span></div><div class="mr-2"><span>未绑定 → 手动绑定或忽略</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#cbd5e1"></span><span class="nm">测试</span><span class="h pill bad">未绑定</span></div><div class="mr-2"><span>未绑定 → 手动绑定或忽略</span></div></div>
+        </div>
+
+        <div class="detail">
+          <!-- 新增：模块头 -->
+          <div style="display:flex;align-items:center;gap:8px;padding:9px 12px 8px;border-bottom:1px solid var(--surface-border);background:var(--surface);flex:none">
+            <span class="dot" style="background:#ef4444;width:8px;height:8px"></span>
+            <span style="font-size:14px;font-weight:700">申报清单页</span>
+            <span class="pg mono" style="font-size:8.5px;font-weight:700;padding:0 4px;border-radius:3px;background:var(--surface-selected);color:var(--faint-foreground)">page</span>
+            <span class="pill mute">对象 2</span>
+            <span class="pill mute">策略 1</span>
+            <span class="pill mute">需求 5</span>
+            <span class="pill mute">任务 2/5</span>
+            <span class="anno" style="margin-left:2px" title="新增模块头">4</span>
+            <div style="margin-left:auto;display:flex;gap:6px">
+              <span class="btn sm" onclick="toast('打开模块概览：目标 / 验收标准 / 关联需求（20261026 方案 02）')">模块概览</span>
+              <span class="btn sm pri" onclick="toast('新会话已挂载「申报清单页 · 规格 v3 · 权威原型 v2」（画面 6）')">在对话中改这版原型</span>
+            </div>
+          </div>
+
+          <div class="msubtabs">
+            <div class="msubtab on">原型图</div>
+            <div class="msubtab" onclick="toast('变更概览保持原样，不在本次优化范围')">变更概览 <span class="n">2/6</span></div>
+            <div class="msubtab" onclick="toast('模块对象保持原样，不在本次优化范围')">模块对象 <span class="n">5</span></div>
+            <div class="msubtab" onclick="toast('模块策略保持原样，不在本次优化范围')">模块策略 <span class="n">3</span></div>
+            <div class="msubtab" onclick="toast('图谱邻域保持原样，不在本次优化范围')">图谱邻域</div>
+          </div>
+
+          <!-- 新增：原型总览条 -->
+          <div class="ovbar">
+            <div class="ov-cell">
+              <span class="ov-k">权威原型</span>
+              <span class="ov-v" id="ovCanon">v2 <small id="ovCanonSub">confirmed · 10-21 14:20</small></span>
+            </div>
+            <div class="ov-cell">
+              <span class="ov-k">模块规格</span>
+              <span class="ov-v" id="ovSpec">v3 <small>5 个功能点 · final</small></span>
+            </div>
+            <div class="ov-cell">
+              <div class="ring" id="ovRing" style="--p:80"><b id="ovPct">80%</b></div>
+              <span class="ov-k">功能点覆盖</span>
+              <span class="ov-v" id="ovCov" style="font-size:11px">4/5 <small>缺 1</small></span>
+            </div>
+            <div class="ov-cta">
+              <span class="pill warn" title="会话产出的候选版本先进队列，发布后才替换权威">待发布 v3 · 2 覆盖 · 1 废弃 · 2 新增</span>
+              <span class="anno" title="两段式：先计划、后发布">5</span>
+              <span class="btn sm pri" onclick="toast('进入发布确认：候选 v3 → 权威 v3，规格 v3 → v4（画面 6 第 3 段）')">发布 v3 →</span>
+            </div>
+          </div>
+
+          <div class="tri">
+            <!-- 左：版本时间线 -->
+            <div class="vt-rail">
+              <div class="vt-sec">版本时间线 · 4 个</div>
+
+              <div class="vt-row pend" data-v="3" onclick="pickVer(3)">
+                <div class="vt-1"><span class="v">v3</span><span class="pill warn">候选</span><span class="anno" style="margin-left:auto" title="待发布草案">6</span></div>
+                <div class="vt-2"><span>Prototype Agent</span><span>·</span><span>MUL-455</span></div>
+                <div class="vt-3">10-26 10:03 · 5 个功能点 · <span class="rd">与规格差 3</span></div>
+              </div>
+
+              <div class="vt-row canon on" data-v="2" onclick="pickVer(2)">
+                <div class="vt-1"><span class="v">v2</span><span class="pill ok">权威</span></div>
+                <div class="vt-2"><span>人工登记</span><span>·</span><span>MUL-455</span></div>
+                <div class="vt-3">10-21 14:20 · 4 个功能点 · 覆盖 80%</div>
+              </div>
+
+              <div class="vt-row" data-v="1" onclick="pickVer(1)">
+                <div class="vt-1"><span class="v">v1</span><span class="pill mute">已归档</span></div>
+                <div class="vt-2"><span>人工登记</span><span>·</span><span>MUL-448</span></div>
+                <div class="vt-3">10-14 09:12 · 3 个功能点 · 被 v2 替换</div>
+              </div>
+
+              <div class="vt-row" data-v="0" onclick="toast('Storybook 轨道：同一组 fp.id 与 HTML 对齐，非版本序列')">
+                <div class="vt-1"><span class="v">SB</span><span class="pill mute">对照轨道</span></div>
+                <div class="vt-2"><span>Storybook 3 stories</span></div>
+                <div class="vt-3">同一组 fp.id 对齐 · 只读</div>
+              </div>
+
+              <div class="vt-sec" style="padding-top:12px">产物来源</div>
+              <div class="bindrow" style="border-style:solid;font-size:10px;line-height:1.55">
+                <span>docs/prototypes/FILING-455.html<br><span class="mono" style="font-size:9px;color:var(--faint-foreground)">content_hash 8f2c41b</span></span>
+              </div>
+              <div style="display:flex;gap:5px;margin-top:6px">
+                <span class="btn sm" style="flex:1;justify-content:center" onclick="toast('打开文件：docs/prototypes/FILING-455.html')">打开文件</span>
+                <span class="btn sm" style="flex:1;justify-content:center" onclick="toast('多 Agent 构建：保持现有入口（PrototypeBuildDialog）')">✦ 构建</span>
+              </div>
+            </div>
+
+            <!-- 中：预览 -->
+            <div class="consist">
+              <div class="ptool" style="margin:8px 10px 0">
+                <div class="seg"><span class="active">单版</span><span onclick="toast('切到并排对比（画面 5）')">并排对比</span><span onclick="toast('打开结构对账矩阵（画面 4）')">结构对账</span></div>
+                <span class="inp" id="pvVerPick">v2 权威 <span class="ar">▾</span></span>
+                <span class="inp" style="color:var(--faint-foreground)">需求 MUL-455 <span class="ar">▾</span></span>
+                <div class="rt">
+                  <span class="btn sm" onclick="toast('Storybook 对照：同一组 fp.id 对齐')">Storybook 对照</span>
+                  <span class="btn sm" onclick="toast('关联 / 更新文件沿用现有 PrototypeManageDialog')">✎ 更新文件</span>
+                </div>
+              </div>
+
+              <div class="pview" style="margin-top:8px">
+                <div class="pvbar">
+                  <i></i><i></i><i></i>
+                  <span class="f" id="pvFile">FILING-455.html · v2</span>
+                  <span class="b ok" id="pvBadge">权威 · confirmed</span>
+                </div>
+                <div class="pframe">
+                  <!-- v2 线框 -->
+                  <div class="wf" id="wfV2">
+                    <div class="wf-h"><b>申报清单</b><span class="path">/filing/list · data-fp 4 个</span></div>
+                    <div class="wf-bar">
+                      <span class="wf-inp" style="max-width:120px"></span>
+                      <span class="wf-btn">状态 ▾</span>
+                      <span class="wf-btn" data-fp="FP-103">批量导出</span>
+                      <span class="wf-btn pri" data-fp="FP-102">＋ 新建申报</span>
+                    </div>
+                    <table class="wf-tbl">
+                      <thead><tr><th>申报单号</th><th>主体</th><th>状态</th><th>操作</th></tr></thead>
+                      <tbody>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0041</td><td>橙心科技</td><td>待受理</td><td>详情</td></tr>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0042</td><td>麦禾数据</td><td>已受理</td><td>详情</td></tr>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0043</td><td>云端物联</td><td>已撤回</td><td>详情</td></tr>
+                      </tbody>
+                    </table>
+                    <div style="display:flex;gap:5px;margin-top:8px">
+                      <span class="wf-btn" data-fp="FP-104">状态筛选 ▾</span>
+                      <span class="pill mute" style="pointer-events:none">未标注：部分撤回</span>
+                    </div>
+                  </div>
+
+                  <!-- v3 线框（候选） -->
+                  <div class="wf" id="wfV3" style="display:none">
+                    <div class="wf-h"><b>申报清单</b><span class="path">/filing/list · data-fp 5 个（候选 v3）</span></div>
+                    <div class="wf-bar">
+                      <span class="wf-inp" style="max-width:120px"></span>
+                      <span class="wf-btn" data-fp="FP-104">状态 ▾</span>
+                      <span class="wf-btn pri" data-fp="FP-102">＋ 新建申报</span>
+                    </div>
+                    <table class="wf-tbl">
+                      <thead><tr><th>申报单号</th><th>主体</th><th>状态</th><th>操作</th></tr></thead>
+                      <tbody>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0041</td><td>橙心科技</td><td>待受理</td><td>详情</td></tr>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0042</td><td>麦禾数据</td><td>已受理</td><td>详情</td></tr>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0043</td><td>云端物联</td><td>已撤回</td><td><span data-fp="FP-105" class="newf" style="padding:0 3px">撤回</span></td></tr>
+                        <tr data-fp="FP-101"><td class="mono">FIL-2026-0044</td><td>极简软件</td><td>待受理</td><td>详情</td></tr>
+                      </tbody>
+                    </table>
+                    <div style="border:1px dashed oklch(0.55 0.16 255 / 45%);border-radius:6px;padding:7px 8px;margin-top:8px;background:oklch(0.55 0.16 255 / 4%)">
+                      <div style="font-size:10px;font-weight:700;color:var(--brand);margin-bottom:4px" data-fp="FP-106">撤回原因弹窗（新增）</div>
+                      <div style="display:flex;gap:5px"><span class="wf-inp" style="height:20px"></span><span class="wf-btn pri" style="height:20px">确认撤回</span></div>
+                    </div>
+                    <div style="margin-top:7px;font-size:9.5px;color:oklch(0.5 0.2 27)">✕ 本稿已移除「批量导出」（FP-103）</div>
+                  </div>
+                </div>
+                <div class="hintline" id="pvHint">点在右侧「结构对账」任一行，线框同步描边高亮；切到 v3 可看到候选稿的移除与新增。</div>
+              </div>
+            </div>
+
+            <!-- 右：结构对账 -->
+            <div class="mat">
+              <div class="mat-head">
+                <div class="mat-t">结构对账 <span class="anno ok" style="min-width:15px;height:15px" title="本画面核心新增">A</span></div>
+                <div class="mat-sub">行＝模块规格功能点全集；列＝该点在权威原型里的覆盖态。</div>
+              </div>
+              <div class="mat-body" id="matBody">
+                <div class="mat-row" data-fp="FP-101" onclick="hlFp('FP-101',this)">
+                  <span class="c">FP-101</span><span class="nm">申报清单列表</span><span class="pill ok">已覆盖</span>
+                </div>
+                <div class="mat-row" data-fp="FP-102" onclick="hlFp('FP-102',this)">
+                  <span class="c">FP-102</span><span class="nm">新建申报</span><span class="pill warn">待覆盖</span>
+                </div>
+                <div class="mat-row" data-fp="FP-103" onclick="hlFp('FP-103',this)">
+                  <span class="c">FP-103</span><span class="nm">批量导出</span><span class="pill bad">待废弃</span>
+                </div>
+                <div class="mat-row" data-fp="FP-104" onclick="hlFp('FP-104',this)">
+                  <span class="c">FP-104</span><span class="nm">申报状态筛选</span><span class="pill ok">已覆盖</span>
+                </div>
+                <div class="mat-row" data-fp="FP-105" onclick="hlFp('FP-105',this)">
+                  <span class="c">FP-105</span><span class="nm" style="color:oklch(0.5 0.2 27)">部分撤回 · 空位</span><span class="pill bad">空位</span>
+                </div>
+                <div class="mat-row" data-fp="FP-106" onclick="hlFp('FP-106',this)" style="opacity:.85">
+                  <span class="c">FP-106</span><span class="nm">撤回原因弹窗<br><span style="font-size:9px;color:var(--brand)">仅在候选 v3 中存在</span></span><span class="pill new">候选新增</span>
+                </div>
+              </div>
+              <div class="mat-foot">
+                <div style="display:flex;gap:8px;margin-bottom:5px">
+                  <span class="pill ok">已覆盖 2</span>
+                  <span class="pill warn">待覆盖 1</span>
+                  <span class="pill bad">空位 1</span>
+                  <span class="pill new">候选 +2</span>
+                </div>
+                对齐口径：<span class="mono">data-fp</span> 优先；无标注按标题 / 导航兜底抽模块。<b>规格有、原型无＝空位（红）；原型有、规格无＝待登记（蓝）。</b>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="notes">
+  <li><span class="anno">4</span><span><b>模块头</b>：一次给出身份＋四个统计＋两个主 CTA。左侧「在对话中改这版原型」是唯一入口，避免在工具栏里塞第三个按钮。</span></li>
+  <li><span class="anno">5</span><span><b>待发布条</b>：把聊天 / 构建产出的候选版本收进队列，模块侧可见「有 1 份草案待处理」，不再直接混进版本序列。</span></li>
+  <li><span class="anno">6</span><span><b>版本时间线替代下拉</b>：每行固定四要素「版本号 · 状态 · 来源＋需求 · 时间＋功能点数＋与规格差异」，pending 用橙点、canonical 用绿点。</span></li>
+  <li><span class="anno ok">A</span><span><b>结构对账</b>：把 As-Is 的「符合 / 不符 / 待定」从<b>版本内自评</b>升级为<b>规格全集的差集</b>，四种状态互斥且可计数，直接等于「模块功能点覆盖率」的分子分母。</span></li>
+</ul>
+
+<!-- ================= 画面 4 · 结构对账矩阵 ================= -->
+<div class="frame-head" id="f4">
+  <h2>画面 4 · 结构对账矩阵：以「模块规格」为行，以「原型版本」为列</h2>
+  <p>这是本次最重要的新视图。As-Is 的对比永远发生在<b>两个 HTML 版本之间</b>，所以只能回答「改了什么」；矩阵回答的是「<b>模块承诺的功能点，现在兑现了几个</b>」。四种覆盖态互斥可计数，覆盖率 = 已覆盖 ÷ 规格功能点，直接成为模块头的那个环。<b>点「登记为规格功能点」可试</b>。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 代码本体平台 / 产品功能 / 申报清单页 / 原型图 / 结构对账</span><em>NEW VIEW</em></div>
+  <div class="app mid" style="flex-direction:column">
+    <div class="topbar">
+      <div class="crumb">申报清单页 <span>/</span> <b>结构对账</b><span class="pill mute" style="margin-left:6px">规格 v3 · 权威原型 v2</span></div>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <span class="btn sm" onclick="toast('导出对账 CSV：fp / 规格 / 权威 / 候选 / 需求验收 五列')">↓ 导出对账</span>
+        <span class="btn sm" onclick="toast('已生成 2 条补齐任务并挂到本模块：FP-105、FP-106')">生成补齐任务</span>
+        <span class="btn sm pri" onclick="toast('回到原型图子页（画面 3）')">← 返回原型图</span>
+      </div>
+    </div>
+    <div class="mtxbar">
+      <div class="seg"><span class="active">全部 6</span><span onclick="toast('筛选：仅看空位 → FP-105')">仅看空位 1</span><span onclick="toast('筛选：仅看待登记 → FP-106')">仅看待登记 1</span><span onclick="toast('筛选：仅看差异 → FP-102 / 103 / 105 / 106')">仅看差异 4</span></div>
+      <span class="inp">来源 · 全部 <span class="ar">▾</span></span>
+      <span class="pill mute">口径 data-fp 优先</span>
+      <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+        <span class="legend" style="padding:0"><span><i style="background:oklch(0.55 0.16 145)"></i>已覆盖</span><span><i style="background:oklch(0.72 0.15 75)"></i>待覆盖 / 待废弃</span><span><i style="background:oklch(0.577 0.245 27)"></i>空位</span><span><i style="background:oklch(0.55 0.16 255)"></i>待登记 / 候选新增</span></span>
+      </div>
+    </div>
+    <div class="mtxwrap">
+      <table class="mtx">
+        <thead>
+          <tr>
+            <th style="width:230px">功能点（模块规格 v3）</th>
+            <th style="width:130px">规格 v3 · 在册</th>
+            <th style="width:200px">权威原型 v2 · 覆盖</th>
+            <th style="width:210px">候选原型 v3 · 变动</th>
+            <th style="width:150px">需求验收</th>
+            <th style="width:150px">动作</th>
+          </tr>
+        </thead>
+        <tbody id="mtxBody">
+          <tr data-fp="FP-101">
+            <td><span class="fp">FP-101</span> 申报清单列表<br><span class="pill mute">core</span> <span class="pill mute">P0</span></td>
+            <td><span class="c-ok">✓ 在册</span><br><span class="mtx-mini">final · 第 3 版</span></td>
+            <td><span class="c-ok">已落 · data-fp</span><br><span class="mtx-mini mono">FILING-455.html#L41</span></td>
+            <td><span class="c-na">未变</span></td>
+            <td><span class="c-ok">MUL-455 已验收</span></td>
+            <td><span class="btn sm" onclick="toast('打开线框热点：FP-101 在 v2 / v3 两侧同步高亮')">定位</span></td>
+          </tr>
+          <tr data-fp="FP-102">
+            <td><span class="fp">FP-102</span> 新建申报<br><span class="pill mute">core</span> <span class="pill mute">P0</span></td>
+            <td><span class="c-ok">✓ 在册</span></td>
+            <td><span class="c-ok">已落 · 旧表单</span><br><span class="mtx-mini">单页弹窗 · 5 字段</span></td>
+            <td><span class="c-chg">覆盖 → 分步表单</span><br><span class="mtx-mini">3 步 · 12 字段</span></td>
+            <td><span class="c-chg">MUL-455 待验收</span></td>
+            <td><span class="btn sm" onclick="toast('采纳候选 v3 的 FP-102 结构（发布时生效）')">采纳 v3</span></td>
+          </tr>
+          <tr data-fp="FP-103">
+            <td><span class="fp">FP-103</span> 批量导出<br><span class="pill mute">edge</span> <span class="pill mute">P2</span></td>
+            <td><span class="c-ok">✓ 在册</span></td>
+            <td><span class="c-ok">已落 · 工具栏按钮</span></td>
+            <td><span class="c-miss">已移除（待废弃）</span></td>
+            <td><span class="c-ok">MUL-455 已验收</span><br><span class="mtx-mini" style="color:oklch(0.5 0.2 27)">验收将失效</span></td>
+            <td><span class="btn sm" onclick="toast('确认废弃需二次确认：会让 MUL-455 的一条验收记录失效')">确认废弃</span></td>
+          </tr>
+          <tr data-fp="FP-104">
+            <td><span class="fp">FP-104</span> 申报状态筛选<br><span class="pill mute">edge</span> <span class="pill mute">P1</span></td>
+            <td><span class="c-ok">✓ 在册</span></td>
+            <td><span class="c-ok">已落</span><br><span class="mtx-mini">仅单选，未多选</span></td>
+            <td><span class="c-na">未变</span></td>
+            <td><span class="c-miss">MUL-455 不符</span></td>
+            <td><span class="btn sm" onclick="toast('已开任务：申报状态筛选支持多选（挂 MUL-455 / 本模块）')">开任务修正</span></td>
+          </tr>
+          <tr data-fp="FP-105">
+            <td><span class="fp">FP-105</span> 部分撤回<br><span class="pill mute">core</span> <span class="pill mute">P1</span> <span class="pill new">v3 新增</span></td>
+            <td><span class="c-ok">✓ 在册</span><br><span class="mtx-mini">来源：会话合并计划</span></td>
+            <td><span class="c-miss">✕ 未落 · 空位</span><br><span class="mtx-mini">权威 v2 无此锚点</span></td>
+            <td><span class="c-new">新增 · data-fp</span></td>
+            <td><span class="c-miss">未覆盖</span></td>
+            <td><span class="btn sm" onclick="toast('补齐指令已发给 Prototype Agent：在权威原型上补 FP-105')">补齐到原型</span></td>
+          </tr>
+          <tr data-fp="FP-106" id="rowFp106">
+            <td><span class="fp">FP-106</span> 撤回原因弹窗<br><span class="pill mute">edge</span> <span class="pill mute">P2</span></td>
+            <td id="spec106"><span class="c-miss">✕ 未登记</span><br><span class="mtx-mini">候选 v3 里有，规格里没有</span></td>
+            <td><span class="c-miss">✕ 未落</span></td>
+            <td><span class="c-new">新增 · data-fp</span></td>
+            <td><span class="c-na">—</span></td>
+            <td id="act106"><span class="btn sm pri" onclick="adoptFp()">登记为规格功能点</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="sumgrid">
+      <div class="kpi"><div class="k">功能点覆盖率</div><div class="v" id="kpiCov">80%</div><div class="d">已覆盖 4 / 规格 5</div></div>
+      <div class="kpi"><div class="k">空位（规格有 · 原型无）</div><div class="v" style="color:oklch(0.5 0.2 27)">1</div><div class="d">FP-105 · P1 core</div></div>
+      <div class="kpi"><div class="k">待登记（原型有 · 规格无）</div><div class="v" id="kpiAdopt" style="color:var(--brand)">1</div><div class="d">FP-106 · P2 edge</div></div>
+      <div class="kpi"><div class="k">待覆盖 / 待废弃</div><div class="v" style="color:oklch(0.5 0.13 60)">2</div><div class="d">FP-102 覆盖 · FP-103 废弃</div></div>
+      <div class="kpi"><div class="k">验收受影响</div><div class="v" style="color:var(--warning)">2</div><div class="d">MUL-455 一条失效 · 一条待验收</div></div>
+    </div>
+  </div>
+</div>
+<ul class="notes">
+  <li><span class="anno warn">!</span><span><b>为什么不复用 HTML diff</b>：行级 diff 回答「代码怎么改了」，对账矩阵回答「承诺兑现没有」。两者并存：改动查 diff，验收查矩阵。</span></li>
+  <li><span class="anno warn">!</span><span><b>空位与待登记方向相反</b>：空位是规格领先于原型（要补原型），待登记是原型领先于规格（要补规格）。混为一谈就会出现「原型明明有、验收却说没有」的扯皮。</span></li>
+  <li><span class="anno warn">!</span><span><b>废弃要回算验收</b>：FP-103 在 MUL-455 有已验收记录，废弃必须提示「将影响 N 条验收」，不能静默删除。</span></li>
+</ul>
+
+<!-- ================= 画面 5 · 并排对比 ================= -->
+<div class="frame-head" id="f5">
+  <h2>画面 5 · 并排对比（保留生产能力，加一列「规格基线」）</h2>
+  <p>生产端的三层对比（画面 / 模块细节 / HTML 代码）与双向 <span class="mono">data-fp</span> 高亮全部保留，只是把「对比基准」从纯 HTML 版本扩展为可选<b>规格基线</b>：左列可以是 v2，也可以是「规格 v3 承诺的样子」，这样「越改越偏」会立刻显形。点下方任一功能点卡片，两侧线框同步描边高亮。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 申报清单页 / 原型图 / 并排对比</span><em>KEEP + EXTEND</em></div>
+  <div class="app mid" style="flex-direction:column">
+    <div class="ptool" style="margin:9px 12px 0">
+      <div class="seg"><span class="active" onclick="setLayer('faces',this)">画面</span><span onclick="setLayer('modules',this)">模块细节</span><span onclick="setLayer('html',this)">HTML 代码</span></div>
+      <div class="seg"><span class="active">v2 版本</span><span onclick="toast('以「规格 v3 承诺」为基线：左列改为规格期望态，而不是历史 HTML')">规格基线</span></div>
+      <span class="inp">当前版本 v3 <span class="ar">▾</span></span>
+      <span class="inp">对比版本 v2 <span class="ar">▾</span></span>
+      <span class="inp" style="color:var(--faint-foreground)">需求 MUL-455 <span class="ar">▾</span></span>
+      <div class="rt">
+        <span class="btn sm" onclick="toast('已写入需求评论：变更摘要 4 条')">✎ 写入评论</span>
+        <span class="btn sm" onclick="toast('多 Agent 构建：PrototypeBuildDialog')">✦ 生成一版</span>
+      </div>
+    </div>
+
+    <div class="cmp" style="margin-top:9px;border-top:1px solid var(--surface-border)">
+      <div class="cmp-col">
+        <div class="pvbar"><i></i><i></i><i></i><span class="f">FILING-455.html · v2</span><span class="b">基线</span></div>
+        <div class="cmp-top">
+          <div class="wf" id="cmpLeft">
+            <div class="wf-h"><b>申报清单</b><span class="path">v2 · 4 个锚点</span></div>
+            <div class="wf-bar">
+              <span class="wf-inp" style="max-width:90px"></span>
+              <span class="wf-btn" data-fp="FP-103">批量导出</span>
+              <span class="wf-btn pri" data-fp="FP-102">＋ 新建申报</span>
+            </div>
+            <table class="wf-tbl">
+              <thead><tr><th>申报单号</th><th>状态</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr data-fp="FP-101"><td class="mono">FIL-0041</td><td>待受理</td><td>详情</td></tr>
+                <tr data-fp="FP-101"><td class="mono">FIL-0042</td><td>已受理</td><td>详情</td></tr>
+                <tr data-fp="FP-101"><td class="mono">FIL-0043</td><td>已撤回</td><td>详情</td></tr>
+              </tbody>
+            </table>
+            <div style="margin-top:7px"><span class="wf-btn" data-fp="FP-104">状态筛选 ▾</span></div>
+          </div>
+        </div>
+        <div class="cmp-bot" id="cmpBotLeft">
+          <button class="spot" data-fp="FP-101" onclick="spotPick('FP-101',this)"><span class="k">FP-101 · 不变</span>申报清单列表 · 表格 4 列，操作列「详情」</button>
+          <button class="spot" data-fp="FP-102" onclick="spotPick('FP-102',this)"><span class="k">FP-102 · 改造</span>新建申报 · 单页弹窗，5 个字段，一次提交</button>
+          <button class="spot removed" data-fp="FP-103" onclick="spotPick('FP-103',this)"><span class="k">FP-103 · 移除</span>批量导出 · 工具栏按钮 + 勾选后导出</button>
+          <button class="spot" data-fp="FP-104" onclick="spotPick('FP-104',this)"><span class="k">FP-104 · 不变</span>申报状态筛选 · 单选下拉</button>
+        </div>
+      </div>
+
+      <div class="cmp-col">
+        <div class="pvbar"><i></i><i></i><i></i><span class="f">FILING-455.html · v3</span><span class="b" style="color:var(--brand)">当前 · 候选</span></div>
+        <div class="cmp-top">
+          <div class="wf" id="cmpRight">
+            <div class="wf-h"><b>申报清单</b><span class="path">v3 · 5 个锚点</span></div>
+            <div class="wf-bar">
+              <span class="wf-inp" style="max-width:90px"></span>
+              <span class="wf-btn" data-fp="FP-104">状态 ▾</span>
+              <span class="wf-btn pri" data-fp="FP-102">＋ 新建申报</span>
+            </div>
+            <table class="wf-tbl">
+              <thead><tr><th>申报单号</th><th>状态</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr data-fp="FP-101"><td class="mono">FIL-0041</td><td>待受理</td><td>详情</td></tr>
+                <tr data-fp="FP-101"><td class="mono">FIL-0042</td><td>已受理</td><td>详情</td></tr>
+                <tr data-fp="FP-101"><td class="mono">FIL-0043</td><td>已撤回</td><td><span data-fp="FP-105" class="newf" style="padding:0 3px">撤回</span></td></tr>
+              </tbody>
+            </table>
+            <div style="border:1px dashed oklch(0.55 0.16 255 / 45%);border-radius:6px;padding:6px 7px;margin-top:7px;background:oklch(0.55 0.16 255 / 4%)">
+              <div style="font-size:9.5px;font-weight:700;color:var(--brand);margin-bottom:3px" data-fp="FP-106">撤回原因弹窗</div>
+              <div style="display:flex;gap:4px"><span class="wf-inp" style="height:18px"></span><span class="wf-btn pri" style="height:18px">确认</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="cmp-bot" id="cmpBotRight">
+          <button class="spot" data-fp="FP-101" onclick="spotPick('FP-101',this)"><span class="k">FP-101 · 不变</span>申报清单列表 · 结构一致</button>
+          <button class="spot" data-fp="FP-102" onclick="spotPick('FP-102',this)"><span class="k">FP-102 · 改造</span>新建申报 · 改为 3 步分步表单，12 个字段</button>
+          <button class="spot added" data-fp="FP-105" onclick="spotPick('FP-105',this)"><span class="k">FP-105 · 新增</span>部分撤回 · 单条行内动作，需填原因</button>
+          <button class="spot added" data-fp="FP-106" onclick="spotPick('FP-106',this)"><span class="k">FP-106 · 新增</span>撤回原因弹窗 · 6 个原因枚举 + 备注</button>
+          <button class="spot" data-fp="FP-104" onclick="spotPick('FP-104',this)"><span class="k">FP-104 · 不变</span>申报状态筛选 · 仍是单选下拉</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="cmpfoot" id="cmpFoot">
+      <div>
+        <div class="subhead">变更摘要 <span class="pill mute">自动总结 · 可写入评论</span></div>
+        <div class="sumline">
+          <b>改造</b>：FP-102 新建申报 → 分步表单（3 步 / 12 字段），旧单页弹窗作废<br>
+          <b>新增</b>：FP-105 部分撤回（行内动作，必填原因）、FP-106 撤回原因弹窗（6 枚举 + 备注）<br>
+          <b>移除</b>：FP-103 批量导出，工具栏按钮与勾选态一并下线<br>
+          <b>不变</b>：FP-101 申报清单列表、FP-104 申报状态筛选
+        </div>
+      </div>
+      <div>
+        <div class="subhead">影响子模块 <span style="font-weight:400;color:var(--faint-foreground)">变更 fp 经对象 / 图谱反查</span></div>
+        <div class="impchip"><span class="pill mute">FP-102</span> 对象 <span class="mono" style="font-size:9.5px">filing.DeclareForm</span></div>
+        <div class="impchip"><span class="pill mute">FP-105</span> 无代码引用（纯原型位）· 安全</div>
+        <div class="impchip"><span class="pill mute">FP-103</span> 对象 <span class="mono" style="font-size:9.5px">filing.ExportAction</span> · <span style="color:oklch(0.5 0.2 27)">2 个在途需求</span></div>
+      </div>
+    </div>
+
+    <div class="diff" id="cmpDiff" style="display:none;margin:9px 12px 12px">
+      <div class="skip">省略 128 行相同代码</div>
+      <div class="rem">- &lt;button class="btn" data-fp="FP-103"&gt;批量导出&lt;/button&gt;</div>
+      <div class="add">+ &lt;button class="btn" data-fp="FP-104"&gt;状态筛选&lt;/button&gt;</div>
+      <div class="add">+ &lt;button class="row-act" data-fp="FP-105"&gt;撤回&lt;/button&gt;</div>
+      <div class="rem">- &lt;div class="modal" data-fp="FP-102"&gt;  &lt;!-- 单页 5 字段 --&gt;</div>
+      <div class="add">+ &lt;div class="stepper" data-fp="FP-102"&gt; &lt;!-- 3 步 12 字段 --&gt;</div>
+      <div class="add">+ &lt;dialog class="reason" data-fp="FP-106"&gt; &lt;!-- 6 枚举 + 备注 --&gt;</div>
+      <div class="skip">省略 41 行相同代码</div>
+    </div>
+  </div>
+</div>
+<ul class="notes">
+  <li><span class="anno warn">!</span><span><b>「规格基线」这一列是本画面唯一新增</b>：当模块有规格但原型落后时，左列取「规格承诺态」比取「上一版 HTML」更能暴露偏差。</span></li>
+  <li><span class="anno warn">!</span><span><b>三层对比原样保留</b>：画面层看布局、模块细节层看功能点、HTML 层看行级改动；相同行仍按 <span class="mono">collapseHtmlDiff</span> 折叠。</span></li>
+  <li><span class="anno warn">!</span><span><b>影响子模块接图谱</b>：沿用 <span class="mono">matchObjectForFeaturePoint</span> / <span class="mono">matchNodesForFeaturePoint</span>，无引用时如实写「安全」，不编造依赖。</span></li>
+</ul>
+
+<!-- ================= 画面 6 · 模块 → 会话 → 发布 ================= -->
+<div class="frame-head" id="f6">
+  <h2>画面 6 · 闭环：模块发起会话 → 合并计划 → 发布为模块新版本</h2>
+  <p>三段并排，对应一次真实动作链。<b>①</b> 模块侧点「在对话中改这版原型」，新建一条<b>模块专属 Agent 会话</b>并挂载 <span class="mono">module + 规格版本 + 权威原型版本</span>；<b>②</b> Agent 取图、改写、重新解析结构，产出<b>合并计划</b>（复用 / 覆盖 / 废弃 / 新增）；<b>③</b> 计划进入<b>发布流水线</b>，六步落库后模块权威版本与规格版本前进一格。<b>点「▶ 播放发布过程」可看动画。</b></p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>模块 → 会话 → 发布 · 三段并排</span><em>CLOSED LOOP</em></div>
+  <div class="app mid" style="flex-direction:column">
+    <div class="topbar">
+      <div class="crumb">代码本体平台 <span>/</span> 产品功能 <span>/</span> <b>申报清单页</b> <span>/</span> 原型改版会话</div>
+      <span class="pill mute" style="margin-left:8px">会话 a2 · 模块专属</span>
+      <span class="btn sm" style="margin-left:auto" onclick="toast('回到画面 3：发布后权威 v3 / 规格 v4 / 覆盖率 100%')">← 回到模块</span>
+    </div>
+
+    <div class="flow">
+      <!-- ① 模块 -->
+      <div class="flow-pane" style="flex:.9">
+        <div class="fp-head">① 模块 · 申报清单页<span class="st">发起</span></div>
+        <div class="fp-body">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="dot" style="background:#ef4444;width:8px;height:8px"></span>
+            <span style="font-size:12.5px;font-weight:700">申报清单页</span>
+            <span class="pill mute">page</span>
+          </div>
+
+          <div class="chat-card">
+            <div class="ch">权威原型 v2 <span class="pill ok" style="margin-left:auto">confirmed</span></div>
+            <div class="cb">
+              <div class="mono" style="font-size:9.5px;color:var(--faint-foreground)">docs/prototypes/FILING-455.html</div>
+              <div style="margin-top:4px">功能点 4 · 覆盖率 <b style="color:oklch(0.42 0.14 145)">80%</b> · 10-21 14:20</div>
+              <div style="margin-top:2px">来源 人工登记 · 需求 MUL-455</div>
+            </div>
+          </div>
+
+          <div class="chat-card">
+            <div class="ch">模块规格 v3 <span class="pill mute" style="margin-left:auto">final</span></div>
+            <div class="cb">
+              <div>FP-101 申报清单列表 · core · P0</div>
+              <div>FP-102 新建申报 · core · P0</div>
+              <div style="color:oklch(0.5 0.2 27)">FP-103 批量导出 · edge · P2（待废弃）</div>
+              <div>FP-104 申报状态筛选 · edge · P1</div>
+              <div style="color:oklch(0.5 0.2 27)">FP-105 部分撤回 · core · P1（空位）</div>
+            </div>
+          </div>
+
+          <div style="border:1px solid oklch(0.55 0.16 255 / 28%);border-radius:8px;padding:8px 9px;background:oklch(0.55 0.16 255 / 4%)">
+            <div style="font-size:10.5px;font-weight:700;color:var(--brand)">待发布队列</div>
+            <div style="font-size:10px;color:var(--muted-foreground);margin-top:3px;line-height:1.6">暂无草案。点下方按钮后，Agent 产出的 v3 会先落在这里，不会直接替换权威版本。</div>
+          </div>
+
+          <div class="btn pri" style="justify-content:center;margin-top:auto" onclick="toast('已新建模块会话 a2 并挂载：申报清单页 · 规格 v3 · 权威原型 v2')">在对话中改这版原型</div>
+          <div style="font-size:9.5px;color:var(--faint-foreground);line-height:1.6">等价于现网「＋ → 项目上下文 → 功能模块原型」，区别是模块侧点两下就到，不用在会话里再选一次。</div>
+        </div>
+      </div>
+
+      <!-- ② 会话 -->
+      <div class="flow-pane" style="flex:1.15">
+        <div class="fp-head">② 会话 · 申报清单页 · 原型改版<span class="st">合并计划</span></div>
+        <div class="fp-body">
+          <div class="chat-sys">已挂载「申报清单页」· 规格 v3 · 权威原型 v2</div>
+
+          <div class="chat-m me">
+            <span class="av">我</span>
+            <div class="bd"><div class="nm">我 · 10:02</div>把「部分撤回」补到原型上：单条可撤、必须填原因；批量导出这一版先去掉。</div>
+          </div>
+
+          <div class="chat-m ag">
+            <span class="av">P</span>
+            <div class="bd">
+              <div class="nm">Prototype Agent · 取图 1.2s</div>
+              已取到权威原型 v2，解析出 4 个 data-fp。按你的要求改写 HTML 后产出 v3，并重新解析做结构比对。
+            </div>
+          </div>
+
+          <div class="chat-card">
+            <div class="ch">结构比对 · 规格 v3 vs 原型 v3<span class="pill warn" style="margin-left:auto">4 → 5 个点</span></div>
+            <div class="cb" style="display:flex;flex-direction:column;gap:5px">
+              <div style="display:flex;align-items:center;gap:5px"><span class="pill ok">复用</span>FP-101 申报清单列表 · 未变</div>
+              <div style="display:flex;align-items:center;gap:5px"><span class="pill warn">覆盖</span>FP-102 新建申报 → 分步表单</div>
+              <div style="display:flex;align-items:center;gap:5px"><span class="pill bad">废弃</span>FP-103 批量导出 · 原型已移除</div>
+              <div style="display:flex;align-items:center;gap:5px"><span class="pill ok">复用</span>FP-104 申报状态筛选 · 未变</div>
+              <div style="display:flex;align-items:center;gap:5px"><span class="pill new">新增</span>FP-105 部分撤回 · FP-106 撤回原因弹窗</div>
+            </div>
+            <div class="cf">
+              <span class="btn sm" style="flex:1;justify-content:center" onclick="toast('逐项可改：复用 2 / 覆盖 1 / 废弃 1 / 新增 2')">逐项确认</span>
+              <span class="btn sm pri" style="flex:1;justify-content:center" onclick="toast('合并计划已提交 → 进入发布流水线（第 ③ 段）')">应用到模块 →</span>
+            </div>
+          </div>
+
+          <div class="composer-mini" style="margin-top:auto">
+            <span class="ctx-chip">◫ 申报清单页 · 规格 v3 · 原型 v2 ×</span>
+            <div class="ln">继续补充要求，例如「撤回原因做成 6 个枚举」…</div>
+            <div style="display:flex;align-items:center;gap:5px">
+              <span class="btn ghost sm">＋</span><span class="pill mute">@Prototype Agent</span>
+              <span class="btn pri sm" style="margin-left:auto">发送 →</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ③ 发布 -->
+      <div class="flow-pane">
+        <div class="fp-head">③ 发布 · 写入模块新版本<span class="st">6 步</span></div>
+        <div class="fp-body">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;font-weight:700">发布变更</span>
+            <span class="pill warn">候选 v3</span>
+            <span class="btn sm" style="margin-left:auto" id="playBtn" onclick="playPipe()">▶ 播放发布过程</span>
+          </div>
+
+          <div class="pipe" id="pipe">
+            <div class="pipe-step"><span class="i">1</span><span><span class="nm">原型产物落盘</span><br><span class="ds"><span class="mono">docs/prototypes/FILING-455.html</span> · content_hash 8f2c41b</span></span></div>
+            <div class="pipe-step"><span class="i">2</span><span><span class="nm">注册原型版本</span><br><span class="ds"><span class="mono">issue_prototype_version v3</span> · status → confirmed</span></span></div>
+            <div class="pipe-step"><span class="i">3</span><span><span class="nm">设为模块权威</span><br><span class="ds"><span class="mono">canonical_prototype_version 2 → 3</span> · v2 转 superseded</span></span></div>
+            <div class="pipe-step"><span class="i">4</span><span><span class="nm">写入模块规格</span><br><span class="ds"><span class="mono">spec v3 → v4</span> · 5 个功能点投影 <span class="mono">project_module_feature</span></span></span></div>
+            <div class="pipe-step"><span class="i">5</span><span><span class="nm">广播与刷新</span><br><span class="ds"><span class="mono">project_module:spec_updated</span> → 列表 / 详情 / 时间线失效</span></span></div>
+            <div class="pipe-step"><span class="i">6</span><span><span class="nm">重算需求验收</span><br><span class="ds"><span class="mono">MUL-455</span> 按新功能点重算 · 1 条验收转失效</span></span></div>
+          </div>
+
+          <div class="receipt" id="dpReceipt" style="display:none">
+            <div class="rh">✓ 已发布 · 申报清单页</div>
+            <div class="rb">
+              <span class="k">权威原型</span><span class="v">v2 → v3（confirmed）</span>
+              <span class="k">模块规格</span><span class="v">v3 → v4（5 个功能点）</span>
+              <span class="k">覆盖率</span><span class="v">80% → 100%</span>
+              <span class="k">结构变更</span><span class="v">复用 2 · 覆盖 1 · 废弃 1 · 新增 2</span>
+              <span class="k">验收影响</span><span class="v">MUL-455 FP-103 失效 · FP-102 待验收</span>
+            </div>
+          </div>
+
+          <div style="font-size:9.5px;color:var(--faint-foreground);line-height:1.6;margin-top:auto">
+            发布是<b>两段式</b>：会话只产出计划，落库必须在这里显式确认，避免 Agent 一次改写直接覆盖权威版本。全流程同事务 + <span class="mono">expected_version</span> CAS，版本被抢占时整笔回滚。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="notes">
+  <li><span class="anno">7</span><span><b>为什么不让 Agent 直接改模块</b>：模块权威版本是验收与对齐的基准，必须有一次人工确认。会话里能改 HTML，但不能改 <span class="mono">canonical_prototype_version</span>。</span></li>
+  <li><span class="anno">8</span><span><b>无需求模块也能玩</b>：发布第 2 步允许 <span class="mono">issue_prototype_version.issue_id</span> 为空、只带 <span class="mono">module_id</span>，这正是补上「无需求即无原型」的关键一列。</span></li>
+  <li><span class="anno">9</span><span><b>发布完立刻能验收</b>：第 6 步重算 acceptance，模块头的覆盖率环与需求详情页的验收项同源，不会出现「模块说 100%、需求说 60%」。</span></li>
+</ul>
+
+<!-- ================= 画面 7 · 状态机与数据契约 ================= -->
+<div class="frame-head" id="f7">
+  <h2>画面 7 · 状态机与数据契约</h2>
+  <p>把上面的交互压成可实现的字段与状态。原则：<b>不新增原型存储</b>——原型仍然落在 <span class="mono">issue_prototype_version</span> 与磁盘 HTML 上，只给 <span class="mono">project_module</span> 补三列、给版本补一个可空的 <span class="mono">module_id</span>，其余是投影。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>数据契约 · 迁移 484–488</span><em>CONTRACT</em></div>
+  <div class="pad">
+    <table class="spec-tbl">
+      <thead><tr><th style="width:250px">对象 / 列</th><th style="width:110px">类型</th><th style="width:90px">变更</th><th>语义与约束</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">project_module.canonical_prototype_version</td><td class="mono">int null</td><td><span class="pill new">新增</span></td><td>模块当前权威原型版本号。NULL ＝ 尚无权威原型（空态如实显示，不自造默认值）。只能指向该模块下 <span class="mono">status='confirmed'</span> 的版本。</td></tr>
+        <tr><td class="mono">project_module.spec_version</td><td class="mono">int default 0</td><td><span class="pill new">新增</span></td><td>模块规格版本号。0 ＝ 未建立规格；任何写规格的动作都要 <span class="mono">where spec_version = $expected</span> 做 CAS。</td></tr>
+        <tr><td class="mono">project_module.spec</td><td class="mono">jsonb</td><td><span class="pill new">新增</span></td><td><span class="mono">$schema = "module_spec/v1"</span>：<span class="mono">{ features:[{code,title,kind,priority,acceptance,source_version}], goal, non_goals }</span>。功能点 <span class="mono">code</span> 与原型 <span class="mono">data-fp</span> 一一对应。</td></tr>
+        <tr><td class="mono">issue_prototype_version.module_id</td><td class="mono">uuid null</td><td><span class="pill new">新增</span></td><td>让原型可以只挂模块、不挂需求。有了它，「无需求即无原型」才被真正解开；一版原型最多属于一个模块。</td></tr>
+        <tr><td class="mono">issue_prototype_version.status</td><td class="mono">text</td><td><span class="pill mute">沿用</span></td><td>语义收紧为 <span class="mono">draft → pending → confirmed → superseded</span>；<b>superseded 只由「设为权威」触发</b>，不再由任意更新触发。</td></tr>
+        <tr><td class="mono">project_module_feature</td><td class="mono">table</td><td><span class="pill new">新增</span></td><td>规格功能点投影表：<span class="mono">(module_id, code)</span> 唯一，<span class="mono">state ∈ live|deprecated</span>。对账矩阵、覆盖率、补齐任务全部读它，避免每次解析 JSONB。</td></tr>
+        <tr><td class="mono">module_prototype_link</td><td class="mono">view</td><td><span class="pill new">新增</span></td><td>视图：模块 × 版本 × 锚点数 × 覆盖功能点集合，供矩阵一次查询，不在前端拼三段数据。</td></tr>
+        <tr><td class="mono">flag module_spec_v2</td><td class="mono">bool</td><td><span class="pill mute">沿用</span></td><td>关闭时原型子页完全回落到现状（需求驱动 + 两个下拉 + 符合/不符/待定），保证可灰度、可回滚。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="pad" style="padding-top:0">
+    <table class="spec-tbl">
+      <thead><tr><th style="width:180px">阶段</th><th style="width:200px">触发动作</th><th>副作用（同一事务）</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill mute">候选草案</span> draft</td><td>会话 / 构建产出新 HTML</td><td>落盘 + 写版本行（<span class="mono">module_id</span> 必填、<span class="mono">issue_id</span> 可空）；模块「待发布」计数 +1；<b>不动 canonical、不动规格</b>。</td></tr>
+        <tr><td><span class="pill warn">待确认</span> pending</td><td>Agent 完成结构比对</td><td>写入 <span class="mono">marks</span> 与合并计划快照（复用/覆盖/废弃/新增 各计数），生成对账差异；模块头待发布条显示「N 覆盖 · M 新增」。</td></tr>
+        <tr><td><span class="pill ok">权威</span> confirmed</td><td>用户在发布面板确认</td><td>三步联动：版本 confirmed → 旧 canonical 转 superseded → 模块三列更新；发 <span class="mono">project_module:spec_updated</span>；重算 acceptance。</td></tr>
+        <tr><td><span class="pill mute">已归档</span> superseded</td><td>被新权威替代</td><td>只读；仍可在时间线与对比里选作基线，不能再次被提升为权威（需重新发布，形成新版本号）。</td></tr>
+        <tr><td><span class="pill bad">空位</span> gap</td><td>对账发现规格有、原型无</td><td>不写库，由视图 <span class="mono">module_prototype_link</span> 计算；可一键「补齐到原型」→ 起一条会话任务并回填 <span class="mono">task.module_id</span>。</td></tr>
+        <tr><td><span class="pill new">待登记</span> pending_adopt</td><td>对账发现原型有、规格无</td><td>不写库；「登记为规格功能点」＝ 更新 <span class="mono">spec</span> + 投影 + <span class="mono">spec_version+1</span>，并在时间线留一条 spec 变更记录。</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ================= 画面 8 · 交互与边界 ================= -->
+<div class="frame-head" id="f8">
+  <h2>画面 8 · 交互、空态与边界</h2>
+  <p>这几条决定上线后会不会被骂：<b>空态必须有出路、失败必须能回滚、权限必须能收窄</b>。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>交互规格</span><em>EDGE CASES</em></div>
+  <div class="pad">
+    <table class="spec-tbl">
+      <thead><tr><th style="width:170px">场景</th><th>行为</th></tr></thead>
+      <tbody>
+        <tr><td><b>模块无任何原型</b></td><td>不再只显示「该模块还没有 HTML 原型版本」。改为两条出路：<b>①从对话生成</b>（起会话，挂 module + 空原型）；<b>②从模板起骨架</b>（复制同类模块的 <span class="mono">data-fp</span> 骨架）。两者都产出 <span class="mono">draft</span>，需发布才成权威。</td></tr>
+        <tr><td><b>模块有原型但无规格</b></td><td>对账矩阵整列显示「规格未建立」，顶部提示「先用当前权威原型生成 v1 规格」；一键从 <span class="mono">data-fp</span> 反向生成 spec（生成后 <span class="mono">spec_version=1</span>）。</td></tr>
+        <tr><td><b>原型未标注 data-fp</b></td><td>沿用现有兜底：按标题 / 导航抽模块，并在矩阵里给行加 <span class="pill mute">推断</span> 标记，覆盖率不计入分子（避免虚高）——这比现在「静默推断」更诚实。</td></tr>
+        <tr><td><b>发布时版本被抢占</b></td><td><span class="mono">expected_version</span> 不匹配 → 整笔回滚 + 提示「模块规格已被他人推进到 v5，请重新对账」。绝不部分提交。</td></tr>
+        <tr><td><b>废弃影响已验收功能点</b></td><td>二次确认弹窗列出受影响的需求 / 验收项，默认<b>不勾选</b>「同时作废验收」；作废需另一条独立动作，留审计记录。</td></tr>
+        <tr><td><b>权限</b></td><td>查看原型与对账：项目成员；<b>登记功能点 / 设权威 / 发布</b>：项目 owner 或 <span class="mono">module:write</span>。Agent 只有 <span class="mono">module:propose</span>，无 <span class="mono">module:publish</span>。</td></tr>
+        <tr><td><b>flag 关闭</b></td><td>原型子页完全回落到现状实现；已写入的 <span class="mono">canonical_prototype_version</span> 只读保留，不参与渲染，重新打开后无需回填。</td></tr>
+        <tr><td><b>性能</b></td><td>矩阵走 <span class="mono">module_prototype_link</span> 单次查询（目标 P95 &lt; 120ms / 500 功能点）；HTML 预览仍按现有 <span class="mono">useArchivePreviewSource</span> 懒加载，切版本不预取其余版本正文。</td></tr>
+        <tr><td><b>键盘</b></td><td>版本时间线 <span class="mono">↑/↓</span> 切版本、<span class="mono">⏎</span> 设为本轮对比基线；对账行 <span class="mono">⏎</span> 定位热点，<span class="mono">⌘⏎</span> 直接打开发布确认。</td></tr>
+        <tr><td><b>文案一致性</b></td><td>四语 key 新增 12 条（<span class="mono">canonical_prototype / spec_version / coverage / gap / pending_adopt / publish_*</span>），沿用 <span class="mono">t(($) =&gt; $.features.*)</span>；不硬编码中文。</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- /frame-wrap -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------- 通用 ---------- */
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2400);
+}
+
+/* ---------- 画面 3：版本切换 ---------- */
+const VER = {
+  1: { file: "FILING-455.html · v1", badge: "已归档 · superseded", cls: "" },
+  2: { file: "FILING-455.html · v2", badge: "权威 · confirmed", cls: "ok" },
+  3: { file: "FILING-455.html · v3", badge: "候选 · pending", cls: "" },
+};
+let activeVer = 2;
+
+function pickVer(v) {
+  if (v === 0) return;
+  activeVer = v;
+  document.querySelectorAll(".vt-row[data-v]").forEach((row) => {
+    row.classList.toggle("on", Number(row.dataset.v) === v);
+  });
+  const meta = VER[v] || VER[2];
+  const file = document.getElementById("pvFile");
+  const badge = document.getElementById("pvBadge");
+  const pick = document.getElementById("pvVerPick");
+  if (file) file.textContent = meta.file;
+  if (badge) {
+    badge.textContent = meta.badge;
+    badge.className = "b " + meta.cls;
+    badge.style.color = v === 3 ? "var(--brand)" : "";
+  }
+  if (pick) pick.innerHTML = "v" + v + (v === 2 ? " 权威" : v === 3 ? " 候选" : " 已归档") + ' <span class="ar">▾</span>';
+
+  /* v1 / v2 共用权威线框；v3 显示候选稿 */
+  const v2 = document.getElementById("wfV2");
+  const v3 = document.getElementById("wfV3");
+  if (v2 && v3) {
+    const showV3 = v === 3;
+    v2.style.display = showV3 ? "none" : "";
+    v3.style.display = showV3 ? "" : "none";
+    [v2, v3].forEach((node) => node.querySelectorAll("[data-fp]").forEach((n) => n.classList.remove("hl")));
+  }
+  const hint = document.getElementById("pvHint");
+  if (hint) {
+    hint.textContent = v === 3
+      ? "当前显示候选稿 v3：橙虚线＝覆盖改动，蓝色「新」标签＝新增锚点，底部标注移除项。发布后它才会替换 v2 成为权威。"
+      : "点在右侧「结构对账」任一行，线框同步描边高亮；切到 v3 可看到候选稿的移除与新增。";
+  }
+  if (v === 1) toast("v1 已归档：可作对比基线，不能被再次提升为权威");
+}
+
+/* ---------- 画面 3：功能点高亮 ---------- */
+function shownWf() { return document.getElementById(activeVer === 3 ? "wfV3" : "wfV2"); }
+function otherWf() { return document.getElementById(activeVer === 3 ? "wfV2" : "wfV3"); }
+function hlFp(code, row) {
+  document.querySelectorAll("#matBody .mat-row").forEach((r) => r.classList.remove("on"));
+  if (row) row.classList.add("on");
+
+  /* 锚点只存在于另一版时，自动切过去，避免在隐藏线框里高亮（用户看不到） */
+  const cur = shownWf();
+  const other = otherWf();
+  if (cur && !cur.querySelector('[data-fp="' + code + '"]') && other && other.querySelector('[data-fp="' + code + '"]')) {
+    const target = activeVer === 3 ? 2 : 3;
+    pickVer(target);
+    toast("已切到 v" + target + "：" + code + " 在当前版本里没有锚点");
+  }
+  document.querySelectorAll("#wfV2 [data-fp], #wfV3 [data-fp]").forEach((n) => {
+    n.classList.toggle("hl", n.dataset.fp === code);
+  });
+  if (!shownWf().querySelector('[data-fp="' + code + '"]')) {
+    toast(code + " 在当前版本里没有锚点——这正是「空位」的含义");
+  }
+}
+
+/* ---------- 画面 4：登记为规格功能点 ---------- */
+function adoptFp() {
+  const spec = document.getElementById("spec106");
+  const act = document.getElementById("act106");
+  const kpi = document.getElementById("kpiAdopt");
+  const kcov = document.getElementById("kpiCov");
+  if (!spec || spec.dataset.done) return;
+  spec.dataset.done = "1";
+  spec.innerHTML = '<span class="c-ok">✓ 已登记</span><br><span class="mtx-mini">并入本轮合并计划 · 待发布</span>';
+  if (act) act.innerHTML = '<span class="pill ok">已登记</span>';
+  if (kpi) kpi.textContent = "0";
+  toast("FP-106 已加入本轮合并计划（登记为规格功能点）；随原型一起发布时才写入规格 v4，不会单独改号码");
+}
+
+/* ---------- 画面 5：三层与联动 ---------- */
+function setLayer(name, el) {
+  if (el && el.parentElement) {
+    el.parentElement.querySelectorAll("span").forEach((s) => s.classList.remove("active"));
+    el.classList.add("active");
+  }
+  const diff = document.getElementById("cmpDiff");
+  const cmp = document.querySelector("#f5 ~ .frame .cmp");
+  const foot = document.getElementById("cmpFoot");
+  if (!cmp) return;
+  if (name === "html") {
+    if (diff) diff.style.display = "";
+    cmp.style.display = "none";
+    if (foot) foot.style.display = "none";
+    return;
+  }
+  if (diff) diff.style.display = "none";
+  cmp.style.display = "";
+  if (foot) foot.style.display = "";
+  cmp.classList.toggle("faceonly", name === "faces");
+  /* 切层时清掉上一层的选中态，避免残留高亮 */
+  document.querySelectorAll(".spot").forEach((b) => b.classList.remove("sel"));
+  document.querySelectorAll("#cmpLeft [data-fp], #cmpRight [data-fp]").forEach((n) => n.classList.remove("hl"));
+  if (name === "faces") toast("画面层：两栏预览铺满，功能点卡片收起（切「模块细节」再展开）");
+}
+
+function spotPick(code, el) {
+  document.querySelectorAll(".spot").forEach((b) => b.classList.remove("sel"));
+  if (el) el.classList.add("sel");
+  const scope = document.querySelectorAll("#cmpLeft [data-fp], #cmpRight [data-fp]");
+  scope.forEach((n) => n.classList.toggle("hl", n.dataset.fp === code));
+  const leftHit = !!document.querySelector('#cmpLeft [data-fp="' + code + '"]');
+  const rightHit = !!document.querySelector('#cmpRight [data-fp="' + code + '"]');
+  if (!leftHit && rightHit) toast(code + " 仅存在于 v3（新增）");
+  if (leftHit && !rightHit) toast(code + " 已被 v3 移除（废弃）");
+}
+
+/* ---------- 画面 6：发布动画 ---------- */
+let playing = false;
+function playPipe() {
+  const steps = document.querySelectorAll("#pipe .pipe-step");
+  const receipt = document.getElementById("dpReceipt");
+  const btn = document.getElementById("playBtn");
+  if (playing || !steps.length) return;
+  playing = true;
+  if (receipt) receipt.style.display = "none";
+  steps.forEach((s) => { s.classList.remove("done", "run"); });
+  if (btn) btn.textContent = "发布中…";
+  let i = 0;
+  const tick = () => {
+    if (i > 0) steps[i - 1].classList.replace("run", "done");
+    if (i >= steps.length) {
+      if (receipt) receipt.style.display = "";
+      if (btn) btn.textContent = "▶ 播放发布过程";
+      playing = false;
+      toast("已发布「申报清单页」：权威 v2 → v3，规格 v3 → v4，覆盖率 80% → 100%");
+      return;
+    }
+    steps[i].classList.add("run");
+    i += 1;
+    setTimeout(tick, 480);
+  };
+  tick();
+}
+
+/* ---------- 初始化 ---------- */
+pickVer(2);
+</script>
+</body>
+</html>
