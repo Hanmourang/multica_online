@@ -726,7 +726,7 @@ function SidebarMenu({ className, ...props }: React.ComponentProps<"ul">) {
     <ul
       data-slot="sidebar-menu"
       data-sidebar="menu"
-      className={cn("flex w-full min-w-0 flex-col gap-0", className)}
+      className={cn("flex w-full min-w-0 flex-col gap-0.5", className)}
       {...props}
     />
   )
@@ -753,8 +753,13 @@ const sidebarMenuButtonVariants = cva(
           "bg-background shadow-[0_0_0_1px_var(--color-sidebar-border)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_var(--color-sidebar-accent)]",
       },
       size: {
-        default: "h-8 text-body group-data-[collapsible=icon]:text-caption!",
-        sm: "h-7 text-caption group-data-[collapsible=icon]:text-micro!",
+        // Row heights must clear text-body's 20px line box plus the base p-2
+        // (16px) vertical padding, otherwise the fixed height clips the text
+        // and every sidebar row reads cramped. 36px is the smallest height
+        // that fits both; sm only carries text-caption (16px line box) so its
+        // 32px is already exact.
+        default: "h-9 text-body group-data-[collapsible=icon]:text-caption!",
+        sm: "h-8 text-caption group-data-[collapsible=icon]:text-micro!",
         lg: "h-12 text-body group-data-[collapsible=icon]:text-caption!",
       },
     },

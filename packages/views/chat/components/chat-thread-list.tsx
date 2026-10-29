@@ -409,7 +409,10 @@ export function ChatThreadList({
         className={cn(
           // Fixed height so nothing (hover actions, confirm prompts) can change
           // the row size and make the list jump. Content is vertically centered.
-          "group/row relative flex h-14 min-w-0 cursor-default items-center gap-3 rounded-md px-2 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
+          // 64px gives the two text lines (20px title + 16px preview + 4px gap)
+          // 12px of breathing room above and below instead of the 9px that made
+          // the rail read cramped at h-14.
+          "group/row relative flex h-16 min-w-0 cursor-default items-center gap-3 rounded-md px-2 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
           isCurrent ? "bg-accent" : "hover:bg-accent/50",
           isConfirmingAction && "bg-destructive/5 hover:bg-destructive/5",
         )}
@@ -469,7 +472,7 @@ export function ChatThreadList({
           </div>
 
           {/* Line 2: preview + unread badge, or an inline confirm prompt */}
-          <div className="mt-0.5 flex items-center gap-2">
+          <div className="mt-1 flex items-center gap-2">
             {isConfirmingDelete ? (
                 <ConfirmRow
                   label={t(($) => $.session_history.delete_dialog.title)}
@@ -656,7 +659,7 @@ export function ChatThreadList({
   // Both history branches fill the rail (min-h-full) and keep their rows from
   // shrinking, so the archived entry's mt-auto resolves against real leftover
   // space. The wrapper is height-agnostic when the parent is not a flex column.
-  const historyFrame = "flex min-h-full flex-col [&>*]:shrink-0";
+  const historyFrame = "flex min-h-full flex-col gap-y-0.5 [&>*]:shrink-0";
 
   if (visibleHistory.length === 0) {
     return (
