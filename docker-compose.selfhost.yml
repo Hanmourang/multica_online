@@ -61,6 +61,11 @@ services:
       - "127.0.0.1:${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
+      # Archive shelves (projects_mgmt / change_logs) are indexed by relative path and
+      # resolved at runtime by probing each project's local_directory, so they have to
+      # appear at their original absolute path inside the container. Read-only: the
+      # server only ever reads them. Override for hosts that mirror elsewhere.
+      - ${MULTICA_ARCHIVE_MIRROR:-/home/workspace/mirror/Users}:/Users:ro
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       DATABASE_REPLICA_URL: ${DATABASE_REPLICA_URL:-}
@@ -197,6 +202,25 @@ services:
       # for a debugging session and unset it when that session ends, because
       # what it records is user message content.
       MULTICA_WECOM_TRACE: ${MULTICA_WECOM_TRACE:-}
+      # ---- Fork module flags (multica_online) ----
+      # This checkout carries modules the upstream image does not ship: assets,
+      # sprints, the requirement/workflow engine, the module spec center, and
+      # DM/group chat. Each one is gated twice on the SAME decision — the server
+      # registers its routes only when FF_<KEY> is true, and the frontend hides
+      # its tab/entry point on the same flag published by GET /api/config. A
+      # missing flag therefore removes a module from both layers at once, which
+      # is how a deployment built from the upstream image ends up looking like a
+      # different product. Defaults are ON so a fresh clone renders what the
+      # local client renders; set any of them to false to scale one module back.
+      FF_SPRINT_MODULE: ${FF_SPRINT_MODULE:-true}
+      FF_WORKFLOW_MODULE: ${FF_WORKFLOW_MODULE:-true}
+      FF_ASSET_MODULE: ${FF_ASSET_MODULE:-true}
+      FF_WORKFLOW_ASSET_GATE: ${FF_WORKFLOW_ASSET_GATE:-true}
+      FF_WORKFLOW_PULL_CONTEXT: ${FF_WORKFLOW_PULL_CONTEXT:-true}
+      FF_WORKFLOW_STAGE_SPEC: ${FF_WORKFLOW_STAGE_SPEC:-true}
+      FF_CHAT_CONVERSATIONS: ${FF_CHAT_CONVERSATIONS:-true}
+      FF_MODULE_PROTOTYPE_CHAT: ${FF_MODULE_PROTOTYPE_CHAT:-true}
+      FF_MODULE_SPEC_CENTER: ${FF_MODULE_SPEC_CENTER:-true}
     restart: unless-stopped
 
   frontend:

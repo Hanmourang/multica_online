@@ -11,6 +11,12 @@ services:
         VERSION: ${VERSION:-dev}
         COMMIT: ${COMMIT:-unknown}
         DATE: ${DATE:-unknown}
+    # Stamped so `scripts/selfhost-local.sh verify` can prove the running
+    # container was built from this checkout instead of an upstream pull.
+    labels:
+      org.opencontainers.image.revision: ${COMMIT:-unknown}
+      org.opencontainers.image.version: ${VERSION:-dev}
+      com.multica.source: selfhost-local
 
   frontend:
     image: multica-web:dev
@@ -18,4 +24,8 @@ services:
       context: .
       dockerfile: Dockerfile.web
       args:
-        NEXT_PUBLIC_APP_VERSION: dev
+        NEXT_PUBLIC_APP_VERSION: ${VERSION:-dev}
+    labels:
+      org.opencontainers.image.revision: ${COMMIT:-unknown}
+      org.opencontainers.image.version: ${VERSION:-dev}
+      com.multica.source: selfhost-local

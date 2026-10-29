@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-stop up down status list destroy gc env-exec api-dev web-dev desktop-dev
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-local selfhost-verify selfhost-code selfhost-stop up down status list destroy gc env-exec api-dev web-dev desktop-dev
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -79,8 +79,12 @@ makehelp: help ## Alias for `make help`
 # ---------- Self-hosting (Docker Compose) ----------
 ##@ Self-hosting
 
-selfhost: ## Create .env if needed, then pull and start the official self-hosted images
+selfhost: ## Pull and start the UPSTREAM images (NOT this fork; use selfhost-local)
 	$(REQUIRE_COMPOSE)
+	@echo "!!! This target pulls ghcr.io/multica-ai/*:latest — the upstream product."
+	@echo "!!! Its runtimes page and module set differ from this checkout: the fork's"
+	@echo "!!! asset / sprint / workflow / module-spec tabs will not be there."
+	@echo "!!! For an instance that matches this repository: make selfhost-local"
 	@if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
 		cp .env.example .env; \
@@ -112,7 +116,7 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 	$(COMPOSE) -f docker-compose.selfhost.yml up -d
 	@bash scripts/selfhost-wait.sh official
 
-selfhost-build: ## Build backend/web from the current checkout and start the self-hosted stack
+selfhost-build: ## Build backend/web from the current checkout (no parity check)
 	$(REQUIRE_COMPOSE)
 	@if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
@@ -136,6 +140,18 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 	@echo "==> Building Multica from the current checkout..."
 	$(COMPOSE) -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
 	@bash scripts/selfhost-wait.sh build
+
+selfhost-local: ## Build THIS checkout, turn every fork module on, then verify parity
+	$(REQUIRE_COMPOSE)
+	@bash scripts/selfhost-local.sh up
+
+selfhost-verify: ## Assert the running stack came from HEAD and has all fork flags on
+	$(REQUIRE_COMPOSE)
+	@bash scripts/selfhost-local.sh verify
+
+selfhost-code: ## Print the latest login verification code from the backend log
+	$(REQUIRE_COMPOSE)
+	@bash scripts/selfhost-local.sh code
 
 selfhost-stop: ## Stop the self-hosted Docker Compose stack
 	$(REQUIRE_COMPOSE)

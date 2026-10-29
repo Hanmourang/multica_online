@@ -1,6 +1,12 @@
 # --- Build stage ---
 FROM golang:1.26-alpine AS builder
 
+# Module proxy: proxy.golang.org is unreachable from mainland-China hosts, where
+# `go mod download` then hangs until it times out. Default to the regional mirror
+# and let anyone outside that network override it with --build-arg.
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
+
 RUN apk add --no-cache git
 
 WORKDIR /src
