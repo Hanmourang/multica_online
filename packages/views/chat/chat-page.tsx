@@ -485,7 +485,12 @@ export function ChatPage() {
       <ResizablePanel
         id="list"
         defaultSize={320}
-        minSize={240}
+        // Floor, not just a hint: a restored percentage layout keeps its ratio
+        // as the window narrows (26% of 1010px leaves 264px), and at 240px the
+        // thread titles truncate after seven characters even though every row
+        // is now 80px tall. 300px is the first width that keeps a full title
+        // and its date/tag on one line.
+        minSize={300}
         maxSize={480}
         groupResizeBehavior="preserve-pixel-size"
       >

@@ -758,11 +758,13 @@ const sidebarMenuButtonVariants = cva(
       size: {
         // Row heights must clear text-body's 20px line box plus the base p-2
         // (16px) vertical padding, otherwise the fixed height clips the text
-        // and every sidebar row reads cramped. 36px is the smallest height
-        // that fits both; sm only carries text-caption (16px line box) so its
-        // 32px is already exact.
-        default: "h-9 text-body group-data-[collapsible=icon]:text-caption!",
-        sm: "h-8 text-caption group-data-[collapsible=icon]:text-micro!",
+        // and every sidebar row reads cramped. 36px is the floor that fits
+        // both; 40px is what the nav actually uses — at 36px a full column of
+        // rows sat shoulder to shoulder, which is what read as "crowded" next
+        // to a 20px line box. sm carries text-caption (16px line box), so its
+        // 36px keeps the same 8px of vertical air per side.
+        default: "h-10 text-body group-data-[collapsible=icon]:text-caption!",
+        sm: "h-9 text-caption group-data-[collapsible=icon]:text-micro!",
         lg: "h-12 text-body group-data-[collapsible=icon]:text-caption!",
       },
     },

@@ -409,10 +409,11 @@ export function ChatThreadList({
         className={cn(
           // Fixed height so nothing (hover actions, confirm prompts) can change
           // the row size and make the list jump. Content is vertically centered.
-          // 72px gives the two text lines (20px title + 18px preview + 4px gap)
-          // 15px of breathing room above and below — at 56px the rail read
-          // cramped, and 64px still felt tight next to the larger preview type.
-          "group/row relative flex h-18 min-w-0 cursor-default items-center gap-3 rounded-md px-2 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
+          // 80px gives the two text lines (20px title + 18px preview + 4px gap)
+          // 19px of breathing room above and below — at 56px the rail read
+          // cramped, 72px still felt tight, and 80px is what finally matched
+          // the 15px conversation type next to it.
+          "group/row relative flex h-20 min-w-0 cursor-default items-center gap-3 rounded-md px-2 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
           isCurrent ? "bg-accent" : "hover:bg-accent/50",
           isConfirmingAction && "bg-destructive/5 hover:bg-destructive/5",
         )}

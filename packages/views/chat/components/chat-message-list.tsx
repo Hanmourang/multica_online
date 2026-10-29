@@ -562,7 +562,7 @@ export function ChatMessageList({
         components={LIST_COMPONENTS}
         itemContent={(_, item) => (
           <div
-            className={cn(CHAT_COLUMN, "py-2.5")}
+            className={cn(CHAT_COLUMN, "py-3")}
             {...(item.key === liveEndKey ? { [LIVE_END_ROW_ATTR]: "" } : {})}
           >
             <MessageBubble
@@ -789,7 +789,7 @@ const MessageBubble = memo(function MessageBubble({
             {hasContentBubble && (
               <div
                 className={cn(
-                  "rounded-2xl px-3.5 py-2 text-body break-words text-foreground",
+                  "rounded-2xl px-4 py-2.5 text-body break-words text-foreground",
                   isConversation && isSelf
                     ? "rounded-tr-md border border-border bg-card"
                     : isConversation
@@ -955,7 +955,7 @@ function AgentFrame({
           <span className="rounded bg-violet-100 px-1">{tag}</span>
           {time && <time className="font-normal text-muted-foreground">{time}</time>}
         </div>
-        <div className="rounded-2xl rounded-tl-md border border-violet-200 border-l-[3px] border-l-violet-400 bg-card px-3.5 py-2.5 text-foreground">
+        <div className="rounded-2xl rounded-tl-md border border-violet-200 border-l-[3px] border-l-violet-400 bg-card px-4 py-3 text-foreground">
           {children}
         </div>
       </div>

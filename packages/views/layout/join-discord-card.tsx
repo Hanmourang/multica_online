@@ -12,7 +12,7 @@ import { useT } from "../i18n";
  * browser — see {@link useDiscordCardDismissed}.
  *
  * Deliberately shaped as a sidebar row, not a bordered card: it matches
- * SidebarMenuButton metrics (h-9 / rounded-md / gap-2 / text-body) and
+ * SidebarMenuButton metrics (h-10 / rounded-md / gap-2 / text-body) and
  * carries no resting border or fill. A dismissible promo is the
  * lowest-priority item in the sidebar, so it must not be drawn heavier than
  * the navigation above it.
@@ -44,7 +44,7 @@ export function JoinDiscordCard() {
         href={DISCORD_URL}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex h-9 items-center gap-2 rounded-md px-2 pr-8 text-body text-muted-foreground ring-sidebar-ring outline-hidden transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground focus-visible:ring-2"
+        className="flex h-10 items-center gap-2 rounded-md px-2 pr-8 text-body text-muted-foreground ring-sidebar-ring outline-hidden transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground focus-visible:ring-2"
       >
         <DiscordIcon className="size-4 shrink-0" />
         <span className="truncate">
