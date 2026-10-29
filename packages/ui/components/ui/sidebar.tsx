@@ -36,10 +36,13 @@ const SIDEBAR_WIDTH_MOBILE = "18rem"
 // a 20-22px icon over a short (typically 2-4 CJK char) module label.
 const SIDEBAR_WIDTH_ICON = 80
 const SIDEBAR_DRAG_THRESHOLD = 2
-// Tailwind `lg`–`xl`: wide enough to keep a two-pane list/detail surface, too
-// narrow to also spend 256px on the nav. The nav starts collapsed here and the
-// header's trigger brings it back.
-const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 1024px) and (max-width: 1279px)"
+// Tailwind `xl`–`2xl`: wide enough to keep a two-pane list/detail surface, too
+// narrow to also spend 256px on the nav. The nav starts collapsed to the icon
+// rail here and the header's trigger brings it back. Below `xl` this component
+// renders the sheet branch (see `useIsCompact`), so this band no longer covers
+// 1024–1279 — that band folded to the single column instead of squeezing three
+// columns into it.
+const SIDEBAR_AUTO_COLLAPSE_QUERY = "(min-width: 1280px) and (max-width: 1535px)"
 
 /**
  * Paints an element with whatever the sidebar wrapper is currently filled with.
@@ -343,13 +346,13 @@ function Sidebar({
     )
   }
 
-  // `lg`, not `md`: this CSS gate has to agree with the `useIsCompact()` gate
+  // `xl`, not `lg`: this CSS gate has to agree with the `useIsCompact()` gate
   // that chose the in-flow branch over the sheet above. While they disagreed,
   // every load between the two breakpoints painted a 256px sidebar for one
   // frame before the hook resolved and collapsed it into a sheet.
   return (
     <div
-      className="group peer hidden text-sidebar-foreground lg:block"
+      className="group peer hidden text-sidebar-foreground xl:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}
@@ -372,7 +375,7 @@ function Sidebar({
         data-slot="sidebar-container"
         data-side={side}
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-out motion-reduce:transition-none lg:flex",
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-out motion-reduce:transition-none xl:flex",
           "data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
@@ -726,7 +729,7 @@ function SidebarMenu({ className, ...props }: React.ComponentProps<"ul">) {
     <ul
       data-slot="sidebar-menu"
       data-sidebar="menu"
-      className={cn("flex w-full min-w-0 flex-col gap-0.5", className)}
+      className={cn("flex w-full min-w-0 flex-col gap-1", className)}
       {...props}
     />
   )

@@ -75,12 +75,12 @@ vi.mock("@multica/ui/components/ui/resizable", () => ({
 // all want the desktop two-pane layout, the breakpoint tests at the bottom set
 // their own width.
 const FOLD_INNER = 851;
-const TABLET = 1024;
+const TABLET = 1280;
 const DESKTOP = 1440;
 const layout = vi.hoisted(() => ({ width: 1440 }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => layout.width < 768,
-  useIsCompact: () => layout.width < 1024,
+  useIsCompact: () => layout.width < 1280,
 }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({ chat: () => "/acme/chat" }),
@@ -364,9 +364,8 @@ describe("ChatPage responsive layout", () => {
   });
 
   it("keeps both panes at the compact breakpoint", () => {
-    // 1024px is the first width that keeps two panes. The nav auto-collapses
-    // there instead (see the sidebar), so the thread list stays on screen next
-    // to an open conversation.
+    // 1280px (`xl`) is the first width that keeps two panes. Below it the page
+    // folds to the single column instead of sharing ~460px between three.
     layout.width = TABLET;
     storeRef.current = { activeSessionId: "session-1" };
     renderPage("session=session-1");

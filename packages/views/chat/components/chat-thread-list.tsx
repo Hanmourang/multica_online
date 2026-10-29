@@ -409,10 +409,10 @@ export function ChatThreadList({
         className={cn(
           // Fixed height so nothing (hover actions, confirm prompts) can change
           // the row size and make the list jump. Content is vertically centered.
-          // 64px gives the two text lines (20px title + 16px preview + 4px gap)
-          // 12px of breathing room above and below instead of the 9px that made
-          // the rail read cramped at h-14.
-          "group/row relative flex h-16 min-w-0 cursor-default items-center gap-3 rounded-md px-2 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
+          // 72px gives the two text lines (20px title + 18px preview + 4px gap)
+          // 15px of breathing room above and below — at 56px the rail read
+          // cramped, and 64px still felt tight next to the larger preview type.
+          "group/row relative flex h-18 min-w-0 cursor-default items-center gap-3 rounded-md px-2 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
           isCurrent ? "bg-accent" : "hover:bg-accent/50",
           isConfirmingAction && "bg-destructive/5 hover:bg-destructive/5",
         )}
@@ -453,7 +453,7 @@ export function ChatThreadList({
             {conversationsEnabled && (
               <span
                 className={cn(
-                  "shrink-0 rounded px-1 py-px text-[10px] font-semibold tracking-wide",
+                  "shrink-0 rounded px-1 py-px text-micro font-semibold tracking-wide",
                   isGroup
                     ? "bg-orange-500/15 text-orange-700 dark:text-orange-300"
                     : isDm
@@ -468,7 +468,7 @@ export function ChatThreadList({
                     : tConv(($) => $.rail.tag_agent)}
               </span>
             )}
-            <span className="ml-auto shrink-0 text-micro text-muted-foreground">{timeText}</span>
+            <span className="ml-auto shrink-0 text-caption text-muted-foreground">{timeText}</span>
           </div>
 
           {/* Line 2: preview + unread badge, or an inline confirm prompt */}
@@ -501,7 +501,7 @@ export function ChatThreadList({
                 />
               ) : (
                 <>
-                  <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-caption">
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-label">
                     {agentName && (
                       <>
                         <span className="max-w-[40%] shrink-0 truncate font-medium text-muted-foreground">

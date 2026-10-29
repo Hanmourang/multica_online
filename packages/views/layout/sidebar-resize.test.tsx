@@ -9,15 +9,30 @@ import {
 } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 
+// Pin the viewport above `xl`: below it SidebarProvider renders the sheet
+// branch and there is no in-flow rail to drag. jsdom's default 1024 now falls
+// under that gate.
+const realInnerWidth = window.innerWidth;
+
 describe("left sidebar resizing", () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.removeAttribute("data-sidebar-resizing");
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1600,
+      writable: true,
+    });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: realInnerWidth,
+      writable: true,
+    });
   });
 
   it("previews width directly and commits only when the pointer is released", () => {

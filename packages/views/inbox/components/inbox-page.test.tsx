@@ -128,12 +128,12 @@ vi.mock("../../navigation", () => ({
 // since a single column swaps the list out for the detail on selection.
 const PHONE = 390;
 const FOLD_INNER = 851;
-const TABLET = 1024;
+const TABLET = 1280;
 const DESKTOP = 1440;
 const layout = { width: PHONE };
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => layout.width < 768,
-  useIsCompact: () => layout.width < 1024,
+  useIsCompact: () => layout.width < 1280,
 }));
 vi.mock("@multica/ui/components/ui/resizable", () => ({
   ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => (
@@ -626,9 +626,8 @@ describe("InboxPage", () => {
   });
 
   it("keeps both panes at the compact breakpoint", () => {
-    // 1024px is the first width that keeps the two-pane layout. The nav
-    // auto-collapses there instead (see the sidebar), so the list has to stay
-    // on screen next to an open item.
+    // 1280px (`xl`) is the first width that keeps the two-pane layout. Below it
+    // the list and the detail fold into one column instead of squeezing in.
     reset();
     layout.width = TABLET;
     listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];

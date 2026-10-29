@@ -776,7 +776,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         <SidebarContent ref={sidebarScrollRef} style={sidebarFadeStyle}>
           <SidebarGroup>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
+              <SidebarMenu className="gap-1">
                 {personalNav.map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
@@ -831,7 +831,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <SidebarGroupContent>
                     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
                       <SortableContext items={visiblePinned.map((p) => p.id)} strategy={verticalListSortingStrategy}>
-                        <SidebarMenu className="gap-0.5">
+                        <SidebarMenu className="gap-1">
                           {visiblePinned.map((pin: PinnedItem) => (
                             <PinRow
                               key={pin.id}
@@ -854,7 +854,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           <SidebarGroup>
             <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
+              <SidebarMenu className="gap-1">
                 {workspaceNav
                   .filter((item) =>
                     item.key === "assets"
@@ -886,7 +886,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           <SidebarGroup>
             <SidebarGroupLabel>{t(($) => $.sidebar.configure_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
+              <SidebarMenu className="gap-1">
                 {configureNav.map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
