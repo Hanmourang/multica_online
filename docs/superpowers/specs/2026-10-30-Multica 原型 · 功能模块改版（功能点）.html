@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 原型 · 功能模块改版（功能点）2026-10-30</title>
+<style>
+/* ===== Multica 设计 token（packages/ui/styles/tokens.css 浅色主题抄录） ===== */
+:root {
+  --app-shell: oklch(0.964435 0.001327 286.375);
+  --page-canvas: oklch(0.988087 0 0);
+  --surface: oklch(1 0 0);
+  --surface-hover: oklch(0.967 0.001 286.375);
+  --surface-selected: oklch(0.95 0.002 286.375);
+  --surface-border: oklch(0.92 0.004 286.32);
+  --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+  --foreground: oklch(0.141 0.005 285.823);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --faint-foreground: oklch(0.606 0.016 285.938);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --border: oklch(0.945 0.003 286.32);
+  --destructive: oklch(0.577 0.245 27.325);
+  --brand: oklch(0.55 0.16 255);
+  --success: oklch(0.55 0.16 145);
+  --warning: oklch(0.72 0.15 75);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: oklch(0.93 0.004 286.32);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+/* ===== 画板框架（非产品 UI） ===== */
+.proto-nav {
+  position: sticky; top: 0; z-index: 300;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 24px; background: oklch(0.16 0.005 285.823);
+  color: oklch(0.92 0.004 286.32);
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 12px; }
+.proto-nav .logo span { color: var(--brand); }
+.proto-nav a {
+  color: oklch(0.705 0.015 286.067); text-decoration: none;
+  padding: 5px 12px; border-radius: 6px; font-size: 12.5px;
+}
+.proto-nav a:hover { background: oklch(1 0 0 / 8%); color: #fff; }
+.proto-nav .nav-sep {
+  color: oklch(0.86 0.02 286); font-size: 11px; font-weight: 700;
+  padding: 4px 8px; border-left: 2px solid oklch(0.55 0.16 255 / 60%);
+  margin-left: 6px; letter-spacing: .03em;
+}
+.frame-wrap { max-width: 1560px; margin: 0 auto; padding: 32px 24px 80px; }
+.frame-head { margin-bottom: 14px; scroll-margin-top: 96px; }
+.frame-head h2 { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.frame-head p { color: var(--muted-foreground); font-size: 13px; margin-top: 5px; line-height: 1.75; max-width: 1200px; }
+.frame-head p b { color: var(--foreground); }
+.frame {
+  background: var(--page-canvas); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 0.16), 0 4px 16px rgb(15 23 42 / 0.08);
+  border: 1px solid oklch(0.85 0.005 286.32);
+  margin-bottom: 52px; position: relative;
+}
+.frame-bar {
+  height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border);
+  display: flex; align-items: center; gap: 6px; padding: 0 14px;
+}
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: oklch(0.7 0.19 27); }
+.frame-bar i:nth-child(2) { background: oklch(0.8 0.16 85); }
+.frame-bar i:nth-child(3) { background: oklch(0.7 0.16 145); }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--faint-foreground); }
+.frame-bar em { margin-left: auto; font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--faint-foreground); }
+.anno {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700;
+  box-shadow: 0 0 0 2.5px oklch(0.55 0.16 255 / 20%);
+  position: relative; z-index: 5; flex: none;
+}
+.anno.ok { background: var(--success); box-shadow: 0 0 0 2.5px oklch(0.55 0.16 145 / 20%); }
+.anno.warn { background: oklch(0.65 0.16 60); box-shadow: 0 0 0 2.5px oklch(0.72 0.15 75 / 22%); }
+.notes { list-style: none; margin: -38px 0 52px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; display: grid; gap: 8px; }
+.notes li { display: flex; gap: 8px; font-size: 12px; line-height: 1.7; color: var(--muted-foreground); }
+.notes li b { color: var(--foreground); }
+
+/* ===== 应用外壳 ===== */
+.app { display: flex; background: var(--page-canvas); }
+.app.tall { height: 812px; }
+.sidebar {
+  width: 178px; flex: none; background: var(--app-shell);
+  border-right: 1px solid var(--surface-border); padding: 10px 8px;
+}
+.ws { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 600; padding: 4px 6px 12px; }
+.ws-avatar {
+  width: 20px; height: 20px; border-radius: 6px; background: var(--primary); color: #fff;
+  display: grid; place-items: center; font-size: 10px; font-weight: 700;
+}
+.s-sec { font-size: 9.5px; font-weight: 700; letter-spacing: .06em; color: var(--faint-foreground); padding: 10px 8px 4px; }
+.s-item {
+  display: flex; align-items: center; gap: 8px; padding: 4.5px 8px; border-radius: 6px;
+  color: var(--muted-foreground); font-size: 12px;
+}
+.s-item.on { background: var(--sidebar-accent, oklch(0.935 0.003 286.375)); color: var(--foreground); font-weight: 600; }
+.s-item .n {
+  margin-left: auto; font-size: 10.5px; background: var(--surface-selected);
+  color: var(--muted-foreground); border-radius: 8px; padding: 0 6px; line-height: 16px;
+}
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.topbar {
+  height: 36px; display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;
+  padding: 0 12px; border-bottom: 1px solid var(--surface-border); background: var(--surface);
+}
+.crumb { color: var(--muted-foreground); display: flex; gap: 5px; align-items: center; font-size: 12px; white-space: nowrap; }
+.crumb b { color: var(--foreground); font-weight: 600; }
+.tab-pill { padding: 3.5px 9px; border-radius: 6px; color: var(--muted-foreground); font-size: 11.5px; white-space: nowrap; }
+.tab-pill.active { background: var(--surface-selected); color: var(--foreground); font-weight: 600; }
+.tab-pill .b { font-size: 9.5px; font-weight: 700; margin-left: 4px; border-radius: 7px; padding: 0 4px; background: oklch(0.94 0.02 255); color: var(--brand); }
+
+/* ===== 通用控件 ===== */
+.pill {
+  display: inline-flex; align-items: center; gap: 3px; border-radius: 9px;
+  padding: 1px 6px; font-size: 10px; font-weight: 600; line-height: 15px;
+  background: var(--surface-selected); color: var(--muted-foreground); white-space: nowrap;
+}
+.pill.ok { background: oklch(0.94 0.06 145); color: oklch(0.42 0.12 145); }
+.pill.bad { background: oklch(0.94 0.05 27); color: oklch(0.47 0.18 27); }
+.pill.warn { background: oklch(0.96 0.06 75); color: oklch(0.48 0.13 62); }
+.pill.new { background: oklch(0.94 0.03 255); color: var(--brand); }
+.pill.mute { background: var(--surface-selected); color: var(--faint-foreground); }
+.btn {
+  display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border);
+  background: var(--surface); border-radius: 6px; padding: 3.5px 9px; font-size: 11.5px;
+  color: var(--foreground); white-space: nowrap; cursor: pointer;
+}
+.btn.sm { padding: 2.5px 8px; font-size: 11px; }
+.btn.pri { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.btn:hover { background: var(--surface-hover); }
+.btn.pri:hover { background: oklch(0.3 0.006 285.885); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--surface); flex: none; }
+.seg span { padding: 3px 10px; font-size: 11.5px; color: var(--muted-foreground); white-space: nowrap; cursor: pointer; }
+.seg span.active { background: var(--surface-selected); color: var(--foreground); font-weight: 600; }
+.inp {
+  display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); padding: 3px 8px; font-size: 11.5px; color: var(--foreground); white-space: nowrap;
+}
+.inp .ar { margin-left: auto; color: var(--faint-foreground); font-size: 9px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+
+/* ===== 功能模块列表页 ===== */
+.feat-toolbar {
+  display: flex; align-items: center; gap: 6px; padding: 7px 12px;
+  border-bottom: 1px solid var(--surface-border); background: var(--surface); flex: none;
+}
+.feat-body { flex: 1; min-height: 0; display: flex; }
+.mod-list { width: 236px; flex: none; border-right: 1px solid var(--surface-border); overflow: auto; background: var(--surface); }
+.ml-head { display: flex; align-items: center; padding: 8px 10px; font-size: 10.5px; color: var(--faint-foreground); border-bottom: 1px solid var(--border); }
+.ml-head .t { font-weight: 700; color: var(--muted-foreground); }
+.ml-head .c { margin-left: auto; }
+.mod-row { padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.mod-row:hover { background: var(--surface-hover); }
+.mod-row.on { background: oklch(0.96 0.02 255); box-shadow: inset 2px 0 0 var(--brand); }
+.mr-1 { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; }
+.mr-1 .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-1 .pg { font-size: 8.5px; font-weight: 700; padding: 0 3px; border-radius: 3px; background: var(--surface-selected); color: var(--faint-foreground); }
+.mr-1 .h { margin-left: auto; }
+.mr-2 { display: flex; align-items: center; gap: 4px; margin-top: 3px; font-size: 10px; color: var(--faint-foreground); }
+.mr-2 .sep { opacity: .5; }
+.detail { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--page-canvas); }
+
+/* 模块头 */
+.modhead {
+  display: flex; align-items: center; gap: 7px; padding: 8px 12px 7px;
+  border-bottom: 1px solid var(--surface-border); background: var(--surface); flex: none;
+}
+.modhead .nm { font-size: 13.5px; font-weight: 700; }
+.kpi { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--muted-foreground); white-space: nowrap; }
+.kpi b { font-size: 11.5px; color: var(--foreground); font-variant-numeric: tabular-nums; }
+.kpi .sep { width: 1px; height: 12px; background: var(--surface-border); }
+
+/* 子 TAB */
+.msubtabs { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--surface-border); background: var(--surface); flex: none; }
+.msubtab {
+  padding: 7px 10px; font-size: 11.5px; font-weight: 600; color: var(--muted-foreground);
+  border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap;
+}
+.msubtab.on { color: var(--foreground); border-bottom-color: var(--primary); }
+.msubtab .n { margin-left: 4px; font-size: 9.5px; font-weight: 700; background: var(--surface-selected); color: var(--muted-foreground); border-radius: 7px; padding: 0 4px; }
+.msubtab .n.warn { background: oklch(0.96 0.06 75); color: oklch(0.48 0.13 62); }
+
+/* 功能点工作台三栏 */
+.wb { flex: 1; min-height: 0; display: flex; overflow-x: auto; }
+.vt-rail { width: 172px; flex: none; border-right: 1px solid var(--surface-border); background: var(--surface); overflow: auto; }
+.vt-sec { padding: 8px 9px 6px; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; color: var(--faint-foreground); display: flex; align-items: center; gap: 4px; }
+.vt-sec .r { margin-left: auto; font-weight: 600; }
+.vt { padding: 6px 9px 7px; border-bottom: 1px solid var(--border); cursor: pointer; border-left: 2px solid transparent; }
+.vt:hover { background: var(--surface-hover); }
+.vt.on { background: oklch(0.96 0.02 255); border-left-color: var(--brand); }
+.vt-top { display: flex; align-items: center; gap: 5px; }
+.vt-top b { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.vt-top .d { margin-left: auto; font-size: 9.5px; color: var(--faint-foreground); }
+.vt-src { margin-top: 2px; font-size: 10px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vt-meta { margin-top: 2px; display: flex; align-items: center; gap: 4px; font-size: 9.5px; color: var(--faint-foreground); }
+.vt-meta .a { color: oklch(0.45 0.13 145); font-weight: 600; }
+.vt-meta .c { color: var(--brand); font-weight: 600; }
+.vt-meta .x { color: oklch(0.5 0.18 27); font-weight: 600; }
+.basebar { padding: 7px 9px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.basebar .lb { font-size: 9.5px; color: var(--faint-foreground); font-weight: 700; }
+.basebar .seg span { padding: 2px 7px; font-size: 10.5px; }
+
+/* 原型预览 */
+.pv { flex: 1; min-width: 340px; display: flex; flex-direction: column; border-right: 1px solid var(--surface-border); background: var(--page-canvas); }
+.pvbar {
+  height: 27px; flex: none; display: flex; align-items: center; gap: 5px; padding: 0 9px;
+  border-bottom: 1px solid var(--surface-border); background: var(--surface); font-size: 10.5px; color: var(--muted-foreground);
+}
+.pvbar .f { font-family: ui-monospace, Menlo, monospace; font-size: 10px; }
+.pvbar .b { margin-left: auto; font-size: 9.5px; font-weight: 700; color: oklch(0.42 0.12 145); }
+.pframe { flex: 1; min-height: 0; overflow: auto; background: var(--surface); }
+.pvfoot {
+  flex: none; padding: 6px 10px; border-top: 1px solid var(--surface-border); background: var(--surface);
+  font-size: 10px; line-height: 1.6; color: var(--faint-foreground); display: flex; align-items: center; gap: 6px;
+}
+.pvfoot .q { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pvfoot .r { margin-left: auto; white-space: nowrap; font-weight: 600; color: var(--muted-foreground); }
+
+/* 线框：申报清单页 */
+.wf { padding: 10px 12px 14px; font-size: 11px; }
+.wf-h { display: flex; align-items: baseline; gap: 6px; padding-bottom: 7px; }
+.wf-h b { font-size: 13px; }
+.wf-h .path { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--faint-foreground); }
+.wf-bar { display: flex; align-items: center; gap: 5px; padding: 6px 0 7px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.wf-inp { border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px; font-size: 10.5px; color: var(--faint-foreground); min-width: 104px; background: var(--surface); }
+.wf-btn {
+  border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px; font-size: 10.5px;
+  background: var(--surface); white-space: nowrap; cursor: pointer; position: relative;
+}
+.wf-btn.pri { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.wf-seg { display: flex; align-items: center; gap: 3px; padding: 6px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.wf-seg span { padding: 2px 7px; border-radius: 10px; font-size: 10px; color: var(--muted-foreground); border: 1px solid transparent; cursor: pointer; }
+.wf-seg span.on { background: var(--surface-selected); color: var(--foreground); font-weight: 600; border-color: var(--border); }
+.wf-tbl { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.wf-tbl th { text-align: left; font-size: 9.5px; font-weight: 700; color: var(--faint-foreground); padding: 4px 5px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.wf-tbl td { padding: 5px; border-bottom: 1px solid oklch(0.96 0.002 286); font-size: 10.5px; color: var(--muted-foreground); white-space: nowrap; }
+.wf-tbl td.k { color: var(--foreground); font-family: ui-monospace, Menlo, monospace; font-size: 10px; }
+.wf-act { color: var(--brand); font-weight: 600; cursor: pointer; }
+.wf-tbl tr:hover td { background: oklch(0.985 0 0); }
+.wf-form {
+  margin-top: 9px; border: 1px dashed var(--border); border-radius: 7px; padding: 7px 8px; background: oklch(0.995 0 0);
+}
+.wf-form .t { display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; margin-bottom: 6px; }
+.wf-field { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 10px; color: var(--muted-foreground); }
+.wf-field .lb { width: 52px; flex: none; color: var(--faint-foreground); }
+.wf-field .bx { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; background: var(--surface); color: var(--foreground); font-size: 10px; }
+.wf-field .bx.sel { color: var(--muted-foreground); }
+.wf-step { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; color: var(--faint-foreground); }
+.wf-step b { width: 14px; height: 14px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--primary); color: #fff; font-size: 8.5px; }
+.wf-step b.off { background: var(--surface-selected); color: var(--faint-foreground); }
+.wf-foot { display: flex; align-items: center; gap: 5px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); font-size: 9.5px; color: var(--faint-foreground); }
+.el-hl { outline: 2px solid var(--brand) !important; outline-offset: 2px; box-shadow: 0 0 0 5px oklch(0.55 0.16 255 / 14%); border-radius: 4px; }
+.wf .el-base { position: relative; }
+.wf .el-chg { position: relative; }
+.wf .el-chg::after {
+  content: ""; position: absolute; inset: -2px; border-radius: 5px;
+  border: 1px dashed oklch(0.55 0.16 255 / 55%); pointer-events: none;
+}
+.new-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: oklch(0.55 0.16 145); margin-left: 3px; vertical-align: middle; }
+
+/* 功能点清单 */
+.fplist { width: 412px; flex: none; display: flex; flex-direction: column; background: var(--surface); }
+.fplist-head { flex: none; padding: 7px 10px; border-bottom: 1px solid var(--surface-border); display: flex; align-items: center; gap: 5px; }
+.fplist-head .t { font-size: 11.5px; font-weight: 700; }
+.fplist-head .r { margin-left: auto; font-size: 9.5px; color: var(--faint-foreground); }
+.fplist-tool { flex: none; display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-bottom: 1px solid var(--border); background: oklch(0.995 0 0); }
+.chk { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--muted-foreground); cursor: pointer; }
+.chk i { width: 10px; height: 10px; border: 1px solid var(--border); border-radius: 3px; display: inline-block; background: var(--surface); }
+.chk.on i { background: var(--primary); border-color: var(--primary); position: relative; }
+.chk.on i::after { content: "✓"; position: absolute; inset: -3px 0 0 0; color: #fff; font-size: 8px; text-align: center; }
+.fp-scroll { flex: 1; min-height: 0; overflow: auto; }
+.fp-grp {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 5px;
+  padding: 5px 10px; background: oklch(0.975 0.002 286); border-bottom: 1px solid var(--border);
+  font-size: 9.5px; font-weight: 700; letter-spacing: .03em; color: var(--muted-foreground);
+}
+.fp-grp .c { margin-left: auto; font-weight: 600; color: var(--faint-foreground); }
+.fp {
+  display: flex; align-items: flex-start; gap: 7px; padding: 7px 10px;
+  border-bottom: 1px solid oklch(0.965 0.002 286); cursor: pointer; border-left: 2px solid transparent;
+}
+.fp:hover { background: var(--surface-hover); }
+.fp.on { background: oklch(0.96 0.02 255); border-left-color: var(--brand); }
+.fp.gone { opacity: .58; }
+.fp-code { flex: none; font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 700; color: var(--faint-foreground); background: var(--surface-selected); border-radius: 3px; padding: 1px 3px; margin-top: 1px; }
+.fp-main { min-width: 0; flex: 1; }
+.fp-nm { display: flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; }
+.fp-nm .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-el { margin-top: 1px; font-size: 9.5px; color: var(--faint-foreground); font-family: ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-desc { margin-top: 2px; font-size: 10px; line-height: 1.55; color: var(--muted-foreground); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fp-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.fp-ac { font-size: 9.5px; color: var(--faint-foreground); font-variant-numeric: tabular-nums; }
+.fp-ac.done { color: oklch(0.45 0.13 145); font-weight: 600; }
+.fp-ac.bad { color: oklch(0.5 0.18 27); font-weight: 600; }
+.tag { flex: none; font-size: 8.5px; font-weight: 700; border-radius: 3px; padding: 0 3px; line-height: 14px; white-space: nowrap; }
+.tag.new { background: oklch(0.94 0.06 145); color: oklch(0.4 0.12 145); }
+.tag.chg { background: oklch(0.94 0.03 255); color: var(--brand); }
+.tag.del { background: oklch(0.94 0.05 27); color: oklch(0.47 0.18 27); }
+.tag.same { background: var(--surface-selected); color: var(--faint-foreground); }
+.tag.gone { background: var(--surface-selected); color: var(--faint-foreground); }
+.fplist-foot {
+  flex: none; border-top: 1px solid var(--surface-border); padding: 6px 10px;
+  display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted-foreground); background: oklch(0.995 0 0);
+}
+.fplist-foot .r { margin-left: auto; font-weight: 600; }
+
+/* ===== 表格（版本矩阵 / 绑定 / 契约） ===== */
+.dtable { width: 100%; border-collapse: collapse; font-size: 11px; }
+.dtable th {
+  text-align: left; font-size: 9.5px; font-weight: 700; letter-spacing: .03em; color: var(--muted-foreground);
+  padding: 6px 8px; border-bottom: 1px solid var(--surface-border); background: oklch(0.975 0.002 286); white-space: nowrap;
+}
+.dtable td { padding: 6px 8px; border-bottom: 1px solid oklch(0.965 0.002 286); vertical-align: top; color: var(--muted-foreground); }
+.dtable td.k { color: var(--foreground); font-weight: 600; }
+.dtable tr:hover td { background: oklch(0.985 0 0); }
+.dtable .num { text-align: center; font-variant-numeric: tabular-nums; }
+.cell { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+.cell.add { background: oklch(0.94 0.06 145); color: oklch(0.4 0.12 145); }
+.cell.chg { background: oklch(0.94 0.03 255); color: var(--brand); }
+.cell.del { background: oklch(0.94 0.05 27); color: oklch(0.47 0.18 27); }
+.cell.same { background: var(--surface-selected); color: var(--faint-foreground); }
+.cell.none { color: oklch(0.86 0.005 286); }
+.cell .dotm { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.sect { padding: 12px 14px; }
+.sect-t { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; margin-bottom: 7px; }
+.sect-t .r { margin-left: auto; font-size: 10px; font-weight: 500; color: var(--faint-foreground); }
+.sect + .sect { border-top: 1px solid var(--surface-border); }
+.hint { font-size: 10.5px; line-height: 1.7; color: var(--muted-foreground); }
+.hint b { color: var(--foreground); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.grid2 > div + div { border-left: 1px solid var(--surface-border); }
+.cols3 { display: grid; grid-template-columns: 1.05fr 1fr 0.95fr; }
+.cols3 > div + div { border-left: 1px solid var(--surface-border); }
+.kv { display: flex; gap: 6px; font-size: 10.5px; line-height: 1.7; }
+.kv .k { flex: none; width: 66px; color: var(--faint-foreground); }
+.kv .v { min-width: 0; color: var(--foreground); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.mini-note { margin-top: 6px; font-size: 10px; line-height: 1.65; color: var(--faint-foreground); }
+.verdict {
+  display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px; border-radius: 9px;
+  background: oklch(0.97 0.05 75); border: 1px solid oklch(0.9 0.06 75);
+}
+.verdict .ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: oklch(0.72 0.15 75); color: #fff; font-size: 12px; font-weight: 700; flex: none; }
+.verdict .tt { font-size: 12px; font-weight: 700; }
+.verdict .dd { font-size: 10.5px; line-height: 1.7; color: oklch(0.4 0.03 70); margin-top: 2px; }
+.verdict.okv { background: oklch(0.97 0.04 145); border-color: oklch(0.9 0.05 145); }
+.verdict.okv .ic { background: var(--success); }
+.verdict.okv .dd { color: oklch(0.36 0.05 145); }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+.mini-table th { text-align: left; font-size: 9.5px; color: var(--faint-foreground); padding: 4px 6px; border-bottom: 1px solid var(--border); font-weight: 700; }
+.mini-table td { padding: 4px 6px; border-bottom: 1px solid oklch(0.965 0.002 286); color: var(--muted-foreground); }
+.mini-table td.k { color: var(--foreground); font-weight: 600; }
+.bar { height: 5px; border-radius: 3px; background: var(--surface-selected); overflow: hidden; }
+.bar i { display: block; height: 100%; background: oklch(0.55 0.14 145); }
+.bar.warn i { background: oklch(0.72 0.15 75); }
+.mono-sm { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--faint-foreground); }
+.toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(16px);
+  background: oklch(0.2 0.005 285.823); color: #fff; font-size: 12px; padding: 8px 14px;
+  border-radius: 8px; opacity: 0; pointer-events: none; transition: all .18s ease; z-index: 500; max-width: 70vw;
+}
+.toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+@media (max-width: 1280px) {
+  .fplist { width: 340px; }
+  .vt-rail { width: 152px; }
+}
+@media (max-width: 1120px) {
+  .vt-rail { display: none; }
+  .fplist { width: 320px; }
+}
+</style>
+</head>
+<body>
+
+<nav class="proto-nav">
+  <div class="logo">Multica <span>原型</span> · 功能模块改版（功能点）</div>
+  <span class="nav-sep">Ⅰ 主视图</span>
+  <a href="#f1">1 · 功能点工作台</a>
+  <a href="#f2">2 · 版本异动矩阵</a>
+  <span class="nav-sep">Ⅱ 关联与校验</span>
+  <a href="#f3">3 · 功能点详情</a>
+  <a href="#f4">4 · 需求 / 任务绑定</a>
+  <a href="#f5">5 · 验收与越权</a>
+  <span class="nav-sep">Ⅲ 契约</span>
+  <a href="#f6">6 · TAB 与数据契约</a>
+  <a href="./2026-10-26-Multica 原型 · 功能模块原型（Module Prototype）.html#f1" style="margin-left:auto;opacity:.7">↩ 10-26 基线画板</a>
+</nav>
+
+<div class="frame-wrap">
+
+<!-- ================= 画面 1 · 功能点工作台 ================= -->
+<div class="frame-head" id="f1">
+  <h2>画面 1 · 模块详情只剩四个子 TAB，第一屏就是「功能点」工作台</h2>
+  <p>三处结构性改动：<b>①</b> 模块对象 + 模块策略合并为<b>功能点</b>——一个功能点 = HTML 原型里的一个可指认元素（区域 + 选择器）+ 功能说明 + 交互详情 + 验收目标；图谱对象降级为该功能点的「实现映射」证据列，不再是并列 TAB；<b>②</b> 原型图不再是独立 TAB，而是功能点工作台的<b>左窗</b>，版本时间线在更左，切版本 = 换一整屏功能点标注；<b>③</b> 图谱邻域与规格覆盖率两个 TAB 删除，覆盖率并入验收 TAB 与模块头 KPI。点左侧版本、点右侧功能点、点预览里的元素都可试。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 代码本体平台 / 功能模块 / 申报清单页 / 功能点</span><em>TO-BE · 主画面（可交互）</em></div>
+  <div class="app tall">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">M</span> Multica 工作区</div>
+      <div class="s-item">收件箱 <span class="n">3</span></div>
+      <div class="s-item">任务</div>
+      <div class="s-item">需求</div>
+      <div class="s-item on">项目 <span class="n">4</span></div>
+      <div class="s-sec">代码本体平台</div>
+      <div class="s-item">项目档案</div>
+      <div class="s-item">资产管理</div>
+      <div class="s-item">迭代</div>
+      <div class="s-item on">功能模块 <span class="n">8</span></div>
+      <div class="s-item">数据模型</div>
+      <div class="s-item">需求管理 <span class="n">2</span></div>
+      <div class="s-item">任务追踪</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb">项目 <span>›</span> 代码本体平台</div>
+        <span class="tab-pill">项目档案 <span class="b">1</span></span>
+        <span class="tab-pill">资产管理</span>
+        <span class="tab-pill">迭代</span>
+        <span class="tab-pill active">功能模块 <span class="b">8</span></span>
+        <span class="tab-pill">数据模型</span>
+        <span class="tab-pill">需求管理 <span class="b">2</span></span>
+        <span class="tab-pill">任务追踪</span>
+        <span class="tab-pill">验收详情 <span class="b">1</span></span>
+        <span class="tab-pill">交付物 <span class="b">193</span></span>
+        <span class="tab-pill">申报 <span class="b">3</span></span>
+      </div>
+      <div class="feat-toolbar">
+        <div class="seg"><span class="active">模块列表</span><span>图谱视图</span><span>表格</span></div>
+        <span class="inp" style="width:100px;color:var(--faint-foreground)">搜索模块…</span>
+        <span class="inp">只读 &amp; 全部 <span class="ar">▾</span></span>
+        <span class="pill">仅看未绑定 2</span>
+        <span class="pill new" style="margin-left:2px">功能点 8 · 待确认 1</span>
+        <div style="margin-left:auto;display:flex;gap:5px">
+          <span class="btn pri sm" onclick="toast('新建模块：建模块即建骨架，功能点从第一版原型开始累积')">＋ 新建模块</span>
+          <span class="btn sm" onclick="toast('从 HTML 原型抽取功能点：按 data-fp / data-region 标注同步，未标注的走标题 + 导航降级抽取')">⟳ 同步功能点</span>
+          <span class="btn sm">↓ 导出模块报告</span>
+        </div>
+      </div>
+      <div class="feat-body">
+        <div class="mod-list">
+          <div class="ml-head"><span class="t">功能模块（页面）</span><span class="c">8 · 功能点 32</span></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#f97316"></span><span class="nm">本体对象页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>功能点 6</span><span class="sep">·</span><span>需求 9</span><span class="sep">·</span><span>任务 5/7</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#64748b"></span><span class="nm">图谱浏览页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>功能点 4</span><span class="sep">·</span><span>需求 6</span><span class="sep">·</span><span>权威 v2</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#0ea5e9"></span><span class="nm">扫描任务页</span><span class="pg">page</span><span class="h pill warn">待确认 2</span></div><div class="mr-2"><span>功能点 3</span><span class="sep">·</span><span>需求 4</span><span class="sep">·</span><span>无原型</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#8b5cf6"></span><span class="nm">抽取配置页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>功能点 5</span><span class="sep">·</span><span>需求 5</span><span class="sep">·</span><span>权威 v2</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#22c55e"></span><span class="nm">总线矩阵页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>功能点 6</span><span class="sep">·</span><span>需求 13</span><span class="sep">·</span><span>权威 v3</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#eab308"></span><span class="nm">档案浏览页</span><span class="pg">page</span><span class="h pill ok">健康</span></div><div class="mr-2"><span>功能点 4</span><span class="sep">·</span><span>需求 7</span><span class="sep">·</span><span>权威 v1</span></div></div>
+          <div class="mod-row on"><div class="mr-1"><span class="dot" style="background:#ef4444"></span><span class="nm">申报清单页</span><span class="pg">page</span><span class="pill warn">越权 1</span></div><div class="mr-2"><span>功能点 8</span><span class="sep">·</span><span>需求 5</span><span class="sep">·</span><span>任务 3/5</span><span class="sep">·</span><span>v4 草案</span></div></div>
+          <div class="mod-row"><div class="mr-1"><span class="dot" style="background:#94a3b8"></span><span class="nm">legacy-import</span><span class="h pill bad">未绑定</span></div><div class="mr-2"><span>未绑定 → 手动绑定或忽略</span></div></div>
+        </div>
+
+        <div class="detail">
+          <div class="modhead">
+            <span class="dot" style="background:#ef4444;width:8px;height:8px"></span>
+            <span class="nm">申报清单页</span>
+            <span class="pg mono" style="font-size:8.5px;font-weight:700;padding:0 4px;border-radius:3px;background:var(--surface-selected);color:var(--faint-foreground)">page</span>
+            <span class="kpi"><span>权威原型</span><b>v3</b></span>
+            <span class="sep"></span>
+            <span class="kpi"><span>功能点</span><b>8</b><span class="pill mute">现行 6 · 草案 1 · 已移除 1</span></span>
+            <span class="sep"></span>
+            <span class="kpi"><span>验收目标</span><b>5/6</b></span>
+            <span class="sep"></span>
+            <span class="kpi"><span>范围校验</span><b style="color:oklch(0.5 0.18 27)">1 项越权</b></span>
+            <span class="anno" style="margin-left:2px" title="模块头一次说清：权威版本 · 功能点数 · 目标达成 · 越权">1</span>
+            <div style="margin-left:auto;display:flex;gap:6px">
+              <span class="btn sm" onclick="toast('模块概览：目标 / 验收标准 / 关联需求（沿用 20261026 方案 02）')">模块概览</span>
+              <span class="btn sm" onclick="toast('已挂载上下文「申报清单页 · 权威原型 v3 · 8 个功能点」进对话框，产出先进待发布队列')">在对话中改这版原型</span>
+              <span class="btn sm pri" onclick="toast('发布 v4 草案：+1 新增 · ~1 变更，需先处理 1 项越权')">发布 v4 草案 →</span>
+            </div>
+          </div>
+
+          <div class="msubtabs" id="subTabs">
+            <div class="msubtab on">功能点 <span class="n">8</span></div>
+            <div class="msubtab">版本异动 <span class="n">3</span></div>
+            <div class="msubtab">需求与任务 <span class="n">5/9</span></div>
+            <div class="msubtab">验收与越权 <span class="n warn">1</span></div>
+            <div class="msubtab" style="margin-left:auto;color:var(--faint-foreground);font-weight:500;border-bottom-color:transparent" onclick="toast('功能点定义：区域 + 元素选择器 + 功能说明 + 交互详情 + 验收目标；图谱对象只作为实现映射证据')">ⓘ 功能点定义</div>
+          </div>
+
+          <div class="wb">
+            <!-- 左：版本时间线 -->
+            <div class="vt-rail">
+              <div class="vt-sec">版本时间线 <span class="r">4 个</span></div>
+              <div id="vtList"></div>
+              <div class="basebar">
+                <span class="lb">对比基线</span>
+                <div class="seg" id="baseSeg">
+                  <span data-base="prev" class="active">上一版</span>
+                  <span data-base="1">v1</span>
+                </div>
+              </div>
+              <div style="padding:7px 9px;font-size:9.5px;line-height:1.7;color:var(--faint-foreground)">
+                选版本 = 换整屏标注：预览按 <span class="mono">data-since</span> 显隐元素，右侧按「基线 → 当前」算 新增/变更/移除。<br>
+                草案（v4）与在途需求同屏，未发布不影响权威。
+              </div>
+            </div>
+
+            <!-- 中：原型预览 -->
+            <div class="pv">
+              <div class="pvbar">
+                <i style="width:8px;height:8px;border-radius:50%;background:oklch(0.9 0.005 286)"></i>
+                <i style="width:8px;height:8px;border-radius:50%;background:oklch(0.9 0.005 286)"></i>
+                <i style="width:8px;height:8px;border-radius:50%;background:oklch(0.9 0.005 286)"></i>
+                <span class="f" id="pvFile">FILING-455.html · v3</span>
+                <span class="b" id="pvBadge">权威</span>
+                <span style="margin-left:auto;font-size:9.5px">元素可点 · 与右侧清单联动</span>
+              </div>
+              <div class="pframe">
+                <div class="wf">
+                  <div class="wf-h"><b>申报清单</b><span class="path">/filing/list · 8 个 data-fp 元素</span></div>
+
+                  <div class="wf-bar">
+                    <span class="wf-inp">搜索单号 / 主体…</span>
+                    <!-- FP-02 状态筛选 -->
+                    <span class="wf-btn" data-fp="FP-02" data-since="1" onclick="pickFp('FP-02')">
+                      状态 <span id="fp02label">单选</span> ▾
+                    </span>
+                    <!-- FP-06 归档区 -->
+                    <span class="wf-btn" data-fp="FP-06" data-since="3" onclick="pickFp('FP-06')">归档区 ▾</span>
+                    <!-- FP-05 批量导出 -->
+                    <span class="wf-btn" data-fp="FP-05" data-since="2" onclick="pickFp('FP-05')">批量导出 <span id="fp05label">CSV</span></span>
+                    <!-- FP-03 新建申报 -->
+                    <span class="wf-btn pri" data-fp="FP-03" data-since="1" onclick="pickFp('FP-03')">＋ 新建申报</span>
+                  </div>
+
+                  <div class="wf-seg">
+                    <span class="on">全部 12</span>
+                    <span>待受理 4</span>
+                    <span>已受理 3</span>
+                    <span data-fp="FP-06" data-since="3">已归档 3</span>
+                    <span data-fp="FP-04" data-since="2" style="border-color:var(--border)">待审批 1</span>
+                  </div>
+
+                  <table class="wf-tbl">
+                    <thead><tr><th>申报单号</th><th>主体</th><th>状态</th><th data-fp="FP-08" data-since="1">单号规则</th><th>操作</th></tr></thead>
+                    <tbody>
+                      <tr>
+                        <td class="k" data-fp="FP-01" data-since="1" onclick="pickFp('FP-01')">FIL-2026-0041</td>
+                        <td>橙心科技</td>
+                        <td><span class="pill warn">待受理</span></td>
+                        <td data-fp="FP-08" data-since="1" class="mono">REG-2026</td>
+                        <td><span class="wf-act" data-fp="FP-04" data-since="2" onclick="pickFp('FP-04')">撤回</span></td>
+                      </tr>
+                      <tr>
+                        <td class="k" data-fp="FP-01" data-since="1">FIL-2026-0042</td>
+                        <td>麦禾数据</td>
+                        <td><span class="pill ok">已受理</span></td>
+                        <td data-fp="FP-08" data-since="1" class="mono">REG-2026</td>
+                        <td><span class="wf-act" data-fp="FP-04" data-since="2">撤回</span></td>
+                      </tr>
+                      <tr>
+                        <td class="k" data-fp="FP-01" data-since="1">FIL-2026-0043</td>
+                        <td>云端物联</td>
+                        <td><span class="pill mute">已撤回</span></td>
+                        <td data-fp="FP-08" data-since="1" class="mono">REG-2026</td>
+                        <td><span class="wf-act" data-fp="FP-04" data-since="2">撤回</span></td>
+                      </tr>
+                      <tr>
+                        <td class="k" data-fp="FP-01" data-since="1">FIL-2026-0044</td>
+                        <td>极简软件</td>
+                        <td><span class="pill warn">待受理</span></td>
+                        <td data-fp="FP-08" data-since="1" class="mono">REG-2026</td>
+                        <td><span class="wf-act" data-fp="FP-04" data-since="2">撤回</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  <!-- FP-03 新建申报：v3 起改为两步 -->
+                  <div class="wf-form" data-fp="FP-03" data-since="1">
+                    <div class="t">
+                      新建申报
+                      <span class="wf-step" id="fp03step"><b>1</b>主体 <b class="off">2</b>资料</span>
+                      <span class="tag same" id="fp03tag" style="margin-left:auto">单步</span>
+                    </div>
+                    <div class="wf-field"><span class="lb">申报主体</span><span class="bx sel">请选择主体（必填）</span></div>
+                    <div class="wf-field"><span class="lb">申报类型</span><span class="bx sel">标准 · 简易 · 加急</span></div>
+                    <div class="wf-field" id="fp03extra" style="display:none"><span class="lb">资料核对</span><span class="bx sel">第 2 步展示校验结果</span></div>
+                    <div class="wf-foot"><span class="pill mute">取消</span><span class="pill new">提交</span><span id="fp03tip">单步表单，提交即受理</span></div>
+                  </div>
+
+                  <div class="wf-foot" style="border-top:0">
+                    <span>共 12 条 · 20/页</span>
+                    <span style="margin-left:auto">1 / 1</span>
+                  </div>
+                </div>
+              </div>
+              <div class="pvfoot">
+                <span class="q" id="pvHint">点预览里的任意元素，右侧清单会跳到对应功能点；点右侧条目，元素会高亮。</span>
+                <span class="r" id="pvCount">8 个功能点</span>
+              </div>
+            </div>
+
+            <!-- 右：功能点清单 -->
+            <div class="fplist">
+              <div class="fplist-head">
+                <span class="t">功能点</span>
+                <span class="pill mute" id="fpVerPill">v3 · 对比 v2</span>
+                <span class="r" id="fpStat">新增 1 · 变更 2 · 移除 1</span>
+              </div>
+              <div class="fplist-tool">
+                <span class="chk" id="onlyChg" onclick="toggleOnlyChg()"><i></i>只看异动</span>
+                <span class="chk on" id="withGone" onclick="toast('移除项始终显示，避免「删功能」被静默吞掉')"><i></i>含已移除</span>
+                <span style="margin-left:auto;font-size:9.5px;color:var(--faint-foreground)">按区域分组</span>
+              </div>
+              <div class="fp-scroll" id="fpList"></div>
+              <div class="fplist-foot">
+                <span>验收目标达成</span>
+                <span class="bar" style="width:70px"><i id="fpBar" style="width:83%"></i></span>
+                <span id="fpBarTxt">5/6</span>
+                <span class="r">实现映射 5 个对象</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="notes">
+  <li><span class="anno">1</span><span><b>模块头承担了原来两个 TAB 的信息</b>：对象数 / 策略数不再作为并列切页，而是折进「功能点 8 · 实现映射 5 个对象」与验收 TAB 的覆盖率条；模块级别的三个数字（权威版本、目标达成、越权）第一屏可见。</span></li>
+  <li><span class="anno">2</span><span><b>版本与功能点是同一件事的两面</b>：版本行直接写「+1 · ~2 · −1」，切换版本时左侧预览按 <span class="mono">data-since</span> 显隐、右侧清单重算异动。版本不再只是 HTML 快照，而是「这一版有哪些功能点、各自什么状态」的规格快照。</span></li>
+  <li><span class="anno">3</span><span><b>图谱对象变成证据而不是目录</b>：每个功能点详情里带 <span class="mono">实现映射</span>（对象 / 路由 / 触达表），用于回答「这个功能点落在哪段代码」，不再单独占一个 TAB 让用户自己去对。</span></li>
+</ul>
+
+<!-- ================= 画面 2 · 版本异动矩阵 ================= -->
+<div class="frame-head" id="f2">
+  <h2>画面 2 · 版本异动：一行一个功能点，一列一个版本，右侧直接回答「哪个需求动了哪些功能点」</h2>
+  <p>这张矩阵替代了原来的「变更概览」+「并排对比 + HTML 行 diff」三套割裂视图：<b>行 = 功能点全集</b>（含已移除与草案），<b>列 = 版本</b>，单元格只允许五种态（新增 / 变更 / 未变 / 移除 / 未包含），下方再把每个需求声明的功能点与实测改动并排放——<b>越权就是「实际 − 声明」这张差集</b>，不再靠人眼对 HTML。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>功能模块 / 申报清单页 / 版本异动</span><em>版本 × 功能点 · 需求归因</em></div>
+  <div class="modhead">
+    <span class="dot" style="background:#ef4444;width:8px;height:8px"></span>
+    <span class="nm">申报清单页</span>
+    <span class="kpi"><span>版本</span><b>4</b><span class="pill mute">现行 3 · 草案 1</span></span>
+    <span class="sep"></span>
+    <span class="kpi"><span>功能点全集</span><b>8</b></span>
+    <span class="sep"></span>
+    <span class="kpi"><span>累计异动</span><b>7</b><span class="pill mute">新增 4 · 变更 3 · 移除 1</span></span>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <span class="btn sm" onclick="toast('导出 Markdown 变更说明：按版本列出新增/变更/移除功能点，可直接贴进需求评论')">导出变更说明</span>
+      <span class="btn sm" onclick="toast('对比任意两版：矩阵列可多选，选 v2 与 v4 即得到跨版差异')">对比任意两版</span>
+    </div>
+  </div>
+  <div class="msubtabs">
+    <div class="msubtab">功能点 <span class="n">8</span></div>
+    <div class="msubtab on">版本异动 <span class="n">3</span></div>
+    <div class="msubtab">需求与任务 <span class="n">5/9</span></div>
+    <div class="msubtab">验收与越权 <span class="n warn">1</span></div>
+  </div>
+  <div class="sect">
+    <div class="sect-t">功能点 × 版本 <span class="r">点击单元格可跳到该版本的功能点工作台</span></div>
+    <table class="dtable" id="mxTable">
+      <thead>
+        <tr>
+          <th style="width:250px">功能点</th>
+          <th style="width:96px">区域</th>
+          <th class="num" style="width:74px">v1<div class="mono-sm">10-18</div></th>
+          <th class="num" style="width:74px">v2<div class="mono-sm">10-22</div></th>
+          <th class="num" style="width:74px">v3<div class="mono-sm">10-28 · 权威</div></th>
+          <th class="num" style="width:74px">v4<div class="mono-sm">10-30 · 草案</div></th>
+          <th style="width:150px">引入需求</th>
+          <th style="width:112px">现行状态</th>
+        </tr>
+      </thead>
+      <tbody id="mxBody"></tbody>
+    </table>
+    <div class="chips" style="margin-top:8px">
+      <span class="tag new">新增</span><span class="tag chg">变更</span><span class="tag same">未变</span><span class="tag del">移除</span>
+      <span class="hint" style="margin-left:6px">「—」＝该版本尚未包含此功能点</span>
+    </div>
+  </div>
+  <div class="sect">
+    <div class="sect-t">需求改动 → 功能点（声明 vs 实测）<span class="r">越权 = 实测 − 声明 − 白名单</span></div>
+    <table class="dtable">
+      <thead>
+        <tr><th style="width:200px">需求</th><th style="width:56px">版本</th><th>声明的功能点与意图</th><th style="width:250px">实测改动</th><th style="width:112px">结论</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="k">MUL-401 申报清单基础版</td>
+          <td class="num">v1</td>
+          <td><span class="chips"><span class="pill muted">FP-01 新增</span><span class="pill muted">FP-02 新增</span><span class="pill muted">FP-03 新增</span><span class="pill muted">FP-08 新增</span></span></td>
+          <td class="mono-sm">FP-01 · FP-02 · FP-03 · FP-08</td>
+          <td><span class="pill ok">一致</span></td>
+        </tr>
+        <tr>
+          <td class="k">MUL-438 撤回与审计</td>
+          <td class="num">v2</td>
+          <td><span class="chips"><span class="pill muted">FP-04 新增</span><span class="pill muted">FP-05 新增</span><span class="pill muted">FP-02 修改</span></span></td>
+          <td class="mono-sm">FP-02 · FP-04 · FP-05</td>
+          <td><span class="pill ok">一致</span></td>
+        </tr>
+        <tr>
+          <td class="k">MUL-455 归档与权限</td>
+          <td class="num">v3</td>
+          <td><span class="chips"><span class="pill muted">FP-06 新增</span><span class="pill muted">FP-03 修改</span><span class="pill muted">FP-04 修改</span></span></td>
+          <td class="mono-sm">FP-03 · FP-04 · <b style="color:oklch(0.5 0.18 27)">FP-05</b> · FP-06 · <span style="opacity:.6">FP-08 移除</span></td>
+          <td><span class="pill bad">越权 1</span></td>
+        </tr>
+        <tr>
+          <td class="k">MUL-471 导出模板 <span class="pill mute">在途</span></td>
+          <td class="num">v4</td>
+          <td><span class="chips"><span class="pill muted">FP-07 新增</span><span class="pill muted">FP-05 修改</span></span></td>
+          <td class="mono-sm">FP-05 · FP-07</td>
+          <td><span class="pill warn">待发布</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="mini-note">白名单只有两类：① 需求显式声明的「连带影响」（如 FP-06 归档区上线必然改动列表分页）；② 平台级变更（i18n / 权限中间件）由人工在发布时勾选「平台改动」豁免。其余一律计越权并要求补声明或拆需求。</p>
+  </div>
+</div>
+
+<!-- ================= 画面 3 · 功能点详情 ================= -->
+<div class="frame-head" id="f3">
+  <h2>画面 3 · 功能点详情：一个功能点必须能说清「是什么、怎么交互、怎样算达成、落在哪段代码」</h2>
+  <p>这是「模块对象 + 模块策略」被合并后的落点。左栏是<b>产品语义</b>（区域 / 元素锚点 / 功能说明 / 交互详情 / 验收目标），右栏是<b>工程与过程证据</b>（实现映射、版本轨迹、关联需求任务、越权记录）。图谱对象与策略键只作为实现映射的证据出现，用户不再需要在两个 TAB 之间自己对号。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>功能模块 / 申报清单页 / 功能点 / FP-04 撤回申报</span><em>功能点详情（抽屉全屏态）</em></div>
+  <div class="modhead">
+    <span class="fp-code" style="font-size:10px;padding:2px 5px">FP-04</span>
+    <span class="nm">撤回申报</span>
+    <span class="pill warn">v3 变更</span>
+    <span class="pill mute">行操作 · &lt;button.row-revoke&gt;</span>
+    <span class="kpi"><span>现行状态</span><b style="color:oklch(0.5 0.18 27)">验收未过</b></span>
+    <span class="sep"></span>
+    <span class="kpi"><span>版本</span><b>v2 → v3</b></span>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <span class="btn sm" onclick="toast('在对话中改这个功能点：把功能点 + 验收目标 + 现有实现映射一起挂进上下文')">在对话中改这个功能点</span>
+      <span class="btn sm pri" onclick="toast('已发起范围校验：FP-04 的声明来自 MUL-455，改动命中 2 个实现对象')">校验改动范围</span>
+    </div>
+  </div>
+  <div class="cols3">
+    <div class="sect">
+      <div class="sect-t">① 功能说明 <span class="r">产品语义</span></div>
+      <p class="hint" style="margin-bottom:8px">在申报单行内提供撤回入口。v2 撤回即时生效并写审计；v3 起撤回进入<b>审批流</b>（提交 → 待审批 → 已撤回/已驳回），撤回原因必填且不可少于 10 字。</p>
+      <div class="kv"><span class="k">区域</span><span class="v">行操作 · 列表区第 4 列</span></div>
+      <div class="kv"><span class="k">元素锚点</span><span class="v mono-sm">button.row-revoke · data-fp="FP-04"</span></div>
+      <div class="kv"><span class="k">前置条件</span><span class="v">单据状态 ∈ {待受理, 已受理} 且当前用户为主体管理员</span></div>
+      <div class="kv"><span class="k">可见性</span><span class="v">无权限用户不渲染该按钮（不是置灰）</span></div>
+      <div class="sect-t" style="margin-top:12px">② 交互详情</div>
+      <ol class="hint" style="padding-left:16px;display:grid;gap:4px">
+        <li>点击「撤回」→ 右侧抽屉打开，展示单号 + 主体 + 撤回后不可逆提示。</li>
+        <li>「撤回原因」多行必填，少于 10 字时提交按钮禁用并就地提示字数。</li>
+        <li>提交后行状态切换为「待审批」，操作列改为「查看进度」，成功 toast 带撤销入口（5s）。</li>
+        <li>驳回时回到「已受理」，并把驳回理由写进行内展开区，不弹全局弹窗。</li>
+        <li>并发保护：他人在同一单上已发起撤回时返回 409，就地提示「已在审批中」并刷新行。</li>
+      </ol>
+      <div class="sect-t" style="margin-top:12px">③ 验收目标 <span class="r">可量化 · 可自动判定</span></div>
+      <table class="mini-table">
+        <thead><tr><th style="width:22px"></th><th>目标</th><th style="width:96px">判定方式</th></tr></thead>
+        <tbody>
+          <tr><td><span class="cell add">✓</span></td><td>撤回原因 &lt; 10 字时提交按钮禁用</td><td class="mono-sm">e2e 断言</td></tr>
+          <tr><td><span class="cell del">✕</span></td><td>撤回后状态流转到「待审批」，审批通过才落「已撤回」</td><td class="mono-sm">接口 + 状态机</td></tr>
+          <tr><td><span class="cell add">✓</span></td><td>并发撤回返回 409 且前端就地提示，不丢失列表状态</td><td class="mono-sm">集成测</td></tr>
+        </tbody>
+      </table>
+      <p class="mini-note">验收目标逐条可被 Agent 读取：<span class="mono">acceptance[]</span> 里每条带 <span class="mono">check</span> 字段（e2e / api / state-machine / manual），越权与达成校验共用同一份。</p>
+    </div>
+    <div class="sect">
+      <div class="sect-t">④ 实现映射 <span class="r">图谱对象降级为证据</span></div>
+      <table class="mini-table">
+        <thead><tr><th>对象 / 路由</th><th style="width:52px">类型</th><th style="width:74px">状态</th></tr></thead>
+        <tbody>
+          <tr><td class="k">RevokeFilingDialog</td><td>Component</td><td><span class="pill ok">已实现</span></td></tr>
+          <tr><td class="k">useRevokeFiling</td><td>Hook</td><td><span class="pill ok">已实现</span></td></tr>
+          <tr><td class="k">POST /api/filing/:id/revoke</td><td>Route</td><td><span class="pill ok">已实现</span></td></tr>
+          <tr><td class="k">filing_audit_log</td><td>Table</td><td><span class="pill warn">迁移待审</span></td></tr>
+          <tr><td class="k">S3 撤回鉴权策略</td><td>Policy</td><td><span class="pill mute">未映射</span></td></tr>
+        </tbody>
+      </table>
+      <p class="mini-note">策略键（原「模块策略」TAB 的 S1–S10）不再单列，落到这里作为 <span class="mono">Policy</span> 行；未映射项在验收 TAB 计为「实现证据不足」，不阻塞原型发布。</p>
+      <div class="sect-t" style="margin-top:12px">⑤ 关联需求与任务</div>
+      <table class="mini-table">
+        <thead><tr><th>条目</th><th style="width:64px">意图</th><th style="width:64px">版本</th></tr></thead>
+        <tbody>
+          <tr><td class="k">MUL-438 撤回与审计</td><td><span class="pill mute">新增</span></td><td>v2</td></tr>
+          <tr><td class="k">MUL-455 归档与权限</td><td><span class="pill new">修改</span></td><td>v3</td></tr>
+          <tr><td class="k">MUL-457 撤回审批接口</td><td><span class="pill mute">实现</span></td><td>v3</td></tr>
+          <tr><td class="k">MUL-462 驳回理由回显</td><td><span class="pill mute">实现</span></td><td>v3</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="sect">
+      <div class="sect-t">⑥ 版本轨迹</div>
+      <div class="vt" style="border-left-color:oklch(0.55 0.16 145);background:oklch(0.985 0.01 145)">
+        <div class="vt-top"><b>v3</b><span class="pill ok">权威</span><span class="d">10-28</span></div>
+        <div class="vt-src">MUL-455 归档与权限 · 陈工</div>
+        <div class="vt-meta"><span class="c">~ 变更</span><span>·</span><span>撤回即时 → 审批流</span></div>
+      </div>
+      <div class="vt">
+        <div class="vt-top"><b>v2</b><span class="pill mute">已替换</span><span class="d">10-22</span></div>
+        <div class="vt-src">MUL-438 撤回与审计 · Agent</div>
+        <div class="vt-meta"><span class="a">＋ 引入</span><span>·</span><span>即时撤回 + 审计日志</span></div>
+      </div>
+      <div class="sect-t" style="margin-top:12px">⑦ 校验记录</div>
+      <div class="verdict" style="background:oklch(0.97 0.05 27);border-color:oklch(0.9 0.06 27)">
+        <span class="ic" style="background:oklch(0.6 0.2 27)">!</span>
+        <div>
+          <div class="tt">MUL-455 · 目标未达成 1 项</div>
+          <div class="dd">「撤回后进入待审批」未通过状态机断言：<span class="mono">revoke</span> 后直接写 <span class="mono">withdrawn</span>。已生成修复任务 MUL-463 并回链本功能点。</div>
+        </div>
+      </div>
+      <div class="verdict okv" style="margin-top:7px">
+        <span class="ic">✓</span>
+        <div>
+          <div class="tt">MUL-438 · 范围一致</div>
+          <div class="dd">声明 3 个功能点，实测 3 个，无越权。</div>
+        </div>
+      </div>
+      <p class="mini-note">功能点详情是「模块对象 / 模块策略 / 变更概览」三处信息的合并落点：产品语义在左，工程证据在右，过程记录在版本轨迹与校验记录。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 画面 4 · 需求 / 任务绑定功能点 ================= -->
+<div class="frame-head" id="f4">
+  <h2>画面 4 · 需求与任务都必须声明「功能模块 → 功能点」，声明即授权范围</h2>
+  <p>回答你的问题：<b>要加，而且这是整条链路能否自动校验的前提</b>。需求层声明「我要动哪些功能点、各自意图」，任务层只能<b>收窄</b>不能扩大；Agent 改动时用声明集合做越权基线，验收时用功能点的验收目标做达成基线。表单里选模块后功能点跟着联动过滤，避免跨模块误绑。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>需求 / MUL-455 归档与权限 / 编辑</span><em>绑定面：需求表单</em></div>
+  <div class="grid2">
+    <div class="sect">
+      <div class="sect-t">需求表单新增区块「功能范围」<span class="r">必填 · 至少 1 个功能点</span></div>
+      <div class="kv" style="margin-bottom:7px"><span class="k">功能模块</span><span class="v"><span class="inp" style="min-width:180px">申报清单页 <span class="ar">▾</span></span> <span class="pill mute">选模块后联动功能点</span></span></div>
+      <div class="kv" style="margin-bottom:5px"><span class="k">功能点</span><span class="v">
+        <span class="chips">
+          <span class="pill new">FP-06 归档区 <b>＋新增</b> <span style="opacity:.6">×</span></span>
+          <span class="pill new">FP-03 新建申报 <b>~修改</b> <span style="opacity:.6">×</span></span>
+          <span class="pill new">FP-04 撤回申报 <b>~修改</b> <span style="opacity:.6">×</span></span>
+          <span class="pill mute">＋ 添加功能点</span>
+        </span>
+      </span></div>
+      <p class="mini-note">意图三选一：<b>新增</b>（该功能点在本需求首次出现）· <b>修改</b>（交互/验收目标发生变化）· <b>移除</b>（下线并写废弃说明）。同一需求可绑多个模块的功能点，但跨模块需各自声明。</p>
+      <div class="sect-t" style="margin-top:12px">联动过滤规则</div>
+      <ul class="hint" style="padding-left:16px;display:grid;gap:4px">
+        <li>模块可多选；选中后功能点选择器只列该模块的功能点（含已移除项，选移除会强制填废弃原因）。</li>
+        <li>子任务继承根需求的功能点集合，可勾选子集；勾选超集直接 422 阻断。</li>
+        <li>需求改绑模块时，已绑功能点若不属于新模块 → 就地提示并清空，不静默保留。</li>
+      </ul>
+      <div class="sect-t" style="margin-top:12px">任务表单（继承态）</div>
+      <div style="border:1px dashed var(--border);border-radius:7px;padding:8px 9px;background:oklch(0.995 0 0)">
+        <div class="kv" style="margin-bottom:5px"><span class="k">所属需求</span><span class="v">MUL-455 归档与权限</span></div>
+        <div class="kv" style="margin-bottom:5px"><span class="k">功能模块</span><span class="v">申报清单页 <span class="pill mute">继承自需求</span></span></div>
+        <div class="kv"><span class="k">本次涉及</span><span class="v chips"><span class="pill new">FP-06 归档区</span><span class="pill mute">FP-03 新建申报</span><span class="pill mute">FP-04 撤回申报</span><span class="hint">未勾选 = 不在本任务范围</span></span></div>
+      </div>
+    </div>
+    <div class="sect">
+      <div class="sect-t">列表侧：需求与任务都直接显示功能点<span class="r">替代原「变更概览」</span></div>
+      <table class="mini-table">
+        <thead><tr><th>条目</th><th style="width:120px">功能模块</th><th>功能点</th><th style="width:60px">范围</th></tr></thead>
+        <tbody>
+          <tr><td class="k">MUL-455 归档与权限</td><td>申报清单页</td><td class="mono-sm">FP-06 ＋ / FP-03 ~ / FP-04 ~</td><td><span class="pill bad">越权 1</span></td></tr>
+          <tr><td class="k">MUL-471 导出模板</td><td>申报清单页</td><td class="mono-sm">FP-07 ＋ / FP-05 ~</td><td><span class="pill warn">待发布</span></td></tr>
+          <tr><td class="k">MUL-456 归档 tab 前端</td><td>申报清单页</td><td class="mono-sm">FP-06</td><td><span class="pill ok">一致</span></td></tr>
+          <tr><td class="k">MUL-457 撤回审批接口</td><td>申报清单页</td><td class="mono-sm">FP-04</td><td><span class="pill ok">一致</span></td></tr>
+          <tr><td class="k">MUL-460 列表虚拟滚动</td><td class="hint">未绑定</td><td class="hint">未声明功能点</td><td><span class="pill bad">阻断</span></td></tr>
+        </tbody>
+      </table>
+      <p class="mini-note">未绑定功能点的需求/任务在列表与看板上带红色标记，且<b>不允许进入实现态</b>（可创建、可拆解，只能卡在「待绑定」）。这是让「每个小需求都能归因到功能迭代」的最低成本约束。</p>
+      <div class="sect-t" style="margin-top:12px">Agent 侧：从声明到执行</div>
+      <table class="mini-table">
+        <thead><tr><th style="width:96px">时机</th><th>Agent 拿到什么</th><th style="width:110px">动作</th></tr></thead>
+        <tbody>
+          <tr><td class="k">领取任务</td><td>功能点清单 + 每条的验收目标 + 实现映射（对象/路由）</td><td>作为实现契约</td></tr>
+          <tr><td class="k">提交改动</td><td>本次 diff 触及的对象与 <span class="mono">data-fp</span> 元素</td><td>反向归因到功能点</td></tr>
+          <tr><td class="k">提交后</td><td>声明集合 vs 实测集合</td><td>越权即挂起并回写</td></tr>
+          <tr><td class="k">验收前</td><td>功能点的 <span class="mono">acceptance[]</span></td><td>逐条跑断言出报告</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 画面 5 · 验收与越权 ================= -->
+<div class="frame-head" id="f5">
+  <h2>画面 5 · 验收与越权：把「改了不该改的」和「该达成的没达成」变成一次可复跑的报告</h2>
+  <p>原来的「规格覆盖率」TAB 被替换成这张<b>验收与越权</b>面板——覆盖率只是其中一个指标，真正要回答的是两件事：<b>范围是否越权</b>（实测改动 − 声明）、<b>目标是否达成</b>（验收目标逐条判定）。报告由 Agent 触发、结论落库，发布草案前必须为绿或人工豁免。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>功能模块 / 申报清单页 / 验收与越权</span><em>校验报告 · MUL-455</em></div>
+  <div class="modhead">
+    <span class="dot" style="background:#ef4444;width:8px;height:8px"></span>
+    <span class="nm">申报清单页</span>
+    <span class="kpi"><span>校验对象</span><b>MUL-455 → v3</b></span>
+    <span class="sep"></span>
+    <span class="kpi"><span>范围</span><b style="color:oklch(0.5 0.18 27)">越权 1</b></span>
+    <span class="sep"></span>
+    <span class="kpi"><span>目标</span><b>2/3</b></span>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <span class="btn sm" onclick="toast('已重跑：范围 3 项 · 目标 3 项 · 证据 6 条，耗时 42s')">重跑校验</span>
+      <span class="btn sm" onclick="toast('人工豁免需填写理由并留痕，豁免项在下次校验继续提示')">人工豁免</span>
+      <span class="btn sm pri" onclick="toast('存在越权与未达成，发布被阻断：需补声明或拆需求')">发布 v4 →</span>
+    </div>
+  </div>
+  <div class="msubtabs">
+    <div class="msubtab">功能点 <span class="n">8</span></div>
+    <div class="msubtab">版本异动 <span class="n">3</span></div>
+    <div class="msubtab">需求与任务 <span class="n">5/9</span></div>
+    <div class="msubtab on">验收与越权 <span class="n warn">1</span></div>
+  </div>
+  <div class="sect">
+    <div class="verdict">
+      <span class="ic">!</span>
+      <div>
+        <div class="tt">结论：不通过 · 1 项越权 + 1 项目标未达成</div>
+        <div class="dd">FP-05「批量导出」在本次提交中被改动（导出格式增加 XLSX），但 MUL-455 未声明该功能点；FP-04「撤回申报」的「待审批」状态断言未通过。<b>建议</b>：把 FP-05 的改动补进 MUL-455 声明，或拆为独立需求 MUL-472；FP-04 已自动生成修复任务 MUL-463。</div>
+      </div>
+    </div>
+  </div>
+  <div class="cols3">
+    <div class="sect">
+      <div class="sect-t">① 范围校验 <span class="r">声明 vs 实测</span></div>
+      <table class="mini-table">
+        <thead><tr><th>功能点</th><th style="width:60px">声明</th><th style="width:60px">实测</th><th style="width:66px">判定</th></tr></thead>
+        <tbody>
+          <tr><td class="k">FP-06 归档区</td><td>＋新增</td><td>＋新增</td><td><span class="pill ok">通过</span></td></tr>
+          <tr><td class="k">FP-03 新建申报</td><td>~修改</td><td>~修改</td><td><span class="pill ok">通过</span></td></tr>
+          <tr><td class="k">FP-04 撤回申报</td><td>~修改</td><td>~修改</td><td><span class="pill ok">通过</span></td></tr>
+          <tr><td class="k">FP-05 批量导出</td><td class="hint">未声明</td><td>~修改</td><td><span class="pill bad">越权</span></td></tr>
+          <tr><td class="k">FP-08 单号规则</td><td class="hint">未声明</td><td>−移除</td><td><span class="pill warn">连带豁免</span></td></tr>
+        </tbody>
+      </table>
+      <p class="mini-note">实测来源三选一并取并集：原型版本 diff（<span class="mono">data-fp</span> 集合变化）、代码 diff 经实现映射反查功能点、测试用例命中。任一来源出现未声明项即计越权。</p>
+    </div>
+    <div class="sect">
+      <div class="sect-t">② 目标达成 <span class="r">按功能点验收目标逐条</span></div>
+      <table class="mini-table">
+        <thead><tr><th style="width:22px"></th><th>断言</th><th style="width:80px">功能点</th></tr></thead>
+        <tbody>
+          <tr><td><span class="cell add">✓</span></td><td>归档区仅对「已受理 ≥ 30 天」单据可见</td><td class="mono-sm">FP-06</td></tr>
+          <tr><td><span class="cell add">✓</span></td><td>归档后列表默认不展示，筛选可召回</td><td class="mono-sm">FP-06</td></tr>
+          <tr><td><span class="cell add">✓</span></td><td>新建申报两步表单可回退且不丢已填值</td><td class="mono-sm">FP-03</td></tr>
+          <tr><td><span class="cell del">✕</span></td><td>撤回后状态流转到「待审批」</td><td class="mono-sm">FP-04</td></tr>
+        </tbody>
+      </table>
+      <div class="kv" style="margin-top:8px"><span class="k">覆盖率</span><span class="v"><span class="bar" style="width:120px;display:inline-block;vertical-align:-1px"><i style="width:83%"></i></span> 5/6 功能点达成（原「规格覆盖率」口径迁入此处）</span></div>
+      <div class="kv"><span class="k">实现证据</span><span class="v">7/9 个映射对象可定位；2 项缺失不阻断发布</span></div>
+      <p class="mini-note">目标判定全部可复跑：断言类型为 e2e / api / state-machine 的由 CI 执行，manual 的必须人工勾选并留下操作人。</p>
+    </div>
+    <div class="sect">
+      <div class="sect-t">③ 证据与留痕</div>
+      <table class="mini-table">
+        <thead><tr><th>类型</th><th>证据</th></tr></thead>
+        <tbody>
+          <tr><td>原型 diff</td><td class="mono-sm">v2→v3：+FP-06 · ~FP-03 · ~FP-04 · −FP-08</td></tr>
+          <tr><td>代码 diff</td><td class="mono-sm">7 files · 触及 FilingTable / ExportMenu / RevokeDialog</td></tr>
+          <tr><td>测试</td><td class="mono-sm">filing.e2e 12 passed · revoke.api 3 failed</td></tr>
+          <tr><td>Agent 记录</td><td class="mono-sm">run #8842 · 42s · 模型摘要已归档</td></tr>
+        </tbody>
+      </table>
+      <div class="sect-t" style="margin-top:12px">校验何时触发</div>
+      <ul class="hint" style="padding-left:16px;display:grid;gap:3px">
+        <li>需求/任务进入「待验收」时自动跑一次。</li>
+        <li>原型草案请求发布前强制跑一次，红灯即阻断发布。</li>
+        <li>Agent 提交改动后立即跑范围校验，越权立刻回写任务评论。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 画面 6 · TAB 与数据契约 ================= -->
+<div class="frame-head" id="f6">
+  <h2>画面 6 · TAB 合并 / 删除与落地契约</h2>
+  <p>六 TAB 收敛为四 TAB，是这次改版的结构性结论：<b>合并</b>模块对象 + 模块策略 → 功能点；<b>删除</b>图谱邻域、规格覆盖率；<b>原型图</b>不再是 TAB 而是功能点工作台左窗；<b>变更概览</b>升级为「版本异动 + 需求与任务」。下表给出映射、数据模型与接口，可直接作为实施分工依据。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>契约：TAB 映射 · 数据模型 · 接口</span><em>IMPLEMENTATION CONTRACT</em></div>
+  <div class="sect">
+    <div class="sect-t">① 子 TAB 映射（module-detail-panel.tsx）</div>
+    <table class="dtable">
+      <thead><tr><th style="width:150px">原 TAB</th><th style="width:170px">去向</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td class="k">原型图 <span class="mono-sm">prototypes</span></td><td>功能点工作台 · 左窗</td><td>版本时间线 + HTML 预览 + 元素联动高亮；不再独立 TAB，保证「切版本」与「看功能点」永远同屏</td></tr>
+        <tr><td class="k">变更概览 <span class="mono-sm">changes</span></td><td>版本异动 / 需求与任务</td><td>按版本聚合成矩阵；需求/任务的改动归因移到绑定 TAB</td></tr>
+        <tr><td class="k">模块对象 <span class="mono-sm">objects</span> + 模块策略 <span class="mono-sm">strategies</span></td><td class="k">功能点（新）</td><td>合并为产品语义主表；对象与策略降级为功能点详情里的「实现映射」证据列</td></tr>
+        <tr><td class="k">图谱邻域 <span class="mono-sm">neighborhood</span></td><td class="k" style="color:oklch(0.5 0.18 27)">删除</td><td>邻域图对验收无决策价值；需要看代码关系走图谱视图入口。组件 <span class="mono">graph-neighborhood.tsx</span> 解除挂载（保留导出给图谱页复用）</td></tr>
+        <tr><td class="k">结构对账 / 规格覆盖率 <span class="mono-sm">reconcile</span></td><td class="k" style="color:oklch(0.5 0.18 27)">删除 TAB</td><td>覆盖率并入「验收与越权」② 与模块头 KPI；四态对账升级为「版本 × 功能点」矩阵，行不再来自规格文本而是功能点主表</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="sect">
+    <div class="sect-t">② 数据模型（新增 4 表 / 扩展 1 表）</div>
+    <table class="dtable">
+      <thead><tr><th style="width:196px">对象</th><th>关键列</th><th style="width:280px">约束与口径</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="k">module_feature_point</td>
+          <td class="mono-sm">id · module_id · code · name · area · element_selector · description · interaction jsonb · acceptance jsonb · impl_map jsonb · since_version · retired_version · state</td>
+          <td>(module_id, code) 唯一；<span class="mono">code</span> 与原型 <span class="mono">data-fp</span> 同名；<span class="mono">retired_version</span> 非空即视为已移除，不物理删除</td>
+        </tr>
+        <tr>
+          <td class="k">module_feature_point_version</td>
+          <td class="mono-sm">fp_id · version · change_kind · snapshot jsonb · source_issue_id</td>
+          <td>change_kind ∈ new/changed/unchanged/removed；snapshot 存该版本下的说明/交互/验收目标，供历史追溯</td>
+        </tr>
+        <tr>
+          <td class="k">issue_feature_binding</td>
+          <td class="mono-sm">issue_id · fp_id · intent · declared_by · created_at</td>
+          <td>intent ∈ own/add/modify/remove；需求与任务共用；子任务绑定必须是父需求绑定集的子集（触发器或事务内校验）</td>
+        </tr>
+        <tr>
+          <td class="k">feature_verify_run</td>
+          <td class="mono-sm">id · issue_id · module_id · from_version · to_version · declared jsonb · actual jsonb · scope_verdict · goal_verdict · evidence jsonb</td>
+          <td>一条记录即一次报告；发布草案前取最近一条 <span class="mono">scope_verdict=pass or exempted</span> 才放行</td>
+        </tr>
+        <tr>
+          <td class="k">project_module（扩展）</td>
+          <td class="mono-sm">canonical_prototype_version 已存在，新增 feature_points_version</td>
+          <td>功能点主表版本号独立于原型版本，允许「原型未变但验收目标收紧」的场景</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="sect">
+    <div class="sect-t">③ 接口与前端落点</div>
+    <div class="grid2">
+      <div>
+        <table class="mini-table">
+          <thead><tr><th>接口</th><th style="width:74px">方法</th></tr></thead>
+          <tbody>
+            <tr><td class="mono-sm">/api/projects/{id}/modules/{mid}/feature-points?version=</td><td>GET</td></tr>
+            <tr><td class="mono-sm">/api/projects/{id}/modules/{mid}/feature-points/diff?from=&amp;to=</td><td>GET</td></tr>
+            <tr><td class="mono-sm">/api/issues/{id}/feature-bindings</td><td>GET / POST</td></tr>
+            <tr><td class="mono-sm">/api/issues/{id}/feature-verify</td><td>POST（Agent 触发）</td></tr>
+            <tr><td class="mono-sm">/api/modules/{mid}/prototype-versions/{v}/extract</td><td>POST（data-fp 抽取 → 功能点）</td></tr>
+          </tbody>
+        </table>
+        <p class="mini-note">全部挂 <span class="mono">FF_MODULE_SPEC_CENTER</span> 门控；未开启时读到的是「无功能点」降级态而非 404。</p>
+      </div>
+      <div>
+        <table class="mini-table">
+          <thead><tr><th>前端</th><th style="width:150px">动作</th></tr></thead>
+          <tbody>
+            <tr><td class="mono-sm">module-detail-panel.tsx</td><td>6 TAB → 4 TAB</td></tr>
+            <tr><td class="mono-sm">sub-tabs/module-feature-points.tsx</td><td>新增（工作台容器）</td></tr>
+            <tr><td class="mono-sm">sub-tabs/feature-point-list.tsx</td><td>新增（清单 + 联动）</td></tr>
+            <tr><td class="mono-sm">sub-tabs/feature-version-matrix.tsx</td><td>新增（版本异动）</td></tr>
+            <tr><td class="mono-sm">sub-tabs/feature-verify-panel.tsx</td><td>新增（验收与越权）</td></tr>
+            <tr><td class="mono-sm">module-objects / module-strategies / graph-neighborhood</td><td>解除挂载</td></tr>
+            <tr><td class="mono-sm">prototype-workbench/*</td><td>口径迁入 feature-verify-panel</td></tr>
+            <tr><td class="mono-sm">issue 表单 / 任务表单</td><td>新增功能范围区块</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /frame-wrap -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===== 数据：模块功能点主表（与画面 1/2 共用一份，保证同源） ===== */
+var VERSIONS = [
+  { v:1, date:"10-18", time:"11:20", status:"superseded", badge:"初版", src:"MUL-401 申报清单基础版", by:"Agent", html:"FILING-401.html" },
+  { v:2, date:"10-22", time:"14:05", status:"superseded", badge:"已替换", src:"MUL-438 撤回与审计", by:"Agent", html:"FILING-438.html" },
+  { v:3, date:"10-28", time:"09:40", status:"confirmed", badge:"权威", src:"MUL-455 归档与权限", by:"陈工", html:"FILING-455.html" },
+  { v:4, date:"10-30", time:"16:10", status:"draft", badge:"草案", src:"MUL-471 导出模板（在途）", by:"Agent", html:"FILING-471.html" }
+];
+
+var FPS = [
+  { code:"FP-01", name:"申报单列表", area:"列表区", el:"table.filing-table", since:1, changed:[], removed:null,
+    desc:"分页表格承载申报单，默认按提交时间倒序，只展示当前主体可见单据。",
+    inter:["筛选变更后 300ms 防抖请求","行点击进详情，操作列不触发跳转","加载/空/错误三态齐备"],
+    accept:["分页 20/页且翻页不丢筛选","行点击命中 /filing/:id","空态展示新建引导"],
+    impl:"FilingTable · GET /api/filing", state:"通过", pass:3, total:3, reqs:"MUL-401" },
+  { code:"FP-02", name:"状态筛选", area:"筛选区", el:".filter-status", since:1, changed:[2], removed:null,
+    desc:"按单据状态过滤列表；v2 起由单选取值改为多选并带各状态计数。",
+    inter:["多选状态即时生效","已选状态可在筛选条上逐个移除","与归档区筛选叠加时取交集"],
+    accept:["多选任意组合结果与后端一致","刷新后保留筛选态（URL 同步）"],
+    impl:"StatusFilter · useFilingQuery", state:"通过", pass:2, total:2, reqs:"MUL-401 · MUL-438" },
+  { code:"FP-03", name:"新建申报", area:"操作区", el:"button.btn-create", since:1, changed:[3], removed:null,
+    desc:"发起新申报。v3 起拆为两步：选主体 → 资料核对，第二步展示校验结果。",
+    inter:["第一步选主体后预校验资格","可回退且不丢已填值","校验失败就地标注失败字段"],
+    accept:["两步可回退且不丢值","主体无资格时禁止进入第二步","重复提交幂等"],
+    impl:"CreateFilingDrawer · POST /api/filing", state:"通过", pass:3, total:3, reqs:"MUL-401 · MUL-455" },
+  { code:"FP-04", name:"撤回申报", area:"行操作", el:"button.row-revoke", since:2, changed:[3], removed:null,
+    desc:"行内撤回入口；v2 撤回即时生效并写审计，v3 起进入审批流，原因必填 ≥10 字。",
+    inter:["抽屉确认 + 原因必填","提交后行状态切「待审批」，操作列改「查看进度」","并发撤回返回 409 就地提示"],
+    accept:["原因 <10 字提交按钮禁用","撤回后状态为「待审批」而非「已撤回」","并发撤回 409 且不丢列表状态"],
+    impl:"RevokeFilingDialog · POST /api/filing/:id/revoke", state:"未过", pass:1, total:3, reqs:"MUL-438 · MUL-455" },
+  { code:"FP-05", name:"批量导出", area:"操作区", el:"button.btn-export", since:2, changed:[4], removed:null,
+    desc:"按当前筛选结果导出；v4 草案增加模板选择（标准 / 归档留痕），格式扩展 XLSX。",
+    inter:["导出任务异步，完成后站内信","超过 5000 行需二次确认","无导出权限时按钮不渲染"],
+    accept:["导出结果与筛选结果行数一致","5000 行阈值二次确认","XLSX 格式在 Excel 可打开无告警"],
+    impl:"ExportMenu · POST /api/filing/export", state:"通过", pass:2, total:3, reqs:"MUL-438 · MUL-471" },
+  { code:"FP-06", name:"归档区", area:"筛选区", el:".filter-archive", since:3, changed:[], removed:null,
+    desc:"新增归档分段：仅展示「已受理 ≥ 30 天」的单据，归档后默认不出现在主列表。",
+    inter:["与状态下拉互斥叠加","归档需二次确认并记录操作人","支持批量归档"],
+    accept:["30 天阈值不可绕过","归档后主列表默认不展示","批量归档逐条留痕"],
+    impl:"ArchiveSegmented · POST /api/filing/archive", state:"通过", pass:3, total:3, reqs:"MUL-455" },
+  { code:"FP-07", name:"导出模板选择", area:"操作区", el:".btn-export > .template", since:4, changed:[], removed:null,
+    desc:"v4 草案：导出前选择模板，标准模板保持原字段顺序，归档留痕模板追加审批链。",
+    inter:["模板选择记忆上次选项","归档留痕模板需管理员权限"],
+    accept:["模板切换后列头顺序正确","无权限时模板置灰并说明原因"],
+    impl:"ExportMenu · 待实现", state:"草案", pass:0, total:2, reqs:"MUL-471" },
+  { code:"FP-08", name:"单号前缀规则", area:"列表区", el:"th.col-rule", since:1, removed:3, changed:[],
+    desc:"列表展示单号前缀规则列（REG-2026），v3 起判定为噪声下线，规则改在详情页说明。",
+    inter:["—"],
+    accept:["下线后列表列数回退且无空白列"],
+    impl:"FilingTable", state:"已移除", pass:1, total:1, reqs:"MUL-401" }
+];
+
+var V4_AREAS = ["列表区", "筛选区", "操作区", "行操作"];
+
+var state = { v:3, base:2, sel:null, onlyChg:false };
+
+function fpPresent(fp, v) { return fp.since <= v && (!fp.removed || fp.removed > v); }
+
+function fpKind(fp, v, base) {
+  if (!fpPresent(fp, v)) return fpPresent(fp, base) ? "removed" : "none";
+  if (fp.since === v) return "new";
+  if (fp.changed.indexOf(v) >= 0) return "chg";
+  return "same";
+}
+
+var KIND_LABEL = { new:"新增", chg:"变更", removed:"移除", same:"未变", none:"未包含" };
+
+function deltaOf(v) {
+  var d = { add:0, chg:0, del:0 };
+  FPS.forEach(function (fp) {
+    var k = fpKind(fp, v, v - 1);
+    if (k === "new") d.add++;
+    if (k === "chg") d.chg++;
+    if (k === "removed") d.del++;
+  });
+  return d;
+}
+
+/* ===== 画面 1：版本时间线 ===== */
+function renderVersions() {
+  var box = document.getElementById("vtList");
+  var html = "";
+  VERSIONS.forEach(function (ver) {
+    var d = deltaOf(ver.v);
+    var pill = ver.status === "confirmed" ? '<span class="pill ok">权威</span>'
+      : ver.status === "draft" ? '<span class="pill warn">草案</span>'
+      : '<span class="pill mute">' + ver.badge + '</span>';
+    html += '<div class="vt' + (ver.v === state.v ? ' on' : '') + '" onclick="pickVer(' + ver.v + ')">'
+      + '<div class="vt-top"><b>v' + ver.v + '</b>' + pill
+      + '<span class="d">' + ver.date + '</span></div>'
+      + '<div class="vt-src">' + ver.src + '</div>'
+      + '<div class="vt-meta">'
+      + (d.add ? '<span class="a">＋' + d.add + '</span>' : '')
+      + (d.chg ? '<span class="c">~' + d.chg + '</span>' : '')
+      + (d.del ? '<span class="x">−' + d.del + '</span>' : '')
+      + '<span>' + ver.by + '</span></div></div>';
+  });
+  box.innerHTML = html;
+}
+
+/* ===== 画面 1：功能点清单 ===== */
+function renderFpList() {
+  var v = state.v, base = state.base;
+  var list = FPS.filter(function (fp) {
+    if (state.onlyChg) {
+      var k0 = fpKind(fp, v, base);
+      if (k0 === "same" || k0 === "none") return false;
+    }
+    return true;
+  });
+  var groups = {};
+  list.forEach(function (fp) { (groups[fp.area] = groups[fp.area] || []).push(fp); });
+  var order = V4_AREAS.filter(function (a) { return groups[a]; });
+
+  var html = "";
+  order.forEach(function (area) {
+    var rows = groups[area];
+    html += '<div class="fp-grp"><span>' + area + '</span><span class="c">' + rows.length + ' 个</span></div>';
+    rows.forEach(function (fp) {
+      var k = fpKind(fp, v, base);
+      var tagCls = k === "new" ? "new" : k === "chg" ? "chg" : k === "removed" ? "del" : k === "none" ? "gone" : "same";
+      var acCls = fp.state === "未过" ? "bad" : fp.state === "草案" ? "" : "done";
+      html += '<div class="fp' + (fp.code === state.sel ? ' on' : '') + (k === "none" || k === "removed" ? ' gone' : '') + '" data-code="' + fp.code + '" onclick="pickFp(\'' + fp.code + '\')">'
+        + '<span class="fp-code">' + fp.code + '</span>'
+        + '<div class="fp-main">'
+        + '<div class="fp-nm"><span class="nm">' + fp.name + '</span><span class="tag ' + tagCls + '">' + KIND_LABEL[k] + '</span></div>'
+        + '<div class="fp-el">' + fp.area + ' · ' + fp.el + '</div>'
+        + '<div class="fp-desc">' + fp.desc + '</div>'
+        + '</div>'
+        + '<div class="fp-side"><span class="fp-ac ' + acCls + '">' + fp.pass + '/' + fp.total + '</span>'
+        + (fp.state === "未过" ? '<span class="tag del">未过</span>' : '') + '</div>'
+        + '</div>';
+    });
+  });
+  if (!html) html = '<div style="padding:18px 12px;font-size:11px;color:var(--faint-foreground)">该版本相对基线没有功能点异动。</div>';
+  document.getElementById("fpList").innerHTML = html;
+}
+
+/* ===== 画面 1：版本切换联动 ===== */
+function applyVersion() {
+  var v = state.v;
+  var ver = VERSIONS.filter(function (x) { return x.v === v; })[0];
+
+  document.getElementById("pvFile").textContent = ver.html + " · v" + v;
+  document.getElementById("pvBadge").textContent = ver.status === "confirmed" ? "权威" : ver.status === "draft" ? "草案" : ver.badge;
+
+  document.querySelectorAll("[data-since]").forEach(function (el) {
+    var since = parseInt(el.getAttribute("data-since"), 10);
+    var code = el.getAttribute("data-fp");
+    var fp = code ? FPS.filter(function (x) { return x.code === code; })[0] : null;
+    var gone = fp && fp.removed && fp.removed <= v;
+    el.style.display = since > v || gone ? "none" : "";
+  });
+
+  // 变更态可视化
+  document.querySelectorAll("[data-fp]").forEach(function (el) {
+    el.classList.remove("el-chg");
+    var code = el.getAttribute("data-fp");
+    var fp = FPS.filter(function (x) { return x.code === code; })[0];
+    if (!fp) return;
+    if (fp.changed.indexOf(v) >= 0) el.classList.add("el-chg");
+  });
+
+  // 状态筛选：v2 起多选
+  document.getElementById("fp02label").textContent = v >= 2 ? "多选 3" : "单选";
+  // 批量导出：v4 起带模板
+  document.getElementById("fp05label").textContent = v >= 4 ? "模板 ▾" : "CSV";
+  // 新建申报：v3 起两步
+  var twoStep = v >= 3;
+  document.getElementById("fp03step").innerHTML = twoStep
+    ? '<b>1</b>主体 <b>2</b>资料'
+    : '<b>1</b>主体 <b class="off">2</b>资料';
+  document.getElementById("fp03extra").style.display = twoStep ? "" : "none";
+  document.getElementById("fp03tag").textContent = twoStep ? "两步" : "单步";
+  document.getElementById("fp03tag").className = "tag " + (twoStep ? "chg" : "same");
+  document.getElementById("fp03tip").textContent = twoStep ? "第二步展示主体资格校验结果" : "单步表单，提交即受理";
+
+  // 清单
+  var d = deltaOf(v);
+  document.getElementById("fpVerPill").textContent = v === 1 ? "v1 · 首版无基线" : "v" + v + " · 对比 v" + state.base;
+  document.getElementById("fpStat").textContent = "新增 " + d.add + " · 变更 " + d.chg + " · 移除 " + d.del;
+  document.getElementById("pvCount").textContent = FPS.filter(function (fp) { return fpPresent(fp, v); }).length + " 个功能点";
+  renderVersions();
+  renderFpList();
+  if (state.sel) selectFp(state.sel, true);
+}
+
+function pickVer(v) {
+  var base = Math.max(1, v - 1);
+  state.v = v;
+  state.base = base;
+  document.querySelectorAll("#baseSeg span").forEach(function (s) {
+    s.classList.toggle("active", s.getAttribute("data-base") === "prev");
+  });
+  applyVersion();
+  toast(v === 1
+    ? "已切到 v1（首版）：4 个功能点全部为新增，无基线可比"
+    : "已切到 v" + v + "：原型按 data-since 重绘，右侧按「v" + base + " → v" + v + "」重算功能点异动");
+}
+
+function pickBaseline(val) {
+  state.base = val === "prev" ? Math.max(1, state.v - 1) : parseInt(val, 10);
+  document.querySelectorAll("#baseSeg span").forEach(function (s) {
+    s.classList.toggle("active", s.getAttribute("data-base") === val);
+  });
+  document.getElementById("fpVerPill").textContent = "v" + state.v + " · 对比 v" + state.base;
+  renderFpList();
+}
+
+function toggleOnlyChg() {
+  state.onlyChg = !state.onlyChg;
+  document.getElementById("onlyChg").classList.toggle("on", state.onlyChg);
+  renderFpList();
+}
+
+/* ===== 联动：清单 ↔ 预览 ===== */
+function pickFp(code) { selectFp(code); }
+
+function selectFp(code, silent) {
+  state.sel = code;
+  document.querySelectorAll(".fp").forEach(function (el) {
+    el.classList.toggle("on", el.getAttribute("data-code") === code);
+  });
+  document.querySelectorAll(".el-hl").forEach(function (el) { el.classList.remove("el-hl"); });
+  var targets = document.querySelectorAll('[data-fp="' + code + '"]');
+  var visible = 0;
+  targets.forEach(function (el) {
+    if (el.offsetParent !== null) { el.classList.add("el-hl"); visible++; }
+  });
+  var fp = FPS.filter(function (x) { return x.code === code; })[0];
+  if (!fp) return;
+  var hint = document.getElementById("pvHint");
+  if (visible === 0) {
+    hint.textContent = fp.name + " 在当前 v" + state.v + " 不可见（" + (fp.removed ? "已于 v" + fp.removed + " 移除" : "v" + fp.since + " 才引入") + "）";
+  } else {
+    hint.textContent = fp.code + " " + fp.name + " · " + fp.el + " · " + fp.accept.length + " 条验收目标 · 命中 " + visible + " 处";
+  }
+  if (visible > 0) {
+    var first = targets[0];
+    if (first && first.scrollIntoView) first.scrollIntoView({ block: "nearest" });
+  }
+  if (!silent && visible === 0) toast("该功能点不在 v" + state.v + " 中，函数已在清单标注「未包含 / 已移除」");
+}
+
+/* ===== 画面 2：矩阵 ===== */
+function renderMatrix() {
+  var body = document.getElementById("mxBody");
+  if (!body) return;
+  var html = "";
+  FPS.forEach(function (fp) {
+    html += '<tr><td class="k">' + fp.code + " " + fp.name + '<div class="mono-sm">' + fp.el + '</div></td>'
+      + '<td>' + fp.area + '</td>';
+    [1, 2, 3, 4].forEach(function (v) {
+      var k = fpKind(fp, v, v - 1);
+      if (k === "none") { html += '<td class="num"><span class="cell none"><span class="dotm"></span></span></td>'; return; }
+      var cls = k === "new" ? "add" : k === "chg" ? "chg" : k === "removed" ? "del" : "same";
+      var ch = k === "new" ? "＋" : k === "chg" ? "~" : k === "removed" ? "−" : "·";
+      html += '<td class="num"><span class="cell ' + cls + '">' + ch + '</span></td>';
+    });
+    html += '<td>' + fp.reqs + '</td>';
+    var pill = fp.state === "未过" ? '<span class="pill bad">未过</span>'
+      : fp.state === "草案" ? '<span class="pill warn">草案</span>'
+      : fp.state === "已移除" ? '<span class="pill mute">已移除</span>'
+      : '<span class="pill ok">通过</span>';
+    html += '<td>' + pill + '</td></tr>';
+  });
+  body.innerHTML = html;
+}
+
+/* ===== 通用 ===== */
+var toastTimer = null;
+function toast(msg) {
+  var el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { el.classList.remove("on"); }, 2400);
+}
+
+document.getElementById("baseSeg").addEventListener("click", function (e) {
+  var span = e.target.closest("span");
+  if (!span) return;
+  pickBaseline(span.getAttribute("data-base"));
+});
+
+/* 初始态：权威 v3，对比 v2 */
+applyVersion();
+renderMatrix();
+</script>
+</body>
+</html>

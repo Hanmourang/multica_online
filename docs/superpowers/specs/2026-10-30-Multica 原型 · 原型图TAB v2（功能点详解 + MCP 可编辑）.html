@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 原型 · 原型图 TAB v2（功能点详解 + MCP 可编辑）</title>
+<style>
+/* ===== Multica 设计 token（packages/ui/styles/tokens.css 浅色主题抄录） ===== */
+:root {
+  --app-shell: oklch(0.964435 0.001327 286.375);
+  --page-canvas: oklch(0.988087 0 0);
+  --surface: oklch(1 0 0);
+  --surface-hover: oklch(0.967 0.001 286.375);
+  --surface-selected: oklch(0.95 0.002 286.375);
+  --surface-border: oklch(0.92 0.004 286.32);
+  --foreground: oklch(0.141 0.005 285.823);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --faint-foreground: oklch(0.606 0.016 285.938);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --border: oklch(0.945 0.003 286.32);
+  --destructive: oklch(0.577 0.245 27.325);
+  --brand: oklch(0.55 0.16 255);
+  --success: oklch(0.55 0.16 145);
+  --warning: oklch(0.72 0.15 75);
+  --spw: 360px;
+  --mlw: 176px;
+  --mlw-collapsed: 42px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 13px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  background: oklch(0.93 0.004 286.32); color: var(--foreground); -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+/* ===== 画板框架 ===== */
+.proto-nav {
+  position: sticky; top: 0; z-index: 300; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 24px; background: oklch(0.16 0.005 285.823); color: oklch(0.92 0.004 286.32);
+}
+.proto-nav .logo { font-weight: 700; font-size: 13px; margin-right: 12px; }
+.proto-nav .logo span { color: var(--brand); }
+.proto-nav a { color: oklch(0.705 0.015 286.067); text-decoration: none; padding: 5px 12px; border-radius: 6px; font-size: 12.5px; }
+.proto-nav a:hover { background: oklch(1 0 0 / 8%); color: #fff; }
+.proto-nav .nav-sep { color: oklch(0.86 0.02 286); font-size: 11px; font-weight: 700; padding: 4px 8px; border-left: 2px solid oklch(0.55 0.16 255 / 60%); margin-left: 6px; letter-spacing: .03em; }
+.frame-wrap { max-width: 1600px; margin: 0 auto; padding: 32px 22px 80px; }
+.frame-head { margin-bottom: 14px; scroll-margin-top: 96px; }
+.frame-head h2 { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.frame-head p { color: var(--muted-foreground); font-size: 13px; margin-top: 5px; line-height: 1.75; max-width: 1320px; }
+.frame-head p b { color: var(--foreground); }
+.frame-head code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; background: oklch(0.96 0.002 286); padding: 1px 4px; border-radius: 3px; }
+.frame { background: var(--page-canvas); border-radius: 14px; overflow: hidden; box-shadow: 0 24px 64px rgb(15 23 42 / 0.16), 0 4px 16px rgb(15 23 42 / 0.08); border: 1px solid oklch(0.85 0.005 286.32); margin-bottom: 52px; position: relative; }
+.frame-bar { height: 34px; background: var(--app-shell); border-bottom: 1px solid var(--surface-border); display: flex; align-items: center; gap: 6px; padding: 0 14px; }
+.frame-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.frame-bar i:nth-child(1) { background: oklch(0.7 0.19 27); }
+.frame-bar i:nth-child(2) { background: oklch(0.8 0.16 85); }
+.frame-bar i:nth-child(3) { background: oklch(0.7 0.16 145); }
+.frame-bar span { margin-left: 8px; font-size: 11.5px; color: var(--faint-foreground); }
+.frame-bar em { margin-left: auto; font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--faint-foreground); }
+.anno { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700; box-shadow: 0 0 0 2.5px oklch(0.55 0.16 255 / 20%); flex: none; }
+.anno.warn { background: oklch(0.65 0.16 60); box-shadow: 0 0 0 2.5px oklch(0.72 0.15 75 / 22%); }
+.anno.ok { background: var(--success); box-shadow: 0 0 0 2.5px oklch(0.55 0.16 145 / 20%); }
+.notes { list-style: none; margin: -38px 0 52px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; display: grid; gap: 8px; }
+.notes li { display: flex; gap: 8px; font-size: 12px; line-height: 1.7; color: var(--muted-foreground); }
+.notes li b { color: var(--foreground); }
+
+/* ===== 应用外壳 ===== */
+.app { display: flex; background: var(--page-canvas); }
+.app.tall { height: 812px; }
+.sidebar { width: 152px; flex: none; background: var(--app-shell); border-right: 1px solid var(--surface-border); padding: 10px 8px; }
+.ws { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 600; padding: 4px 6px 12px; }
+.ws-avatar { width: 20px; height: 20px; border-radius: 6px; background: var(--primary); color: #fff; display: grid; place-items: center; font-size: 10px; font-weight: 700; }
+.s-sec { font-size: 9.5px; font-weight: 700; letter-spacing: .06em; color: var(--faint-foreground); padding: 10px 8px 4px; }
+.s-item { display: flex; align-items: center; gap: 8px; padding: 4.5px 8px; border-radius: 6px; color: var(--muted-foreground); font-size: 12px; }
+.s-item.on { background: var(--surface-selected); color: var(--foreground); font-weight: 600; }
+.s-item .n { margin-left: auto; font-size: 10.5px; background: var(--surface-selected); color: var(--muted-foreground); border-radius: 8px; padding: 0 6px; line-height: 16px; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.topbar { height: 34px; display: flex; align-items: center; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--surface-border); background: var(--surface); }
+.crumb { color: var(--muted-foreground); display: flex; gap: 5px; align-items: center; font-size: 12px; white-space: nowrap; }
+.crumb b { color: var(--foreground); font-weight: 600; }
+.tab-pill { padding: 3.5px 9px; border-radius: 6px; color: var(--muted-foreground); font-size: 11.5px; white-space: nowrap; }
+.tab-pill.active { background: var(--surface-selected); color: var(--foreground); font-weight: 600; }
+.tab-pill .b { font-size: 9.5px; font-weight: 700; margin-left: 4px; border-radius: 7px; padding: 0 4px; background: oklch(0.94 0.02 255); color: var(--brand); }
+
+/* ===== 通用控件 ===== */
+.pill { display: inline-flex; align-items: center; gap: 3px; border-radius: 9px; padding: 1px 6px; font-size: 10px; font-weight: 600; line-height: 15px; background: var(--surface-selected); color: var(--muted-foreground); white-space: nowrap; }
+.pill.ok { background: oklch(0.94 0.06 145); color: oklch(0.42 0.12 145); }
+.pill.bad { background: oklch(0.94 0.05 27); color: oklch(0.47 0.18 27); }
+.pill.warn { background: oklch(0.96 0.06 75); color: oklch(0.48 0.13 62); }
+.pill.new { background: oklch(0.94 0.03 255); color: var(--brand); }
+.pill.mute { background: var(--surface-selected); color: var(--faint-foreground); }
+.btn { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 3.5px 9px; font-size: 11.5px; color: var(--foreground); white-space: nowrap; }
+.btn.sm { padding: 2.5px 8px; font-size: 11px; }
+.btn.pri { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.btn:not(.pri):hover { background: var(--surface-hover); }
+.btn.pri:hover { background: oklch(0.3 0.006 285.885); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--surface); flex: none; }
+.seg span { padding: 3px 10px; font-size: 11.5px; color: var(--muted-foreground); white-space: nowrap; cursor: pointer; }
+.seg span.active { background: var(--surface-selected); color: var(--foreground); font-weight: 600; }
+.inp { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 3px 8px; font-size: 11.5px; color: var(--foreground); white-space: nowrap; }
+.inp .ar { margin-left: auto; color: var(--faint-foreground); font-size: 9px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+
+/* ===== 功能模块页 ===== */
+.feat-toolbar { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-bottom: 1px solid var(--surface-border); background: var(--surface); flex: none; }
+/* 底色：左栏与工作台拉开明度差，右侧原型区成为视觉主体 */
+.feat-body { flex: 1; min-height: 0; display: flex; background: oklch(0.955 0.004 286.32); }
+.mod-list { width: var(--mlw); flex: none; display: flex; flex-direction: column; overflow: hidden; transition: width .16s ease;
+  border-right: 1px solid oklch(0.9 0.006 286.32); background: linear-gradient(180deg, oklch(0.972 0.008 286.32), oklch(0.958 0.008 286.32)); }
+.mod-list.collapsed { width: var(--mlw-collapsed); }
+.ml-head { display: flex; align-items: center; gap: 4px; padding: 6px 8px; font-size: 10.5px; color: var(--faint-foreground); border-bottom: 1px solid oklch(0.9 0.008 286.32); flex: none; white-space: nowrap; }
+.ml-head .t { font-weight: 700; color: var(--foreground); letter-spacing: .01em; }
+.ml-head .c { margin-left: auto; font-size: 9px; }
+.ml-head .fold { width: 17px; height: 17px; display: grid; place-items: center; border-radius: 4px; font-size: 11px; color: var(--muted-foreground); background: oklch(1 0 0 / 55%); }
+.ml-head .fold:hover { background: var(--surface); color: var(--brand); }
+.mod-list.collapsed .ml-head { justify-content: center; padding: 6px 0; }
+.mod-list.collapsed .ml-head .t, .mod-list.collapsed .ml-head .c { display: none; }
+.mod-list.collapsed .ml-scroll, .mod-list.collapsed .ml-add { display: none; }
+.ml-scroll { flex: 1; min-height: 0; overflow: auto; padding: 5px 0 2px; }
+.mod-list.collapsed .ml-rail { display: flex; }
+.ml-rail { display: none; flex-direction: column; align-items: center; gap: 7px; padding: 8px 0; cursor: pointer; }
+.ml-rail .vt { writing-mode: vertical-rl; font-size: 10px; letter-spacing: .1em; font-weight: 700; color: var(--muted-foreground); }
+.ml-rail .n { font-size: 8.5px; font-weight: 700; background: oklch(1 0 0 / 70%); color: var(--faint-foreground); border-radius: 7px; padding: 0 4px; }
+.mod-row { margin: 0 5px 3px; padding: 6px 7px; border: 1px solid transparent; border-radius: 7px; cursor: pointer; }
+.mod-row:hover { background: oklch(1 0 0 / 62%); }
+.mod-row.on { background: var(--surface); border-color: oklch(0.55 0.16 255 / 30%); box-shadow: inset 3px 0 0 var(--brand), 0 2px 7px rgb(15 23 42 / 0.07); }
+.mr-1 { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; }
+.mr-1 .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-1 .pg { font-size: 8.5px; font-weight: 700; padding: 0 3px; border-radius: 3px; background: var(--surface-selected); color: var(--faint-foreground); }
+.mr-1 .h { margin-left: auto; }
+.mr-2 { display: flex; align-items: center; gap: 4px; margin-top: 3px; font-size: 9.5px; color: var(--faint-foreground); }
+.mr-2 .sep { opacity: .5; }
+.mr-brief { margin-top: 3px; font-size: 9.5px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-brief.empty { color: oklch(0.55 0.18 27); }
+.ml-add { display: flex; align-items: center; gap: 6px; margin: 8px; padding: 6px 8px; border: 1px dashed oklch(0.55 0.16 255 / 40%); border-radius: 7px; font-size: 11px; color: var(--brand); background: oklch(0.97 0.02 255); }
+.detail { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--page-canvas); }
+
+/* 模块头 */
+.modhead { display: flex; align-items: center; gap: 7px; padding: 7px 12px; border-bottom: 1px solid var(--surface-border); background: var(--surface); flex: none; flex-wrap: wrap; }
+.modhead .nm { font-size: 13.5px; font-weight: 700; }
+.kpi { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--muted-foreground); white-space: nowrap; }
+.kpi b { font-size: 11.5px; color: var(--foreground); font-variant-numeric: tabular-nums; }
+.kpi .sep { width: 1px; height: 12px; background: var(--surface-border); }
+.pairchip { display: inline-flex; align-items: center; gap: 4px; border-radius: 9px; padding: 1.5px 7px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.pairchip.ok { background: oklch(0.94 0.06 145); color: oklch(0.4 0.12 145); }
+.pairchip.bad { background: oklch(0.95 0.05 27); color: oklch(0.47 0.18 27); }
+.pairchip.none { background: var(--surface-selected); color: var(--muted-foreground); }
+
+/* 主 TAB */
+.maintabs { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--surface-border); background: var(--surface); flex: none; }
+.mtab { padding: 7px 10px; font-size: 11.5px; font-weight: 600; color: var(--muted-foreground); border-bottom: 2px solid transparent; white-space: nowrap; position: relative; }
+.mtab.on { color: var(--foreground); border-bottom-color: var(--primary); }
+.mtab .n { margin-left: 4px; font-size: 9.5px; font-weight: 700; background: var(--surface-selected); color: var(--muted-foreground); border-radius: 7px; padding: 0 4px; }
+.mtab.dim { color: oklch(0.75 0.01 286); }
+.mtabs-note { margin-left: auto; padding-right: 6px; font-size: 9px; color: var(--faint-foreground); white-space: nowrap; }
+
+/* 草案带：未发布的改动集中在这里，人和 AI 共用一条队列 */
+.draftbar { display: flex; align-items: center; gap: 6px; padding: 4px 10px; flex: none; border-bottom: 1px solid oklch(0.9 0.05 75);
+  background: oklch(0.978 0.045 85); font-size: 10px; color: oklch(0.42 0.09 62); white-space: nowrap; overflow: hidden; }
+.draftbar .db-t { font-weight: 700; }
+.draftbar .db-i { border-radius: 8px; padding: 0 6px; background: oklch(1 0 0 / 72%); }
+.draftbar .db-i.ai { background: oklch(0.95 0.05 145); color: oklch(0.38 0.1 145); }
+.draftbar .db-base { margin-left: 2px; color: oklch(0.5 0.06 70); font-size: 9.5px; }
+.draftbar .db-a { margin-left: auto; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.draftbar .db-a + .db-a { margin-left: 8px; }
+.draftbar .db-go { background: var(--primary); color: var(--primary-foreground); border-radius: 5px; padding: 2px 8px; font-weight: 700; cursor: pointer; }
+.draftbar.empty { background: oklch(0.972 0.002 286); border-bottom-color: var(--border); color: var(--faint-foreground); }
+/* 编辑态：能改的地方全部显形 */
+.wb.editing .wf-block, .wb.editing .wf-inp, .wb.editing .wf-btn { outline: 1px dashed oklch(0.55 0.16 255 / 55%); outline-offset: 2px; cursor: text; }
+.wb.editing .wf-block:hover { outline-style: solid; }
+.wb.editing .frow .fv, .wb.editing .dc-text, .wb.editing .dc-rules li { background: oklch(0.99 0.02 85); border-radius: 3px; box-shadow: 0 0 0 2px oklch(0.99 0.02 85); }
+.wb.editing .frow .edit { opacity: 1; color: var(--brand); }
+.savebar { display: none; align-items: center; gap: 6px; padding: 4px 9px; border-top: 1px solid oklch(0.9 0.05 75); background: oklch(0.985 0.03 85); font-size: 9.5px; color: oklch(0.44 0.08 62); }
+.wb.editing .savebar { display: flex; }
+.savebar .g { margin-left: auto; display: flex; gap: 4px; }
+.savebar .g span { border: 1px solid oklch(0.86 0.05 75); background: var(--surface); border-radius: 5px; padding: 1px 7px; cursor: pointer; }
+
+/* 原型图 TAB 工具条 */
+.pvtool { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--surface-border); background: var(--surface); flex: none; flex-wrap: wrap; position: relative; z-index: 20; }
+.pvtool .sp { margin-left: auto; display: flex; align-items: center; gap: 5px; }
+.vsel { position: relative; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 3px 7px; font-size: 11px; cursor: pointer; }
+.vsel .lb { font-size: 9.5px; color: var(--faint-foreground); }
+.vsel .ar { color: var(--faint-foreground); font-size: 9px; }
+.vsel.brief { border-color: oklch(0.86 0.06 285); background: oklch(0.98 0.012 285); }
+.vmenu { position: absolute; top: calc(100% + 5px); left: 0; min-width: 232px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 8px; box-shadow: 0 16px 40px rgb(15 23 42 / 14%); padding: 4px; display: none; z-index: 60; }
+.vmenu.open { display: block; }
+.vmenu .mi { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border-radius: 5px; font-size: 11px; cursor: pointer; }
+.vmenu .mi:hover { background: var(--surface-hover); }
+.vmenu .mi.on { background: oklch(0.96 0.02 255); }
+.vmenu .mi .d { margin-left: auto; font-size: 9.5px; color: var(--faint-foreground); }
+.vmenu .mh { padding: 5px 7px 3px; font-size: 9px; font-weight: 700; letter-spacing: .05em; color: var(--faint-foreground); }
+
+/* 两栏工作台 */
+.wb { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.pv { flex: 1; min-width: 300px; display: flex; flex-direction: column; background: var(--page-canvas); }
+.pvbar { height: 26px; flex: none; display: flex; align-items: center; gap: 5px; padding: 0 9px; border-bottom: 1px solid var(--surface-border); background: var(--surface); font-size: 10.5px; color: var(--muted-foreground); }
+.pvbar .f { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; }
+.pvbar .b { font-size: 9.5px; font-weight: 700; color: oklch(0.42 0.12 145); }
+.pvbar .b.draft { color: oklch(0.48 0.13 62); }
+.pframe { flex: 1; min-height: 0; overflow: auto; background: var(--surface); }
+.pvfoot { flex: none; padding: 5px 9px; border-top: 1px solid var(--surface-border); background: var(--surface); font-size: 9.5px; line-height: 1.55; color: var(--faint-foreground); display: flex; align-items: center; gap: 6px; }
+.pvfoot .q { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pvfoot .r { margin-left: auto; white-space: nowrap; font-weight: 600; color: var(--muted-foreground); }
+
+/* 拖拽分隔条 */
+.splitter { flex: none; width: 6px; cursor: col-resize; background: transparent; position: relative; z-index: 10; }
+.splitter::after { content: ""; position: absolute; top: 50%; left: 2px; width: 2px; height: 34px; margin-top: -17px; border-radius: 1px; background: var(--surface-border); }
+.splitter:hover::after, .splitter.drag::after { background: var(--brand); }
+
+/* 右栏：功能点详解 */
+.sidepane { width: var(--spw); flex: none; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--surface-border); position: relative; }
+.sidepane.collapsed { width: 30px; }
+.sidepane.collapsed .sp-full { display: none; }
+.sp-rail { display: none; flex-direction: column; align-items: center; gap: 8px; padding-top: 8px; cursor: pointer; }
+.sidepane.collapsed .sp-rail { display: flex; }
+.sp-rail .vt { writing-mode: vertical-rl; font-size: 10.5px; letter-spacing: .08em; color: var(--muted-foreground); font-weight: 600; }
+.sp-rail .ic { font-size: 11px; color: var(--faint-foreground); }
+.sp-full { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.sp-head { flex: none; padding: 6px 9px; border-bottom: 1px solid var(--surface-border); display: flex; align-items: center; gap: 5px; }
+.sp-head .t { font-size: 11.5px; font-weight: 700; }
+.sp-head .grow { margin-left: auto; display: flex; align-items: center; gap: 3px; }
+.iconbtn { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 4px; color: var(--faint-foreground); font-size: 12px; }
+.iconbtn:hover { background: var(--surface-hover); color: var(--foreground); }
+.pairbar { flex: none; display: flex; align-items: center; gap: 5px; padding: 4px 9px; font-size: 9.5px; border-bottom: 1px solid var(--border); }
+.pairbar.ok { background: oklch(0.975 0.03 145); color: oklch(0.38 0.09 145); }
+.pairbar.bad { background: oklch(0.975 0.04 60); color: oklch(0.4 0.11 62); }
+.pairbar .r { margin-left: auto; cursor: pointer; }
+.anchorbar { flex: none; display: flex; align-items: center; gap: 2px; padding: 4px 7px; border-bottom: 1px solid var(--border); background: oklch(0.99 0 0); }
+.anchorbar span { font-size: 9.5px; padding: 1.5px 6px; border-radius: 8px; color: var(--muted-foreground); cursor: pointer; }
+.anchorbar span:hover { background: var(--surface-selected); }
+.sp-scroll { flex: 1; min-height: 0; overflow: auto; }
+
+/* 分区 */
+.blk { border-bottom: 1px solid var(--surface-border); }
+.blk-h { display: flex; align-items: center; gap: 5px; padding: 6px 9px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.blk-h .ic { font-size: 9px; }
+.blk-h .r { margin-left: auto; font-size: 9px; font-weight: 500; color: var(--faint-foreground); }
+.blk-h.ro { background: oklch(0.972 0.002 286); color: var(--muted-foreground); }
+.blk-b { padding: 0 9px 8px; }
+.blk.ro .blk-b { padding: 0 9px 7px; }
+.blk.closed .blk-b { display: none; }
+
+/* 字段行 */
+.frow { display: flex; align-items: flex-start; gap: 6px; padding: 4px 0; border-bottom: 1px dashed oklch(0.955 0.002 286); }
+.frow:last-child { border-bottom: 0; }
+.frow .fk { flex: none; width: 58px; font-size: 9.5px; color: var(--faint-foreground); line-height: 1.6; }
+.frow .fv { min-width: 0; flex: 1; font-size: 10.5px; line-height: 1.62; color: var(--foreground); }
+.frow .fv.dim { color: var(--muted-foreground); }
+.frow.todo .fv { color: oklch(0.62 0.02 286); border-bottom: 1px dashed oklch(0.82 0.01 286); padding-bottom: 1px; }
+.frow.todo .fv::before { content: "待填写 · "; color: oklch(0.55 0.13 60); font-weight: 600; }
+.fsrc { flex: none; font-size: 8.5px; border-radius: 3px; padding: 0 3px; line-height: 14px; white-space: nowrap; }
+.fsrc.sys { background: var(--surface-selected); color: var(--faint-foreground); }
+.fsrc.human { background: oklch(0.94 0.03 255); color: var(--brand); }
+.fsrc.ai { background: oklch(0.94 0.06 145); color: oklch(0.4 0.12 145); }
+.fsrc.todo { background: oklch(0.96 0.07 75); color: oklch(0.46 0.13 62); }
+.fsrc req { background: none; }
+.frow .edit { flex: none; opacity: 0; width: 14px; text-align: center; font-size: 10px; color: var(--faint-foreground); cursor: pointer; }
+.frow:hover .edit { opacity: 1; }
+
+/* 功能点清单 */
+.fpg { display: flex; align-items: center; gap: 4px; padding: 3px 9px; background: oklch(0.975 0.002 286); border-bottom: 1px solid var(--border); font-size: 8.5px; font-weight: 700; letter-spacing: .04em; color: var(--muted-foreground); }
+.fpg .c { margin-left: auto; font-weight: 600; color: var(--faint-foreground); }
+.fp { display: flex; align-items: flex-start; gap: 6px; padding: 5px 9px; border-bottom: 1px solid oklch(0.965 0.002 286); cursor: pointer; border-left: 2px solid transparent; }
+.fp:hover { background: var(--surface-hover); }
+.fp.on { background: oklch(0.96 0.02 255); border-left-color: var(--brand); }
+.fp.gone { opacity: .55; }
+.fp-code { flex: none; font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; font-weight: 700; color: var(--faint-foreground); background: var(--surface-selected); border-radius: 3px; padding: 1px 3px; margin-top: 1px; }
+.fp-main { min-width: 0; flex: 1; }
+.fp-nm { display: flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; }
+.fp-nm .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-sub { margin-top: 1px; font-size: 9px; color: var(--faint-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.tag { flex: none; font-size: 8px; font-weight: 700; border-radius: 3px; padding: 0 3px; line-height: 13px; white-space: nowrap; }
+.tag.new { background: oklch(0.94 0.06 145); color: oklch(0.4 0.12 145); }
+.tag.chg { background: oklch(0.94 0.03 255); color: var(--brand); }
+.tag.del { background: oklch(0.94 0.05 27); color: oklch(0.47 0.18 27); }
+.tag.same { background: var(--surface-selected); color: var(--faint-foreground); }
+.tag.gone { background: var(--surface-selected); color: var(--faint-foreground); }
+.fp-ac { font-size: 8.5px; color: var(--faint-foreground); font-variant-numeric: tabular-nums; }
+.fp-ac.done { color: oklch(0.45 0.13 145); font-weight: 600; }
+.fp-ac.bad { color: oklch(0.5 0.18 27); font-weight: 600; }
+
+/* 功能点详情卡 */
+.detail-card { margin: 6px 9px 9px; border: 1px solid oklch(0.86 0.03 286); border-radius: 8px; overflow: hidden; background: oklch(0.995 0 0); }
+.dc-head { display: flex; align-items: center; gap: 5px; padding: 5px 7px; border-bottom: 1px solid var(--border); background: var(--surface); font-size: 10.5px; font-weight: 700; }
+.dc-head .x { margin-left: auto; color: var(--faint-foreground); font-weight: 500; font-size: 9.5px; cursor: pointer; }
+.dc-body { padding: 4px 7px 6px; }
+.dc-row { display: flex; gap: 5px; font-size: 10px; line-height: 1.62; padding: 3px 0; border-bottom: 1px dashed oklch(0.955 0.002 286); }
+.dc-row:last-child { border-bottom: 0; }
+.dc-row .k { flex: none; width: 50px; color: var(--faint-foreground); font-size: 9.5px; }
+.dc-row .v { min-width: 0; color: var(--foreground); }
+.dc-row .v .dim { color: var(--muted-foreground); }
+.ac-list { display: grid; gap: 1px; }
+.ac-item { display: flex; align-items: flex-start; gap: 3px; font-size: 9.5px; color: var(--muted-foreground); }
+.ac-item .c { flex: none; font-weight: 700; }
+.ac-item .c.ok { color: oklch(0.45 0.13 145); }
+.ac-item .c.no { color: oklch(0.5 0.18 27); }
+/* 功能点详情（四段）：卡片内的分段与行样式 */
+.dc-sec { display: flex; align-items: center; gap: 4px; margin: 7px 0 2px; font-size: 9px; font-weight: 700; color: var(--muted-foreground); }
+.dc-sec:first-child { margin-top: 2px; }
+.dc-sec::before { content: ""; flex: none; width: 2px; height: 9px; border-radius: 1px; background: oklch(0.74 0.03 286); }
+.dc-sec .n { margin-left: auto; display: flex; align-items: center; gap: 3px; font-weight: 500; color: var(--faint-foreground); }
+.dc-text { font-size: 10px; line-height: 1.62; color: var(--foreground); }
+.dc-text .mono-sm { font-size: 9px; }
+.dc-io { display: grid; gap: 3px; }
+.dc-io-c { border: 1px solid var(--surface-border); border-radius: 5px; padding: 3px 5px; background: var(--surface); font-size: 9.5px; line-height: 1.6; color: var(--foreground); }
+.dc-io-c b { display: block; margin-bottom: 1px; font-size: 8.5px; font-weight: 700; color: var(--faint-foreground); }
+.dc-rules { margin: 0; padding-left: 14px; font-size: 9.5px; line-height: 1.62; color: var(--foreground); }
+.dc-rules li { margin: 1px 0; }
+.dc-rules li::marker { font-size: 8.5px; color: var(--faint-foreground); }
+.dc-todo { border-top: 1px dashed oklch(0.9 0.03 75); padding: 2px 0; font-size: 9.5px; color: oklch(0.55 0.11 75); }
+.dc-ac { display: grid; gap: 1px; }
+.dc-ac > div { display: flex; gap: 4px; font-size: 9.5px; line-height: 1.6; color: var(--foreground); }
+.dc-ac .ok { flex: none; font-weight: 700; color: oklch(0.45 0.13 145); }
+.dc-ac .no { flex: none; font-weight: 700; color: oklch(0.55 0.11 75); }
+.fp-cap { font-size: 8.5px; color: var(--faint-foreground); font-variant-numeric: tabular-nums; }
+.fp-cap.full { color: oklch(0.45 0.13 145); font-weight: 600; }
+.fp-cap.part { color: oklch(0.52 0.1 75); font-weight: 600; }
+
+/* 版本记录 */
+.ver-row { display: flex; align-items: flex-start; gap: 5px; padding: 4px 0; border-bottom: 1px dashed oklch(0.955 0.002 286); font-size: 9.5px; }
+.ver-row:last-child { border-bottom: 0; }
+.ver-row .v { flex: none; font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 9px; color: var(--foreground); width: 22px; }
+.ver-row .m { min-width: 0; flex: 1; color: var(--muted-foreground); line-height: 1.55; }
+.ver-row .m b { color: var(--foreground); font-weight: 600; }
+.ver-row .t { flex: none; font-size: 8.5px; color: var(--faint-foreground); }
+
+/* （v2.1）界面不展示工具入口，右栏不再有 MCP 分区 */
+.empty-note { padding: 12px 9px; text-align: center; font-size: 10px; line-height: 1.7; color: var(--muted-foreground); }
+.empty-note b { display: block; font-size: 11px; color: var(--foreground); margin-bottom: 2px; }
+
+/* ===== 线框 ===== */
+.wf { padding: 9px 11px 14px; font-size: 11px; }
+.wf-h { display: flex; align-items: baseline; gap: 6px; padding-bottom: 6px; }
+.wf-h b { font-size: 12.5px; }
+.wf-h .path { font-family: ui-monospace, Menlo, monospace; font-size: 9px; color: var(--faint-foreground); }
+.wf-bar { display: flex; align-items: center; gap: 5px; padding: 5px 0 6px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.wf-inp { border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px; font-size: 10px; color: var(--faint-foreground); min-width: 92px; background: var(--surface); }
+.wf-btn { border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px; font-size: 10px; background: var(--surface); white-space: nowrap; cursor: pointer; position: relative; }
+.wf-btn.pri { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.wf-btn:hover { border-color: var(--brand); }
+.wf-seg { display: flex; align-items: center; gap: 3px; padding: 5px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.wf-seg span { padding: 2px 7px; border-radius: 10px; font-size: 9.5px; color: var(--muted-foreground); border: 1px solid transparent; cursor: pointer; }
+.wf-seg span.on { background: var(--surface-selected); color: var(--foreground); font-weight: 600; border-color: var(--border); }
+.wf-tbl { width: 100%; border-collapse: collapse; margin-top: 3px; }
+.wf-tbl th { text-align: left; font-size: 9px; font-weight: 700; color: var(--faint-foreground); padding: 4px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.wf-tbl td { padding: 4.5px; border-bottom: 1px solid oklch(0.96 0.002 286); font-size: 10px; color: var(--muted-foreground); white-space: nowrap; }
+.wf-tbl td.k { color: var(--foreground); font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; }
+.wf-tbl tr:hover td { background: oklch(0.985 0 0); }
+.wf-act { color: var(--brand); font-weight: 600; cursor: pointer; }
+.wf-block { margin-top: 7px; border: 1px dashed var(--border); border-radius: 7px; padding: 6px 8px; background: oklch(0.995 0 0); }
+.wf-block .t { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; margin-bottom: 4px; }
+.wf-kv { display: flex; gap: 6px; font-size: 9.5px; color: var(--muted-foreground); margin-bottom: 2px; }
+.wf-kv .k { width: 44px; flex: none; color: var(--faint-foreground); }
+.wf-kv .bx { flex: 1; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; background: var(--surface); }
+.wf-notice { display: flex; align-items: center; gap: 6px; margin-top: 6px; padding: 4px 7px; border-radius: 5px; background: oklch(0.97 0.06 75); border: 1px solid oklch(0.9 0.06 75); font-size: 9.5px; color: oklch(0.42 0.1 62); }
+.wf-notice .x { margin-left: auto; opacity: .6; }
+.wf-nav { display: flex; align-items: center; gap: 5px; margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--border); }
+.wf-nav span { border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; font-size: 9.5px; background: var(--surface); cursor: pointer; }
+.wf-foot { display: flex; align-items: center; gap: 5px; margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--border); font-size: 9px; color: var(--faint-foreground); }
+.el-hl { outline: 2px solid var(--brand) !important; outline-offset: 2px; box-shadow: 0 0 0 5px oklch(0.55 0.16 255 / 14%); border-radius: 4px; }
+.wf .el-chg { position: relative; }
+.wf .el-chg::after { content: ""; position: absolute; inset: -2px; border-radius: 5px; border: 1px dashed oklch(0.55 0.16 255 / 55%); pointer-events: none; }
+
+/* ===== 表格 / 通用块 ===== */
+.dtable { width: 100%; border-collapse: collapse; font-size: 11px; }
+.dtable th { text-align: left; font-size: 9.5px; font-weight: 700; letter-spacing: .03em; color: var(--muted-foreground); padding: 6px 8px; border-bottom: 1px solid var(--surface-border); background: oklch(0.975 0.002 286); white-space: nowrap; }
+.dtable td { padding: 6px 8px; border-bottom: 1px solid oklch(0.965 0.002 286); vertical-align: top; color: var(--muted-foreground); }
+.dtable code, .mstep code { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; background: oklch(0.96 0.002 286); border-radius: 3px; padding: 0 3px; color: var(--foreground); }
+.dtable td.k { color: var(--foreground); font-weight: 600; }
+.dtable.capdef th:first-child, .dtable.capdef td:first-child { white-space: nowrap; }
+.dtable.capdef th:nth-child(2), .dtable.capdef td:nth-child(2) { white-space: nowrap; }
+.dtable tr:hover td { background: oklch(0.985 0 0); }
+.sect { padding: 12px 14px; }
+.sect-t { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; margin-bottom: 7px; }
+.sect-t .r { margin-left: auto; font-size: 10px; font-weight: 500; color: var(--faint-foreground); }
+.sect + .sect { border-top: 1px solid var(--surface-border); }
+.hint { font-size: 10.5px; line-height: 1.7; color: var(--muted-foreground); }
+.hint b { color: var(--foreground); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; }
+.grid2 > div + div { border-left: 1px solid var(--surface-border); }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); }
+.grid3 > div + div { border-left: 1px solid var(--surface-border); }
+.kv { display: flex; gap: 6px; font-size: 10.5px; line-height: 1.75; }
+.kv .k { flex: none; width: 78px; color: var(--faint-foreground); }
+.kv .v { min-width: 0; color: var(--foreground); }
+.mini-note { margin-top: 6px; font-size: 10px; line-height: 1.65; color: var(--faint-foreground); }
+.mono-sm { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--faint-foreground); }
+.toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(16px); background: oklch(0.2 0.005 285.823); color: #fff; font-size: 12px; padding: 8px 14px; border-radius: 8px; opacity: 0; pointer-events: none; transition: all .18s ease; z-index: 500; max-width: 70vw; }
+.toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ===== 画面 3/4 图示 ===== */
+.demo-bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--surface-border); background: var(--surface); }
+.demo-bar .lab { font-size: 10px; color: var(--faint-foreground); }
+.demo-stage { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; height: 218px; }
+.demo-stage > div { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.demo-stage > div + div { border-left: 1px solid var(--surface-border); }
+.mini-app { flex: 1; border: 1px solid var(--surface-border); border-radius: 8px; overflow: hidden; display: flex; background: var(--page-canvas); }
+.mini-pv { flex: 1; background: repeating-linear-gradient(45deg, oklch(0.985 0 0), oklch(0.985 0 0) 6px, oklch(0.975 0 0) 6px, oklch(0.975 0 0) 12px); border-right: 1px dashed var(--surface-border); display: grid; place-items: center; font-size: 9px; color: var(--faint-foreground); }
+.mini-sp { background: var(--surface); display: flex; flex-direction: column; gap: 4px; padding: 8px 5px; font-size: 8px; color: var(--faint-foreground); text-align: center; line-height: 1.4; }
+.mini-sp i { display: block; height: 5px; border-radius: 2px; background: var(--surface-selected); }
+.mini-sp i:nth-child(2) { width: 76%; }
+.mini-sp i:nth-child(3) { width: 88%; }
+.mini-sp i:last-of-type { margin-bottom: 2px; }
+.mini-sp.wide i { height: 6px; }
+.mini-sp.col { writing-mode: vertical-rl; align-items: center; justify-content: flex-start; gap: 0; }
+.mini-cap { font-size: 9.5px; color: var(--muted-foreground); line-height: 1.6; }
+.mcpflow { display: flex; align-items: stretch; padding: 12px; overflow-x: auto; background: var(--surface); }
+.mstep { flex: 1; min-width: 150px; border: 1px solid var(--surface-border); border-radius: 8px; padding: 8px 9px; background: var(--page-canvas); position: relative; }
+.mstep b { display: block; font-size: 11px; margin-bottom: 3px; }
+.mstep > span { display: block; font-size: 9.5px; line-height: 1.55; color: var(--muted-foreground); }
+.mstep .pn { width: 16px; height: 16px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 9px; font-weight: 700; display: grid; place-items: center; margin-bottom: 5px; }
+.marrow { flex: none; display: grid; place-items: center; width: 18px; color: var(--faint-foreground); font-size: 12px; }
+.codeblk { border: 1px solid var(--surface-border); border-radius: 7px; background: oklch(0.16 0.005 286); padding: 8px 10px; font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; line-height: 1.8; color: oklch(0.86 0.01 286); white-space: pre; overflow-x: auto; }
+.codeblk .c { color: oklch(0.62 0.03 286); }
+.codeblk .s { color: oklch(0.8 0.11 145); }
+.codeblk .k { color: oklch(0.78 0.1 255); }
+@media (max-width: 1280px) { :root { --spw: 330px; --mlw: 158px; } .mtabs-note, .draftbar .db-base { display: none; } }
+@media (max-width: 1120px) { .sidepane { position: absolute; right: 0; top: 0; bottom: 0; z-index: 40; box-shadow: -12px 0 32px rgb(15 23 42 / 10%); } }
+</style>
+</head>
+<body>
+
+<nav class="proto-nav">
+  <div class="logo">Multica <span>原型</span> · 原型图 TAB v2</div>
+  <span class="nav-sep">Ⅰ 主视图</span>
+  <a href="#f1">1 · 左栏可收起 + 4 个 TAB</a>
+  <a href="#f2">2 · 改一版的链路</a>
+  <span class="nav-sep">Ⅱ 侧栏内容</span>
+  <a href="#f3">3 · 功能点详解排版</a>
+  <a href="#f4">4 · 宽度三态</a>
+  <span class="nav-sep">Ⅲ AI 编辑（后台）</span>
+  <a href="#f5">5 · AI 编辑链路</a>
+  <a href="#f6">6 · 版本记录</a>
+  <span class="nav-sep">Ⅳ 契约（研发用，不进界面）</span>
+  <a href="#f7">7 · 字段与工具契约</a>
+  <a href="./2026-10-30-Multica 原型 · 原型图TAB内嵌功能点与模块说明联动.html#f1" style="margin-left:auto;opacity:.7">↩ v1 画板</a>
+</nav>
+
+<div class="frame-wrap">
+
+<!-- ================= 画面 1 ================= -->
+<div class="frame-head" id="f1">
+  <h2>画面 1 · 左栏收窄可收起、子 TAB 六个收到四个、原型区吃满——改原型一屏能做完（可交互）</h2>
+  <p>本轮四件事：<b>① 左栏默认 222→176px</b>，头上一个 <code>«</code> 可收到 42px 竖条（只留「功能模块」竖排 + 数量），预览区跟着变宽；左栏改用带色调渐变底、选中行白底浮起，与右侧工作台拉开明度差——<b>视线先落在原型上</b>；<b>② 子 TAB 从 6 个收到 4 个</b>（原型图 / 变更概览 / 需求与任务 / 验收与覆盖），<b>模块对象、模块策略、图谱邻域三个 TAB 直接删掉</b>——对象与策略降为功能点的实现证据，邻域回图谱看；<b>③ 工具条新增 <code>✎ 编辑</code> 与 <code>草案 2</code></b>，人直接在预览/右栏改；<b>④ 多一条草案带</b>：未发布改动集中在这里，标明是谁改的、基线是哪个版，点「发布 v4」才成新版本。试试点左上角 <code>«</code>、点 <code>✎ 编辑</code>、点功能点。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>Multica — 代码本体平台 / 功能模块 / 申报清单页 / 原型图</span><em>TO-BE v2 · 主画面（可交互）</em></div>
+  <div class="app tall">
+    <aside class="sidebar">
+      <div class="ws"><span class="ws-avatar">M</span> Multica 工作区</div>
+      <div class="s-item">收件箱 <span class="n">3</span></div>
+      <div class="s-item">任务</div>
+      <div class="s-item">需求</div>
+      <div class="s-item on">项目 <span class="n">4</span></div>
+      <div class="s-sec">代码本体平台</div>
+      <div class="s-item">项目档案</div>
+      <div class="s-item">资产管理</div>
+      <div class="s-item">迭代</div>
+      <div class="s-item on">功能模块 <span class="n">8</span></div>
+      <div class="s-item">数据模型</div>
+      <div class="s-item">需求管理 <span class="n">2</span></div>
+      <div class="s-item">任务追踪</div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <div class="crumb">项目 <span>›</span> 代码本体平台 <span>›</span> <b>功能模块</b></div>
+        <span class="tab-pill active">功能模块</span>
+        <span class="tab-pill">数据模型</span>
+        <span class="tab-pill">需求管理 <span class="b">2</span></span>
+        <span class="tab-pill">任务追踪</span>
+      </div>
+      <div class="feat-toolbar">
+        <span class="pill">扫描 ontology · 10-25 12:19</span>
+        <span class="pill ok">图谱逐条</span>
+        <div class="inp" style="width:132px">搜索模块…</div>
+        <div class="inp" style="width:92px">biz_kind：全部 <span class="ar">▾</span></div>
+        <span class="sp" style="margin-left:auto"></span>
+        <span class="btn sm">＋ 新建模块</span>
+        <span class="btn sm">重新扫描</span>
+      </div>
+      <div class="feat-body">
+        <div class="mod-list" id="modList">
+          <div class="ml-head">
+            <span class="t">功能模块</span><span class="c" id="mlCount">5 · 4 已描述</span>
+            <button class="fold" type="button" id="mlFold" title="收起列表" onclick="toggleModList()">«</button>
+          </div>
+          <div class="ml-rail" onclick="toggleModList()" title="展开模块列表">
+            <span class="n" id="mlRailN">8</span>
+            <span class="vt">功能模块</span>
+            <span style="font-size:10px;color:var(--faint-foreground)">»</span>
+          </div>
+          <div class="ml-scroll" id="modRows"></div>
+          <button class="ml-add" type="button" onclick="toast('新建模块：说明与原型可在同一处挂载')">＋ 新建模块</button>
+        </div>
+        <div class="detail">
+          <div class="modhead" id="modHead"></div>
+          <div class="maintabs">
+            <span class="mtab on">原型图 <span class="n" id="mtabFp">8</span></span>
+            <span class="mtab">变更概览 <span class="n">2</span></span>
+            <span class="mtab">需求与任务 <span class="n" id="mtabReq">3</span></span>
+            <span class="mtab">验收与覆盖 <span class="n" id="mtabCov">82%</span></span>
+            <span class="mtabs-note">对象 / 策略 / 图谱邻域已收起 —— 作为功能点的实现证据挂在 FP 行里</span>
+          </div>
+          <div class="pvtool">
+            <span class="seg"><span class="active">HTML 原型</span><span>Storybook 对照</span></span>
+            <div class="vsel" id="reqSel"><span class="lb">需求</span><span id="reqName">MUL-455 归档与权限</span><span class="ar">▾</span></div>
+            <span class="seg"><span class="active">单版</span><span>并排对比</span></span>
+
+            <!-- 原型版本下拉（替代左侧版本栏） -->
+            <div class="vsel" id="protoSel" onclick="toggleMenu('protoMenu', event)">
+              <span class="lb">原型</span><span id="protoSelLabel">v3 · confirmed</span><span class="ar">▾</span>
+              <div class="vmenu" id="protoMenu"><div class="mh">原型版本（append-only）</div><div id="protoMenuItems"></div></div>
+            </div>
+            <div class="vsel brief" id="briefSel" onclick="toggleMenu('briefMenu', event)">
+              <span class="lb">说明</span><span id="briefSelLabel">v3</span><span class="ar">▾</span>
+              <div class="vmenu" id="briefMenu"><div class="mh">说明版本</div><div id="briefMenuItems"></div></div>
+            </div>
+            <span class="sp">
+              <span class="btn sm pri" id="editBtn" onclick="toggleEdit()">✎ 编辑</span>
+              <span class="btn sm" onclick="toast('草案篮：2 处改动 · 你 1 / AI 1；点「发布」才成新版本')">草案 <b style="color:oklch(0.55 0.13 60)">2</b></span>
+              <span class="btn sm" onclick="toast('关联需求：写 issue_feature_binding，不改说明主体')">关联</span>
+              <span class="btn sm" onclick="toast('新建原型：成对生成 prototype 草案 + 说明草案')">＋ 新建原型</span>
+            </span>
+          </div>
+
+          <!-- 草案带：人与 AI 共用一条待发布队列 -->
+          <div class="draftbar" id="draftBar">
+            <span class="db-t">✎ 2 处未发布改动</span>
+            <span class="db-i">你 · 模块目标</span>
+            <span class="db-i ai">AI · FP-03 验收</span>
+            <span class="db-base">基线 说明 v3 / 原型 v3 · 发布后成为 R4</span>
+            <span class="db-a" onclick="toast('差异预览：模块目标改写 1 行 · FP-03 验收 +1 条')">看差异</span>
+            <span class="db-a" onclick="toast('已放弃 2 处草案，回到 v3')">放弃</span>
+            <span class="db-go" onclick="publishDraft()">发布 v4</span>
+          </div>
+
+          <div class="wb" id="wb">
+            <div class="pv">
+              <div class="pvbar">
+                <span class="f" id="pvFile">declaration-list.html</span>
+                <span style="color:var(--faint-foreground)">·</span>
+                <span id="pvVer">v3</span>
+                <span class="b" id="pvStatus">confirmed</span>
+                <span style="margin-left:auto" id="pvStat">6 / 8 功能点在场</span>
+              </div>
+              <div class="pframe" id="pvBody"></div>
+              <div class="pvfoot">
+                <span class="q" id="pvHint">点原型里的任一元素，可直接定位到右侧对应功能点</span>
+                <span class="r" id="pvCount">v3 · 标注 6/8</span>
+              </div>
+              <div class="savebar">
+                <span>编辑中 · 改动先进草案，不直接覆盖当前版本</span>
+                <span class="g"><span onclick="toast('已存为草案：基线下一次发布时一起校验')">存草案</span><span onclick="toggleEdit()">退出编辑</span></span>
+              </div>
+            </div>
+
+            <div class="splitter" id="splitter" title="拖动调整右侧宽度"></div>
+
+            <div class="sidepane" id="sidePane">
+              <!-- 收起态 -->
+              <div class="sp-rail" onclick="toggleSide()">
+                <span class="ic">‹</span>
+                <span class="vt">功能点详解</span>
+              </div>
+              <!-- 展开态 -->
+              <div class="sp-full">
+                <div class="sp-head">
+                  <span class="t">功能点详解</span>
+                  <span class="pill mute" id="spVerPill">v3</span>
+                  <span class="grow">
+                    <span class="iconbtn" title="宽度：窄" onclick="setSpw(300)">⤢</span>
+                    <span class="iconbtn" title="宽度：默认" onclick="setSpw(360)">⇔</span>
+                    <span class="iconbtn" title="收起侧栏" onclick="toggleSide()">›</span>
+                  </span>
+                </div>
+                <div class="pairbar ok" id="pairBar"></div>
+                <div class="anchorbar">
+                  <span onclick="scrollToSec('blk-brief')">说明</span>
+                  <span onclick="scrollToSec('blk-fp')">功能点 <b id="anFp">8</b></span>
+                  <span onclick="scrollToSec('blk-ver')">版本</span>
+                  <span style="margin-left:auto;color:var(--brand)" onclick="toast('编辑：在当前版之上生成新草案，保存即新版本')">＋ 编辑</span>
+                </div>
+                <div class="sp-scroll" id="spScroll"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="notes">
+  <li><b>①</b> 删除 <code>vt-rail</code>：版本切换全部进顶部 <code>.vsel</code> 下拉（原型版本 + 说明版本两个小下拉），横向空间还给预览。</li>
+  <li><b>②</b> 右栏宽度由 <code>--spw</code> 驱动，默认 360，中缝 <code>.splitter</code> 指针拖拽 300–560 连续可调，并记忆到本地偏好。</li>
+  <li><b>③</b> 收起态 30px：只留竖排「功能点详解」+ 展开箭头，预览区吃满；再点恢复原宽度。</li>
+  <li><b>④</b> 右栏内每个字段带来源标签：<code>human</code>（人工填写）/ <code>ai</code>（AI 自动更新）/ <code>todo</code>（待填写），并标注所属版本号。能算出来的值（版本号、覆盖率、标注数）只出现在标题 pill、配对条与清单计数里，<b>不单独占一块只读区</b>。</li>
+  <li><b>⑤</b> 左栏：默认 176px（原 222），<code>«</code> 收到 42px 竖条，状态记本地偏好、<b>切模块不重置</b>；底改成浅浅的渐变灰，选中行白底 + 3px 品牌竖条，一眼能看出「现在在看哪个模块」。</li>
+  <li><b>⑥</b> 子 TAB <b>6 → 4</b>：删掉「模块对象 24」「模块策略 2」「图谱邻域」，剩下的「规格覆盖率」并入「验收与覆盖」。删掉的不丢能力：<b>对象与策略作为功能点的实现证据挂在 FP 行（<code>impl_map</code>）</b>，邻域回图谱视图看。</li>
+</ul>
+
+<!-- ================= 画面 2 ================= -->
+<div class="frame-head" id="f2">
+  <h2>画面 2 · 改一版只要三步：改 → 看差异 → 发布（人和 Agent 走同一条路）</h2>
+  <p>要求 ③ 的落地方式：<b>不是给 Agent 开一个新入口，而是让它和人共用同一个「草案 → 发布」通道</b>。人在界面上点 <code>✎ 编辑</code>，Agent 在聊天里说一句话，两者写出来的东西是同一个对象（<code>proposal</code>：基线版本 + 字段 patch + 来源）；差异逐条可看，<b>发布只能由人点</b>，发布后追加 v4、旧版一行不改。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>一条链路 · 两个入口 · 一个草案队列 · 一次发布</span><em>编辑与迭代主线</em></div>
+  <div class="mcpflow">
+    <div class="mstep"><div class="pn">1</div><b>开始改</b><span>人：右栏 / 预览里点 <code>✎</code>，或工具条 <code>✎ 编辑</code><br>Agent：在聊天里说「把状态筛选改成多选」，或按功能点发起补写</span></div>
+    <div class="marrow">→</div>
+    <div class="mstep"><div class="pn">2</div><b>写草案</b><span>只存差异，不碰当前版本<br>带上 <code>base_version</code>（你从哪个版开始改）<br>AI 与人工各带来源标签</span></div>
+    <div class="marrow">→</div>
+    <div class="mstep"><div class="pn">3</div><b>看差异</b><span>顶端草案带：谁改的、改了什么、基线是哪个版<br><code>看差异</code> 逐字段对比，AI 的改动可逐条接受</span></div>
+    <div class="marrow">→</div>
+    <div class="mstep"><div class="pn">4</div><b>发布</b><span>只能由人点（AI 无发布权）<br>说明与原型一起发布 → <code>R4</code><br>基线被人改过就报冲突，让你重看</span></div>
+    <div class="marrow">→</div>
+    <div class="mstep"><div class="pn">5</div><b>成为新版本</b><span>追加 <code>v4</code>，旧版只读不删<br>回滚 = 以 v3 为底再发一版<br>版本记录里一行一人一句</span></div>
+  </div>
+
+  <div class="sect">
+    <div class="sect-t">三个入口，一套规则<span class="r">差别只在“怎么发起”，不在“能不能改”</span></div>
+    <table class="dtable">
+      <thead><tr><th style="width:130px">入口</th><th style="width:210px">发起的动作</th><th>典型场景</th><th style="width:200px">系统必须保证</th></tr></thead>
+      <tbody>
+        <tr><td class="k">右栏就地编辑</td><td>点字段 ✎ → 改一行 → <code>存草案</code></td><td>补一句模块目标、改一条验收</td><td>只改一个字段，不连带整篇渲染</td></tr>
+        <tr><td class="k">预览里点元素</td><td>点原型里的区块 → 改这个功能点的说明</td><td>看到哪里不对就改哪里</td><td>元素与功能点必须能对应上（有标注时）</td></tr>
+        <tr><td class="k">聊天里让 Agent 改</td><td>“把筛选改成多选”/“按截图重写 FP-02”</td><td>批量重写、按原型反推说明</td><td>只产出草案，不直接发布；改动逐条可驳回</td></tr>
+      </tbody>
+    </table>
+    <div class="mini-note">AI 与人工的写入口完全相同；界面上只说「你」/「AI」，不出现任何工具名。</div>
+  </div>
+
+  <div class="sect">
+    <div class="sect-t">三种快速迭代，别把简单事变复杂<span class="r">原型改没改，决定发布方式</span></div>
+    <table class="dtable">
+      <thead><tr><th style="width:150px">你要改什么</th><th style="width:190px">界面上的动作</th><th>系统做什么</th><th style="width:180px">发布后的结果</th></tr></thead>
+      <tbody>
+        <tr><td class="k">只改说明</td><td><code>✎</code> 改字段 → 发布</td><td>只升说明版本，原型版本不动</td><td><code>说明 v4</code>，原型仍 v3（不强行成对）</td></tr>
+        <tr><td class="k">只改原型</td><td>上传/替换 HTML → 发布</td><td>重新抽功能点，算出新增 / 变更 / 移除</td><td><code>原型 v4</code> + 清单里带增减标签</td></tr>
+        <tr><td class="k">两者一起改</td><td>先改原型再补说明 → 发布</td><td>一次事务内两侧同时升版，检查配对完整性</td><td><code>R4</code>：说明 v4 ⨯ 原型 v4</td></tr>
+      </tbody>
+    </table>
+    <div class="mini-note"><b>不做的事</b>：不引入工单式审批流、不做草稿自动过期、不要求每次改动都写理由。</div>
+  </div>
+</div>
+<ul class="notes">
+  <li><b>①</b> 草案是独立队列：<code>proposal</code> 只存与基线的差异，所以两个人在不同字段上同时改不会互相覆盖；同一字段才冲突。</li>
+  <li><b>②</b> 冲突只发生在发布这一刻：基线变了就拦下让你重看差异，不静默合并、不丢改动。</li>
+  <li><b>③</b> Agent 能做全部编辑动作，唯独不能点发布——这是“迭代可追溯”的底线。</li>
+  <li><b>④</b> 版本只追加：改错了就再从旧版发一版，历史永远可回溯到“第几次改动、谁改的、改了什么”。</li>
+</ul>
+
+<!-- ================= 画面 3 ================= -->
+<div class="frame-head" id="f3">
+  <h2>画面 3 · 「功能点详解」只留三段，功能点详情只留四段</h2>
+  <p>右栏只有三段，顺序固定：<b>① 模块说明（可编辑，逐字段标来源与版本）</b> → <b>② 功能点清单 + 选中详情</b> → <b>③ 版本记录</b>。原先那块「🔒 系统信息（只读 · 自动生成）」整块去掉——模块、图谱节点、权威版本、覆盖率、标注数这些值在标题、配对条、清单计数里都读得到，单独占一块只读区只是噪音。功能点详情同步从 9 段收到 4 段：<b>功能描述与定位 / 功能细节要求 / 交互与依赖 / 验收标准</b>，每段 1–3 条，缺就是缺（虚线 + 待填写）。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>功能点详解 — 排版与字段归属</span><em>静态放大 · 1:1 字体</em></div>
+  <div style="display:flex;align-items:stretch;min-height:0">
+    <!-- 左：放大版右栏 -->
+    <div style="width:486px;flex:none;border-right:1px solid var(--surface-border);background:var(--surface);display:flex;flex-direction:column">
+      <div class="sp-head">
+        <span class="anno">1</span>
+        <span class="t">功能点详解</span>
+        <span class="pill mute">说明 v3</span>
+        <span class="grow">
+          <span class="iconbtn">⤢</span><span class="iconbtn">⇔</span><span class="iconbtn">›</span>
+        </span>
+      </div>
+      <div class="pairbar ok"><span class="anno ok" style="min-width:14px;height:14px;font-size:9px">2</span>
+        说明 v3 ⨯ 原型 v3 已成对（R3）<span class="r">变更记录 ›</span>
+      </div>
+      <div class="anchorbar">
+        <span>说明</span><span>功能点 8</span><span>版本</span>
+        <span style="margin-left:auto;color:var(--brand)">＋ 编辑</span>
+      </div>
+      <div style="flex:1;overflow:auto">
+
+        <!-- 模块说明（原「系统信息」只读区已整块去掉：8 个值在标题/配对条/计数里已有） -->
+        <div class="blk">
+          <div class="blk-h"><span class="anno" style="min-width:14px;height:14px;font-size:9px">3</span>模块说明<span class="r">v3 · 7 字段 · 2 待填</span></div>
+          <div class="blk-b">
+            <div class="frow todo"><span class="fk">模块定位</span><span class="fv">一句话说明这个模块为谁解决什么问题</span><span class="fsrc todo">待填写</span><span class="edit">✎</span></div>
+            <div class="frow"><span class="fk">目标</span><span class="fv">让申报方在 3 步内完成提交与撤回，管理员可批量处理。</span><span class="fsrc human">人工 v3</span><span class="edit">✎</span></div>
+            <div class="frow"><span class="fk">范围</span><span class="fv">申报列表、新建、撤回、归档区、状态筛选、权限矩阵。</span><span class="fsrc ai">AI v3</span><span class="edit">✎</span></div>
+            <div class="frow"><span class="fk">非目标</span><span class="fv">批量审批流、跨租户导出（V2 再说）。</span><span class="fsrc human">人工 v2</span><span class="edit">✎</span></div>
+            <div class="frow"><span class="fk">角色</span><span class="fv">申报人 / 审核人 / 管理员</span><span class="fsrc ai">AI v3</span><span class="edit">✎</span></div>
+            <div class="frow"><span class="fk">关键流程</span><span class="fv">新建 → 提交 → 撤回 → 归档；每步有原型入口。</span><span class="fsrc ai">AI v3</span><span class="edit">✎</span></div>
+            <div class="frow todo"><span class="fk">验收目标</span><span class="fv">按功能点逐条勾选，未勾选项不允许发布</span><span class="fsrc todo">待填写</span><span class="edit">✎</span></div>
+            <div class="frow" style="border:0;padding-top:6px"><span class="fk"></span><span class="fv" style="color:var(--brand);font-weight:600;cursor:pointer">＋ 添加字段（可自定义 key）</span><span class="fsrc" style="background:none"></span><span class="edit"></span></div>
+          </div>
+        </div>
+
+        <!-- 功能点 -->
+        <div class="blk">
+          <div class="blk-h"><span class="anno" style="min-width:14px;height:14px;font-size:9px">4</span>功能点清单<span class="r">8 个 · 6 已标注</span></div>
+          <div class="fpg">列表与筛选<span class="c">3</span></div>
+          <div class="fp on"><span class="fp-code">FP-01</span><span class="fp-main"><span class="fp-nm"><span class="nm">申报列表</span><span class="tag same">—</span></span><span class="fp-sub">表格 + 空态 + 分页；列可配置</span></span><span class="fp-side"><span class="fp-cap full">◍4/4</span><span class="fp-ac done">2/2</span><span class="fp-ac">🔗</span></span></div>
+          <div class="fp"><span class="fp-code">FP-02</span><span class="fp-main"><span class="fp-nm"><span class="nm">状态筛选</span><span class="tag chg">变更</span></span><span class="fp-sub">新增「待我审」快捷筛</span></span><span class="fp-side"><span class="fp-cap full">◍4/4</span><span class="fp-ac bad">1/2</span><span class="fp-ac">🔗</span></span></div>
+          <div class="fp"><span class="fp-code">FP-03</span><span class="fp-main"><span class="fp-nm"><span class="nm">新建申报</span><span class="tag new">新增</span></span><span class="fp-sub">抽屉式表单，必填 4 项</span></span><span class="fp-side"><span class="fp-cap full">◍4/4</span><span class="fp-ac done">2/2</span><span class="fp-ac">🔗</span></span></div>
+          <div class="fpg">明细与操作<span class="c">3</span></div>
+          <div class="fp"><span class="fp-code">FP-04</span><span class="fp-main"><span class="fp-nm"><span class="nm">撤回申报</span><span class="tag same">—</span></span><span class="fp-sub">二次确认 + 原因必填</span></span><span class="fp-side"><span class="fp-cap full">◍4/4</span><span class="fp-ac done">2/2</span><span class="fp-ac">🔗</span></span></div>
+          <div class="fp"><span class="fp-code">FP-05</span><span class="fp-main"><span class="fp-nm"><span class="nm">批量导出</span><span class="tag chg">变更</span></span><span class="fp-sub">导出范围改为当前筛选</span></span><span class="fp-side"><span class="fp-cap part">◍3/4</span><span class="fp-ac">1/2</span><span class="fp-ac">🔗</span></span></div>
+          <div class="fp gone"><span class="fp-code">FP-08</span><span class="fp-main"><span class="fp-nm"><span class="nm">申报提醒</span><span class="tag del">v4 移除</span></span><span class="fp-sub">移出范围，原型同步移除</span></span><span class="fp-side"><span class="fp-cap">◍—</span><span class="fp-ac">—</span><span class="fp-ac">—</span></span></div>
+
+          <!-- 详情卡：功能点详情 4 段（一段 1–3 条，一屏看完） -->
+          <div class="detail-card">
+            <div class="dc-head"><span class="anno" style="min-width:14px;height:14px;font-size:9px">6</span>FP-02 状态筛选<span class="pill warn">v3 变更</span><span class="fp-cap full" style="margin-left:auto">4/4</span><span class="x">收起 ✕</span></div>
+            <div class="dc-body">
+              <div class="dc-sec">1 · 功能描述与定位<span class="n">原型位置：列表头右侧</span></div>
+              <div class="dc-text">把申报单按生命周期切片；本版由单选改多选，并新增「待我审」预设组合，筛选态与 URL 双向同步。</div>
+              <div class="dc-sec">2 · 功能细节要求<span class="n">3 条</span></div>
+              <ol class="dc-rules"><li>多选之间 OR，与关键字 AND</li><li>「待我审」是预设组合，不新增状态枚举值</li><li>刷新与分享链接后筛选态可复现</li></ol>
+              <div class="dc-sec">3 · 交互与依赖</div>
+              <div class="dc-io">
+                <div class="dc-io-c"><b>交互</b>点段位即生效，200ms 内出结果（骨架屏先行）</div>
+                <div class="dc-io-c"><b>依赖</b>状态枚举来自 <code class="mono-sm">issue.status</code>；被 FP-01 / FP-05 复用</div>
+              </div>
+              <div class="dc-sec">4 · 验收标准<span class="n">1 / 2 已通过</span></div>
+              <div class="dc-ac"><div><span class="ok">✓</span><span>多段组合筛选结果正确</span></div><div><span class="no">○</span><span>分享链接在无权限角色下自动降级</span></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 版本记录 -->
+        <div class="blk">
+          <div class="blk-h"><span class="anno" style="min-width:14px;height:14px;font-size:9px">5</span>版本记录<span class="r">每次编辑 = 一版</span></div>
+          <div class="blk-b">
+            <div class="ver-row"><span class="v">v3</span><span class="m"><b>AI</b> 自动更新 · 目标/范围/角色 · <span style="color:oklch(0.4 0.12 145)">+3</span> <span style="color:oklch(0.47 0.18 27)">−1</span></span><span class="t">10-25 14:02</span></div>
+            <div class="ver-row"><span class="v">v2</span><span class="m"><b>人工</b> 张三 · 非目标补充 · +1</span><span class="t">10-23 09:40</span></div>
+            <div class="ver-row"><span class="v">v1</span><span class="m"><b>AI</b> 从需求 MUL-401 抽取 · 首次建档</span><span class="t">10-21 16:11</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右：图例 + 字段总表 -->
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div class="sect">
+        <div class="sect-t">三类内容 · 只留「要人写的」和「要人看的」<span class="r">库能算的不占位</span></div>
+        <div class="grid2" style="gap:0;border:1px solid var(--surface-border);border-radius:8px;overflow:hidden">
+          <div style="padding:9px 10px">
+            <div style="font-size:10.5px;font-weight:700;margin-bottom:4px">✎ 待填写 / 已填写 <span class="fsrc human">人工</span> <span class="fsrc ai">AI</span></div>
+            <div class="hint">模块说明 7 个字段，加每个功能点四段详情（描述与定位 / 细节要求 / 交互与依赖 / 验收标准）。空值显示<b>虚线 + 黄色「待填写」</b>，不留空白也不猜；填了就是<b>一条可追溯的版本</b>。</div>
+          </div>
+          <div style="padding:9px 10px">
+            <div style="font-size:10.5px;font-weight:700;margin-bottom:4px">◈ 功能点清单 <span class="fsrc ai">可编辑</span></div>
+            <div class="hint">按原型区块分组；行右侧是<b>详情完成度 ◍n/4</b>与<b>验收进度</b>。点行展开四段详情，新增/移除由版本 diff 驱动，不手工删。</div>
+          </div>
+          <div style="padding:9px 10px;border-top:1px solid var(--surface-border);grid-column:1/-1">
+            <div style="font-size:10.5px;font-weight:700;margin-bottom:4px">↻ 版本记录 <span class="fsrc sys">系统生成</span></div>
+            <div class="hint">一行一版：<b>谁改的</b>（人工 / AI 自动更新）、<b>改了哪些字段</b>、<b>增删行数</b>、时间。append-only，不可编辑不可删除——这是唯一保留的「只读」内容，因为它本身就是审计对象。</div>
+          </div>
+        </div>
+        <div class="mini-note">原先那块「🔒 系统信息（只读 · 自动生成）」已删除：模块 ID、图谱节点、权威版本、覆盖率、标注数、成对版本在标题 pill、配对条与清单计数里都能读到，<b>谁也不需要「读一遍再确认一遍」</b>。</div>
+      </div>
+
+      <div class="sect">
+        <div class="sect-t">字段总表：谁能改、是否进版本、由谁写入<span class="r">与画面 7 的字段字典一一对应</span></div>
+        <table class="dtable">
+          <thead><tr><th>字段</th><th>归属</th><th>人</th><th>AI</th><th>版本化</th><th>写入方</th></tr></thead>
+          <tbody>
+            <tr><td class="k">brief 定位 / 目标 / 范围 / 非目标</td><td>待填写</td><td>✓</td><td>✓</td><td>是</td><td>人工 / AI</td></tr>
+            <tr><td class="k">brief 角色 / 关键流程 / 验收目标</td><td>待填写</td><td>✓</td><td>✓</td><td>是</td><td>人工 / AI</td></tr>
+            <tr><td class="k">fp.desc / fp.loc（描述与定位）</td><td>待填写</td><td>✓</td><td>✓</td><td>是</td><td>人工 / AI</td></tr>
+            <tr><td class="k">fp.req[]（细节要求）</td><td>待填写</td><td>✓</td><td>✓</td><td>是</td><td>人工 / AI</td></tr>
+            <tr><td class="k">fp.inter / fp.deps（交互与依赖）</td><td>待填写</td><td>✓</td><td>✓</td><td>是</td><td>人工 / AI</td></tr>
+            <tr><td class="k">fp.ac[]（验收标准）</td><td>待填写</td><td>✓</td><td>✓（需给依据）</td><td>是</td><td>人工 / AI</td></tr>
+            <tr><td class="k">fp.code / since / removed</td><td>系统</td><td>—</td><td>仅新增/退场</td><td>是</td><td>人工为主</td></tr>
+            <tr><td class="k">原型 HTML 与 data-fp 标注</td><td>产物</td><td>✓</td><td>✓（草案）</td><td>是</td><td>人工 / AI</td></tr>
+          </tbody>
+        </table>
+        <div class="mini-note">「系统」列只留 <span class="mono-sm">fp.code / since / removed</span>：功能点的编号与进退场必须由人发起。版本号、覆盖率、标注数没有写入口——它们只能由写入动作顺带产生；写 owner=system 的 key 直接 422，不靠文档约束。</div>
+      </div>
+
+      <div class="sect">
+        <div class="sect-t">功能点详情 4 段：每段 1–3 条，写不下就拆功能点<span class="r">缺段不猜、按段写、按段发版</span></div>
+        <table class="dtable capdef">
+          <thead><tr><th>段</th><th>落点 key</th><th>写什么</th><th>空值规则</th></tr></thead>
+          <tbody>
+            <tr><td class="k">1 · 功能描述与定位</td><td class="mono-sm">fp.desc / fp.loc</td><td>一句话说清它是什么、替谁解决什么；再用「原型位置：列表头右侧」这种自然语言点出落在原型哪个区块</td><td rowspan="4" style="vertical-align:top">缺段显虚线框 + 黄色「待填写」+ ✎（点击只让 AI 补该段）；<b>不猜、不合并成「暂无」</b>。每段上限 1–3 条，超了就拆功能点。</td></tr>
+            <tr><td class="k">2 · 功能细节要求</td><td class="mono-sm">fp.req[]</td><td>可判定的规则一条一句：校验、排序、状态迁移、权限、边界与兜底</td></tr>
+            <tr><td class="k">3 · 交互与依赖</td><td class="mono-sm">fp.inter / fp.deps</td><td>点了之后发生什么、结果在哪出现；上下游是哪些功能点、改它会波及谁</td></tr>
+            <tr><td class="k">4 · 验收标准</td><td class="mono-sm">fp.ac[]</td><td>每条可勾选的验收项 + 是否已通过（✓ / ○），发布前逐条对</td></tr>
+          </tbody>
+        </table>
+        <div class="mini-note">落点路径 <span class="mono-sm">fp.&lt;code&gt;.*</span> · 人与 AI 均可写 · 逐段版本化（每段修改各自生成新版并带 <span class="mono-sm">base_version</span>，冲突 409）。清单行以 <span class="fp-cap part">◍n/4</span> 标完成度，四段齐备才转 <span class="fp-cap full">◍4/4</span>；退场的功能点显 <span class="fp-cap">◍—</span>，不参与统计。原先的 9 段（能力定义 / 输入输出 / 权限 / 数据落点 / 非功能…）已经合并进这四段——<b>评审要问的问题没少，填的人只用填四处</b>。</div>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="notes">
+  <li><b>改名</b>：右栏标题由「交付与详解」改为「功能点详解」，锚点条同步改为 说明 / 功能点 / 版本（不再放工具入口）。</li>
+  <li><b>排版</b>：删掉「系统信息」只读区（8 个只读值），右栏只剩 模块说明 / 功能点清单 + 详情 / 版本记录；说明区一行一字段（标签 58px + 值 + 来源 chip），功能点按原型区块分组，<b>详情卡四段、每段最多 3 条</b>——一个功能点一屏能看完，不再需要滚三屏。</li>
+  <li><b>不入界面</b>：右栏不出现工具名/MCP——来源只说「人工」或「AI 自动更新」；工具名只活在服务端与研发契约（画面 5 / 7）。</li>
+  <li><b>原型位置不做联动</b>：只有「AI 生成的原型」能自动注入 <code>data-fp</code> 锚点；人工上传 / Axure / Figma 导出的原型要逐个手标，成本不划算。所以详情里只写一句自然语言位置（「列表头右侧」），<b>不进字段契约、不做定位按钮</b>；画板里的双向高亮保留作演示，不对外承诺。</li>
+</ul>
+
+<!-- ================= 画面 3 ================= -->
+<div class="frame-head" id="f4">
+  <h2>画面 4 · 宽度三态：默认 360 / 拖到 480 / 收起 30</h2>
+  <p>宽度不是写死的：中缝可连续拖拽（300–560），右栏头部两个快捷按钮切「窄 / 默认」，最右箭头收起。收起态保留 30px 竖条，竖条上的「功能点详解」竖排文字本身就是展开入口——不额外占一行工具条，也不像抽屉那样遮挡预览。宽度与折叠态写进本地偏好，<b>换模块不重置</b>。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>宽度三态对照</span><em>同一画面 · 只改 --spw</em></div>
+  <div class="demo-stage">
+    <div>
+      <div style="display:flex;align-items:center;gap:6px"><span class="anno">A</span><b style="font-size:11px">默认 360px（现在就是）</b></div>
+      <div class="mini-app">
+        <div class="mini-pv" style="flex:68">预览 766px</div>
+        <div class="mini-sp" style="flex:32"><i></i><i></i><i></i><i></i><i></i><span>功能点详解<br>360px</span></div>
+      </div>
+      <div class="mini-cap">首屏最常用。说明 7 行 + 功能点 8 行刚好一屏，不用滚动就能读完模块全貌。</div>
+    </div>
+    <div>
+      <div style="display:flex;align-items:center;gap:6px"><span class="anno">B</span><b style="font-size:11px">拖宽 480px（写说明时）</b></div>
+      <div class="mini-app">
+        <div class="mini-pv" style="flex:57">预览 646px</div>
+        <div class="mini-sp wide" style="flex:43"><i></i><i></i><i></i><i></i><span>功能点详解<br>480px</span></div>
+      </div>
+      <div class="mini-cap">编辑长正文（关键流程、验收目标）时拖宽，字段值一行放得下更多字；拖窄回来预览立即变大。</div>
+    </div>
+    <div>
+      <div style="display:flex;align-items:center;gap:6px"><span class="anno">C</span><b style="font-size:11px">收起 30px（看原型时）</b></div>
+      <div class="mini-app">
+        <div class="mini-pv" style="flex:97">预览 1096px</div>
+        <div class="mini-sp col" style="flex:3"><span>功能点详解 ›</span></div>
+      </div>
+      <div class="mini-cap">纯看原型、或并排对比两版时收起。竖条只有一个点击目标，误触率低；点它回到收起前的宽度。</div>
+    </div>
+  </div>
+  <div class="sect" style="border-top:1px solid var(--surface-border)">
+    <div class="grid3">
+      <div style="padding:0 12px 0 0">
+        <div class="kv"><span class="k">拖拽范围</span><span class="v">300 – 560px，超出即停（不夹掉预览最小 300）</span></div>
+        <div class="kv"><span class="k">快捷</span><span class="v">⤢ 窄 300 · ⇔ 默认 360 · › 收起</span></div>
+      </div>
+      <div style="padding:0 12px">
+        <div class="kv"><span class="k">记忆</span><span class="v">宽度与折叠态存本地偏好，刷新/切模块保持</span></div>
+        <div class="kv"><span class="k">窄视口</span><span class="v">&lt;1120px 时右栏转浮层覆盖，不挤压预览</span></div>
+      </div>
+      <div style="padding:0 0 0 12px">
+        <div class="kv"><span class="k">收起时</span><span class="v">不卸载内容，展开无请求、无闪烁</span></div>
+        <div class="kv"><span class="k">键盘</span><span class="v">⌥[ / ⌥] 切窄宽，⌘⇧B 折叠</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 画面 4 ================= -->
+<div class="frame-head" id="f5">
+  <h2>画面 5 · AI 编辑链路：字段可读写、每改一次就是一版（服务端，界面不透出）</h2>
+  <p>本屏是给研发看的<b>后台链路</b>，界面里不会出现这些工具名。右栏看到的每一个可填字段，在服务端都有稳定的 <code>field_key</code>（如 <code>brief.goal</code>、<code>fp.FP-02.interaction</code>），并对应一组后台工具（MCP 服务，仅 agent 与服务端之间使用）。<b>读</b>用 <code>module.get</code> 一次拿全（含字段字典、字段值、功能点、两轴版本号）；<b>写</b>用 <code>brief.patch</code> / <code>fp.patch</code>，必须带 <code>base_version</code>——服务端写成功后<b>不覆盖旧值</b>，而是新增一个版本行并把指针推到新版本。界面上只体现为版本记录里的「AI 自动更新 · v4」。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>AI 编辑链路（后台）· 一次 patch 的完整生命周期</span><em>propose → validate → new version</em></div>
+
+  <div class="mcpflow">
+    <div class="mstep"><div class="pn">1</div><b>读</b><span><span class="mono" style="font-size:9px">module.get</span><br>一次返回 brief 字段、功能点四段详情、当前版本号</span></div>
+    <div class="marrow">→</div>
+    <div class="mstep"><div class="pn">2</div><b>组补丁</b><span>只提交要改的 key，带 <span class="mono" style="font-size:9px">base_version=3</span>、<span class="mono" style="font-size:9px">source=agent</span></span></div>
+    <div class="marrow">→</div>
+    <div class="mstep"><div class="pn">3</div><b>三道闸门</b><span>① 只读 key 拒绝 ② base 陈旧 409 ③ 引用不存在的功能点 422</span></div>
+    <div class="marrow">→</div>
+    <div class="mstep"><div class="pn">4</div><b>落新版本</b><span>写 <span class="mono" style="font-size:9px">brief_version v4</span>（append-only），旧版不动、指针推进</span></div>
+    <div class="marrow">→</div>
+    <div class="mstep"><div class="pn">5</div><b>返回 diff</b><span><span class="mono" style="font-size:9px">{version:4, diff:[…]}</span>；右栏局部刷新，版本记录多一行</span></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--surface-border)">
+    <div style="padding:12px 14px;border-right:1px solid var(--surface-border)">
+      <div class="sect-t">一次真实调用（AI 替人补全「范围」与「角色」）</div>
+      <div class="codeblk"><span class="c">// 1) 读：拿到 base_version 与全部 field_key</span>
+<span class="k">call</span> module.get { module_id: <span class="s">"pm_8f3a"</span> }
+<span class="c">// → { brief: {version:3, fields:{...}}, fps:[…] }</span>
+
+<span class="c">// 2) 写：只提交两个 key，显式声明来源与依据</span>
+<span class="k">call</span> brief.patch {
+  module_id: <span class="s">"pm_8f3a"</span>,
+  base_version: <span class="s">3</span>,
+  source: <span class="s">"agent"</span>,
+  run_id: <span class="s">"run_7c21"</span>,
+  fields: {
+    <span class="s">"brief.scope"</span>: <span class="s">"申报列表、新建、撤回、归档区、状态筛选、权限矩阵"</span>,
+    <span class="s">"brief.roles"</span>: [<span class="s">"申报人"</span>,<span class="s">"审核人"</span>,<span class="s">"管理员"</span>]
+  },
+  note: <span class="s">"根据 MUL-455 需求描述补全"</span>
+}
+<span class="c">// → 200 { version: 4, prev: 3, diff: [</span>
+<span class="c">//     {key:"brief.scope", old:null, new:"…", op:"add"},</span>
+<span class="c">//     {key:"brief.roles", old:null, new:[…], op:"add"} ] }</span></div>
+      <div class="mini-note">同一套工具在聊天里由 agent 直接调、在右栏「编辑」里由人工调——<b>人机只是 source 不同，路径与版本机制完全相同</b>，不存两套写入逻辑。</div>
+    </div>
+
+    <div style="padding:12px 14px">
+      <div class="sect-t">右侧立即发生的变化<span class="r">只重绘变化的部分</span></div>
+      <table class="dtable">
+        <thead><tr><th>位置</th><th>变化</th></tr></thead>
+        <tbody>
+          <tr><td class="k">头部 pill</td><td><span class="pill mute">说明 v3</span> → <span class="pill" style="background:oklch(0.94 0.03 255);color:var(--brand)">说明 v4</span></td></tr>
+          <tr><td class="k">字段行</td><td>「范围 / 角色」由黄色待填写变成绿标 <span class="fsrc ai">AI v4</span></td></tr>
+          <tr><td class="k">顶部下拉</td><td>说明下拉多出 v4，当前项自动选中</td></tr>
+          <tr><td class="k">版本记录</td><td>插入一行：<b>v4 · AI 自动更新 · +2 字段</b>（界面只显示这个，不显示工具名）</td></tr>
+          <tr><td class="k">配对条</td><td>变为「草案 v4 未发布，权威仍是 v3」→ 需人工成对发布</td></tr>
+          <tr><td class="k">通知</td><td><span class="mono-sm">project_module:spec_updated</span>，聊天侧 agent 可感知</td></tr>
+        </tbody>
+      </table>
+      <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">
+        <span class="pill ok">✓ 旧版 v3 仍在，可对比可回滚</span>
+        <span class="pill warn">⚠ 未发布 → 不影响验收口径</span>
+        <span class="pill bad">✕ 写只读 key → 422</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sect" style="border-top:1px solid var(--surface-border)">
+    <div class="sect-t">冲突与人工闸门：不靠礼貌，靠版本号</div>
+    <div class="grid3">
+      <div style="padding:0 12px 0 0">
+        <div class="kv"><span class="k">base 陈旧</span><span class="v">AI 拿着 v3 提交但库已到 v4 → <b>409 base_stale</b>，回传当前版与冲突 key，要求重读后重试</span></div>
+        <div class="kv"><span class="k">并发同值</span><span class="v">两路写同一 key 且值相同 → 幂等返回已有版本，不额外搓一版</span></div>
+      </div>
+      <div style="padding:0 12px">
+        <div class="kv"><span class="k">越权</span><span class="v">AI 试图改 <span class="mono-sm">fp.code</span> / <span class="mono-sm">canonical_prototype_version</span> → schema 层 422</span></div>
+        <div class="kv"><span class="k">引用校验</span><span class="v">正文引用 <span class="mono-sm">[[FP-09]]</span> 但不存在 → 422 并列出可用 code</span></div>
+      </div>
+      <div style="padding:0 0 0 12px">
+        <div class="kv"><span class="k">发布闸门</span><span class="v">AI <b>永远不能</b>成对发布（不改 canonical）→ <span class="mono-sm">release.publish</span> 仅人可调</span></div>
+        <div class="kv"><span class="k">回滚</span><span class="v">不允许删版本；回滚 = 以旧版为基发一个新版</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="notes">
+  <li><b>为什么必带 base_version</b>：说明是人机共写的，没有乐观锁就会出现「AI 拿旧底稿覆盖人工刚写的一段」。带版本号 + 409 才能把冲突交回给调用方而不是默默丢失。</li>
+  <li><b>为什么每次写都成版本</b>：因为右栏的「来源 + 版本」标签、版本记录回放、agent 越权审计全靠它；如果只存最新值，三类追溯全部失效。</li>
+</ul>
+
+<!-- ================= 画面 5 ================= -->
+<div class="frame-head" id="f6">
+  <h2>画面 6 · 版本记录：每次编辑一行，说明与原型各一本账</h2>
+  <p>两条时间轴：<b>说明轴</b>（brief v1…v4，人与 AI 共写）与<b>原型轴</b>（proto v1…v4，文件驱动）。两轴各自 append-only，发布时用 <code>module_release</code> 把「哪版说明 + 哪版原型」绑成一个成对版本（R1…R3）。右栏版本记录是说明轴的投影；原型轴在顶部下拉里看。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>版本记录 · 说明轴与原型轴成对发布</span><em>append-only</em></div>
+  <div style="padding:0">
+    <table class="dtable">
+      <thead><tr><th>版本</th><th>类型</th><th>来源</th><th>变更字段 / 变更点</th><th>diff</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr><td class="k">brief v4</td><td>说明</td><td><span class="fsrc ai">AI · run_7c21</span></td><td>范围、角色（2 字段）</td><td><span style="color:oklch(0.4 0.12 145)">+2</span></td><td><span class="pill warn">草案</span></td><td><span class="wf-act">对比 v3</span> · <span class="wf-act">发布</span></td></tr>
+        <tr><td class="k">brief v3</td><td>说明</td><td><span class="fsrc ai">AI 自动更新</span></td><td>目标、范围、角色（3 字段）</td><td><span style="color:oklch(0.4 0.12 145)">+3</span> <span style="color:oklch(0.47 0.18 27)">−1</span></td><td><span class="pill ok">已发布 R3</span></td><td><span class="wf-act">对比</span> · <span class="wf-act">以此为基</span></td></tr>
+        <tr><td class="k">proto v3</td><td>原型</td><td><span class="fsrc human">人工 · 张三</span></td><td>补 FP-05 批量导出入口</td><td>4 个元素</td><td><span class="pill ok">canonical</span></td><td><span class="wf-act">查看</span></td></tr>
+        <tr><td class="k">brief v2</td><td>说明</td><td><span class="fsrc human">人工 · 张三</span></td><td>非目标补充</td><td><span style="color:oklch(0.4 0.12 145)">+1</span></td><td><span class="pill mute">已归档</span></td><td><span class="wf-act">对比</span> · <span class="wf-act">以此为基</span></td></tr>
+        <tr><td class="k">proto v2</td><td>原型</td><td><span class="fsrc human">人工</span></td><td>列表列配置、空态</td><td>5 个元素</td><td><span class="pill mute">已归档</span></td><td><span class="wf-act">查看</span></td></tr>
+        <tr><td class="k">brief v1</td><td>说明</td><td><span class="fsrc ai">AI · 需求抽取</span></td><td>首次建档（MUL-401）</td><td>7 字段</td><td><span class="pill mute">已归档</span></td><td><span class="wf-act">对比</span></td></tr>
+        <tr style="background:oklch(0.975 0.02 255)"><td class="k">R3</td><td>成对</td><td><span class="fsrc human">人工发布</span></td><td>brief v3 + proto v3</td><td>—</td><td><span class="pill ok">当前权威</span></td><td><span class="wf-act">回滚</span>（以旧为基发新版）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="sect" style="border-top:1px solid var(--surface-border)">
+    <div class="grid2">
+      <div style="padding-right:14px">
+        <div class="sect-t">三条不可变性</div>
+        <div class="kv"><span class="k">序号不复用</span><span class="v">删掉的版本号不会回收；新写入永远 max+1</span></div>
+        <div class="kv"><span class="k">旧版不可改</span><span class="v">只有 status 可从 draft → published → superseded</span></div>
+        <div class="kv"><span class="k">指针单写点</span><span class="v">只有 release.publish 能改 canonical_prototype_version / brief_version</span></div>
+        <div class="mini-note">所以「AI 自主迭代」不会把历史抹掉：它只会不断加行，人随时能在时间轴上逐行回看是哪个 run、哪些字段、加减多少。</div>
+      </div>
+      <div style="padding-left:14px">
+        <div class="sect-t">回滚不等于删除</div>
+        <div class="hint">点「回滚到 R1」→ 读取 R1 的 brief v1 + proto v1 → <b>以它们为 base 生成 brief v5 / proto v5</b> → 再成对发布为 R4。好处：①历史完整；②报告与审计不会出现“版本消失”；③回滚动作本身也是一次可追溯的变更（source=rollback）。</div>
+        <div class="mini-note">对应接口：<span class="mono-sm">POST /modules/{id}/releases/{v}/rollback</span>，请求体只传目标 release 号，不传内容。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 画面 6 ================= -->
+<div class="frame-head" id="f7">
+  <h2>画面 7 · 契约：字段字典一份、后台工具七个、前端落点三处</h2>
+  <p>要把「哪些字段可写、哪些只能由库算」写死在代码里，最省事的做法是把<b>字段字典存表</b>（<code>module_field_def</code>）：右栏照着它渲染、服务端工具的 <code>inputSchema</code> 也照着它生成。<b>一份定义两处用</b>，不会出现“界面能改但后台改不了”或反之。<b>这些工具名不进产品界面</b>——界面只呈现「人工 / AI 自动更新」与版本号，本节供研发对齐契约。</p>
+</div>
+<div class="frame">
+  <div class="frame-bar"><i></i><i></i><i></i><span>数据与接口契约</span><em>migration 499–501</em></div>
+
+  <div class="sect">
+    <div class="sect-t">1 · 三张表<span class="r">沿用 495–498 功能点四表，不重建</span></div>
+    <div class="codeblk"><span class="c">-- 499 字段字典：界面与后台工具 schema 的唯一来源</span>
+CREATE TABLE module_field_def (
+  key         text PRIMARY KEY,          <span class="c">-- 'brief.goal' / 'fp.*.interaction'</span>
+  scope       text NOT NULL,             <span class="c">-- 'module' | 'feature_point'</span>
+  label       text NOT NULL,
+  ord         int  NOT NULL,
+  kind        text NOT NULL,             <span class="c">-- text | longtext | list | refs</span>
+  owner       text NOT NULL,            <span class="c">-- 'system' | 'user'  ← 库计算 / 可填写</span>
+  writable_by text[] NOT NULL DEFAULT '{human,agent}',
+  versioned   bool NOT NULL DEFAULT true
+);
+
+<span class="c">-- 500 说明版本：一行一版，append-only</span>
+CREATE TABLE module_brief_version (
+  id uuid PRIMARY KEY, module_id uuid NOT NULL REFERENCES project_module(id),
+  version int NOT NULL, base_version int,
+  fields jsonb NOT NULL DEFAULT '{}',    <span class="c">-- {"brief.goal":{"v":"…","by":"agent","at":"…"}}</span>
+  status text NOT NULL DEFAULT 'draft',  <span class="c">-- draft | published | superseded</span>
+  source text NOT NULL,                  <span class="c">-- manual | agent | mcp | extract | rollback</span>
+  source_issue_id uuid, agent_run_id text, diff_summary text,
+  created_by_type text, created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (module_id, version)
+);
+
+<span class="c">-- 501 成对发布 + 模块指针</span>
+CREATE TABLE module_release (
+  id uuid PRIMARY KEY, module_id uuid NOT NULL, version int NOT NULL,
+  brief_version int NOT NULL, prototype_version int NOT NULL,
+  diff jsonb NOT NULL DEFAULT '{}', released_by uuid, created_at timestamptz,
+  UNIQUE (module_id, version)
+);
+ALTER TABLE project_module ADD COLUMN IF NOT EXISTS brief_version int,
+  ADD COLUMN IF NOT EXISTS release_version int;
+CREATE INDEX IF NOT EXISTS idx_mbv_module ON module_brief_version(module_id, version DESC);</div>
+  </div>
+
+  <div class="sect">
+    <div class="sect-t">2 · 后台工具面（MCP 服务）<span class="r">写工具全部返回新版本号 + diff</span></div>
+    <table class="dtable">
+      <thead><tr><th>工具</th><th>类型</th><th>作用</th><th>关键参数</th><th>权限</th></tr></thead>
+      <tbody>
+        <tr><td class="k">module.get</td><td>read</td><td>一次拿字段字典 + 字段值 + 功能点四段详情 + 两轴版本</td><td><span class="mono-sm">module_id</span></td><td><span class="pill ok">人 / AI</span></td></tr>
+        <tr><td class="k">brief.patch</td><td>write</td><td>改模块说明字段（新版本）</td><td><span class="mono-sm">base_version, fields{}, source</span></td><td><span class="pill ok">人 / AI</span></td></tr>
+        <tr><td class="k">fp.patch</td><td>write</td><td>改功能点四段详情（描述与定位 / 细节要求 / 交互与依赖 / 验收）</td><td><span class="mono-sm">code, base_version, fields{}</span></td><td><span class="pill ok">人 / AI</span></td></tr>
+        <tr><td class="k">fp.create / fp.retire</td><td>write</td><td>新增/退场功能点（只能退场不能删）</td><td><span class="mono-sm">code, name, since / removed</span></td><td><span class="pill warn">人为主</span></td></tr>
+        <tr><td class="k">proto.propose</td><td>write</td><td>提交原型草案（只后台草稿，不动 canonical）</td><td><span class="mono-sm">file, base_version, fp_touched[]</span></td><td><span class="pill ok">人 / AI</span></td></tr>
+        <tr><td class="k">releases.list</td><td>read</td><td>两轴版本时间轴</td><td><span class="mono-sm">module_id, kind</span></td><td><span class="pill ok">人 / AI</span></td></tr>
+        <tr><td class="k">release.publish / rollback</td><td>write</td><td>成对发布或回滚（唯一改指针的入口）</td><td><span class="mono-sm">brief_version, prototype_version</span></td><td><span class="pill bad">仅人</span></td></tr>
+      </tbody>
+    </table>
+    <div class="mini-note">MCP 服务与 HTTP 接口共用 handler（工具名不进界面）；CLI 子命令 (<span class="mono-sm">multica module brief patch …</span>) 只是第三张皮。</div>
+  </div>
+
+  <div class="sect">
+    <div class="sect-t">3 · 前端落点<span class="r">文件所有权清晰，可并行</span></div>
+    <table class="dtable">
+      <thead><tr><th>文件</th><th>改动</th></tr></thead>
+      <tbody>
+        <tr><td class="k">graph/module-list-panel.tsx</td><td>行内统计换成「说明 vN · 原型 vN · N 功能点」+ 说明首句；点击主键从 <span class="mono-sm">graph_node_id</span> 改为 <span class="mono-sm">module.id</span>（未桥接模块也能进）</td></tr>
+        <tr><td class="k">sub-tabs/module-prototypes.tsx</td><td><b>删除</b> 左侧版本轴；新增 <span class="mono-sm">.splitter</span> 拖拽、<span class="mono-sm">collapsed</span> 状态与本地偏好</td></tr>
+        <tr><td class="k">prototype-inspector.tsx → feature-detail-pane.tsx</td><td>整体重写为三段式（模块说明 / 功能点 + 详情 / 版本），渲染由 <span class="mono-sm">module_field_def</span> 驱动；功能点详情固定四段、每段最多 3 条</td></tr>
+        <tr><td class="k">core/api + hooks</td><td>新增 <span class="mono-sm">useModuleWorkspace / useBriefPatch / useFpPatch</span>；复用现有 <span class="mono-sm">ArtifactPreviewPane</span> 的 <span class="mono-sm">highlightFp / onSelectFp</span></td></tr>
+      </tbody>
+    </table>
+    <div class="mini-note">与 v1 画板的关系：v1 的「双版本轴 + 成对发布 + 功能点内嵌」全部保留，本版只做<b>布局收敛</b>（去左栏、右栏可收起可拖宽）与<b>字段级可编辑（后台 MCP 服务承载，界面不透出）</b>，不推翻已有结论。</div>
+  </div>
+</div>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+var S = { mod: "m1", v: 3, bv: 3, fp: null, collapsed: false };
+
+/* ---------- 数据 ---------- */
+var MODULES = [
+  {
+    id: "m1", name: "申报清单页", pg: "page", color: "#7c3aed",
+    stats: { obj: 15, pol: 3, req: 1, task: 8 },
+    proto: { canonical: 3, file: "declaration-list.html", versions: [
+      { v: 4, status: "draft", date: "10-29", by: "agent" },
+      { v: 3, status: "confirmed", date: "10-25", by: "human" },
+      { v: 2, status: "confirmed", date: "10-22", by: "human" },
+      { v: 1, status: "confirmed", date: "10-20", by: "agent" } ] },
+    brief: { current: 3, versions: [
+      { v: 4, date: "10-29 11:08", src: "agent", changed: "范围、角色", diff: "+2", status: "draft" },
+      { v: 3, date: "10-25 14:02", src: "agent", changed: "目标、范围、角色", diff: "+3 −1", status: "published" },
+      { v: 2, date: "10-23 09:40", src: "human", changed: "非目标补充", diff: "+1", status: "superseded" },
+      { v: 1, date: "10-21 16:11", src: "extract", changed: "首次建档 · MUL-401", diff: "7 字段", status: "superseded" } ] },
+    pair: { brief: 3, proto: 3, release: 3 },
+    fields: [
+      { k: "模块定位", key: "brief.pitch", v: "", src: "todo" },
+      { k: "目标", key: "brief.goal", v: "让申报方在 3 步内完成提交与撤回，管理员可批量处理。", src: "human", ver: 3 },
+      { k: "范围", key: "brief.scope", v: "申报列表、新建、撤回、归档区、状态筛选、权限矩阵。", src: "ai", ver: 3 },
+      { k: "非目标", key: "brief.nongoal", v: "批量审批流、跨租户导出（V2 再说）。", src: "human", ver: 2 },
+      { k: "角色", key: "brief.roles", v: "申报人 / 审核人 / 管理员", src: "ai", ver: 3 },
+      { k: "关键流程", key: "brief.flow", v: "新建 → 提交 → 撤回 → 归档；每步有原型入口。", src: "ai", ver: 3 },
+      { k: "验收目标", key: "brief.accept", v: "", src: "todo" } ],
+    fps: [
+      { code: "FP-01", name: "申报列表", grp: "列表与筛选", since: 1, desc: "表格 + 空态 + 分页；列可配置。", inter: "行点击进详情抽屉，保留筛选条件。", ac: [[1, "可排序与分页"], [1, "空态有引导"]], loc: "表格区",
+        req: ["按更新时间倒序；同值按 id 稳定排序", "列可见性随角色，越权列不渲染", "撤回 / 结案不删行，转入归档区"],
+        deps: "消费 FP-02 筛选态；被 FP-04 / FP-05 行内调用" },
+      { code: "FP-02", name: "状态筛选", grp: "列表与筛选", since: 2, changed: [3], desc: "列表顶部状态分段器，支持多选；新增「待我审」快捷项。", inter: "点击即筛，保留 URL 参数；空结果给「清除筛选」。", ac: [[1, "可多选且与 URL 同步"], [0, "「待我审」仅管理员可见（待确认）"]], loc: "列表头右侧",
+        req: ["多选之间 OR，与关键字 AND", "「待我审」是预设组合，不新增状态枚举", "筛选态写进 URL，刷新与分享可复现"],
+        deps: "被 FP-01 / FP-05 复用" },
+      { code: "FP-03", name: "新建申报", grp: "列表与筛选", since: 1, desc: "抽屉式表单，必填 4 项。", inter: "提交后回到列表并高亮新行。", ac: [[1, "必填校验"], [1, "提交后可回滚"]], loc: "右上主按钮",
+        req: ["必填 4 项：标题、类型、责任域、期望时间", "存草稿不校验，提交才校验", "24h 内同标题提示疑似重复，不阻断"],
+        deps: "成功后回跳 FP-01；受 FP-07 权限约束" },
+      { code: "FP-04", name: "撤回申报", grp: "明细与操作", since: 1, desc: "二次确认 + 原因必填。", inter: "撤回后状态置灰，不可再编辑。", ac: [[1, "二次确认"], [1, "原因必填"]], loc: "行内操作列",
+        req: ["仅「待审 / 已通过」的本人单据可撤回", "原因 ≥ 10 字并写审计", "不可逆，恢复需重新提交"],
+        deps: "依赖 FP-01 行状态；影响 FP-06 归档数量" },
+      { code: "FP-05", name: "批量导出", grp: "明细与操作", since: 2, changed: [3], desc: "导出范围改为当前筛选。", inter: "异步任务，完成后站内提醒。", ac: [[1, "范围跟随筛选"], [0, "大文件分片下载"]], loc: "工具栏",
+        req: ["范围恒等于当前筛选，不读勾选态", "列集合受角色字段权限约束", "≥ 2 万行转分片压缩包"],
+        deps: "依赖 FP-02 筛选态；与 FP-01 列配置同源" },
+      { code: "FP-06", name: "归档区", grp: "归档与权限", since: 2, desc: "已归档申报只读，可恢复。", inter: "标签切页，不带筛选。", ac: [[1, "只读"], [1, "可恢复"]], loc: "顶部标签",
+        req: ["归档条目只读，编辑须先恢复", "恢复后重新走必填校验", "按年分页，不设总量上限"],
+        deps: "与 FP-01 / FP-04 共享行组件" },
+      { code: "FP-07", name: "权限矩阵", grp: "归档与权限", since: 1, desc: "角色 × 操作矩阵，管理员可调。", inter: "变更需二次确认。", ac: [[1, "矩阵可保存"]], loc: "设置弹窗",
+        req: ["「查看」为基线，取消后该角色看不到入口", "保存前后 diff 写审计", "至少保留一个全权限管理员"],
+        deps: "约束 FP-01 / FP-03 / FP-04 的可见与可操作" },
+      { code: "FP-08", name: "申报提醒", grp: "归档与权限", since: 2, removed: 4, desc: "移出范围，原型同步移除。", inter: "—", ac: [], loc: "—" }
+    ],
+    bar: "<span class=\"wf-inp\" data-fp=\"FP-02\">全部状态 \u25be</span><span class=\"wf-inp\" style=\"min-width:120px\">搜索申报人/编号</span><button class=\"wf-btn\" data-fp=\"FP-05\">导出</button><button class=\"wf-btn pri\" data-fp=\"FP-03\">＋ 新建申报</button>",
+    tabs: "<span class=\"on\" data-fp=\"FP-01\">我的申报</span><span data-fp=\"FP-06\">归档区</span><span data-fp=\"FP-07\" style=\"margin-left:auto\">权限</span>"
+  },
+  {
+    id: "m2", name: "图谱浏览页", pg: "page", color: "#7c3aed",
+    stats: { obj: 38, pol: 5, req: 1, task: 2 },
+    proto: { canonical: 2, file: "graph-view.html", versions: [
+      { v: 2, status: "confirmed", date: "10-18", by: "human" },
+      { v: 1, status: "confirmed", date: "10-14", by: "human" } ] },
+    brief: { current: 2, versions: [
+      { v: 2, date: "10-18 10:12", src: "human", changed: "范围", diff: "+1", status: "published" },
+      { v: 1, date: "10-14 09:30", src: "human", changed: "首次建档", diff: "5 字段", status: "superseded" } ] },
+    pair: { brief: 2, proto: 2, release: 2 },
+    fields: [
+      { k: "模块定位", key: "brief.pitch", v: "一屏看清代码本体与依赖关系。", src: "human", ver: 1 },
+      { k: "目标", key: "brief.goal", v: "支持按图层逐级下钻到文件级。", src: "human", ver: 2 },
+      { k: "范围", key: "brief.scope", v: "图层视图、表格视图、搜索、只看未绑定。", src: "human", ver: 2 },
+      { k: "关键流程", key: "brief.flow", v: "", src: "todo" } ],
+    fps: [
+      { code: "FP-01", name: "图层下钻", grp: "浏览", since: 1, desc: "图层 → 子系统 → 文件三级。", inter: "点击节点展开，面包屑回退。", ac: [[1, "三级可逆"]], loc: "画布",
+        req: ["三级封顶：图层 → 子系统 → 文件", "面包屑回退保留上一个选中节点"],
+        deps: "与 FP-02 共享选中态" },
+      { code: "FP-02", name: "表格视图", grp: "浏览", since: 1, desc: "平铺列表，可排序。", inter: "切换不丢筛选。", ac: [[1, "与图视共享筛选"], [0, "列可配置"]], loc: "顶部切换" },
+      { code: "FP-03", name: "搜索定位", grp: "检索", since: 1, desc: "按名/路径搜，高亮命中。", inter: "回车跳到节点。", ac: [[1, "命中高亮"]], loc: "工具栏",
+        req: ["命中高亮不改变筛选态", "无命中给「清空搜索」"],
+        deps: "依赖 FP-01 的层级展开" },
+      { code: "FP-04", name: "只看未绑定", grp: "检索", since: 1, desc: "过滤未挂模块的节点。", inter: "与搜索可叠加。", ac: [[1, "叠加生效"]], loc: "工具栏" } ],
+    bar: "<span class=\"wf-inp\">图层 \u25be</span><span class=\"wf-inp\" data-fp=\"FP-03\">搜索节点…</span><span class=\"wf-inp\" data-fp=\"FP-04\">只看未绑定</span>",
+    tabs: "<span class=\"on\" data-fp=\"FP-01\">图谱画布</span><span data-fp=\"FP-02\">表格</span>"
+  },
+  {
+    id: "m3", name: "总线矩阵页", pg: "page", color: "#7c3aed",
+    stats: { obj: 24, pol: 2, req: 1, task: 8 },
+    proto: { canonical: 4, file: "bus-matrix.html", versions: [
+      { v: 4, status: "confirmed", date: "10-28", by: "human" },
+      { v: 3, status: "confirmed", date: "10-24", by: "human" },
+      { v: 2, status: "confirmed", date: "10-19", by: "agent" },
+      { v: 1, status: "confirmed", date: "10-15", by: "human" } ] },
+    brief: { current: 1, versions: [
+      { v: 1, date: "10-15 11:02", src: "extract", changed: "首次建档", diff: "4 字段", status: "published" } ] },
+    pair: null,
+    fields: [
+      { k: "模块定位", key: "brief.pitch", v: "", src: "todo" },
+      { k: "目标", key: "brief.goal", v: "矩阵化呈现总线与系统的收发关系。", src: "human", ver: 1 },
+      { k: "范围", key: "brief.scope", v: "", src: "todo" },
+      { k: "角色", key: "brief.roles", v: "", src: "todo" },
+      { k: "关键流程", key: "brief.flow", v: "", src: "todo" } ],
+    fps: [
+      { code: "FP-01", name: "矩阵渲染", grp: "矩阵", since: 1, desc: "总线 × 系统矩阵。", inter: "单元格悬浮看收发。", ac: [[1, "大矩阵不卡"], [1, "行列冻结"]], loc: "主区域",
+        req: ["行列同时冻结首列首行", "空单元格与「无收发」区分样式", "超 200×200 走虚拟滚动"],
+        deps: "数据来自接口注册表；被 FP-05 差异对比复用" },
+      { code: "FP-02", name: "行列筛选", grp: "矩阵", since: 2, desc: "按域/系统过滤行列。", inter: "筛选后保留滚动位。", ac: [[1, "行列同时瘦身"]], loc: "左上",
+        req: ["行列同时瘦身，比例不变", "筛选后保留滚动位"],
+        deps: "依赖 FP-01 的矩阵布局" },
+      { code: "FP-03", name: "单元格详情", grp: "交互", since: 2, desc: "点单元格开侧薄。", inter: "ESC 关闭。", ac: [[1, "不遮挡矩阵"]], loc: "单元格",
+        req: ["侧薄 ≤ 360，不遮当前单元格", "ESC / 点遮罩关闭，保留选中高亮", "多条目分页，不一次拉全量"],
+        deps: "依赖接口注册表的收发明细" },
+      { code: "FP-04", name: "导出快照", grp: "交互", since: 3, desc: "导出当前矩阵为图片。", inter: "异步生成。", ac: [[0, "超宽分页"]], loc: "工具栏" },
+      { code: "FP-05", name: "差异高亮", grp: "交互", since: 4, desc: "两版矩阵差异高亮。", inter: "需选对比基线。", ac: [[1, "可切基线"]], loc: "工具栏",
+        req: ["新增 / 丢失 / 变更三色互斥", "未选基线时按钮置灰并说明原因", "基线超 10 版先提示耗时"],
+        deps: "依赖 FP-01 矩阵与版本快照" },
+      { code: "FP-06", name: "图例", grp: "辅助", since: 1, desc: "颜色含义说明。", inter: "可收起。", ac: [[1, "可收起"]], loc: "右下",
+        req: ["颜色与符号口径与矩阵一致"],
+        deps: "与 FP-01 共用色板" } ],
+    bar: "<span class=\"wf-inp\" data-fp=\"FP-02\">域：全部 \u25be</span><span class=\"wf-inp\">对比基线 \u25be</span><button class=\"wf-btn\" data-fp=\"FP-05\">差异高亮</button><button class=\"wf-btn\" data-fp=\"FP-04\">导出快照</button>",
+    tabs: "<span class=\"on\" data-fp=\"FP-01\">矩阵</span><span data-fp=\"FP-06\">图例</span>"
+  },
+  {
+    id: "m4", name: "扫描任务页", pg: "page", color: "#0ea5e9",
+    stats: { obj: 21, pol: 3, req: 1, task: 3 },
+    proto: null, brief: null, pair: null, fields: [], fps: [],
+    emptyHint: "这个模块还没接原型，也没写说明——但这不代表点不进来"
+  },
+  {
+    id: "m5", name: "数据模型分析", pg: "page", color: "#0ea5e9",
+    stats: { obj: 46, pol: 6, req: 3, task: 2 },
+    proto: { canonical: 1, file: "data-model.html", versions: [
+      { v: 1, status: "confirmed", date: "10-12", by: "human" } ] },
+    brief: { current: 1, versions: [
+      { v: 1, date: "10-12 15:20", src: "human", changed: "首次建档", diff: "4 字段", status: "published" } ] },
+    pair: { brief: 1, proto: 1, release: 1 },
+    fields: [
+      { k: "模块定位", key: "brief.pitch", v: "看懂表结构、索引与调用关系。", src: "human", ver: 1 },
+      { k: "目标", key: "brief.goal", v: "按业务域列出表与依赖。", src: "human", ver: 1 },
+      { k: "范围", key: "brief.scope", v: "表、索引、外键、调用方。", src: "human", ver: 1 },
+      { k: "验收目标", key: "brief.accept", v: "", src: "todo" } ],
+    fps: [
+      { code: "FP-01", name: "表列表", grp: "浏览", since: 1, desc: "按域分组的表。", inter: "点击进详情。", ac: [[1, "分组可折叠"]], loc: "左侧" },
+      { code: "FP-02", name: "字段详情", grp: "浏览", since: 1, desc: "字段类型/注释/索引。", inter: "可复制名称。", ac: [[1, "复制可用"]], loc: "右侧",
+        req: ["类型 / 注释 / 索引 / 约束一次给全", "名称一键复制"],
+        deps: "依赖 FP-01 选中表" },
+      { code: "FP-03", name: "依赖图", grp: "分析", since: 1, desc: "表间引用关系图。", inter: "可展开两层。", ac: [[1, "两层可展开"]], loc: "底部",
+        req: ["以选中表为中心，向外两层", "外键与调用引用区分线型"],
+        deps: "依赖 FP-02 的字段与外键元信息" },
+      { code: "FP-04", name: "调用方列表", grp: "分析", since: 1, desc: "谁在生产/消费。", inter: "跳代码定位。", ac: [[0, "含异步链路"]], loc: "右侧 tab" } ],
+    bar: "<span class=\"wf-inp\" data-fp=\"FP-01\">域：用户中心 \u25be</span><span class=\"wf-inp\">搜索表名…</span>",
+    tabs: "<span class=\"on\" data-fp=\"FP-02\">字段</span><span data-fp=\"FP-04\">调用方</span>"
+  }
+];
+
+/* ---------- 工具 ---------- */
+function cur(){ return MODULES.filter(function(m){ return m.id === S.mod; })[0]; }
+function present(fp, v){ if (!v) return false; return fp.since <= v && (!fp.removed || fp.removed > v); }
+function kind(fp, v){
+  if (!present(fp, v)) return fp.since <= v ? "gone" : "none";
+  if (fp.since === v) return "new";
+  if ((fp.changed || []).indexOf(v) >= 0) return "chg";
+  return "same";
+}
+var toastT = null;
+function toast(msg){
+  var t = document.getElementById("toast"); t.textContent = msg; t.className = "toast on";
+  clearTimeout(toastT); toastT = setTimeout(function(){ t.className = "toast"; }, 2600);
+}
+function closed(el){ var b = el.closest(".blk"); if (b) b.classList.toggle("closed"); }
+function scrollToSec(id){ var el = document.getElementById(id); if (el) el.scrollIntoView({ block: "start", behavior: "smooth" }); }
+
+/* ---------- 布局 ---------- */
+function setSpw(w){
+  w = Math.max(300, Math.min(560, w));
+  document.documentElement.style.setProperty("--spw", w + "px");
+  if (S.collapsed) toggleSide(true);
+}
+function toggleSide(silent){
+  S.collapsed = !S.collapsed;
+  document.getElementById("wb").classList.toggle("collapsed", S.collapsed);
+  document.getElementById("sidePane").classList.toggle("collapsed", S.collapsed);
+  if (!silent) toast(S.collapsed ? "侧栏已收起——预览占满，点右侧竖条恢复" : "侧栏已展开");
+}
+(function bindSplitter(){
+  var d = document.getElementById("splitter"), drag = false, x0 = 0, w0 = 0;
+  d.addEventListener("pointerdown", function(e){
+    drag = true; x0 = e.clientX; w0 = document.getElementById("sidePane").offsetWidth;
+    d.classList.add("drag"); d.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  d.addEventListener("pointermove", function(e){ if (drag) setSpw(w0 + (x0 - e.clientX)); });
+  d.addEventListener("pointerup", function(){ drag = false; d.classList.remove("drag"); });
+})();
+
+/* ---------- 左栏：默认窄 + 可收起 ---------- */
+function toggleModList(){
+  var el = document.getElementById("modList");
+  var on = el.classList.toggle("collapsed");
+  var f = document.getElementById("mlFold");
+  if (f) f.textContent = on ? "\u00bb" : "\u00ab";
+  document.getElementById("mlRailN").textContent = MODULES.length;
+  toast(on ? "模块列表已收起（42px）——原型区变宽，点竖条展开" : "模块列表已展开 · 默认 176px");
+}
+
+/* ---------- 编辑态：改动先落草案，不碰当前版本 ---------- */
+var editing = false;
+function toggleEdit(force){
+  editing = typeof force === "boolean" ? force : !editing;
+  document.getElementById("wb").classList.toggle("editing", editing);
+  document.getElementById("editBtn").textContent = editing ? "\u270e 编辑中" : "\u270e 编辑";
+  document.getElementById("pvHint").textContent = editing
+    ? "编辑态：蓝虚线 = 可改的地方；改原型区块或右栏字段都进草案"
+    : "点原型里的任一元素，可直接定位到右侧对应功能点";
+  toast(editing ? "已进入编辑：改动进草案，当前 v3 不受影响" : "已退出编辑（草案仍保留在顶部草案带）");
+}
+function publishDraft(){
+  var bar = document.getElementById("draftBar");
+  bar.className = "draftbar empty";
+  bar.innerHTML = '<span class="db-t">没有未发布的改动</span>' +
+    '<span class="db-base">当前 R4 · 说明 v4 \u2a2f 原型 v4（旧版保留）</span>' +
+    '<span class="db-a" onclick="toggleEdit(false)">退出编辑</span>';
+  toggleEdit(false);
+  toast("已发布 v4 · R4：说明 v4 ⨯ 原型 v4 —— 版本记录多一行，历史未改");
+}
+
+/* ---------- 下拉 ---------- */
+function toggleMenu(id, ev){
+  if (ev) ev.stopPropagation();
+  ["protoMenu", "briefMenu"].forEach(function(k){
+    document.getElementById(k).classList.toggle("open", k === id && !document.getElementById(k).classList.contains("open"));
+  });
+}
+/* 预览区反向联动：任何带 data-fp 的元素（区块 / 工具条 / tab）点击即选中 */
+document.getElementById("pvBody").addEventListener("click", function(e){
+  var t = e.target.closest("[data-fp]");
+  if (t && this.contains(t)) clickEl(t.getAttribute("data-fp"));
+});
+document.addEventListener("click", function(){
+  ["protoMenu", "briefMenu"].forEach(function(k){ document.getElementById(k).classList.remove("open"); });
+});
+
+/* ---------- 交互 ---------- */
+function selModule(id){
+  var m = MODULES.filter(function(x){ return x.id === id; })[0];
+  S.mod = id; S.fp = null;
+  S.v = m.proto ? m.proto.canonical : 0;
+  S.bv = m.brief ? m.brief.current : 0;
+  renderAll();
+  var sc = document.getElementById("spScroll"); if (sc) sc.scrollTop = 0;
+  toast("已切到「" + m.name + "」：说明、原型、功能点、版本整块跟着换");
+}
+function pickProto(v){
+  S.v = v; renderAll();
+  var c = cur().proto ? cur().proto.canonical : 0;
+  toast("原型切到 v" + v + (v === c ? "（当前权威）" : v > c ? "（草案，未发布）" : "（历史版本，只读）"));
+}
+function pickBrief(v){
+  S.bv = v; renderAll();
+  toast("说明切到 v" + v + (v === cur().brief.current ? "（当前）" : "（历史版本，只读）"));
+}
+/* ---------- 能力描述：9 段模型 ---------- */
+/* ---------- 功能点详情：四段 ---------- */
+var DC_KEYS = ["功能描述与定位", "功能细节要求", "交互与依赖", "验收标准"];
+function fpFull(fp){
+  return (fp.desc ? 1 : 0) +
+    (fp.req && fp.req.length ? 1 : 0) +
+    (fp.inter && fp.inter !== "—" ? 1 : 0) +
+    (fp.ac && fp.ac.length ? 1 : 0);
+}
+function dcHead(code, i, label, right, todo){
+  return '<div class="dc-sec">' + i + ' · ' + label + (todo
+    ? '<span class="n"><span class="fsrc todo">待填写</span><span class="edit" title="AI 补写这一段" onclick="toast(\'已发起 AI 补写 ' + code + ' · ' + label + '\')">✎</span></span>'
+    : (right ? '<span class="n">' + right + '</span>' : '')) + '</div>';
+}
+function dcTodo(label){ return '<div class="dc-todo">待填写 · 点 ✎ 或让 AI 按「' + label + '」补一段</div>'; }
+function detailBody(fp){
+  var o = "", hasReq = !!(fp.req && fp.req.length), hasAc = !!(fp.ac && fp.ac.length), hasInter = !!(fp.inter && fp.inter !== "—");
+  /* 1 · 功能描述与定位 */
+  o += dcHead(fp.code, 1, DC_KEYS[0], fp.loc && fp.loc !== "—" ? '原型位置：' + fp.loc : '', !fp.desc);
+  o += fp.desc ? '<div class="dc-text">' + fp.desc + '</div>' : dcTodo(DC_KEYS[0]);
+  /* 2 · 功能细节要求 */
+  o += dcHead(fp.code, 2, DC_KEYS[1], hasReq ? fp.req.length + ' 条' : '', !hasReq);
+  o += hasReq ? '<ol class="dc-rules">' + fp.req.map(function(r){ return '<li>' + r + '</li>'; }).join("") + '</ol>' : dcTodo(DC_KEYS[1]);
+  /* 3 · 交互与依赖 */
+  o += dcHead(fp.code, 3, DC_KEYS[2], '', !hasInter);
+  o += hasInter
+    ? '<div class="dc-io"><div class="dc-io-c"><b>交互</b>' + fp.inter + '</div><div class="dc-io-c"><b>依赖</b>' + (fp.deps || '无外部依赖') + '</div></div>'
+    : dcTodo(DC_KEYS[2]);
+  /* 4 · 验收标准 */
+  var done = fp.ac.filter(function(a){ return a[0]; }).length;
+  o += dcHead(fp.code, 4, DC_KEYS[3], hasAc ? done + ' / ' + fp.ac.length + ' 已通过' : '', !hasAc);
+  o += hasAc
+    ? '<div class="dc-ac">' + fp.ac.map(function(a){ return '<div><span class="' + (a[0] ? 'ok' : 'no') + '">' + (a[0] ? '✓' : '○') + '</span><span>' + a[1] + '</span></div>'; }).join("") + '</div>'
+    : dcTodo(DC_KEYS[3]);
+  return o;
+}
+
+function selectFp(code){
+  S.fp = (S.fp === code ? null : code);
+  renderSp();
+  if (!S.fp) return;
+  var t = document.querySelector('#pvBody [data-fp="' + code + '"]');
+  if (!t) { toast(code + " 在当前原型 v" + S.v + " 里没有对应元素"); return; }
+  t.classList.add("el-hl");
+  t.scrollIntoView({ block: "center", behavior: "smooth" });
+  var fp = cur().fps.filter(function(f){ return f.code === S.fp; })[0] || {};
+  document.getElementById("pvHint").textContent = "已定位 " + code + " · " + (fp.name || "") + "（原型里蓝框高亮）";
+  var sc = document.getElementById("spScroll");
+  var card = document.querySelector("#spScroll .detail-card");
+  if (card && sc) sc.scrollTop = card.offsetTop - 8;
+}
+function clickEl(code){
+  S.fp = code; renderSp();
+  var fp = cur().fps.filter(function(f){ return f.code === code; })[0] || {};
+  document.getElementById("pvHint").textContent = "已选中 " + code + " · " + (fp.name || "") + "，右侧已展开详情";
+}
+
+/* ---------- 渲染：左栏 ---------- */
+function renderMods(){
+  var host = document.getElementById("modRows");
+  host.innerHTML = MODULES.map(function(m){
+    var described = m.brief ? 1 : 0;
+    var pair = (!m.proto && !m.brief) ? '<span class="dot" style="background:oklch(0.72 0.01 286)"></span>'
+      : !m.pair ? '<span class="pill bad" style="font-size:8px;padding:0 3px">未成对</span>'
+      : (m.pair.proto === (m.proto ? m.proto.canonical : 0) ? '<span class="dot" style="background:oklch(0.55 0.16 145)"></span>' : '<span class="dot" style="background:oklch(0.72 0.15 75)"></span>');
+    var line = m.brief ? "说明 v" + m.brief.current + " · 原型 v" + m.proto.canonical + " · " + m.fps.length + " 功能点"
+      : "说明 — · 原型 — · 0 功能点";
+    var sub = m.brief && m.fields.length && m.fields[1] && m.fields[1].v ? m.fields[1].v : "尚未填写模块目标";
+    return '<div class="mod-row' + (m.id === S.mod ? ' on' : '') + '" onclick="selModule(\'' + m.id + '\')">' +
+      '<div class="mr-1"><span class="pg" style="background:' + m.color + '1f;color:' + m.color + '">' + m.pg + '</span>' +
+      '<span class="nm">' + m.name + '</span><span class="h">' + pair + '</span></div>' +
+      '<div class="mr-2">' + line + '</div>' +
+      '<div class="mr-brief' + (m.brief ? '' : ' empty') + '">' + sub + '</div></div>';
+  }).join("");
+  document.getElementById("mlCount").textContent = MODULES.length + " · " + MODULES.filter(function(m){ return !!m.brief; }).length + " 已描述";
+  var rail = document.getElementById("mlRailN"); if (rail) rail.textContent = MODULES.length;
+}
+
+/* ---------- 渲染：模块头 ---------- */
+function renderHead(){
+  var m = cur(), s = m.stats;
+  var pc = (!m.proto && !m.brief) ? '<span class="pairchip none">未建原型与说明</span>'
+    : !m.pair ? '<span class="pairchip none">未成对 · 说明落后 ' + (m.proto ? m.proto.canonical : 0) + ' 版</span>'
+    : (S.v === m.pair.proto && S.bv === m.pair.brief ? '<span class="pairchip ok">R' + m.pair.release + ' · 成对</span>' : '<span class="pairchip bad">草案未发布</span>');
+  document.getElementById("modHead").innerHTML =
+    '<span class="nm">' + m.name + '</span>' + pc +
+    '<span class="kpi"><b>' + s.obj + '</b> 对象</span><span class="sep"></span>' +
+    '<span class="kpi"><b>' + s.pol + '</b> 策略</span><span class="sep"></span>' +
+    '<span class="kpi"><b>' + s.req + '</b> 需求</span><span class="sep"></span>' +
+    '<span class="kpi"><b>' + s.task + '</b> 任务</span>' +
+    '<span style="margin-left:auto;font-size:10px;color:var(--faint-foreground)">' + (m.brief ? '说明 v' + m.brief.current : '无说明') + ' · ' + (m.proto ? '原型 v' + m.proto.canonical : '无原型') + '</span>';
+  document.getElementById("mtabFp").textContent = m.fps.length;
+  var onN = m.proto ? m.fps.filter(function(f){ return present(f, S.v); }).length : 0;
+  document.getElementById("mtabReq").textContent = s.req;
+  document.getElementById("mtabCov").textContent = onN + "/" + m.fps.length;
+}
+
+/* ---------- 渲染：顶部下拉 ---------- */
+function renderSel(){
+  var m = cur();
+  if (m.proto) {
+    var p = m.proto.versions.filter(function(x){ return x.v === S.v; })[0] || {};
+    document.getElementById("protoSelLabel").textContent = "v" + S.v + " · " + (p.status || "") + (S.v === m.proto.canonical ? " · 权威" : S.v > m.proto.canonical ? " · 草案" : " · 历史");
+    document.getElementById("protoMenuItems").innerHTML = m.proto.versions.map(function(x){
+      return '<div class="mi' + (x.v === S.v ? ' on' : '') + '" onclick="pickProto(' + x.v + ');event.stopPropagation()">' +
+        '<span>v' + x.v + '</span><span class="pill ' + (x.status === "draft" ? "warn" : "mute") + '" style="font-size:8px">' + x.status + '</span>' +
+        '<span style="color:var(--faint-foreground);font-size:9px">' + x.by + '</span><span class="d">' + x.date + '</span></div>';
+    }).join("") + '<div style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px;font-size:9px;color:var(--faint-foreground);padding:4px 7px">新建版本只会追加，不改历史</div>';
+  } else {
+    document.getElementById("protoSelLabel").textContent = "无原型";
+    document.getElementById("protoMenuItems").innerHTML = '<div class="mh">切换模块查看</div>';
+  }
+  if (m.brief) {
+    document.getElementById("briefSelLabel").textContent = "v" + S.bv;
+    document.getElementById("briefMenuItems").innerHTML = m.brief.versions.map(function(x){
+      return '<div class="mi' + (x.v === S.bv ? ' on' : '') + '" onclick="pickBrief(' + x.v + ');event.stopPropagation()">' +
+        '<span>v' + x.v + '</span><span class="fsrc ' + (x.src === "human" ? "human" : x.src === "agent" ? "ai" : "sys") + '">' + x.src + '</span>' +
+        '<span style="color:var(--faint-foreground);font-size:9px">' + x.changed + '</span><span class="d">' + x.date.slice(0, 5) + '</span></div>';
+    }).join("");
+  } else {
+    document.getElementById("briefSelLabel").textContent = "—";
+    document.getElementById("briefMenuItems").innerHTML = '<div class="mh">尚未建档</div>';
+  }
+}
+
+/* ---------- 渲染：预览线框 ---------- */
+function renderPv(){
+  var m = cur(), host = document.getElementById("pvBody");
+  if (!m.proto) {
+    host.innerHTML = '<div class="empty-note" style="padding-top:48px"><b>还没有原型</b>点上方「＋ 新建原型」开始；<br>说明仍可在右侧填写（右侧现在是空态）</div>';
+    document.getElementById("pvFile").textContent = "—";
+    document.getElementById("pvVer").textContent = "—";
+    document.getElementById("pvStatus").textContent = "";
+    document.getElementById("pvStat").textContent = "0 / 0 功能点在场";
+    document.getElementById("pvCount").textContent = "—";
+    document.getElementById("pvHint").textContent = "空态：未桥接图谱节点也能进来，不再只给一个 toast";
+    return;
+  }
+  var on = m.fps.filter(function(f){ return present(f, S.v); });
+  document.getElementById("pvFile").textContent = m.proto.file;
+  document.getElementById("pvVer").textContent = "v" + S.v;
+  var pmeta = m.proto.versions.filter(function(x){ return x.v === S.v; })[0] || {};
+  document.getElementById("pvStatus").textContent = pmeta.status || "";
+  document.getElementById("pvStatus").className = "b" + (pmeta.status === "draft" ? " draft" : "");
+  document.getElementById("pvStat").textContent = on.length + " / " + m.fps.length + " 功能点在场";
+  document.getElementById("pvCount").textContent = "v" + S.v + " · 标注 " + on.length + "/" + m.fps.length;
+
+  var groups = {};
+  on.forEach(function(f){ (groups[f.grp] = groups[f.grp] || []).push(f); });
+  var h = '<div class="wf"><div class="wf-h"><b>' + m.name.replace("页", "") + '</b><span class="path">' + m.proto.file + ' · v' + S.v + '</span>' +
+    '<span class="pill ' + (pmeta.status === "draft" ? "warn" : "ok") + '" style="margin-left:auto;font-size:8.5px">' + (pmeta.status || "") + '</span></div>';
+  h += '<div class="wf-bar">' + (m.bar || "") + '</div>';
+  if (m.tabs) h += '<div class="wf-seg">' + m.tabs + '</div>';
+  Object.keys(groups).forEach(function(g){
+    h += '<div style="font-size:8.5px;font-weight:700;color:var(--faint-foreground);letter-spacing:.04em;padding:8px 0 3px">' + g.toUpperCase() + '</div>';
+    groups[g].forEach(function(f, i){
+      var k = kind(f, S.v);
+      h += '<div class="wf-block' + (k === "chg" ? ' el-chg' : '') + '" data-fp="' + f.code + '">' +
+        '<div class="t"><span class="mono" style="font-size:8px;color:var(--faint-foreground)">' + f.code + '</span>' + f.name +
+        '<span class="tag ' + k + '" style="margin-left:auto">' + (k === "new" ? "本版新增" : k === "chg" ? "本版变更" : "稳定") + '</span></div>' +
+        '<div class="wf-kv"><span class="k">主区</span><span class="bx" style="height:' + (i === 0 ? 22 : 13) + 'px"></span></div>' +
+        (i === 0 ? '<div class="wf-kv"><span class="k">操作</span><span class="bx" style="height:11px;max-width:46%"></span></div>' : '') +
+        '</div>';
+    });
+  });
+  var gone = m.fps.filter(function(f){ return !present(f, S.v); });
+  if (gone.length) h += '<div style="margin-top:8px;font-size:9px;color:oklch(0.5 0.02 286);border-top:1px dashed var(--border);padding-top:5px">本版无：' + gone.map(function(f){ return f.code; }).join("、") + '（已在范围内移除，原型已同步删掉）</div>';
+  h += '<div class="wf-foot"><span class="dot" style="background:var(--brand)"></span>原型热区 = 功能点；点任一区块右侧即展开它的说明与验收</div></div>';
+  host.innerHTML = h;
+  document.getElementById("pvHint").textContent = "点原型里的任一区块，可直接定位到右侧对应功能点";
+}
+
+/* ---------- 渲染：右栏 ---------- */
+function renderSp(){
+  var m = cur(), host = document.getElementById("spScroll");
+  document.getElementById("spVerPill").textContent = m.brief ? "说明 v" + S.bv : "无说明";
+  document.getElementById("anFp").textContent = m.fps.length;
+
+  /* 配对条 */
+  var pb = document.getElementById("pairBar"), pcls = "ok", phtml = "";
+  if (!m.proto && !m.brief) { pcls = "bad"; phtml = "⚠ 原型与说明都还没建：先在右侧补说明，再新建原型"; }
+  else if (!m.pair) { pcls = "bad"; phtml = "⚠ 说明 v" + (m.brief ? m.brief.current : "—") + " 与原型 " + (m.proto ? "v" + m.proto.canonical : "—") + " 未成对 · 发布时必须指定原型版本"; }
+  else if (S.v > m.pair.proto) { pcls = "bad"; phtml = "⚠ 正在预览草案 v" + S.v + "：尚未发布，权威仍是原型 v" + m.pair.proto; }
+  else if (S.v !== m.pair.proto) { pcls = "bad"; phtml = "⚠ 正在看历史原型 v" + S.v + "，权威仍是 v" + m.pair.proto; }
+  else if (S.bv !== m.pair.brief) { pcls = "bad"; phtml = "⚠ 说明 v" + S.bv + " 未与当前原型成对（草案）"; }
+  else { phtml = "✓ 说明 v" + m.pair.brief + " ⨯ 原型 v" + m.pair.proto + " 已成对发布（R" + m.pair.release + "）"; }
+  pb.className = "pairbar " + pcls; pb.innerHTML = phtml + '<span class="r" onclick="scrollToSec(\'blk-ver\')">版本记录 ›</span>';
+
+  /* 模块说明（原「系统信息」只读区已去掉：版本号/覆盖数在配对条与标题里已有） */
+  var todo = m.fields.filter(function(f){ return f.src === "todo"; }).length;
+  var h = '<div class="blk" id="blk-brief"><div class="blk-h" onclick="closed(this)">模块说明<span class="r">' +
+    (m.brief ? "v" + S.bv + " · " + m.fields.length + " 字段" + (todo ? " · " + todo + " 待填" : "") : "未建档") + '</span></div><div class="blk-b">';
+  if (!m.brief) {
+    h += '<div class="empty-note" style="padding:8px 0 4px"><b>还没有模块说明</b>可从需求抽取一版，再逐字段补<br><span class="pill new" style="margin-top:5px;display:inline-flex;cursor:pointer" onclick="toast(\'已从需求与图谱抽取 brief v1 草案\')">从需求抽取 v1</span></div>';
+  } else {
+    h += m.fields.map(function(f){
+      var cls = f.src === "todo" ? "frow todo" : "frow";
+      var chip = f.src === "todo" ? '<span class="fsrc todo">待填写</span>'
+        : '<span class="fsrc ' + f.src + '">' + (f.src === "human" ? "人工" : f.src === "ai" ? "AI" : "系统") + ' v' + (f.ver || 1) + '</span>';
+      return '<div class="' + cls + '"><span class="fk">' + f.k + '</span><span class="fv">' + (f.v || '填写一句话说明') + '</span>' +
+        chip + '<span class="edit" title="编辑（写入即新版本）" onclick="toast(\'编辑 ' + f.key + ' → 保存后生成 brief v' + (m.brief.current + 1) + '\')">✎</span></div>';
+    }).join("");
+    h += '<div class="frow" style="border:0;padding-top:5px"><span class="fk"></span><span class="fv" style="color:var(--brand);font-weight:600;cursor:pointer" onclick="toast(\'自定义字段：先写 module_field_def，再随字段一起版本化\')">＋ 添加字段</span><span class="fsrc" style="background:none"></span><span class="edit"></span></div>';
+  }
+  h += '</div></div>';
+
+  /* 功能点清单 */
+  h += '<div class="blk" id="blk-fp"><div class="blk-h" onclick="closed(this)">功能点清单<span class="r">' + m.fps.length + ' 个 · ' + (m.proto ? m.fps.filter(function(f){ return present(f, S.v); }).length + ' 已标注' : '未接原型') + '</span></div><div class="blk-b" style="padding:0">';
+  if (!m.fps.length) {
+    h += '<div class="empty-note"><b>空态</b>这个模块还没拆功能点。<br>点上方「＋ 编辑」可从原型现抽一版草案。</div>';
+  } else {
+    var gs = [];
+    m.fps.forEach(function(f){ if (gs.indexOf(f.grp) < 0) gs.push(f.grp); });
+    gs.forEach(function(g){
+      var arr = m.fps.filter(function(f){ return f.grp === g; });
+      h += '<div class="fpg">' + g + '<span class="c">' + arr.length + '</span></div>';
+      arr.forEach(function(f){
+        var k = kind(f, S.v);
+        var done = f.ac.filter(function(a){ return a[0]; }).length;
+        var gone = k === "gone";
+        var tag = gone ? '<span class="tag gone">v' + f.removed + ' 移除</span>' : k === "new" ? '<span class="tag new">新增</span>' : k === "chg" ? '<span class="tag chg">变更</span>' : '<span class="tag same">—</span>';
+        h += '<div class="fp' + (S.fp === f.code ? ' on' : '') + (gone ? ' gone' : '') + '" data-code="' + f.code + '" onclick="selectFp(\'' + f.code + '\')">' +
+          '<span class="fp-code">' + f.code + '</span><span class="fp-main"><span class="fp-nm"><span class="nm">' + f.name + '</span>' + tag + '</span>' +
+          '<span class="fp-sub">' + f.desc + '</span></span>' +
+          '<span class="fp-side"><span class="fp-cap' + (gone || !f.desc ? '' : fpFull(f) === 4 ? ' full' : ' part') + '" title="' + (gone ? '已退场，不统计详情' : '详情完成度：已填 ' + fpFull(f) + ' / 4 段') + '">◍' + (gone ? '—' : fpFull(f) + '/4') + '</span>' +
+          '<span class="fp-ac' + (gone ? '' : done === f.ac.length && f.ac.length ? ' done' : done < f.ac.length ? ' bad' : '') + '">' + (f.ac.length ? done + '/' + f.ac.length : '—') + '</span>' +
+          '<span class="fp-ac">' + (m.proto && !gone ? '🔗' : '') + '</span></span></div>';
+      });
+    });
+    if (S.fp) {
+      var fp = m.fps.filter(function(f){ return f.code === S.fp; })[0];
+      if (fp) {
+        var n = fpFull(fp), full = n === 4;
+        h += '<div class="detail-card"><div class="dc-head"><span class="mono" style="font-size:8.5px">' + fp.code + '</span>' + fp.name +
+          '<span class="pill ' + (kind(fp, S.v) === "chg" ? "warn" : "mute") + '" style="font-size:8px">' + (kind(fp, S.v) === "chg" ? "v" + S.v + " 变更" : "v" + fp.since + " 引入") + '</span>' +
+          '<span class="fp-cap ' + (full ? 'full' : 'part') + '" style="margin-left:auto" title="详情完成度：已填 / 4 段">' + n + '/4</span>' +
+          '<span class="x" onclick="selectFp(\'' + fp.code + '\')">收起 ✕</span></div><div class="dc-body">' +
+          detailBody(fp) +
+          '</div></div>';
+      }
+    } else {
+      h += '<div class="mini-note" style="padding:5px 9px 7px">点任一行展开说明 / 交互 / 验收；也可在原型里点区块反向选中。</div>';
+    }
+  }
+  h += '</div></div>';
+
+  /* 版本记录 */
+  h += '<div class="blk" id="blk-ver"><div class="blk-h" onclick="closed(this)">版本记录<span class="r">每次编辑 = 一版</span></div><div class="blk-b">';
+  if (!m.brief) h += '<div class="mini-note">尚无版本。</div>';
+  else h += m.brief.versions.map(function(x){
+    var src = x.src === "human" ? "人工" : "AI";
+    var cls = x.src === "human" ? "human" : "ai";
+    return '<div class="ver-row"><span class="v">v' + x.v + '</span><span class="m"><span class="fsrc ' + cls + '">' + src + '</span> ' +
+      (x.src === "extract" ? "从需求抽取 · " : x.src === "human" ? "" : "自动更新 · ") + x.changed + ' · ' + x.diff + '</span><span class="t">' + x.date.slice(0, 5) + '</span></div>';
+  }).join("");
+  h += '<div class="mini-note">append-only：旧版不可改不可删，回滚=以旧为基发新版。</div></div></div>';
+
+  host.innerHTML = h;
+}
+
+/* ---------- 总渲染 ---------- */
+function renderAll(){ renderMods(); renderHead(); renderSel(); renderPv(); renderSp(); }
+renderAll();
+</script>
+</body>
+</html>
