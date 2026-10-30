@@ -47,6 +47,10 @@ interface LabelPickerProps {
    *  × affordance — a remove <button> can't nest inside a trigger <button>,
    *  so removal happens by toggling the label off in the open picker. */
   triggerRender?: React.ReactElement;
+  /** 自定义 trigger 不是 `<button>` 时传 `false`（Base UI 的 nativeButton 契约）。
+   *  不传时按 trigger 的实际形态推断：没有传 triggerRender 且已有标签，
+   *  trigger 落在一个 chip 用的 `<div>` 上。 */
+  triggerNativeButton?: boolean;
 }
 
 /**
@@ -96,6 +100,7 @@ export function LabelPicker({
   align = "start",
   defaultOpen = false,
   triggerRender,
+  triggerNativeButton,
 }: LabelPickerProps) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
@@ -211,6 +216,10 @@ export function LabelPicker({
     (hasLabels ? (
       <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors" />
     ) : undefined);
+  // 上面那个 div 是 chip 容器（每个 chip 自带「×」按钮，不能包在 button 里），
+  // 所以落到它身上时必须让 Base UI 关掉原生按钮语义。
+  const resolvedTriggerNativeButton =
+    triggerNativeButton ?? (triggerRender ? true : !hasLabels);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -226,6 +235,7 @@ export function LabelPicker({
         searchPlaceholder={t(($) => $.pickers.label.search_placeholder)}
         onSearchChange={setFilter}
         triggerRender={resolvedTriggerRender}
+        triggerNativeButton={resolvedTriggerNativeButton}
         trigger={
           hasLabels ? (
             <>

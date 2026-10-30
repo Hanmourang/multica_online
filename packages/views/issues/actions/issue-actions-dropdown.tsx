@@ -53,7 +53,9 @@ export function IssueActionsDropdown({
       </DropdownMenu>
       {/* Mount the picker only once the user actually opens it. Otherwise
           every row in a list/board would subscribe to members/agents/squads
-          /frequency queries on mount, multiplying memory + render cost. */}
+          /frequency queries on mount, multiplying memory + render cost.
+          The trigger is an invisible <span> anchor over the 3-dot button, so
+          Base UI has to drop native-button semantics for it. */}
       {assigneeOpen && (
         <AssigneePicker
           assigneeType={issue.assignee_type}
@@ -67,6 +69,7 @@ export function IssueActionsDropdown({
               className="pointer-events-none absolute inset-0"
             />
           }
+          triggerNativeButton={false}
           trigger={<span />}
           align={align}
         />

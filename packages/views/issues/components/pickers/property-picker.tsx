@@ -44,6 +44,7 @@ export function PropertyPicker({
   onOpenChange,
   trigger,
   triggerRender,
+  triggerNativeButton = true,
   width = "w-48",
   align = "end",
   side = "bottom",
@@ -59,6 +60,13 @@ export function PropertyPicker({
   onOpenChange: (v: boolean) => void;
   trigger: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /**
+   * Base UI 在挂载后用 useButton 检查最终 DOM：`nativeButton` 为 true 却
+   * 渲染出非 <button> 时会打一条 console 警告。Picker 的自定义 trigger 常常
+   * 是 chip 容器（span/div，里面还要放「×」删除按钮，不能是 button），
+   * 这类调用方必须显式传 `false`。默认仍按原生 button 处理。
+   */
+  triggerNativeButton?: boolean;
   width?: string;
   align?: "start" | "center" | "end";
   side?: React.ComponentProps<typeof PopoverContent>["side"];
@@ -183,6 +191,7 @@ export function PropertyPicker({
   const popoverTrigger = (
     <PopoverTrigger
       className={triggerRender ? undefined : PICKER_TRIGGER_CLASS}
+      nativeButton={triggerNativeButton}
       render={triggerRender}
     >
       {trigger}

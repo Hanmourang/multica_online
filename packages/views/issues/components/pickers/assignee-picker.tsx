@@ -53,6 +53,8 @@ interface AssigneePickerProps {
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement<Record<string, unknown>>;
+  /** triggerRender 不是 `<button>` 时传 `false`（Base UI 的 nativeButton 契约）。 */
+  triggerNativeButton?: boolean;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
@@ -96,6 +98,7 @@ function AssigneePickerImpl({
   onUpdate,
   trigger: customTrigger,
   triggerRender,
+  triggerNativeButton,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
@@ -164,6 +167,7 @@ function AssigneePickerImpl({
       searchPlaceholder={t(($) => $.pickers.assignee.search_placeholder)}
       onSearchChange={setFilter}
       triggerRender={triggerRender}
+      triggerNativeButton={triggerNativeButton}
       trigger={
         customTrigger ? customTrigger : assigneeType && assigneeId ? (
           <>

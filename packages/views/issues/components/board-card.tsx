@@ -199,7 +199,8 @@ export const BoardCardContent = memo(function BoardCardContent({
       <p className="mt-1 text-body font-medium leading-snug line-clamp-2">
         {issue.title}
       </p>
-      <RequirementHomeLink issue={issue} />
+      {/* 整张卡片已经包在指向详情的 AppLink 里，这里不能再渲染 <a>。 */}
+      <RequirementHomeLink issue={issue} asLink={false} />
 
       {showDescription && (() => {
         const preview = descriptionPreview(issue.description!);
