@@ -95,7 +95,7 @@ export async function inlineHtmlRelativeAssets(
   const hrefs = collectRelativeStylesheets(html);
   const scripts = collectRelativeScripts(html);
   if (hrefs.length === 0 && scripts.length === 0) {
-    return stripRemotePreviewAssets(html);
+    return preparePreviewAssets(html);
   }
   const files: Record<string, string> = {};
   await Promise.all(
@@ -104,7 +104,7 @@ export async function inlineHtmlRelativeAssets(
       if (text) files[href] = text;
     }),
   );
-  return stripRemotePreviewAssets(
+  return preparePreviewAssets(
     inlineRelativeScripts(inlineRelativeStylesheets(html, files), files),
   );
 }
@@ -138,9 +138,19 @@ export function withContractPrototypeChrome(html: string): string {
   return `${CONTRACT_PREVIEW_STYLE}${html}`;
 }
 
-/** Tailwind Play CDN / Google Fonts 在国内经常十几秒；预览里直接丢掉，改走本地 CSS。 */
-export function stripRemotePreviewAssets(html: string): string {
-  return html
-    .replace(/<script\b[^>]*\bsrc=["']https?:\/\/cdn\.tailwindcss\.com[^>]*>\s*<\/script>/gi, "")
-    .replace(/<link\b[^>]*\bhref=["']https?:\/\/fonts\.(?:googleapis|gstatic)\.com[^>]*>/gi, "");
+/**
+ * 原型预览的资源归一化（单点收口）。
+ *
+ * 历史：为了避开 Tailwind Play CDN / Google Fonts 在国内的十几秒卡顿，老实现
+ * 直接把这两个远程依赖删掉（stripRemotePreviewAssets）。代价是：原型几乎都靠
+ * Tailwind CDN 现场生成 utility 样式，删掉后整页退化成无样式文本堆叠，
+ * Material Symbols 还会把字形名（chevron_right、account_tree）当文字显示 ——
+ * 预览看上去就像坏了。CDN 慢只是首屏晚一点变好看，删掉则是永远不对。
+ *
+ * 现在原样保留，让原型按作者写的样子渲染；CDN 不可达时浏览器只是不应用这些
+ * 工具类，效果与剥离后等价，不会更差。保留这个函数是为了把「要不要动远程资源」
+ * 的决定继续收在一个地方（将来做离线模式只改这里）。
+ */
+export function preparePreviewAssets(html: string): string {
+  return html;
 }

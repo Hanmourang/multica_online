@@ -36,8 +36,8 @@ import {
   inlineHtmlRelativeAssets,
   inlineRelativeScripts,
   inlineRelativeStylesheets,
+  preparePreviewAssets,
   resolveRelativeRelPath,
-  stripRemotePreviewAssets,
 } from "./archive-html-preview";
 
 const LOCAL_PREVIEW_MAX = 800_000;
@@ -154,7 +154,7 @@ async function withInlinedStyles(hit: LocalPreviewHit): Promise<LocalPreviewHit>
   const hrefs = collectRelativeStylesheets(hit.text);
   const scripts = collectRelativeScripts(hit.text);
   if (hrefs.length === 0 && scripts.length === 0) {
-    return { ...hit, text: stripRemotePreviewAssets(hit.text) };
+    return { ...hit, text: preparePreviewAssets(hit.text) };
   }
   const files: Record<string, string> = {};
   // 先落成 const：闭包里对 hit.root / hit.relPath 的收窄会丢失（属性可变）。
@@ -169,7 +169,7 @@ async function withInlinedStyles(hit: LocalPreviewHit): Promise<LocalPreviewHit>
   );
   const withCss = inlineRelativeStylesheets(hit.text, files);
   const withJs = inlineRelativeScripts(withCss, files);
-  return { ...hit, text: stripRemotePreviewAssets(withJs) };
+  return { ...hit, text: preparePreviewAssets(withJs) };
 }
 
 async function readLocalPreview(
@@ -425,7 +425,7 @@ export function useArchivePreviewSource({
         // HTML 交给 srcdoc iframe。相对样式和脚本从同项目档案嵌进正文。
         text:
           kind === "html"
-            ? (inlineQuery.data ?? stripRemotePreviewAssets(attachmentTextQuery.data))
+            ? (inlineQuery.data ?? preparePreviewAssets(attachmentTextQuery.data))
             : attachmentTextQuery.data,
       };
     }

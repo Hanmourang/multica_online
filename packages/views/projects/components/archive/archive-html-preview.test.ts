@@ -9,8 +9,8 @@ import {
   inlineRelativeScripts,
   inlineRelativeStylesheets,
   isRelativeAssetHref,
+  preparePreviewAssets,
   resolveRelativeRelPath,
-  stripRemotePreviewAssets,
 } from "./archive-html-preview";
 
 describe("archiveFileUrl", () => {
@@ -71,15 +71,17 @@ describe("relative html assets", () => {
     expect(next).toContain("https://cdn.tailwindcss.com");
   });
 
-  it("strips Tailwind CDN and Google Fonts", () => {
+  it("keeps Tailwind CDN and Google Fonts so CDN-based prototypes still render", () => {
+    // 早期会剥掉这两个远程依赖，结果全靠 utility 类的原型退化成无样式文本堆叠、
+    // Material Symbols 把字形名当文字显示 —— 预览看上去像坏了。
     const html = [
       '<script src="https://cdn.tailwindcss.com"></script>',
       '<link href="https://fonts.googleapis.com/css2?family=Work+Sans" rel="stylesheet">',
       '<link rel="stylesheet" href="./shared.css">',
     ].join("\n");
-    const next = stripRemotePreviewAssets(html);
-    expect(next).not.toContain("cdn.tailwindcss.com");
-    expect(next).not.toContain("fonts.googleapis.com");
+    const next = preparePreviewAssets(html);
+    expect(next).toContain("cdn.tailwindcss.com");
+    expect(next).toContain("fonts.googleapis.com");
     expect(next).toContain("./shared.css");
   });
 

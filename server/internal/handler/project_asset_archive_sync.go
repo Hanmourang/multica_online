@@ -22,12 +22,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// archiveAssetCategories：只有知识 / 文档语义的资产分类参与档案映射；
-// 代码仓库 / 应用 / 制品包是运行资源而非文档，不进档案货架。
+// archiveAssetCategories：默认只有知识 / 文档语义的资产分类参与档案映射；
+// 代码仓库 / 应用 / 制品包是运行资源而非文档，不进档案货架。注意这只是**默认**：
+// 分类是用户手选的，传原型时忘了改分类就会落到 code_repository，所以还要看
+// 载荷本身的类型（见 archiveDocumentSubtypes）。
 var archiveAssetCategories = map[string]bool{
 	"knowledge_repo":  true,
 	"knowledge_group": true,
 	"other":           true,
+}
+
+// archiveDocumentSubtypes：载荷本身是文档（原型 HTML、设计稿、规格、图片）时
+// 一律入档，不论分类选的是什么。
+//
+// 这是「资产管理里传了原型，档案 / 原型选择器里永远看不到」的根因：新增原型的
+// 选择器列的是 project_artifact 里 .html 结尾的行，而 code_repository 分类根本
+// 不产生档案行。分类语义（运行资源 / 文档）不该盖过文件事实。
+var archiveDocumentSubtypes = map[string]bool{
+	"html": true, "htm": true, "xhtml": true,
+	"md": true, "markdown": true, "txt": true, "csv": true, "pdf": true,
+	"doc": true, "docx": true, "ppt": true, "pptx": true, "xls": true, "xlsx": true,
+	"key": true, "numbers": true, "pages": true,
+	"png": true, "jpg": true, "jpeg": true, "gif": true, "webp": true, "svg": true,
+	"fig": true, "sketch": true, "xd": true,
 }
 
 // assetExternalRef 是 binding.external_ref 中档案映射关心的字段。
@@ -37,11 +54,42 @@ type assetExternalRef struct {
 	Filename     string `json:"filename"`
 	RelPath      string `json:"rel_path"`
 	SizeBytes    int64  `json:"size_bytes"`
+	ContentType  string `json:"content_type"`
 	ArtifactID   string `json:"artifact_id"` // 档案反向绑定的标记（防循环）
 }
 
 // archiveStageFromLifecycle 已归一到 project_asset_archive_placement.go 的
 // 统一五阶段映射，避免正反映射各自漂移。
+
+// assetPayloadIsDocument：载荷是不是文档。三处任一命中即可 —— subtype 是上传时
+// 按扩展名记的，content_type 来自上传 MIME，filename 肩底手工录入的名字。
+func assetPayloadIsDocument(b assetBindingRow, ref assetExternalRef) bool {
+	if b.assetSubtype.Valid {
+		ext := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(b.assetSubtype.String)), ".")
+		if archiveDocumentSubtypes[ext] {
+			return true
+		}
+	}
+	ct := strings.ToLower(strings.TrimSpace(ref.ContentType))
+	if strings.HasPrefix(ct, "text/") || strings.HasPrefix(ct, "image/") {
+		return true
+	}
+	switch ct {
+	case "application/pdf", "application/msword", "application/rtf",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"application/vnd.ms-powerpoint",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		"application/vnd.ms-excel",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		return true
+	}
+	name := strings.TrimSpace(ref.Filename)
+	if name == "" {
+		name = strings.TrimSpace(b.assetName)
+	}
+	ext := strings.TrimPrefix(strings.ToLower(path.Ext(name)), ".")
+	return archiveDocumentSubtypes[ext]
+}
 
 // assetArchivePlan 是从 binding 推导出的档案行形态；ok=false 表示不参与映射。
 type assetArchivePlan struct {
@@ -56,11 +104,11 @@ type assetArchivePlan struct {
 // planAssetArchive 纯函数：判定 + 推导（单测覆盖点）。doc_module 不再取资产
 // 首标签：资产标签与档案模块标签各自独立，不做元数据双向映射。
 func planAssetArchive(b assetBindingRow) (assetArchivePlan, bool) {
-	if !archiveAssetCategories[b.assetCategory] {
-		return assetArchivePlan{}, false
-	}
 	var ref assetExternalRef
 	_ = json.Unmarshal(b.externalRef, &ref) // 解析失败按空 ref 走后续判定
+	if !archiveAssetCategories[b.assetCategory] && !assetPayloadIsDocument(b, ref) {
+		return assetArchivePlan{}, false
+	}
 	if strings.TrimSpace(ref.ArtifactID) != "" {
 		return assetArchivePlan{}, false // 档案 → 资产的反向行不新建档案（placement 回写见 planImportedAssetPlacementUpdate）
 	}

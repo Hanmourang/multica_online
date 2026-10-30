@@ -111,7 +111,9 @@ func TestCreateProjectArtifactAutoBindsLocalDirectory(t *testing.T) {
 	}
 }
 
-func TestCreateProjectArtifactWithoutResourceReturns404(t *testing.T) {
+// 无档案根目录不是错误：手动建的档案正文落附件，resource_id 允许为空
+// （migration 474），预览/列表只按 project_id 查。
+func TestCreateProjectArtifactWithoutArchiveResourceStoresNull(t *testing.T) {
 	w := httptest.NewRecorder()
 	testHandler.CreateProject(w, newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Archive create missing",
@@ -125,21 +127,37 @@ func TestCreateProjectArtifactWithoutResourceReturns404(t *testing.T) {
 	w = httptest.NewRecorder()
 	testHandler.CreateProjectArtifact(w, withURLParam(newRequest("POST", "/api/projects/"+project.ID+"/artifacts", map[string]any{
 		"scope":    "project",
-		"doc_type": "architecture",
-		"rel_path": "overview/architecture/architecture.md",
+		"doc_type": "prototype",
+		"rel_path": "prototypes/chat/prototype-v1.html",
 		"version":  1,
 	}), "id", project.ID))
-	if w.Code != http.StatusNotFound {
+	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateProjectArtifact unbound: %d %s", w.Code, w.Body.String())
 	}
-	var body struct {
-		Error string `json:"error"`
-		Code  string `json:"code"`
+	var artifact ProjectArtifactResponse
+	if err := json.NewDecoder(w.Body).Decode(&artifact); err != nil {
+		t.Fatalf("decode artifact: %v", err)
 	}
-	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
-		t.Fatalf("decode error: %v", err)
+	if artifact.ResourceID != "" {
+		t.Fatalf("resource_id = %q, want empty for an unbound project", artifact.ResourceID)
 	}
-	if body.Code != "archive_resource_missing" {
-		t.Fatalf("error code = %q, want archive_resource_missing (%s)", body.Code, body.Error)
+
+	// 同一自然键重复登记必须收敛到同一行，而不是因为 NULL 不参与 UNIQUE 而重复插入。
+	w = httptest.NewRecorder()
+	testHandler.CreateProjectArtifact(w, withURLParam(newRequest("POST", "/api/projects/"+project.ID+"/artifacts", map[string]any{
+		"scope":    "project",
+		"doc_type": "prototype",
+		"rel_path": "prototypes/chat/prototype-v1.html",
+		"version":  1,
+	}), "id", project.ID))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProjectArtifact repeat: %d %s", w.Code, w.Body.String())
+	}
+	var again ProjectArtifactResponse
+	if err := json.NewDecoder(w.Body).Decode(&again); err != nil {
+		t.Fatalf("decode repeat artifact: %v", err)
+	}
+	if again.ID != artifact.ID {
+		t.Fatalf("repeat created a new row: %s != %s", again.ID, artifact.ID)
 	}
 }

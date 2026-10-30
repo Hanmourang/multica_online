@@ -48,9 +48,9 @@ function isGatedError(error: unknown): boolean {
 }
 
 /**
- * 上传分支要先落一条 project_artifact（预览靠它的 attachment_id），而档案写入
- * 要求项目已绑定档案根目录。这个前置条件不满足时错误码是
- * archive_resource_missing，必须和「能力未开启」分开提示，否则用户会以为按钮坏了。
+ * 上传分支先落一条 project_artifact（预览靠它的 attachment_id），未绑定档案根目录时
+ * 后端把 resource_id 存空，正文仍然可预览。这里只兜住历史错误码：不同步到新项目
+ * 的项目仍可能返回 archive_resource_missing，要和「能力未开启」分开提示。
  */
 function failMessage(error: unknown, t: ReturnType<typeof useT<"archive">>["t"]): string {
   if (isArchiveResourceMissingError(error)) return t(($) => $.features.create_proto_no_archive);
@@ -104,8 +104,8 @@ export function PrototypeCreateDialog({
     ...projectArtifactsOptions(wsId, projectId),
     enabled: open,
   });
-  // 上传分支要写 project_artifact，而档案行必须挂在档案资源上。提前探一下，
-  // 未绑定时在对话框里就说明原因，不让用户点完提交才看到失败。
+  // 档案根目录只决定「正文存不存本地」：没绑定时后端把 artifact.resource_id 存空，
+  // 附件仍是正文，预览照常。这里只用来决定要不要提示一句，不禁用提交。
   const projectQuery = useQuery({
     ...projectDetailOptions(wsId, projectId),
     enabled: open && source === "upload",
@@ -313,16 +313,16 @@ export function PrototypeCreateDialog({
               })}
             </p>
             {archiveReady ? null : (
-              <div className="rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-2">
-                <p className="text-[10.5px] leading-relaxed text-warning">
-                  {t(($) => $.features.create_proto_no_archive)}
+              <div className="rounded-lg border border-surface-border bg-muted/20 px-2.5 py-2">
+                <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+                  {t(($) => $.features.create_proto_local_only)}
                 </p>
-                {/* 别让用户卡在一条走不通的路上：档案里已有 HTML 时直接给出口。 */}
+                {/* 档案里已有 HTML 时给一个就近出口，省得用户自己回去找。 */}
                 {htmlArtifacts.length > 0 ? (
                   <button
                     type="button"
                     onClick={() => setSource("artifact")}
-                    className="mt-1 cursor-pointer text-[10.5px] font-medium text-warning underline underline-offset-2 hover:opacity-80"
+                    className="mt-1 cursor-pointer text-[10.5px] font-medium text-primary underline underline-offset-2 hover:opacity-80"
                   >
                     {t(($) => $.features.create_proto_switch_to_archive)}
                   </button>
@@ -439,11 +439,8 @@ export function PrototypeCreateDialog({
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
             {t(($) => $.common.close)}
           </Button>
-          <Button
-            type="button"
-            disabled={busy || (source === "upload" && !archiveReady)}
-            onClick={() => void submit()}
-          >
+          {/* 未绑定档案根目录不再是阻塞条件：正文走附件，resource_id 留空即可。 */}
+          <Button type="button" disabled={busy} onClick={() => void submit()}>
             {busy
               ? t(($) => $.features.create_proto_pending)
               : t(($) => $.features.create_proto_submit, { version: nextVersion })}

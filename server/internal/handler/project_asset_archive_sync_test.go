@@ -61,6 +61,45 @@ func TestPlanAssetArchiveCategoryGate(t *testing.T) {
 	}
 }
 
+// 分类选成运行资源、但载荷本身是文档（典型：传原型时忘了改分类，落到
+// code_repository）时也要入档，否则资产里看得到、档案 / 原型选择器里看不到。
+func TestPlanAssetArchiveDocumentPayloadOverridesCategory(t *testing.T) {
+	att := "7f1fb123-4567-89ab-cdef-000000000002"
+	b := archiveTestBinding("code_repository", map[string]any{
+		"attachment_id": att,
+		"filename":      "code.html",
+		"content_type":  "text/html",
+	})
+	b.assetSubtype = pgtype.Text{String: "html", Valid: true}
+	b.lifecycleStage = pgtype.Text{String: "S2", Valid: true}
+	plan, ok := planAssetArchive(b)
+	if !ok {
+		t.Fatal("document payload must enter archive regardless of category")
+	}
+	if plan.relPath != "assets/code_repository/code.html" {
+		t.Errorf("rel_path = %q, want assets/code_repository/code.html", plan.relPath)
+	}
+	if plan.docType != "product-design" || plan.archiveStage != 2 {
+		t.Errorf("S2 plan = (%q,%d), want (product-design,2)", plan.docType, plan.archiveStage)
+	}
+
+	// subtype 缺失时靠 content_type / 扩展名判定。
+	b2 := archiveTestBinding("code_repository", map[string]any{
+		"filename":     "设计稿.png",
+		"content_type": "image/png",
+	})
+	if _, ok := planAssetArchive(b2); !ok {
+		t.Error("image payload must enter archive as a design artifact")
+	}
+
+	// 真正的运行资源（无文档载荷）仍然不入档。
+	b3 := archiveTestBinding("package", map[string]any{"url": "https://registry.example.com/pkg.tgz"})
+	b3.assetSubtype = pgtype.Text{String: "tgz", Valid: true}
+	if _, ok := planAssetArchive(b3); ok {
+		t.Error("package artifacts must stay out of the archive")
+	}
+}
+
 func TestPlanAssetArchiveLoopGuardAndEmptyRef(t *testing.T) {
 	// 档案反向 binding（带 artifact_id）：跳过，防 档案→资产→档案 循环。
 	back := archiveTestBinding("other", map[string]any{

@@ -17,12 +17,13 @@ import {
 import { useArchivePreviewSource } from "./use-archive-preview-source";
 import { CodeBlockIframe } from "../../../editor/code-block-iframe";
 import { withFragmentNavShim } from "../../../editor/utils/iframe-fragment-nav";
-import { stripRemotePreviewAssets, withContractPrototypeChrome } from "./archive-html-preview";
+import { preparePreviewAssets, withContractPrototypeChrome } from "./archive-html-preview";
 import {
   isPrototypeFpFrom,
   postPrototypeHighlight,
   withPrototypeInteractShim,
 } from "./prototype-interact";
+import { readPrototypeFitHeight, withPrototypeFitShim } from "./prototype-fit";
 
 const WEB_PREVIEW_MAX = 800_000;
 
@@ -233,6 +234,24 @@ function ArchiveHtmlFrame({
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
+  // 固定尺寸原型会在 srcdoc 内按视口宽等比缩放，并把缩放后高度回传；
+  // 按 event.source 校验来源，避免其他 iframe / 页面的同形消息改高度。
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const target = iframeRef.current;
+      if (!target || event.source !== target.contentWindow) return;
+      const height = readPrototypeFitHeight(event.data);
+      if (height) target.style.height = `${height}px`;
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  // 换文档时先清掉上一份的 inline 高度：响应式原型不该继承固定高度。
+  useEffect(() => {
+    if (iframeRef.current) iframeRef.current.style.height = "";
+  }, [html]);
+
   useEffect(() => {
     if (!interact || !onSelectFp) return;
     const onMessage = (event: MessageEvent) => {
@@ -254,12 +273,13 @@ function ArchiveHtmlFrame({
 
   if (html != null && html.trim() !== "") {
     const body = withFragmentNavShim(
-      withContractPrototypeChrome(stripRemotePreviewAssets(html)),
+      withContractPrototypeChrome(preparePreviewAssets(html)),
     );
+    const fitted = withPrototypeFitShim(body);
     return (
       <CodeBlockIframe
         ref={iframeRef}
-        html={interact ? withPrototypeInteractShim(body) : body}
+        html={interact ? withPrototypeInteractShim(fitted) : fitted}
         title={title}
         heightClassName={className}
         className={embedded ? "rounded-none border-0 bg-white" : "border-surface-border bg-white"}

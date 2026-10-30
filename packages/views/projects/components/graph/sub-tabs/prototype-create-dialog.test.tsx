@@ -86,14 +86,14 @@ describe("PrototypeCreateDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("blocks the upload branch until an archive root is bound", async () => {
+  it("keeps the upload branch usable without an archive root", async () => {
     renderDialog();
 
-    // 未绑定档案根目录：上传区直接说明原因，提交按钮禁用。
-    expect(await screen.findByText(/no archive root yet/i)).toBeTruthy();
+    // 未绑定本地档案目录：只说明「正文只存系统内」，提交不被拦。
+    expect(await screen.findByText(/no local archive directory is bound/i)).toBeTruthy();
     await waitFor(() => {
       const submit = screen.getByRole("button", { name: "Register as v2" });
-      expect((submit as HTMLButtonElement).disabled).toBe(true);
+      expect((submit as HTMLButtonElement).disabled).toBe(false);
     });
   });
 
@@ -106,7 +106,10 @@ describe("PrototypeCreateDialog", () => {
       const submit = screen.getByRole("button", { name: "Register as v2" });
       expect((submit as HTMLButtonElement).disabled).toBe(false);
     });
-    expect(screen.queryByText(/no archive root yet/i)).toBeNull();
+    // 绑定后提示条要消失：档案查询是异步的，等它落定再断言。
+    await waitFor(() => {
+      expect(screen.queryByText(/no local archive directory is bound/i)).toBeNull();
+    });
   });
 
   it("keeps the archive-pick branch enabled even without an archive root", async () => {
@@ -158,12 +161,12 @@ describe("PrototypeCreateDialog", () => {
     ).toBeTruthy();
   });
 
-  it("offers a way out of the upload branch when the archive is unavailable", async () => {
+  it("offers a shortcut into the archive list from the upload branch", async () => {
     artifacts = [{ id: "a1", rel_path: "change_logs/repo/proto.html" }];
     renderDialog();
 
-    // 上传分支走不通时，警告条必须直接给出可点的替代路径。
-    expect(await screen.findByText(/no archive root yet/i)).toBeTruthy();
+    // 未绑定本地目录时提示条仍要给一个可点的就近出口。
+    expect(await screen.findByText(/no local archive directory is bound/i)).toBeTruthy();
     const shortcut = await screen.findByRole("button", { name: /Switch to "Pick from archive"/ });
     fireEvent.click(shortcut);
 

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -151,12 +152,16 @@ func (h *Handler) loadArchiveResourceID(w http.ResponseWriter, r *http.Request, 
 	return archiveResourceID, true
 }
 
-// loadOrBindArchiveResourceID is the write-path resolver for manual artifact
-// create. If the project already has archive_resource_id, it is used as-is.
-// If it is empty, the first local_directory resource is bound and persisted
-// — scanning a folder into this project is an explicit bind intent. Sync
-// still uses loadArchiveResourceID so an unbound project cannot fake success.
-func (h *Handler) loadOrBindArchiveResourceID(w http.ResponseWriter, r *http.Request, project db.Project) (pgtype.UUID, bool) {
+// loadOrBindOptionalArchiveResourceID is the write-path resolver for manual
+// artifact create. If the project already has archive_resource_id, it is used
+// as-is; if it is empty, the first local_directory resource is bound and
+// persisted — scanning a folder into this project is an explicit bind intent.
+// An unbound project is not an error: the artifact is stored with
+// resource_id = NULL, exactly like syncAssetToArchive's best-effort bind
+// (migration 474 dropped that column's NOT NULL). Listing and content only key
+// on project_id, so a NULL-resource row still renders. Sync still uses
+// loadArchiveResourceID so an unbound project cannot fake a folder sync.
+func (h *Handler) loadOrBindOptionalArchiveResourceID(w http.ResponseWriter, r *http.Request, project db.Project) (pgtype.UUID, bool) {
 	archiveResourceID, err := h.lookupArchiveResourceID(r.Context(), project.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load project archive resource")
@@ -171,8 +176,7 @@ func (h *Handler) loadOrBindArchiveResourceID(w http.ResponseWriter, r *http.Req
 		return pgtype.UUID{}, false
 	}
 	if !found {
-		writeErrorCode(w, http.StatusNotFound, "archive_resource_missing", "project has no archive resource configured")
-		return pgtype.UUID{}, false
+		return pgtype.UUID{}, true
 	}
 	return bound, true
 }
@@ -1620,7 +1624,9 @@ func (h *Handler) CreateProjectArtifact(w http.ResponseWriter, r *http.Request) 
 	if _, ok := requireUserID(w, r); !ok {
 		return
 	}
-	archiveResourceID, ok := h.loadOrBindArchiveResourceID(w, r, project)
+	// 手动建档案不再强制绑定档案根目录：原型上传的正文落附件，未绑定目录时
+	// resource_id 为 NULL（迁移 474 允许），预览走 attachment_url。
+	archiveResourceID, ok := h.loadOrBindOptionalArchiveResourceID(w, r, project)
 	if !ok {
 		return
 	}
@@ -1681,6 +1687,32 @@ func (h *Handler) CreateProjectArtifact(w http.ResponseWriter, r *http.Request) 
 		requirementKey = util.PtrToText(req.RequirementKey)
 	}
 	row, err := scanProjectArtifactRow(func(dest ...any) error {
+		// resource_id 为 NULL 时 UNIQUE(resource_id, rel_path, version) 对 NULL 不生效
+		// （NULL 互不相等），先按自然键收敛到同一条目，再回落到插入。
+		if !archiveResourceID.Valid {
+			err := h.DB.QueryRow(r.Context(), `
+				UPDATE project_artifact SET
+					scope = $2, stage = $3, doc_type = $4, issue_id = $5,
+					requirement_key = $6, blob_sha = $7,
+					attachment_id = COALESCE($8, attachment_id),
+					size_bytes = $9, doc_class = $10, doc_module = $11,
+					source = 'manual', synced_at = now(), updated_at = now(), deleted_at = NULL
+				WHERE project_id = $1 AND resource_id IS NULL
+					AND rel_path = $12 AND version = $13
+				RETURNING `+projectArtifactColumns,
+				project.ID, req.Scope, util.PtrToInt4(req.Stage), req.DocType, issueID,
+				requirementKey, blobSha, attachmentID, int64(len(content)),
+				util.PtrToText(docClassPtr(req.DocClass, req.DocType, req.RelPath)),
+				util.PtrToText(normalizeDocModulePtr(req.DocModule)),
+				req.RelPath, req.Version,
+			).Scan(dest...)
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		return h.DB.QueryRow(r.Context(), `
 			INSERT INTO project_artifact (
 				workspace_id, project_id, resource_id, issue_id, scope, stage, doc_type,
