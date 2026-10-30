@@ -318,6 +318,24 @@
       "searching_web": "웹 검색 중",
       "fallback": "작업 중"
     },
+    "progress": {
+      "steps": "{{finished}}/{{total}} 단계",
+      "errors": "오류 {{count}}건",
+      "thinking": "생각 중",
+      "skill_badge": "스킬 {{name}}",
+      "more": "이전 {{count}}단계",
+      "less": "이전 단계 접기",
+      "kinds": {
+        "skill": "스킬 로드",
+        "command": "명령 실행",
+        "read": "읽기",
+        "write": "수정",
+        "search": "검색",
+        "web": "웹",
+        "mcp": "MCP",
+        "other": "호출"
+      }
+    },
     "group": {
       "agent_fallback": "에이전트",
       "stop_task": "{{name}} 중지",

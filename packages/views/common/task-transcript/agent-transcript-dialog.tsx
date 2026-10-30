@@ -1202,7 +1202,7 @@ export function AgentTranscriptDialog({
 
         {/* ── Steps, and the inspector when one is selected ───────────── */}
         <div className="flex min-h-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {displayRows.length === 0 ? (
               <div
                 className={cn(
@@ -1233,10 +1233,13 @@ export function AgentTranscriptDialog({
               </div>
             ) : (
               // Dialog: virtualize so a multi-thousand-step run mounts a
-              // bounded number of DOM rows (#5733). Embedded (A3): grow with
-              // the page scroller — Virtuoso needs a fixed parent height.
+              // bounded number of DOM rows (#5733). Embedded (A3): plain rows
+              // inside its own scroller — Virtuoso needs a fixed parent height,
+              // and the host panel (issue execution log) is `overflow-hidden`,
+              // so without a scroller here every step past the fold is
+              // unreachable (the page can't scroll either).
               embedded ? (
-                <div>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   {displayRows.map((row) => (
                     <TranscriptRow
                       key={row.seq}

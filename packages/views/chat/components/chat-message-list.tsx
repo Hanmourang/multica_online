@@ -51,7 +51,7 @@ import type {
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { buildTimeline } from "../../common/task-transcript";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
-import { TaskStatusPill } from "./task-status-pill";
+import { RunProgressPanel } from "./run-progress-panel";
 import {
   GroupDispatchPills,
   GroupPendingPills,
@@ -205,6 +205,10 @@ function ChatListHeader({ context }: { context?: ChatListContext }) {
 // live timeline moved into a real row so it can keep its identity when the
 // task completes (see ChatRenderItem).
 //
+// The pill is wrapped in RunProgressPanel: a one-line "what is it doing" label
+// plus the step list derived from the same task:message cache, so a long run
+// shows its progress instead of just a spinner.
+//
 // The container always renders (even with no pill) so the list keeps a
 // constant bottom inset: without it the last row's own py-2 was the only gap
 // between the final reply (and its follow-up pills) and the composer.
@@ -212,7 +216,7 @@ function ChatListFooter({ context }: { context?: ChatListContext }) {
   return (
     <div className={cn(CHAT_COLUMN, "pb-4 space-y-4")}>
       {context?.showStatusPill && context.pendingTask ? (
-        <TaskStatusPill
+        <RunProgressPanel
           pendingTask={context.pendingTask}
           taskMessages={context.liveTaskMessages ?? []}
           availability={context.availability}

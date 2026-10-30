@@ -1249,39 +1249,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     useState<ActivityTimeWindow>("all");
   const openModal = useModalStore((state) => state.open);
 
-  const setDetailTab = useCallback(
-    (tab: IssueDetailTab, runId?: string | null) => {
-      const params = new URLSearchParams(navigation.searchParams ?? "");
-      if (tab === "activity") {
-        params.delete("tab");
-        params.delete("run");
-      } else {
-        params.set("tab", "exec");
-        if (runId) params.set("run", runId);
-        else params.delete("run");
-      }
-      const query = params.toString();
-      navigation.replace(
-        `${paths.issueDetail(id)}${query ? `?${query}` : ""}${navigation.hash ?? ""}`,
-      );
-    },
-    [id, navigation, paths],
-  );
-  const retryAndOpenExec = useCallback(
-    async (taskId: string) => {
-      try {
-        await api.rerunIssue(id, taskId);
-      } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : t(($) => $.execution_log.retry_failed),
-        );
-      }
-      setDetailTab("exec", taskId);
-    },
-    [id, setDetailTab, t],
-  );
+  // setDetailTab / retryAndOpenExec 定义在 issue 查询之后——拼地址要用
+  // identifier，而 identifier 只有拿到 issue 数据才存在（见下方注释）。
   const toggleActivityFilter = useCallback((key: ActivityFilterKey) => {
     setActivityFilters((prev) => {
       const next = new Set(prev);
@@ -1524,6 +1493,45 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return cached?.description != null ? cached : undefined;
     },
   });
+  // Tab 是从 URL 派生的（`?tab=exec`），每次切换都要重写地址栏。路径段优先
+  // 用 identifier：`IssueDetail` 从路由拿到的 `id` 是 canonical UUID，而
+  // `IssueDetailRoute` 会把 UUID 段规范化成 identifier 并再 replace 一次 URL。
+  // 若这里用 UUID 拼，那次规范化紧跟着覆盖地址、顺手丢掉 query，`?tab=exec`
+  // 被静默抹掉——表现就是「点执行日志 tab 毫无反应」。
+  const setDetailTab = useCallback(
+    (tab: IssueDetailTab, runId?: string | null) => {
+      const params = new URLSearchParams(navigation.searchParams ?? "");
+      if (tab === "activity") {
+        params.delete("tab");
+        params.delete("run");
+      } else {
+        params.set("tab", "exec");
+        if (runId) params.set("run", runId);
+        else params.delete("run");
+      }
+      const query = params.toString();
+      const segment = issue?.identifier ?? id;
+      navigation.replace(
+        `${paths.issueDetail(segment)}${query ? `?${query}` : ""}${navigation.hash ?? ""}`,
+      );
+    },
+    [id, issue?.identifier, navigation, paths],
+  );
+  const retryAndOpenExec = useCallback(
+    async (taskId: string) => {
+      try {
+        await api.rerunIssue(id, taskId);
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t(($) => $.execution_log.retry_failed),
+        );
+      }
+      setDetailTab("exec", taskId);
+    },
+    [id, setDetailTab, t],
+  );
   const openCommentSubIssue = useCallback((commentId: string) => {
     if (!issue) return;
     openModal("quick-create-issue", {

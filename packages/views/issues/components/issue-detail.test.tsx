@@ -1241,8 +1241,11 @@ describe("IssueDetail (shared)", () => {
     const execTab = await screen.findByTestId("issue-tab-exec");
     expect(screen.getByTestId("activity-stream-filters")).toBeInTheDocument();
     fireEvent.click(execTab);
+    // The identifier, not the canonical UUID: `IssueDetailRoute` rewrites a UUID
+    // segment to the identifier and would carry the query away with it (the tab
+    // click then reads as a no-op in the browser).
     expect(mockNav.replace).toHaveBeenCalledWith(
-      expect.stringMatching(/\/issues\/issue-1\?tab=exec/),
+      expect.stringMatching(/\/issues\/TES-1\?tab=exec/),
     );
   });
 

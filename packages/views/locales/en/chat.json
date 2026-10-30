@@ -322,6 +322,24 @@
       "searching_web": "Searching the web",
       "fallback": "Working"
     },
+    "progress": {
+      "steps": "{{finished}}/{{total}} steps",
+      "errors": "{{count}} errors",
+      "thinking": "Thinking",
+      "skill_badge": "Skill {{name}}",
+      "more": "{{count}} earlier steps",
+      "less": "Hide earlier steps",
+      "kinds": {
+        "skill": "Skill",
+        "command": "Run",
+        "read": "Read",
+        "write": "Edit",
+        "search": "Search",
+        "web": "Web",
+        "mcp": "MCP",
+        "other": "Call"
+      }
+    },
     "group": {
       "agent_fallback": "Agent",
       "stop_task": "Stop {{name}}",

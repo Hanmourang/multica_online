@@ -318,6 +318,24 @@
       "searching_web": "搜索网页",
       "fallback": "处理中"
     },
+    "progress": {
+      "steps": "{{finished}}/{{total}} 步",
+      "errors": "{{count}} 处报错",
+      "thinking": "思考中",
+      "skill_badge": "技能 {{name}}",
+      "more": "更早 {{count}} 步",
+      "less": "收起更早步骤",
+      "kinds": {
+        "skill": "加载技能",
+        "command": "执行命令",
+        "read": "读取",
+        "write": "修改",
+        "search": "搜索",
+        "web": "联网",
+        "mcp": "MCP",
+        "other": "调用"
+      }
+    },
     "group": {
       "agent_fallback": "Agent",
       "stop_task": "停止 {{name}}",

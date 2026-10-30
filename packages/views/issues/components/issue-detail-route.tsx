@@ -31,7 +31,13 @@ export function useCanonicalIssueUrl(
 ) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
-  const canonicalHref = identifier ? `${paths.issueDetail(identifier)}${hash}` : null;
+  // Rewrite the segment, nothing else: the query carries state that lives in the
+  // URL by design (`?tab=exec`, `?run=<id>`), and dropping it here silently
+  // undid every such deep link — including the tab click that just wrote it.
+  const search = navigation.searchParams?.toString() ?? "";
+  const canonicalHref = identifier
+    ? `${paths.issueDetail(identifier)}${search ? `?${search}` : ""}${hash}`
+    : null;
   // `useWorkspacePaths()` and the navigation adapter are both rebuilt on
   // render, so this ref — not the dependency array — is what guarantees the
   // replace runs once per target instead of on every commit.

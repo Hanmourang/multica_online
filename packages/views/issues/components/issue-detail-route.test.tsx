@@ -30,13 +30,17 @@ vi.mock("@multica/core/paths", async () => {
 const replace = vi.fn();
 const push = vi.fn();
 
+// Mutable so individual cases can simulate a deep link that carries query
+// state; the adapter is rebuilt on every render and reads it fresh.
+let currentSearch = new URLSearchParams();
+
 function wrapper({ children }: { children: ReactNode }) {
   const adapter: NavigationAdapter = {
     push,
     replace,
     back: vi.fn(),
     pathname: "/acme/issues/x",
-    searchParams: new URLSearchParams(),
+    searchParams: new URLSearchParams(currentSearch.toString()),
     hash: "",
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   };
@@ -47,6 +51,7 @@ describe("useCanonicalIssueUrl", () => {
   beforeEach(() => {
     replace.mockClear();
     push.mockClear();
+    currentSearch = new URLSearchParams();
   });
 
   it("rewrites a UUID URL to the identifier once the issue resolves", () => {
@@ -100,6 +105,22 @@ describe("useCanonicalIssueUrl", () => {
       { wrapper },
     );
     expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134#comment-comment-7");
+  });
+
+  // Regression: the rewrite used to keep only the hash. Every URL-carried view
+  // state (`?tab=exec`, `?run=<id>`) was silently dropped once the issue
+  // resolved, so a UUID deep link landed on the activity tab and clicking the
+  // execution tab looked like a no-op — it wrote the query, then this rewrite
+  // erased it.
+  it("keeps the query while canonicalizing a UUID", () => {
+    currentSearch = new URLSearchParams("tab=exec&run=task-9");
+    renderHook(
+      () => useCanonicalIssueUrl("cb240efb-154c-42a8-ae92-42b02676feca", "TRS-134"),
+      { wrapper },
+    );
+    expect(replace).toHaveBeenCalledWith(
+      "/acme/issues/TRS-134?tab=exec&run=task-9",
+    );
   });
 });
 

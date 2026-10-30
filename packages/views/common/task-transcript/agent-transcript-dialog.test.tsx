@@ -690,6 +690,35 @@ describe("AgentTranscriptDialog", () => {
   });
 });
 
+describe("AgentTranscriptDialog — embedded", () => {
+  // Regression: the embedded variant used to render its rows into a plain
+  // div and rely on "the page scroller". Its host is the issue execution log,
+  // whose column is `overflow-hidden` end to end — so every step past the fold
+  // (97 of them in the reported run) was unreachable: the page couldn't scroll
+  // and the list had no scroller of its own.
+  it("scrolls the step list itself so rows past the fold stay reachable", () => {
+    renderWithI18n(
+      <AgentTranscriptDialog
+        open
+        onOpenChange={vi.fn()}
+        task={baseTask}
+        items={items}
+        agentName="Codex"
+        embedded
+      />,
+    );
+
+    const scroller = screen
+      .getByTestId("agent-transcript-embedded")
+      .querySelector(".overflow-y-auto");
+    expect(scroller).not.toBeNull();
+    expect(scroller).toHaveClass("min-h-0", "flex-1");
+    // The column around it has to be shrunken too, otherwise `flex-1`
+    // resolves against the content height and there is nothing to scroll.
+    expect(scroller?.parentElement).toHaveClass("min-h-0");
+  });
+});
+
 describe("AgentTranscriptDialog — work directory handoff", () => {
   it("shows and copies the durable project directory after worktree cleanup", async () => {
     renderDialog(items, {

@@ -318,6 +318,24 @@
       "searching_web": "ウェブを検索中",
       "fallback": "作業中"
     },
+    "progress": {
+      "steps": "{{finished}}/{{total}} ステップ",
+      "errors": "エラー {{count}}件",
+      "thinking": "思考中",
+      "skill_badge": "スキル {{name}}",
+      "more": "以前の {{count}} ステップ",
+      "less": "以前のステップを閉じる",
+      "kinds": {
+        "skill": "スキル読み込み",
+        "command": "コマンド実行",
+        "read": "読み取り",
+        "write": "編集",
+        "search": "検索",
+        "web": "ウェブ",
+        "mcp": "MCP",
+        "other": "呼び出し"
+      }
+    },
     "group": {
       "agent_fallback": "エージェント",
       "stop_task": "{{name}} を停止",
