@@ -24,7 +24,11 @@ import {
   postPrototypeHighlight,
   withPrototypeInteractShim,
 } from "./prototype-interact";
-import { readPrototypeFitHeight, withPrototypeFitShim } from "./prototype-fit";
+import {
+  MAX_PROTOTYPE_FIT_HEIGHT,
+  readPrototypeFitHeight,
+  withPrototypeFitShim,
+} from "./prototype-fit";
 
 const WEB_PREVIEW_MAX = 800_000;
 
@@ -248,7 +252,12 @@ function ArchiveHtmlFrame({
       const target = iframeRef.current;
       if (!target || event.source !== target.contentWindow) return;
       const height = readPrototypeFitHeight(event.data);
-      if (height) target.style.height = `${height}px`;
+      if (!height) return;
+      // 兜底截断：异常原型曾因「撑满视口」与回写高度互相触发，iframe 一路涨到
+      // 百万 px、内容被推到视口外，整块预览区只剩空白。宁可出现滚动条。
+      const next = Math.min(height, MAX_PROTOTYPE_FIT_HEIGHT);
+      if (next === target.offsetHeight) return;
+      target.style.height = `${next}px`;
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);

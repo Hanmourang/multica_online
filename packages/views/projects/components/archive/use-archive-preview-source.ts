@@ -54,7 +54,7 @@ function previewAssetSigning(): PreviewAssetSigning {
   };
 }
 
-function withSignedPreviewAssets(html: string): Promise<string> {
+export function withSignedPreviewAssets(html: string): Promise<string> {
   const assets = previewAssetSigning();
   return preparePreviewAssetsSigned(html, assets.assetBase ?? "", assets.sign);
 }

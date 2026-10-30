@@ -1645,8 +1645,10 @@ function WorkspaceAssetsPager({
 }) {
   const { t } = useT("assets");
   if (totalCount === 0 && !pending) return null;
+  // `pe-chat-launcher`：分页条贴在右下角，而全局聊天入口（FloatingChat）就浮在
+  // 那个角上；不避让的话「下一页」会被它盖住，点击落空（表现为要点两次才翻页）。
   return (
-    <div className={`flex items-center justify-end gap-2${pending ? " invisible" : ""}`}>
+    <div className={`pe-chat-launcher flex items-center justify-end gap-2${pending ? " invisible" : ""}`}>
       <Button type="button" size="sm" variant="outline" disabled={page <= 1} onClick={onPrev}>
         {t(($) => $.pager.prev)}
       </Button>

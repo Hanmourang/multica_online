@@ -35,6 +35,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { useT } from "../../../../i18n";
 import { ArtifactPreviewPane } from "../../archive/artifact-preview-pane";
+import { withSignedPreviewAssets } from "../../archive/use-archive-preview-source";
 import { classifyArchivePreviewKind } from "../../archive/archive-display";
 import { QueryLoading } from "../../archive/query-states";
 import { RichContent } from "../../../../rich-content/rich-content";
@@ -241,11 +242,17 @@ function AttachmentBranch({ binding }: { binding: AssetBinding }) {
 
   const needsText = kind === "markdown" || kind === "html" || kind === "text";
   const textQuery = useQuery({
-    queryKey: ["asset-preview-attachment-text", attachmentId],
+    // html 要多做一次资源签名改写，缓存键里带上 kind，否则升级后旧的未改写
+    // 正文会一直命中（staleTime 5 分钟）。
+    queryKey: ["asset-preview-attachment-text", attachmentId, kind],
     enabled: needsText,
     queryFn: async () => {
       const { text } = await api.getAttachmentTextContent(attachmentId);
-      return text;
+      // 预览 iframe 是 srcdoc 不透明源，子资源既不带 cookie 也不带
+      // Authorization，直连境外 CDN 时就连不上；而原型里的 Google Fonts
+      // 样式表是渲染阻塞资源，实测 fonts.googleapis.com 25s 才超时 —— 在它
+      // 返回前整页一直是空白。改写成本站签名代理后，浏览器只连本机站点。
+      return kind === "html" ? withSignedPreviewAssets(text) : text;
     },
     retry: false,
     staleTime: 5 * 60_000,
