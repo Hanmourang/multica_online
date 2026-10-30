@@ -348,6 +348,10 @@ import type {
   ModuleFeatureDecision,
   ModulePrototypePlan,
   ModulePrototypePlanApplyResponse,
+  ModuleWorkspace,
+  ModuleWorkspacePatchResponse,
+  ModuleReleasesResponse,
+  ModuleReleasePublishResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -1568,6 +1572,61 @@ export class ApiClient {
   ): Promise<ModulePrototypePlanApplyResponse> {
     return this.fetch(
       `/api/projects/${projectId}/modules/${moduleId}/prototype-plans/${planId}/apply`,
+      { method: "POST" },
+    );
+  }
+
+  /** GET /modules/{moduleId}/workspace —— 右栏三段（说明/功能点/版本记录）一次取齐。 */
+  async getModuleWorkspace(projectId: string, moduleId: string): Promise<ModuleWorkspace> {
+    return this.fetch(`/api/projects/${projectId}/modules/${moduleId}/workspace`);
+  }
+
+  /** POST /modules/{moduleId}/workspace/patch —— 追加一条说明版本；
+   *  base_version 陈旧 → 409 base_stale（响应带 current_version），只读字段 → 422。 */
+  async patchModuleWorkspace(
+    projectId: string,
+    moduleId: string,
+    body: {
+      base_version: number;
+      fields: Record<string, unknown>;
+      source?: "manual" | "agent" | "mcp" | "extract" | "rollback";
+      note?: string;
+    },
+  ): Promise<ModuleWorkspacePatchResponse> {
+    return this.fetch(`/api/projects/${projectId}/modules/${moduleId}/workspace/patch`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** GET /modules/{moduleId}/releases —— 成对发布历史 + 两条时间轴指针。 */
+  async listModuleReleases(
+    projectId: string,
+    moduleId: string,
+  ): Promise<ModuleReleasesResponse> {
+    return this.fetch(`/api/projects/${projectId}/modules/${moduleId}/releases`);
+  }
+
+  /** POST /modules/{moduleId}/releases —— 成对发布（仅人可调，agent → 403）。 */
+  async publishModuleRelease(
+    projectId: string,
+    moduleId: string,
+    body: { brief_version?: number; prototype_version?: number; note?: string },
+  ): Promise<ModuleReleasePublishResponse> {
+    return this.fetch(`/api/projects/${projectId}/modules/${moduleId}/releases`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** POST /modules/{moduleId}/releases/{version}/rollback —— 旧版为基发新版（不改历史行）。 */
+  async rollbackModuleRelease(
+    projectId: string,
+    moduleId: string,
+    version: number,
+  ): Promise<ModuleReleasePublishResponse> {
+    return this.fetch(
+      `/api/projects/${projectId}/modules/${moduleId}/releases/${version}/rollback`,
       { method: "POST" },
     );
   }
@@ -4771,6 +4830,8 @@ export class ApiClient {
     if (params?.category) search.set("category", params.category);
     if (params?.name) search.set("name", params.name);
     if (params?.projectId) search.set("projectId", params.projectId);
+    if (params?.stage) search.set("stage", params.stage);
+    if (params?.role) search.set("role", params.role);
     const qs = search.toString();
     return this.fetch(`/api/assets/page${qs ? `?${qs}` : ""}`);
   }

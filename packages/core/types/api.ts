@@ -248,6 +248,8 @@ export interface ModuleSpecFeature {
   title: string;
   kind: "core" | "edge";
   priority?: string;
+  /** 右栏「功能点清单」的分组标签（原型区块，如「浏览」「分析」）。 */
+  group?: string;
 }
 
 /** project_module.spec 的反序列化形态（唯一真源，schema=module_spec/v1）。 */
@@ -380,6 +382,156 @@ export interface ModulePrototypePlanApplyResponse {
   canonical_prototype_version: number;
   spec_version: number;
   feature_count: number;
+}
+
+// ── 右栏「功能点详解」工作区（原型图 TAB v2 · 画面 3/5/6） ──────────────
+
+/** module_field_def 一行：右栏字段字典（key / scope / label / kind / owner）。 */
+export interface ModuleFieldDef {
+  key: string;
+  scope: "module" | "feature_point";
+  label: string;
+  ord: number;
+  kind: "text" | "longtext" | "list" | "refs" | "acceptance";
+  /** system = 只读（版本号、覆盖率、功能点编号与进退场），写它们 422。 */
+  owner: "system" | "user";
+  writable_by: string[];
+  versioned: boolean;
+}
+
+/** 单个字段值的版本元信息：fields jsonb 每个 key 自带 {v, by, at, actor}。 */
+export interface ModuleFieldValue {
+  value: unknown;
+  v: number;
+  by: "human" | "agent";
+  at: string;
+  actor?: string;
+}
+
+export type ModuleBriefFields = Record<string, ModuleFieldValue>;
+
+export type ModuleBriefSource = "manual" | "agent" | "mcp" | "extract" | "rollback";
+export type ModuleBriefStatus = "draft" | "published" | "superseded";
+
+/** 一条字段级差异（版本记录的 +/−）。 */
+export interface ModuleBriefDiffEntry {
+  key: string;
+  label: string;
+  scope: "module" | "feature_point";
+  op: "set" | "clear";
+  from: unknown;
+  to: unknown;
+}
+
+/** 说明版本的一行（append-only）。 */
+export interface ModuleBrief {
+  version: number;
+  base_version: number | null;
+  fields: ModuleBriefFields;
+  status: ModuleBriefStatus;
+  source: ModuleBriefSource;
+  diff_summary: string;
+  changes: ModuleBriefDiffEntry[];
+  created_by_type: string;
+  created_at: string;
+}
+
+/** 版本记录里的一行（不含整份 fields，只有差异摘要）。 */
+export interface ModuleBriefVersionSummary {
+  version: number;
+  base_version: number | null;
+  status: ModuleBriefStatus;
+  source: ModuleBriefSource;
+  diff_summary: string;
+  changes: ModuleBriefDiffEntry[];
+  created_by_type: string;
+  created_at: string;
+}
+
+/** 验收标准一条：✓/○ 由 ok 决定。 */
+export interface ModuleAcceptanceItem {
+  text?: string;
+  ok?: boolean;
+}
+
+/** 功能点四段详情（1 描述/定位 · 2 细节要求 · 3 交互/依赖 · 4 验收）。
+ *  req / acceptance 保存的是写入时的原始 JSON，历史数据可能是裸字符串。 */
+export interface ModuleFeatureDetail {
+  desc?: string;
+  loc?: string;
+  req?: string[];
+  interaction?: string;
+  deps?: string;
+  acceptance?: Array<ModuleAcceptanceItem | string>;
+}
+
+/** 功能点清单的一行：规格投影 + 四段填充度。 */
+export interface ModuleWorkspaceFeature {
+  code: string;
+  title: string;
+  kind: string;
+  priority?: string;
+  group?: string;
+  spec_version: number;
+  detail: ModuleFeatureDetail;
+  /** ◍filled/total：四段里有几段写了内容。 */
+  filled: number;
+  total: number;
+  acceptance_ok: number;
+  acceptance_total: number;
+}
+
+/** 成对发布的一行：说明版本 ⨯ 原型版本。 */
+export interface ModuleRelease {
+  version: number;
+  brief_version: number;
+  prototype_version: number;
+  diff: unknown;
+  released_by: string;
+  created_at: string;
+}
+
+/** GET /modules/{moduleId}/workspace —— 右栏三段一次取齐。 */
+export interface ModuleWorkspace {
+  module_id: string;
+  name: string;
+  color: string;
+  spec_version: number;
+  canonical_prototype_version: number | null;
+  brief_version: number | null;
+  release_version: number | null;
+  brief: ModuleBrief;
+  field_defs: ModuleFieldDef[];
+  features: ModuleWorkspaceFeature[];
+  versions: ModuleBriefVersionSummary[];
+  releases: ModuleRelease[];
+  feature_count: number;
+}
+
+/** POST /workspace/patch 回执：version/prev/diff，同值幂等返回 noop。 */
+export interface ModuleWorkspacePatchResponse {
+  module_id: string;
+  version: number;
+  prev: number;
+  noop: boolean;
+  diff: ModuleBriefDiffEntry[];
+  brief: ModuleBrief;
+}
+
+/** GET /modules/{moduleId}/releases 响应。 */
+export interface ModuleReleasesResponse {
+  module_id: string;
+  brief_version: number | null;
+  release_version: number | null;
+  canonical_prototype_version: number | null;
+  releases: ModuleRelease[];
+}
+
+/** POST /releases 与 /releases/{version}/rollback 回执。 */
+export interface ModuleReleasePublishResponse {
+  module_id: string;
+  release: ModuleRelease;
+  brief_version?: number;
 }
 
 /** POST /issues/{id}/prototype/generate 的响应包：新版本行 + stage-1 子任务。 */

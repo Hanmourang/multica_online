@@ -43,4 +43,10 @@ export {
   useParseModulePrototype,
   useCreateModulePrototypePlan,
   useApplyModulePrototypePlan,
+  moduleWorkspaceOptions,
+  moduleReleasesOptions,
+  isModuleWorkspaceGated,
+  usePatchModuleWorkspace,
+  usePublishModuleRelease,
+  useRollbackModuleRelease,
 } from "./module-prototypes";

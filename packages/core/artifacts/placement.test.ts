@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ARTIFACT_STAGES,
+  ASSET_S0_PLACEMENT,
   ASSET_UNSTAGED_PLACEMENT,
   FIVE_STAGE_PLACEMENTS,
   SHELF_DOC_TYPES,
@@ -33,6 +34,14 @@ describe("five-stage placement contract", () => {
   it("maps each lifecycle stage to its archive placement", () => {
     expect(placementForLifecycle("S1")).toEqual({ stage: 1, docType: "research" });
     expect(placementForLifecycle("S5")).toEqual({ stage: 5, docType: "iteration" });
+  });
+
+  it("maps S0 (requirement brief) outside the 1..5 shelf domain", () => {
+    // S0 不在日历阶段内：落 (NULL, requirement)，不污染五货架集合。
+    expect(placementForLifecycle("S0")).toEqual(ASSET_S0_PLACEMENT);
+    expect(lifecycleForPlacement(ASSET_S0_PLACEMENT)).toBe("S0");
+    expect(isShelfDocType(ASSET_S0_PLACEMENT.docType)).toBe(false);
+    expect(ARTIFACT_STAGES).not.toContain(0);
   });
 
   it("treats general / empty as the unstaged retention shelf", () => {

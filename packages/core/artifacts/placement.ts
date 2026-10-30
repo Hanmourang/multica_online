@@ -8,6 +8,8 @@
 // S1 项目规划 ↔ 1 ↔ research；S2 产品原型 ↔ 2 ↔ product-design；
 // S3 技术方案 ↔ 3 ↔ architecture；S4 问题复盘 ↔ 4 ↔ retrospective；
 // S5 需求迭代 ↔ 5 ↔ iteration。general / 未标 → (null, 'asset') 未分阶保留区。
+// S0 需求描述 ↔ (null, 'requirement')：不在 1..5 日历阶段域内，只作需求 × 阶段
+// 矩阵的 S0 列归属（migration 500 放宽 lifecycle CHECK）。
 //
 // 货架归属只认 doc_type；doc_module 是货架内独立模块标签，不参与阶段映射。
 
@@ -22,6 +24,12 @@ export interface ArchivePlacement {
 
 /** 未分阶保留区形态（与 Go assetUnstagedPlacement 同值）。 */
 export const ASSET_UNSTAGED_PLACEMENT: ArchivePlacement = { stage: null, docType: "asset" };
+
+/**
+ * S0 需求描述：资产阶段 ↔ (stage NULL, doc_type 'requirement')。stage 置空是因为
+ * 档案日历阶段只存 1..5；需求 × 阶段矩阵以 doc_type 'requirement' 认这列。
+ */
+export const ASSET_S0_PLACEMENT: ArchivePlacement = { stage: null, docType: "requirement" };
 
 /** 五阶段映射表（顺序即货架/矩阵列顺序，与 Go lifecyclePlacementMap 同值）。 */
 export const FIVE_STAGE_PLACEMENTS: readonly {
@@ -56,6 +64,7 @@ export function isShelfDocType(docType: string): boolean {
 /** 资产阶段 → 档案 placement；general/未知服务端值 → 未分阶保留区（防御式）。 */
 export function placementForLifecycle(lifecycle: AssetLifecycleStage | string | null | undefined): ArchivePlacement {
   const key = (lifecycle ?? "").trim().toUpperCase();
+  if (key === "S0") return ASSET_S0_PLACEMENT;
   for (const rule of FIVE_STAGE_PLACEMENTS) {
     if (rule.lifecycle === key) return { stage: rule.stage, docType: rule.docType };
   }
@@ -76,7 +85,9 @@ export function lifecycleForArtifactStage(stage: ArtifactStage | null | undefine
  * 矛盾组合 / 未知 stage 一律返回 general（服务端为最终校正方，前端仅展示）。
  */
 export function lifecycleForPlacement(placement: ArchivePlacement): AssetLifecycleStage {
-  if (placement.stage == null) return "general";
+  if (placement.stage == null) {
+    return placement.docType === ASSET_S0_PLACEMENT.docType ? "S0" : "general";
+  }
   for (const rule of FIVE_STAGE_PLACEMENTS) {
     if (rule.stage === placement.stage && rule.docType === placement.docType) return rule.lifecycle;
   }

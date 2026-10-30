@@ -26,6 +26,7 @@ interface AssetFilterState {
   setCategory: (key: string, category: AssetCategory | null) => void;
   setName: (key: string, name: string) => void;
   setPage: (key: string, page: number) => void;
+  setPageSize: (key: string, pageSize: number) => void;
   reset: (key: string) => void;
 }
 
@@ -64,6 +65,24 @@ export const useAssetFilterStore = create<AssetFilterState>()((set) => ({
         page: page > 0 ? page : 1,
       }),
     })),
+  // Written by the tables' fit-to-viewport measurement, not by a page-size
+  // picker. The page is re-anchored in the same write: the row the reader was
+  // looking at stays the first row of the new page, and because both fields
+  // move together a resize costs one fetch instead of a stale-size fetch
+  // followed by a corrected one.
+  setPageSize: (key, pageSize) =>
+    set((state) => {
+      const current = state.filtersByProject[key] ?? DEFAULT_ASSET_FILTERS;
+      if (pageSize <= 0 || current.pageSize === pageSize) return state;
+      const firstVisible = (current.page - 1) * current.pageSize;
+      return {
+        filtersByProject: withEntry(state.filtersByProject, key, {
+          ...current,
+          pageSize,
+          page: Math.floor(firstVisible / pageSize) + 1,
+        }),
+      };
+    }),
   reset: (key) =>
     set((state) => {
       if (!state.filtersByProject[key]) return state;

@@ -1,5 +1,6 @@
 // 档案产物类型（migration 455 project_artifact；含 project.archive_resource_id 扩展列）
 
+import type { AssetRole } from "./asset";
 import type { GraphSyncPayload } from "./graph";
 
 /** 档案作用域：由目录契约推导 —— overview/ → project，requirements/ → requirement，_shared/ → shared。 */
@@ -45,6 +46,17 @@ export interface ProjectArtifact {
   updated_at: string;
   /** 软删标记：sync 全量清单 diff 时缺席行置 deleted_at，不物理删除。 */
   deleted_at?: string | null;
+  /**
+   * 解析后的「档案 ↔ 资产绑定」关联（列表响应专属，服务端两类关联合并：
+   * 原生入档 asset_binding_id 优先，archive-import 回退 external_ref.artifact_id）。
+   * null / 缺省 = 该档案没有关联任何资产。
+   */
+  asset_binding_id?: string | null;
+  /**
+   * 关联资产的对象：input 输入 / output 产物。交付物 TAB 只收「未关联资产」
+   * 与 output——资产管理上传的输入物不得混进交付物。
+   */
+  asset_role?: AssetRole | null;
 }
 
 /** GET /projects/{id}/artifacts 查询参数（scope/stage/doc_type/issue_id 筛选）。 */

@@ -26,10 +26,15 @@ export const ASSET_CATEGORIES: readonly AssetCategory[] = [
 /** 写入通道：manual = 手填 / 搜索候选绑定；github = 仓库源；其余为预留目录来源。 */
 export type AssetSource = string;
 
-/** 生命周期阶段（migration 473/477；五阶段唯一映射 plan §5.1，与 Go 端 placement 表同取值）。 */
-export type AssetLifecycleStage = "S1" | "S2" | "S3" | "S4" | "S5" | "general";
+/**
+ * 生命周期阶段（migration 473/477/500；五阶段唯一映射 plan §5.1，与 Go 端
+ * placement 表同取值）。S0 = 需求描述：不对应档案日历阶段 1..5，落
+ * (stage NULL, doc_type 'requirement')，供需求 × 阶段矩阵的 S0 列使用。
+ */
+export type AssetLifecycleStage = "S0" | "S1" | "S2" | "S3" | "S4" | "S5" | "general";
 
 export const ASSET_LIFECYCLE_STAGES: readonly AssetLifecycleStage[] = [
+  "S0",
   "S1",
   "S2",
   "S3",
@@ -117,6 +122,9 @@ export interface WorkspaceAssetPage {
   totalPages: number;
 }
 
+/** 「未分阶 / 未定对象」筛选值：服务端把它翻成 IS NULL OR '' 的条件。 */
+export type AssetUnsetFilter = "none";
+
 /** GET /assets/page 查询参数。issueId 非空把作用域降到某工作项。 */
 export interface ListAssetsParams {
   page?: number;
@@ -127,6 +135,11 @@ export interface ListAssetsParams {
   /** 仅工作区级 GET /api/assets/page 消费（侧栏项目下拉过滤）；项目/工作项级
    *  endpoint 的作用域由路径参数决定，服务端忽略此字段。 */
   projectId?: string;
+  /** 仅工作区级 GET /api/assets/page 消费：阶段过滤在服务端完成，这样分页的
+   *  totalCount / totalPages 与筛选结果一致（前端页内二次过滤会让末页留白）。 */
+  stage?: AssetLifecycleStage | AssetUnsetFilter;
+  /** 同上，限定输入 / 输出对象。 */
+  role?: AssetRole | AssetUnsetFilter;
 }
 
 /** POST /assets 请求体。 */
