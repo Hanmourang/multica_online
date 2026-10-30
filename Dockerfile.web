@@ -52,6 +52,13 @@ ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 ENV STANDALONE=true
 
 # Build the web app (standalone output for minimal runtime)
+
+# `next build` 是单进程的，V8 默认堆上限按宿主物理内存推算：8G 机器上只有 ~2G，
+# 页面/图标多起来就会 "Reached heap limit" 直接 SIGABRT。显式抬高上限，
+# 并保留 build-arg 覆盖能力，小内存机器可下调配合 swap 使用。
+ARG NODE_OPTIONS=--max-old-space-size=4096
+ENV NODE_OPTIONS=$NODE_OPTIONS
+
 RUN pnpm --filter @multica/web build
 
 # --- Runtime ---
