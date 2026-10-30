@@ -556,7 +556,7 @@ func (q *Queries) ListPrototypeVersions(ctx context.Context, issueID pgtype.UUID
 }
 
 const listRequirementChildren = `-- name: ListRequirementChildren :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id, feature_code FROM issue
 WHERE parent_issue_id = $1
 ORDER BY stage ASC, created_at ASC
 `
@@ -615,6 +615,7 @@ func (q *Queries) ListRequirementChildren(ctx context.Context, parentIssueID pgt
 			&i.GraphContext,
 			&i.AcceptanceSpec,
 			&i.SprintID,
+			&i.FeatureCode,
 		); err != nil {
 			return nil, err
 		}
@@ -627,7 +628,7 @@ func (q *Queries) ListRequirementChildren(ctx context.Context, parentIssueID pgt
 }
 
 const listTriggerableRequirements = `-- name: ListTriggerableRequirements :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue i
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id, feature_code FROM issue i
 WHERE i.parent_issue_id IS NULL
   AND i.auto_trigger = TRUE
   AND i.triggered_at IS NULL
@@ -693,6 +694,7 @@ func (q *Queries) ListTriggerableRequirements(ctx context.Context) ([]Issue, err
 			&i.GraphContext,
 			&i.AcceptanceSpec,
 			&i.SprintID,
+			&i.FeatureCode,
 		); err != nil {
 			return nil, err
 		}

@@ -14,7 +14,7 @@ import (
 const createProjectModule = `-- name: CreateProjectModule :one
 INSERT INTO project_module (project_id, workspace_id, name, color)
 VALUES ($1, $2, $3, $4)
-RETURNING id, project_id, workspace_id, name, color, created_at, graph_node_id, spec, spec_version, canonical_prototype_version, spec_updated_at
+RETURNING id, project_id, workspace_id, name, color, created_at, graph_node_id, spec, spec_version, canonical_prototype_version, spec_updated_at, brief_version, release_version
 `
 
 type CreateProjectModuleParams struct {
@@ -44,6 +44,8 @@ func (q *Queries) CreateProjectModule(ctx context.Context, arg CreateProjectModu
 		&i.SpecVersion,
 		&i.CanonicalPrototypeVersion,
 		&i.SpecUpdatedAt,
+		&i.BriefVersion,
+		&i.ReleaseVersion,
 	)
 	return i, err
 }
@@ -132,7 +134,7 @@ func (q *Queries) GetIssuesModuleIDs(ctx context.Context, issueIds []pgtype.UUID
 }
 
 const getProjectModule = `-- name: GetProjectModule :one
-SELECT id, project_id, workspace_id, name, color, created_at, graph_node_id, spec, spec_version, canonical_prototype_version, spec_updated_at FROM project_module WHERE id = $1
+SELECT id, project_id, workspace_id, name, color, created_at, graph_node_id, spec, spec_version, canonical_prototype_version, spec_updated_at, brief_version, release_version FROM project_module WHERE id = $1
 `
 
 func (q *Queries) GetProjectModule(ctx context.Context, id pgtype.UUID) (ProjectModule, error) {
@@ -150,6 +152,8 @@ func (q *Queries) GetProjectModule(ctx context.Context, id pgtype.UUID) (Project
 		&i.SpecVersion,
 		&i.CanonicalPrototypeVersion,
 		&i.SpecUpdatedAt,
+		&i.BriefVersion,
+		&i.ReleaseVersion,
 	)
 	return i, err
 }
@@ -245,7 +249,7 @@ func (q *Queries) ListIssueDependencies(ctx context.Context, issueID pgtype.UUID
 
 const listProjectModules = `-- name: ListProjectModules :many
 
-SELECT m.id, m.project_id, m.workspace_id, m.name, m.color, m.created_at, m.graph_node_id, m.spec, m.spec_version, m.canonical_prototype_version, m.spec_updated_at, COUNT(i.id)::int AS task_count
+SELECT m.id, m.project_id, m.workspace_id, m.name, m.color, m.created_at, m.graph_node_id, m.spec, m.spec_version, m.canonical_prototype_version, m.spec_updated_at, m.brief_version, m.release_version, COUNT(i.id)::int AS task_count
 FROM project_module m
 LEFT JOIN issue i ON i.module_id = m.id
 WHERE m.project_id = $1
@@ -265,6 +269,8 @@ type ListProjectModulesRow struct {
 	SpecVersion               int32              `json:"spec_version"`
 	CanonicalPrototypeVersion pgtype.Int4        `json:"canonical_prototype_version"`
 	SpecUpdatedAt             pgtype.Timestamptz `json:"spec_updated_at"`
+	BriefVersion              pgtype.Int4        `json:"brief_version"`
+	ReleaseVersion            pgtype.Int4        `json:"release_version"`
 	TaskCount                 int32              `json:"task_count"`
 }
 
@@ -292,6 +298,8 @@ func (q *Queries) ListProjectModules(ctx context.Context, projectID pgtype.UUID)
 			&i.SpecVersion,
 			&i.CanonicalPrototypeVersion,
 			&i.SpecUpdatedAt,
+			&i.BriefVersion,
+			&i.ReleaseVersion,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -305,7 +313,7 @@ func (q *Queries) ListProjectModules(ctx context.Context, projectID pgtype.UUID)
 }
 
 const updateProjectModule = `-- name: UpdateProjectModule :one
-UPDATE project_module SET name = $1, color = $2 WHERE id = $3 RETURNING id, project_id, workspace_id, name, color, created_at, graph_node_id, spec, spec_version, canonical_prototype_version, spec_updated_at
+UPDATE project_module SET name = $1, color = $2 WHERE id = $3 RETURNING id, project_id, workspace_id, name, color, created_at, graph_node_id, spec, spec_version, canonical_prototype_version, spec_updated_at, brief_version, release_version
 `
 
 type UpdateProjectModuleParams struct {
@@ -330,6 +338,8 @@ func (q *Queries) UpdateProjectModule(ctx context.Context, arg UpdateProjectModu
 		&i.SpecVersion,
 		&i.CanonicalPrototypeVersion,
 		&i.SpecUpdatedAt,
+		&i.BriefVersion,
+		&i.ReleaseVersion,
 	)
 	return i, err
 }

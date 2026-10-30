@@ -73,6 +73,8 @@ import { api, errorCode } from "@multica/core/api";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { ModulePicker } from "./pickers/module-picker";
+import { FeaturePointPropRow } from "./pickers/feature-point-picker";
+import { FeaturePointPanel } from "./feature-point-panel";
 import { SprintPicker } from "./pickers/sprint-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
@@ -2589,7 +2591,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   value={issue.module_id}
                   onChange={(moduleId) => {
                     if (moduleId) {
-                      handleUpdateField({ module_id: moduleId });
+                      // 换模块就换功能点：编号只在模块内唯一，旧编号不能继承
+                      // （服务端也会级联清空，这里把乐观缓存同步对齐）。
+                      handleUpdateField(
+                        moduleId === issue.module_id
+                          ? { module_id: moduleId }
+                          : { module_id: moduleId, feature_code: null },
+                      );
                     } else {
                       // Mirror create-issue's cascade: dropping the module
                       // drops conflict avoidance and any same-module edges
@@ -2602,6 +2610,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       }
                       handleUpdateField({
                         module_id: null,
+                        feature_code: null,
                         avoid_conflict: false,
                       });
                     }
@@ -2638,6 +2647,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 )}
               </span>
             </PropRow>
+          )}
+
+          {/* 功能点：模块原型里的一个具体功能点（归属链的最后一跳）。
+              无模块即无功能点，渲染与门控在组件内部处理。 */}
+          <FeaturePointPropRow
+            projectId={issue.project_id}
+            moduleId={issue.module_id}
+            value={issue.feature_code}
+            onChange={(code) => handleUpdateField({ feature_code: code })}
+          />
+          {issue.module_id && issue.feature_code && (
+            <div className="col-span-2">
+              <FeaturePointPanel
+                projectId={issue.project_id}
+                moduleId={issue.module_id}
+                code={issue.feature_code}
+              />
+            </div>
           )}
 
           {sprintsEnabled && issue.project_id && (

@@ -941,6 +941,8 @@ type Issue struct {
 	GraphContext             []byte             `json:"graph_context"`
 	AcceptanceSpec           []byte             `json:"acceptance_spec"`
 	SprintID                 pgtype.UUID        `json:"sprint_id"`
+	// 功能点编号（project_module_feature.code，作用域 = 本行 module_id）；NULL = 未绑定功能点
+	FeatureCode pgtype.Text `json:"feature_code"`
 }
 
 type IssueDependency struct {
@@ -1226,6 +1228,19 @@ type LarkUserBinding struct {
 	BoundAt        pgtype.Timestamptz `json:"bound_at"`
 }
 
+type LocalEnvPrewarm struct {
+	ID            pgtype.UUID        `json:"id"`
+	DaemonID      string             `json:"daemon_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	LocalPath     string             `json:"local_path"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ClaimedAt     pgtype.Timestamptz `json:"claimed_at"`
+	Attempts      int32              `json:"attempts"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
 type Member struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -1242,6 +1257,23 @@ type ModuleAcceptanceRun struct {
 	Result        []byte             `json:"result"`
 	CreatedByType string             `json:"created_by_type"`
 	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+}
+
+type ModuleBriefVersion struct {
+	ID            pgtype.UUID        `json:"id"`
+	ModuleID      pgtype.UUID        `json:"module_id"`
+	Version       int32              `json:"version"`
+	BaseVersion   pgtype.Int4        `json:"base_version"`
+	Fields        []byte             `json:"fields"`
+	Status        string             `json:"status"`
+	Source        string             `json:"source"`
+	SourceIssueID pgtype.UUID        `json:"source_issue_id"`
+	AgentRunID    pgtype.Text        `json:"agent_run_id"`
+	DiffSummary   pgtype.Text        `json:"diff_summary"`
+	Changes       []byte             `json:"changes"`
+	CreatedBy     pgtype.UUID        `json:"created_by"`
+	CreatedByType pgtype.Text        `json:"created_by_type"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type ModuleChangeEvent struct {
@@ -1265,6 +1297,18 @@ type ModuleDod struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type ModuleFieldDef struct {
+	Key        string             `json:"key"`
+	Scope      string             `json:"scope"`
+	Label      string             `json:"label"`
+	Ord        int32              `json:"ord"`
+	Kind       string             `json:"kind"`
+	Owner      string             `json:"owner"`
+	WritableBy []string           `json:"writable_by"`
+	Versioned  bool               `json:"versioned"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type ModulePrototypeParse struct {
 	ID       pgtype.UUID        `json:"id"`
 	ModuleID pgtype.UUID        `json:"module_id"`
@@ -1284,6 +1328,17 @@ type ModulePrototypePlan struct {
 	Error            pgtype.Text        `json:"error"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ModuleRelease struct {
+	ID               pgtype.UUID        `json:"id"`
+	ModuleID         pgtype.UUID        `json:"module_id"`
+	Version          int32              `json:"version"`
+	BriefVersion     int32              `json:"brief_version"`
+	PrototypeVersion int32              `json:"prototype_version"`
+	Diff             []byte             `json:"diff"`
+	ReleasedBy       pgtype.UUID        `json:"released_by"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type ModuleRequirementLink struct {
@@ -1575,6 +1630,8 @@ type ProjectModule struct {
 	SpecVersion               int32              `json:"spec_version"`
 	CanonicalPrototypeVersion pgtype.Int4        `json:"canonical_prototype_version"`
 	SpecUpdatedAt             pgtype.Timestamptz `json:"spec_updated_at"`
+	BriefVersion              pgtype.Int4        `json:"brief_version"`
+	ReleaseVersion            pgtype.Int4        `json:"release_version"`
 }
 
 type ProjectModuleFeature struct {

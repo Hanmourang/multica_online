@@ -92,6 +92,10 @@ type IssueCreateParams struct {
 	// 任务互斥执行（spec §5）。
 	ModuleID      pgtype.UUID
 	AvoidConflict bool
+	// FeatureCode 绑定该模块下的一个功能点（project_module_feature.code）。
+	// 编号只在模块内唯一，所以 handler 已连同 ModuleID 一起校验过归属；
+	// 无模块时 handler 直接 409，这里不再重复判定。
+	FeatureCode pgtype.Text
 	// SprintID 将新建 issue 直接归入项目下的某个迭代（CoCo 对标 02 §F）。
 	// 必须属于解析后的最终项目且状态非 completed，否则分别以
 	// ErrSprintNotFound / ErrSprintCompleted 拒绝整个创建。
@@ -432,6 +436,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			Stage:             p.Stage,
 			ModuleID:          p.ModuleID,
 			SprintID:          p.SprintID,
+			FeatureCode:       p.FeatureCode,
 			AvoidConflict:     pgtype.Bool{Bool: p.AvoidConflict, Valid: true},
 			StartAt:           p.StartAt,
 			Goal:              p.Goal,
@@ -461,6 +466,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			Stage:             p.Stage,
 			ModuleID:          p.ModuleID,
 			SprintID:          p.SprintID,
+			FeatureCode:       p.FeatureCode,
 			AvoidConflict:     pgtype.Bool{Bool: p.AvoidConflict, Valid: true},
 			StartAt:           p.StartAt,
 			Goal:              p.Goal,

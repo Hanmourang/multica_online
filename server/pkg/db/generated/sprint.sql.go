@@ -187,7 +187,7 @@ func (q *Queries) GetSprintProgress(ctx context.Context, arg GetSprintProgressPa
 }
 
 const listSprintIssues = `-- name: ListSprintIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, module_id, avoid_conflict, start_at, goal, repo_resource_id, decompose_mode, auto_trigger, decomposition_confirmed_at, triggered_at, acceptance_round, root_requirement_id, feature_points, graph_context, acceptance_spec, sprint_id, feature_code FROM issue
 WHERE sprint_id = $1 AND workspace_id = $2
   AND ($3::text IS NULL OR status = $3)
 ORDER BY position ASC, created_at DESC
@@ -254,6 +254,7 @@ func (q *Queries) ListSprintIssues(ctx context.Context, arg ListSprintIssuesPara
 			&i.GraphContext,
 			&i.AcceptanceSpec,
 			&i.SprintID,
+			&i.FeatureCode,
 		); err != nil {
 			return nil, err
 		}

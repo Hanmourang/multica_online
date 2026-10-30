@@ -28,13 +28,17 @@ type IssueContentPatch struct {
 // effects.
 func (s *IssueService) UpdateContent(ctx context.Context, issue db.Issue, patch IssueContentPatch) (db.Issue, error) {
 	params := db.UpdateIssueParams{
-		ID:                issue.ID,
-		AssigneeType:      issue.AssigneeType,
-		AssigneeID:        issue.AssigneeID,
-		StartDate:         issue.StartDate,
-		DueDate:           issue.DueDate,
-		ParentIssueID:     issue.ParentIssueID,
-		ProjectID:         issue.ProjectID,
+		ID:            issue.ID,
+		AssigneeType:  issue.AssigneeType,
+		AssigneeID:    issue.AssigneeID,
+		StartDate:     issue.StartDate,
+		DueDate:       issue.DueDate,
+		ParentIssueID: issue.ParentIssueID,
+		ProjectID:     issue.ProjectID,
+		// 这三列是裸 sqlc.narg，留零值等于清空；内容更新不该动归属。
+		ModuleID:          issue.ModuleID,
+		SprintID:          issue.SprintID,
+		FeatureCode:       issue.FeatureCode,
 		Stage:             issue.Stage,
 		StartAt:           issue.StartAt,
 		Goal:              issue.Goal,

@@ -504,7 +504,7 @@ WHERE i.workspace_id = $2::uuid
   AND i.project_id = ANY($3::uuid[])
   AND i.status = $4::text
   AND i.status <> $1::text
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.module_id, i.avoid_conflict, i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger, i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round, i.root_requirement_id, i.feature_points, i.graph_context, i.acceptance_spec, i.sprint_id
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.module_id, i.avoid_conflict, i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger, i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round, i.root_requirement_id, i.feature_points, i.graph_context, i.acceptance_spec, i.sprint_id, i.feature_code
 `
 
 type RemapProjectIssueStatusParams struct {
@@ -577,6 +577,7 @@ func (q *Queries) RemapProjectIssueStatus(ctx context.Context, arg RemapProjectI
 			&i.GraphContext,
 			&i.AcceptanceSpec,
 			&i.SprintID,
+			&i.FeatureCode,
 		); err != nil {
 			return nil, err
 		}

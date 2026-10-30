@@ -75,6 +75,10 @@ type IssueResponse struct {
 	// AvoidConflict 勾选后与其他模块的任务互斥执行（spec §5）。
 	ModuleID      *string `json:"module_id"`
 	AvoidConflict bool    `json:"avoid_conflict"`
+	// FeatureCode 功能点编号（project_module_feature.code，作用域 = ModuleID）；
+	// null = 未绑定。四层归属在这里闭合：
+	// 项目（ProjectID）→ 功能模块（ModuleID）→ 原型图/功能点（FeatureCode）。
+	FeatureCode *string `json:"feature_code"`
 	// SprintID 归属的迭代（migration 470，CoCo 对标 02_迭代模块）；
 	// null = backlog（未纳入任何迭代）。
 	SprintID *string `json:"sprint_id"`
@@ -351,6 +355,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID:            uuidToPtr(i.ParentIssueID),
 		ProjectID:                uuidToPtr(i.ProjectID),
 		ModuleID:                 uuidToPtr(i.ModuleID),
+		FeatureCode:              textToPtr(i.FeatureCode),
 		SprintID:                 uuidToPtr(i.SprintID),
 		AvoidConflict:            i.AvoidConflict,
 		Position:                 i.Position,
@@ -403,6 +408,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		ParentIssueID:            uuidToPtr(i.ParentIssueID),
 		ProjectID:                uuidToPtr(i.ProjectID),
 		ModuleID:                 uuidToPtr(i.ModuleID),
+		FeatureCode:              textToPtr(i.FeatureCode),
 		SprintID:                 uuidToPtr(i.SprintID),
 		AvoidConflict:            i.AvoidConflict,
 		Position:                 i.Position,
@@ -494,6 +500,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		ParentIssueID:            uuidToPtr(i.ParentIssueID),
 		ProjectID:                uuidToPtr(i.ProjectID),
 		ModuleID:                 uuidToPtr(i.ModuleID),
+		FeatureCode:              textToPtr(i.FeatureCode),
 		SprintID:                 uuidToPtr(i.SprintID),
 		AvoidConflict:            i.AvoidConflict,
 		Position:                 i.Position,
@@ -1156,7 +1163,7 @@ func (h *Handler) QueryIssues(w http.ResponseWriter, r *http.Request) {
 const requirementCalendarColumns = `i.start_at, i.goal, i.repo_resource_id, i.decompose_mode, i.auto_trigger,
 	   i.decomposition_confirmed_at, i.triggered_at, i.acceptance_round`
 
-const requirementListExtraColumns = `i.module_id, i.avoid_conflict, i.sprint_id,
+const requirementListExtraColumns = `i.module_id, i.avoid_conflict, i.feature_code, i.sprint_id,
 	   ` + requirementCalendarColumns
 
 const requirementProgressJoin = `LEFT JOIN LATERAL (
@@ -1745,6 +1752,7 @@ LIMIT %s OFFSET %s`, requirementListExtraColumns, requirementStatusProjection, r
 			&row.Revision,
 			&row.ModuleID,
 			&row.AvoidConflict,
+			&row.FeatureCode,
 			&row.SprintID,
 			&row.StartAt,
 			&row.Goal,
@@ -2328,7 +2336,7 @@ SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
 	parent_issue_id, position, start_date, due_date, created_at, updated_at, last_activity_at,
-	number, project_id, metadata, stage, properties, revision, module_id, avoid_conflict,
+	number, project_id, metadata, stage, properties, revision, module_id, avoid_conflict, feature_code,
 	start_at, goal, repo_resource_id, decompose_mode, auto_trigger,
 	decomposition_confirmed_at, triggered_at, acceptance_round,
 	requirement_status, stage_progress, group_total
@@ -2382,6 +2390,7 @@ ORDER BY
 			&row.Revision,
 			&row.ModuleID,
 			&row.AvoidConflict,
+			&row.FeatureCode,
 			&row.StartAt,
 			&row.Goal,
 			&row.RepoResourceID,
@@ -3018,6 +3027,9 @@ type CreateIssueRequest struct {
 	// 勾选后与其他模块的任务互斥执行。创建时随字段一并写入。
 	ModuleID      *string `json:"module_id"`
 	AvoidConflict *bool   `json:"avoid_conflict"`
+	// FeatureCode 功能点编号（必须属于 ModuleID 指向的模块，否则 404）；
+	// 省略或空串 = 不绑定功能点。
+	FeatureCode *string `json:"feature_code"`
 	// SprintID 把新 issue 直接归入项目下的某个迭代（CoCo 对标 02 §F 反向
 	// 挂接）。租户/项目/completed 校验在 service.Create 事务内完成，
 	// 分别以 404 / 409 拒绝整个创建。
@@ -3049,6 +3061,35 @@ type CreateIssueRequest struct {
 
 func duplicateIssueMessage(issue IssueResponse) string {
 	return issueguard.DuplicateMessage(issue.Identifier, issue.Title, issue.Status)
+}
+
+// validateIssueFeatureCode 校验功能点归属。
+//
+// 功能点编号（FP-xx）只在它的模块里唯一（project_module_feature 的唯一键是
+// (module_id, code)），所以「这个功能点存不存在」必须连着模块一起问：
+//   - 没有模块就没有功能点可言（409，与 module/project 同款不变式）；
+//   - 模块在、编号不在 = 引用不存在（404，与 sprint 同款不泄露存在性）。
+//
+// 空串表示「不绑定功能点」，直接放行。返回的 status 非 0 即拒绝。
+func (h *Handler) validateIssueFeatureCode(ctx context.Context, moduleID pgtype.UUID, code string) (int, string) {
+	if code == "" {
+		return 0, ""
+	}
+	if !moduleID.Valid {
+		return http.StatusConflict, "feature point requires a module"
+	}
+	var exists bool
+	if err := h.DB.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM project_module_feature WHERE module_id = $1 AND code = $2
+		)`, moduleID, code).Scan(&exists); err != nil {
+		slog.Error("validate issue feature point", "module_id", uuidToString(moduleID), "code", code, "error", err)
+		return http.StatusInternalServerError, "failed to validate feature point"
+	}
+	if !exists {
+		return http.StatusNotFound, "feature point not found in this module"
+	}
+	return 0, ""
 }
 
 // defaultRequirementDueDate 用 start_at 的 UTC 日历日作为顶层需求默认截止日。
@@ -3206,6 +3247,15 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		moduleID = id
+	}
+	// 功能点：必须扇在模块下且存在于该模块的功能点投影里。
+	featureCode := ""
+	if req.FeatureCode != nil {
+		featureCode = strings.TrimSpace(*req.FeatureCode)
+	}
+	if status, msg := h.validateIssueFeatureCode(r.Context(), moduleID, featureCode); status != 0 {
+		writeError(w, status, msg)
+		return
 	}
 	avoidConflict := req.AvoidConflict != nil && *req.AvoidConflict
 	var sprintID pgtype.UUID
@@ -3398,6 +3448,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		Stage:          ptrToInt4(req.Stage),
 		ModuleID:       moduleID,
 		SprintID:       sprintID,
+		FeatureCode:    pgtype.Text{String: featureCode, Valid: featureCode != ""},
 		AvoidConflict:  avoidConflict,
 		StartAt:        startAt,
 		Goal:           goal,
@@ -3539,6 +3590,9 @@ type UpdateIssueRequest struct {
 	//（省略保持现值）。模块必须属于 issue 所在项目，违反 409。
 	ModuleID      *string `json:"module_id"`
 	AvoidConflict *bool   `json:"avoid_conflict"`
+	// FeatureCode：显式 null/空串 = 清空功能点；省略 = 保持现值（但换模块时
+	// 会被连带清空——编号只在原模块里唯一）。功能点必须属于当前模块，否则 404。
+	FeatureCode *string `json:"feature_code"`
 	// SprintID：显式 null = 移出迭代（回 backlog）；省略 = 保持现值。
 	// 迭代必须属于 issue 的最终项目（否则 404，与 loadSprint 同款不泄露
 	// 语义）；completed 迭代冻结，不接受新增归属（否则 409）。
@@ -3800,6 +3854,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID:     prevIssue.ParentIssueID,
 		ProjectID:         prevIssue.ProjectID,
 		ModuleID:          prevIssue.ModuleID,
+		FeatureCode:       prevIssue.FeatureCode,
 		SprintID:          prevIssue.SprintID,
 		Stage:             prevIssue.Stage,
 		StartAt:           prevIssue.StartAt,
@@ -4076,6 +4131,21 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["avoid_conflict"]; ok && req.AvoidConflict != nil {
 		params.AvoidConflict = pgtype.Bool{Bool: *req.AvoidConflict, Valid: true}
+	}
+	// 功能点归属：模块是它的作用域，换/清模块而没显式重设时连带清空，
+	// 否则会留下一个指向别的模块（或压根不存在）的编号。
+	if _, ok := rawFields["feature_code"]; ok {
+		next := ""
+		if req.FeatureCode != nil {
+			next = strings.TrimSpace(*req.FeatureCode)
+		}
+		if status, msg := h.validateIssueFeatureCode(r.Context(), params.ModuleID, next); status != 0 {
+			writeError(w, status, msg)
+			return
+		}
+		params.FeatureCode = pgtype.Text{String: next, Valid: next != ""}
+	} else if params.ModuleID != prevIssue.ModuleID {
+		params.FeatureCode = pgtype.Text{Valid: false}
 	}
 	if _, ok := rawFields["stage"]; ok {
 		if req.Stage != nil {
@@ -4773,13 +4843,19 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		params := db.UpdateIssueParams{
-			ID:                prevIssue.ID,
-			AssigneeType:      prevIssue.AssigneeType,
-			AssigneeID:        prevIssue.AssigneeID,
-			StartDate:         prevIssue.StartDate,
-			DueDate:           prevIssue.DueDate,
-			ParentIssueID:     prevIssue.ParentIssueID,
-			ProjectID:         prevIssue.ProjectID,
+			ID:            prevIssue.ID,
+			AssigneeType:  prevIssue.AssigneeType,
+			AssigneeID:    prevIssue.AssigneeID,
+			StartDate:     prevIssue.StartDate,
+			DueDate:       prevIssue.DueDate,
+			ParentIssueID: prevIssue.ParentIssueID,
+			ProjectID:     prevIssue.ProjectID,
+			// 模块/迭代/功能点也走裸 narg，必须预填现值：批量更新不写这三列，
+			// 留零值等于把它们清空（模块被清空而 feature_code 还在还会撞
+			// issue_feature_code_requires_module 的 CHECK）。
+			ModuleID:          prevIssue.ModuleID,
+			SprintID:          prevIssue.SprintID,
+			FeatureCode:       prevIssue.FeatureCode,
 			Stage:             prevIssue.Stage,
 			StartAt:           prevIssue.StartAt,
 			Goal:              prevIssue.Goal,
@@ -4885,6 +4961,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if _, ok := rawUpdates["project_id"]; ok {
 			// Resolved before the loop; an explicit null stays invalid and clears.
 			params.ProjectID = batchProjectID
+			if batchProjectID != prevIssue.ProjectID {
+				// 模块/迭代/功能点都是项目作用域：跨项目后一起清空，与单条
+				// UpdateIssue 的级联同一口径。
+				params.ModuleID = pgtype.UUID{Valid: false}
+				params.SprintID = pgtype.UUID{Valid: false}
+				params.FeatureCode = pgtype.Text{Valid: false}
+			}
 		}
 		if _, ok := rawUpdates["stage"]; ok {
 			if req.Updates.Stage != nil {

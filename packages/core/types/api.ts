@@ -15,6 +15,9 @@ export interface CreateIssueRequest {
   project_id?: string;
   /** 所属模块；必须属于 issue 所在项目（异项目模块服务端 400）。 */
   module_id?: string;
+  /** 绑定该模块下的功能点编号（如 FP-03）；无模块服务端 409、编号不在该
+   *  模块服务端 404。省略 = 只到模块粒度。 */
+  feature_code?: string;
   /** 跨模块避免冲突：勾选后本任务与异模块任务互斥执行。 */
   avoid_conflict?: boolean;
   /** 所属迭代；必须属于 issue 所在项目且未 completed，否则服务端 404 / 409
@@ -579,6 +582,9 @@ export interface UpdateIssueRequest {
   /** 所属模块；null 显式清空。异项目模块服务端 409；未显式给出时随
    *  project_id 变更自动清空。 */
   module_id?: string | null;
+  /** 绑定的功能点编号；null/空串显式解绑。未显式给出时，模块一变就级联
+   *  清空（编号只在模块内唯一，不能跨模块继承）。 */
+  feature_code?: string | null;
   /** 跨模块避免冲突：勾选后本任务与异模块任务互斥执行。 */
   avoid_conflict?: boolean;
   /** 所属迭代；null 显式移出（回 backlog）。异项目迭代服务端 404、

@@ -190,6 +190,10 @@ export interface Issue {
   project_id: string | null;
   /** 所属模块（项目级单选标签）；null/缺省 = 无模块，不参与任何锁 */
   module_id?: string | null;
+  /** 绑定该模块下的一个功能点编号（project_module_feature.code，如 FP-03）；
+   * null/缺省 = 未绑定。编号只在模块内唯一，故必须与 module_id 一起读；
+   * 一个任务对应一个功能点，覆盖多个功能点的活应拆成多条任务。 */
+  feature_code?: string | null;
   /** 所属迭代（CoCo 对标 02_迭代模块，migration 470）；null/缺省 = backlog */
   sprint_id?: string | null;
   /** 跨模块避免冲突：勾选后本任务与异模块任务互斥执行 */
