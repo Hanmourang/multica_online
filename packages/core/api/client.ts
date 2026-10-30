@@ -4337,6 +4337,33 @@ export class ApiClient {
     return res.blob();
   }
 
+  // Signs the allowlisted remote assets referenced by a prototype HTML so the
+  // preview iframe can load them from this origin.
+  //
+  // That iframe is a `sandbox="allow-scripts"` srcdoc document, i.e. an opaque
+  // origin: its <script>/<link>/<img> requests carry neither the auth cookie
+  // (SameSite=Strict) nor an Authorization header, so an auth-gated URL 401s
+  // every asset and the prototype renders unstyled (Material Symbols even show
+  // their glyph names as text). The HMAC path this method mints is the
+  // credential — same reasoning as `/api/avatars/<sig>/*`.
+  //
+  // Returns `{ [upstreamUrl]: signedPath }`; URLs the server refuses to sign
+  // (not on the allowlist) are simply absent.
+  async signPreviewAssets(urls: string[]): Promise<Record<string, string>> {
+    if (urls.length === 0) return {};
+    const raw = await this.fetch<{
+      urls?: Array<{ url?: string; path?: string }>;
+    }>("/api/preview-assets/sign", {
+      method: "POST",
+      body: JSON.stringify({ urls }),
+    });
+    const signed: Record<string, string> = {};
+    for (const row of raw.urls ?? []) {
+      if (row?.url && row.path) signed[row.url] = row.path;
+    }
+    return signed;
+  }
+
   // Projects
   async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();

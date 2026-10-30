@@ -1389,6 +1389,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// #6024).
 	r.Get("/api/avatars/{sig}/*", h.ServeAvatar)
 
+	// Prototype preview assets (Tailwind Play CDN / Google Fonts / Google-hosted
+	// images). Public for the SAME reason as the avatar route above, and the
+	// signature is again the credential. The preview iframe is a
+	// sandbox="allow-scripts" srcdoc document — an opaque origin — so its
+	// <script>/<link>/<img> subresource requests carry neither the
+	// SameSite=Strict auth cookie nor any Authorization header. Routing them
+	// through middleware.Auth only ever produced 401s, which is exactly why the
+	// prototype pane used to show no styles at all. The HMAC covers the target
+	// URL, only the four allowlisted hosts are ever signed, and signing itself
+	// requires a session (POST /api/preview-assets/sign below).
+	// See server/internal/handler/preview_assets.go.
+	r.Get("/api/preview-assets/{sig}", h.GetPreviewAsset)
+
 	// Hosted plugin documents are capability-authenticated and intentionally
 	// outside the session middleware: the configured content origin must stay
 	// cookie-free. The encrypted path token binds the installation, immutable
@@ -1600,6 +1613,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// because they are JSON-API consumers that always have
 		// workspace context.
 		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
+
+		// Signs the allowlisted remote assets a prototype HTML references so the
+		// preview iframe can load them from this origin without a session (see
+		// the public GET route above). Minting requires an authenticated session;
+		// the signed paths themselves are safe to serve anonymously because the
+		// content is public CDN material.
+		r.Post("/api/preview-assets/sign", h.SignPreviewAssets)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)

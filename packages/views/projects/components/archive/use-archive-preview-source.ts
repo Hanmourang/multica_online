@@ -37,10 +37,27 @@ import {
   inlineRelativeScripts,
   inlineRelativeStylesheets,
   preparePreviewAssets,
+  preparePreviewAssetsSigned,
   resolveRelativeRelPath,
+  type PreviewAssetSigning,
 } from "./archive-html-preview";
 
 const LOCAL_PREVIEW_MAX = 800_000;
+
+// 原型 HTML 里的 Tailwind / Google Fonts 要走同源代理，而代理路径必须签名（预
+// 览 iframe 是 sandbox srcdoc，不透明源，不会带 cookie）。这里不缓存 getBaseUrl
+// 的值：api 单例在 app 启动后才注入，模块加载时读到的会是 undefined。
+function previewAssetSigning(): PreviewAssetSigning {
+  return {
+    assetBase: api.getBaseUrl(),
+    sign: (urls) => api.signPreviewAssets(urls),
+  };
+}
+
+function withSignedPreviewAssets(html: string): Promise<string> {
+  const assets = previewAssetSigning();
+  return preparePreviewAssetsSigned(html, assets.assetBase ?? "", assets.sign);
+}
 
 /** disabled 查询在 RQ v5 里 isPending=true，不能当「还在加载」。 */
 function queryOpening(
@@ -154,7 +171,7 @@ async function withInlinedStyles(hit: LocalPreviewHit): Promise<LocalPreviewHit>
   const hrefs = collectRelativeStylesheets(hit.text);
   const scripts = collectRelativeScripts(hit.text);
   if (hrefs.length === 0 && scripts.length === 0) {
-    return { ...hit, text: preparePreviewAssets(hit.text) };
+    return { ...hit, text: await withSignedPreviewAssets(hit.text) };
   }
   const files: Record<string, string> = {};
   // 先落成 const：闭包里对 hit.root / hit.relPath 的收窄会丢失（属性可变）。
@@ -169,7 +186,7 @@ async function withInlinedStyles(hit: LocalPreviewHit): Promise<LocalPreviewHit>
   );
   const withCss = inlineRelativeStylesheets(hit.text, files);
   const withJs = inlineRelativeScripts(withCss, files);
-  return { ...hit, text: preparePreviewAssets(withJs) };
+  return { ...hit, text: await withSignedPreviewAssets(withJs) };
 }
 
 async function readLocalPreview(
@@ -178,7 +195,9 @@ async function readLocalPreview(
 ): Promise<LocalPreviewHit | null> {
   lastReadReason = undefined;
   const cached = getArchivePreviewText(relPath);
-  if (cached) return { text: clip(cached), relPath };
+  if (cached) {
+    return { text: await withSignedPreviewAssets(clip(cached)), relPath };
+  }
   if (!isDesktopShell()) return null;
 
   const roots = rememberedRoot
@@ -356,22 +375,27 @@ export function useArchivePreviewSource({
       const byPath = new Map(
         listed.artifacts.map((item) => [item.rel_path.replace(/\\/g, "/"), item]),
       );
-      return inlineHtmlRelativeAssets(snapshotHtml!, artifact!.rel_path, async (resolved) => {
-        const norm = resolved.replace(/\\/g, "/");
-        const match =
-          byPath.get(norm) ??
-          listed.artifacts.find((item) => {
-            const path = item.rel_path.replace(/\\/g, "/");
-            return path.endsWith(`/${norm}`) || norm.endsWith(`/${path}`);
-          });
-        if (!match?.attachment_id) return null;
-        try {
-          const { text } = await api.getAttachmentTextContent(match.attachment_id);
-          return text;
-        } catch {
-          return null;
-        }
-      });
+      return inlineHtmlRelativeAssets(
+        snapshotHtml!,
+        artifact!.rel_path,
+        async (resolved) => {
+          const norm = resolved.replace(/\\/g, "/");
+          const match =
+            byPath.get(norm) ??
+            listed.artifacts.find((item) => {
+              const path = item.rel_path.replace(/\\/g, "/");
+              return path.endsWith(`/${norm}`) || norm.endsWith(`/${path}`);
+            });
+          if (!match?.attachment_id) return null;
+          try {
+            const { text } = await api.getAttachmentTextContent(match.attachment_id);
+            return text;
+          } catch {
+            return null;
+          }
+        },
+        previewAssetSigning(),
+      );
     },
   });
 
@@ -425,7 +449,7 @@ export function useArchivePreviewSource({
         // HTML 交给 srcdoc iframe。相对样式和脚本从同项目档案嵌进正文。
         text:
           kind === "html"
-            ? (inlineQuery.data ?? preparePreviewAssets(attachmentTextQuery.data))
+            ? (inlineQuery.data ?? preparePreviewAssets(attachmentTextQuery.data, api.getBaseUrl()))
             : attachmentTextQuery.data,
       };
     }

@@ -10,6 +10,7 @@ import {
   inlineRelativeStylesheets,
   isRelativeAssetHref,
   preparePreviewAssets,
+  preparePreviewAssetsSigned,
   resolveRelativeRelPath,
 } from "./archive-html-preview";
 
@@ -71,18 +72,44 @@ describe("relative html assets", () => {
     expect(next).toContain("https://cdn.tailwindcss.com");
   });
 
-  it("keeps Tailwind CDN and Google Fonts so CDN-based prototypes still render", () => {
-    // 早期会剥掉这两个远程依赖，结果全靠 utility 类的原型退化成无样式文本堆叠、
-    // Material Symbols 把字形名当文字显示 —— 预览看上去像坏了。
+  it("routes Tailwind CDN and Google Fonts through the preview asset proxy", () => {
+    // 这两类远程依赖在国内客户端直连是 25s 超时（样式表还阻塞渲染），曾经
+    // 一打开原型就是十几秒白屏。现在改由服务端代取，HTML 里只留同源代理路径。
     const html = [
-      '<script src="https://cdn.tailwindcss.com"></script>',
-      '<link href="https://fonts.googleapis.com/css2?family=Work+Sans" rel="stylesheet">',
+      '<script src="https://cdn.tailwindcss.com?plugins=forms"></script>',
+      '<link href="https://fonts.googleapis.com/css2?family=Work+Sans&amp;display=swap" rel="stylesheet">',
       '<link rel="stylesheet" href="./shared.css">',
     ].join("\n");
     const next = preparePreviewAssets(html);
-    expect(next).toContain("cdn.tailwindcss.com");
-    expect(next).toContain("fonts.googleapis.com");
+    expect(next).not.toContain("cdn.tailwindcss.com\"");
+    expect(next).toContain(
+      "/api/preview-assets?u=https%3A%2F%2Fcdn.tailwindcss.com%3Fplugins%3Dforms",
+    );
+    // `&amp;` 必须先还原成 `&` 再编码，否则上游拿到的是个假的 amp; 参数。
+    expect(next).toContain(
+      "/api/preview-assets?u=https%3A%2F%2Ffonts.googleapis.com%2Fcss2%3Ffamily%3DWork%2BSans%26display%3Dswap",
+    );
+    // 相对路径仍由 inlineHtmlRelativeAssets 处理，这里不能动。
     expect(next).toContain("./shared.css");
+  });
+
+  it("rewrites allowed image hosts, honours assetBase and leaves other hosts alone", () => {
+    const html = [
+      '<img src="https://lh3.googleusercontent.com/aida-public/abc">',
+      '<img src="https://cdn.example.com/cover.png">',
+      '<link rel="preconnect" href="https://fonts.gstatic.com">',
+      "<style>.x{background:url('https://fonts.gstatic.com/s/a.woff2')}</style>",
+    ].join("\n");
+    const next = preparePreviewAssets(html, "http://127.0.0.1:18227");
+    expect(next).toContain(
+      "http://127.0.0.1:18227/api/preview-assets?u=https%3A%2F%2Flh3.googleusercontent.com%2Faida-public%2Fabc",
+    );
+    expect(next).toContain("https://cdn.example.com/cover.png");
+    // preconnect 不是资源，重写只会多一次无效请求。
+    expect(next).toContain('<link rel="preconnect" href="https://fonts.gstatic.com">');
+    expect(next).toContain(
+      "url('http://127.0.0.1:18227/api/preview-assets?u=https%3A%2F%2Ffonts.gstatic.com%2Fs%2Fa.woff2')",
+    );
   });
 
   it("inlines sibling css and js resolved from the html path", async () => {
@@ -103,6 +130,36 @@ describe("relative html assets", () => {
     expect(next).toContain(".card{color:red}");
     expect(next).toContain("window.__icons=1;");
     expect(next).not.toContain('href="./shared.css"');
+  });
+
+  it("signs the proxy paths so the sandboxed iframe can load them", async () => {
+    // srcdoc iframe 是不透明源，子资源请求不带 cookie，未签名路径会被 403，
+    // Tailwind 与字体一个都进不来 —— 必须换成服务端签好的 HMAC 路径。
+    const html = [
+      '<script src="https://cdn.tailwindcss.com?plugins=forms"></script>',
+      '<link href="https://fonts.googleapis.com/css2?family=Work+Sans&amp;display=swap" rel="stylesheet">',
+    ].join("\n");
+    const asked: string[][] = [];
+    const next = await preparePreviewAssetsSigned(html, "", async (urls) => {
+      asked.push(urls);
+      return Object.fromEntries(urls.map((url) => [url, `/api/preview-assets/SIG?u=x`]));
+    });
+    // `&amp;` 必须先还原再交给服务端，否则签的是一个带 amp; 的假参数。
+    expect(asked).toHaveLength(1);
+    expect([...(asked[0] ?? [])].sort()).toEqual([
+      "https://cdn.tailwindcss.com?plugins=forms",
+      "https://fonts.googleapis.com/css2?family=Work+Sans&display=swap",
+    ]);
+    expect(next.match(/\/api\/preview-assets\/SIG\?u=x/g)).toHaveLength(2);
+  });
+
+  it("falls back to the unsigned proxy path when signing fails", async () => {
+    const html = '<script src="https://cdn.tailwindcss.com"></script>';
+    const next = await preparePreviewAssetsSigned(html, "", async () => {
+      throw new Error("offline");
+    });
+    // 快速 403 远好于退回境外直连的二十多秒白屏。
+    expect(next).toContain("/api/preview-assets?u=https%3A%2F%2Fcdn.tailwindcss.com");
   });
 
   it("treats a data-fp stub as a contract and leaves styled pages alone", () => {
