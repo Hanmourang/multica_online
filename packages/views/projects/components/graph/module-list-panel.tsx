@@ -221,10 +221,10 @@ export function ModuleListPanel({
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="flex items-center gap-1.5 px-0.5">
-        <h3 className="text-[9.5px] font-bold tracking-wide text-muted-foreground">
+        <h3 className="min-w-0 text-[12.5px] font-bold leading-tight tracking-wide text-muted-foreground">
           {t(($) => $.features.module_list)}
         </h3>
-        <span className="ml-auto text-[10px] font-semibold tabular-nums text-muted-foreground">
+        <span className="ml-auto text-[11.5px] font-semibold tabular-nums text-muted-foreground">
           {total}
         </span>
         {onCollapse ? (
@@ -235,7 +235,7 @@ export function ModuleListPanel({
             aria-label={t(($) => $.features.inspector_collapse)}
             className="-mr-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
           >
-            <ChevronLeft className="size-3.5" aria-hidden />
+            <ChevronLeft className="size-4" aria-hidden />
           </button>
         ) : null}
       </div>
@@ -355,16 +355,12 @@ export function ModuleListPanel({
                   )}
                 >
                   <div className="flex items-center gap-1.5">
-                    <span
-                      className={cn(
-                        "shrink-0 rounded px-1 py-px text-[9px] font-bold",
-                        module.graph_node_id
-                          ? "bg-violet-500/15 text-violet-700 dark:text-violet-300"
-                          : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {module.graph_node_id ? t(($) => $.features.page_badge) : "?"}
-                    </span>
+                    {/* 只在已绑定时给 badge：未绑定的「?」没有信息量（虚线边框 + 红字已说明），留着只会被误读成「帮助」 */}
+                    {module.graph_node_id ? (
+                      <span className="shrink-0 rounded bg-violet-500/15 px-1 py-px text-[9.5px] font-bold text-violet-700 dark:text-violet-300">
+                        {t(($) => $.features.page_badge)}
+                      </span>
+                    ) : null}
                     {editingId === module.id ? (
                       <Input
                         value={editName}
@@ -379,7 +375,7 @@ export function ModuleListPanel({
                         }}
                       />
                     ) : (
-                      <span className="min-w-0 flex-1 truncate text-left text-[12px] font-semibold">
+                      <span className="min-w-0 flex-1 truncate text-left text-[13.5px] font-semibold">
                         {module.name}
                       </span>
                     )}
@@ -449,50 +445,73 @@ export function ModuleListPanel({
                       )}
                     </span>
                   </div>
-                  <div className="mt-1.5 flex gap-2.5 text-[9.5px] text-muted-foreground">
+                  <div className="mt-1.5 flex gap-2.5 text-[10.5px] text-muted-foreground">
                     <span>
                       {t(($) => $.features.stat_objects)}{" "}
-                      <b className="text-[11px] tabular-nums text-foreground">
+                      <b className="text-[11.5px] tabular-nums text-foreground">
                         {summary?.obj_count ?? 0}
                       </b>
                     </span>
                     <span>
                       {t(($) => $.features.stat_strategies)}{" "}
-                      <b className="text-[11px] tabular-nums text-foreground">
+                      <b className="text-[11.5px] tabular-nums text-foreground">
                         {summary?.strategy_count ?? 0}
                       </b>
                     </span>
                     <span>
                       {t(($) => $.features.stat_requirements)}{" "}
-                      <b className="text-[11px] tabular-nums text-foreground">{reqCount}</b>
+                      <b className="text-[11.5px] tabular-nums text-foreground">{reqCount}</b>
                     </span>
                   </div>
                   <div
                     className={cn(
-                      "mt-1 text-[9px] text-muted-foreground",
+                      "mt-1 text-[10px] text-muted-foreground",
                       !module.graph_node_id && "text-destructive",
                     )}
+                    title={
+                      module.graph_node_id
+                        ? t(($) => $.features.community_ref, {
+                            id: communityLabel(module.graph_node_id ?? summary?.node_id) || "—",
+                          })
+                        : t(($) => $.features.unbound_hint)
+                    }
                   >
-                    {t(($) => $.features.community_ref, {
-                      id: communityLabel(module.graph_node_id ?? summary?.node_id) || "—",
-                    })}
-                    {module.graph_node_id
-                      ? tasks.total > 0
-                        ? ` · ${t(($) => $.features.task_progress, { done: tasks.done, total: tasks.total })}`
-                        : summary
-                          ? ` · ${t(($) => $.features.new_this_period)}`
-                          : null
-                      : ` · ${t(($) => $.features.unbound_hint)}`}
+                    {/* 没有图谱详情时只说结论：`Community#— · 未绑定 → 手动绑定或忽略` 那串
+                        对一个空模块是噪音，绑定指引留在 title 里给需要的人。 */}
+                    {module.graph_node_id ? (
+                      <>
+                        {t(($) => $.features.community_ref, {
+                          id: communityLabel(module.graph_node_id ?? summary?.node_id) || "—",
+                        })}
+                        {tasks.total > 0
+                          ? ` · ${t(($) => $.features.task_progress, { done: tasks.done, total: tasks.total })}`
+                          : summary
+                            ? ` · ${t(($) => $.features.new_this_period)}`
+                            : null}
+                      </>
+                    ) : (
+                      t(($) => $.features.unbound_badge)
+                    )}
                     <button
                       type="button"
                       className="ml-2 hidden text-micro text-destructive hover:text-destructive group-hover:inline"
                       onClick={(event) => {
                         event.stopPropagation();
-                        if (window.confirm(t(($) => $.features.delete_confirm))) {
-                          void deleteModule.mutateAsync(module.id).catch(() => {
+                        if (!window.confirm(t(($) => $.features.delete_confirm))) return;
+                        void deleteModule
+                          .mutateAsync(module.id)
+                          .then(() => {
+                            // 选中态记的是模块 UUID，删掉后它会指向不存在的模块，
+                            // 右栏详情只能停在「请选择模块」。这里让出选中，交给
+                            // 上面「无选中自动选第一个」的 effect 兜底。
+                            if (selectedModuleId === module.id) {
+                              setSelectedModuleId(null);
+                              setSelectedNodeId(null);
+                            }
+                          })
+                          .catch(() => {
                             toast.error(t(($) => $.features.delete_failed));
                           });
-                        }
                       }}
                     >
                       {t(($) => $.features.delete)}
@@ -544,7 +563,7 @@ export function ModuleListPanel({
         >
           <Plus className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden />
           <span>
-            <span className="block text-[12px] font-semibold text-primary">
+            <span className="block text-[13px] font-semibold text-primary">
               {t(($) => $.features.create)}
             </span>
             <span className="mt-1 block text-[10px] text-muted-foreground">

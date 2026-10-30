@@ -28,6 +28,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../../i18n";
 import { useGraphData } from "../graph-data-provider";
 import { ArtifactPreviewPane } from "../../archive/artifact-preview-pane";
+import { PrototypeStage } from "../../archive/prototype-stage";
 import { useArchivePreviewSource } from "../../archive/use-archive-preview-source";
 import {
   artifactForPrototypeVersion,
@@ -457,17 +458,18 @@ export function ModulePrototypesTab({
                   label={`${fileName(current.html_path)} · v${current.version}`}
                   badge={t(($) => $.features.prototypes_current)}
                 />
-                <div className="relative min-h-0 flex-1">
+                <PrototypeStage className="min-h-0 flex-1">
                   <ArtifactPreviewPane
                     artifact={currentArtifact}
                     projectId={projectId}
                     archiveRoots={[]}
                     embedded
                     interact
+                    measureContentHeight
                     highlightFp={selectedFp}
                     onSelectFp={setSelectedFp}
                   />
-                </div>
+                </PrototypeStage>
               </div>
             ) : current && currentArtifact ? (
               <HtmlComparePane

@@ -3,6 +3,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { FileWarning, FolderSearch } from "lucide-react";
 import type { ProjectArtifact } from "@multica/core/types";
+import { api } from "@multica/core/api";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { RichContent } from "../../../rich-content/rich-content";
@@ -37,6 +38,7 @@ export function ArtifactPreviewPane({
   embedded = false,
   frameClassName,
   interact = false,
+  measureContentHeight = false,
   highlightFp = null,
   onSelectFp,
 }: {
@@ -52,6 +54,8 @@ export function ArtifactPreviewPane({
   frameClassName?: string;
   /** 注入 data-fp 热点点击 / 高亮协议。 */
   interact?: boolean;
+  /** 响应式原型也上报内容高度（原型画布需要它来缩放/平移，普通预览保持默认）。 */
+  measureContentHeight?: boolean;
   highlightFp?: string | null;
   onSelectFp?: (id: string) => void;
 }) {
@@ -140,6 +144,7 @@ export function ArtifactPreviewPane({
               html={source.text}
               embedded={embedded}
               interact={interact}
+              measureContentHeight={measureContentHeight}
               highlightFp={highlightFp}
               onSelectFp={onSelectFp}
             />
@@ -220,6 +225,7 @@ function ArchiveHtmlFrame({
   html,
   embedded,
   interact,
+  measureContentHeight,
   highlightFp,
   onSelectFp,
 }: {
@@ -229,6 +235,7 @@ function ArchiveHtmlFrame({
   html?: string;
   embedded?: boolean;
   interact?: boolean;
+  measureContentHeight?: boolean;
   highlightFp?: string | null;
   onSelectFp?: (id: string) => void;
 }) {
@@ -273,9 +280,9 @@ function ArchiveHtmlFrame({
 
   if (html != null && html.trim() !== "") {
     const body = withFragmentNavShim(
-      withContractPrototypeChrome(preparePreviewAssets(html)),
+      withContractPrototypeChrome(preparePreviewAssets(html, api.getBaseUrl())),
     );
-    const fitted = withPrototypeFitShim(body);
+    const fitted = withPrototypeFitShim(body, { measureScroll: measureContentHeight });
     return (
       <CodeBlockIframe
         ref={iframeRef}
