@@ -442,7 +442,12 @@ func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueID
 		WorkspaceID: wsUUID,
 	})
 	if err != nil {
-		slog.Warn("ListLabelsForIssues failed", "error", err)
+		// A cancelled caller is not a label failure: the request context dies when
+		// the surface that asked for the rows unmounts, so warn-level logging here
+		// would report ordinary navigation churn as a server problem.
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			slog.Warn("ListLabelsForIssues failed", "error", err)
+		}
 		return out
 	}
 	for _, r := range rows {
@@ -2480,6 +2485,11 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 
 	if sourceContext, err := h.issueSourceContextDetail(r.Context(), issue); err == nil {
 		resp.SourceContext = sourceContext
+	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// The caller went away mid-read (drawer closed, identifier lookup re-keyed).
+		// Nobody is left to read a 500, and recording one turns ordinary navigation
+		// into a server-side error rate spike.
+		return
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		slog.Warn("load issue source context failed", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "error", err)...)
 		// The frozen context is part of the issue's execution contract, not an
