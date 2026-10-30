@@ -94,6 +94,7 @@ vi.mock("@multica/core/agents", () => ({
 vi.mock("@multica/core/api", () => ({
   api: { sendChatMessage: h.sendChatMessage, cancelTaskById: vi.fn() },
   dispatchReasonCode: () => undefined,
+  clientErrorMessage: () => undefined,
 }));
 vi.mock("@multica/core/logger", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),

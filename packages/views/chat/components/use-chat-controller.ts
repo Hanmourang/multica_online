@@ -12,7 +12,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
-import { api, dispatchReasonCode } from "@multica/core/api";
+import { api } from "@multica/core/api";
 import {
   isAgentRuntimeBound as hasAgentRuntime,
   useAgentPresenceDetail,
@@ -56,6 +56,7 @@ import type {
 } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { extractMentionsFromContent } from "../lib/mention-extract";
+import { chatSendFailureKind, type ChatSendFailureKind } from "../lib/send-failure";
 import { preparePageSurfaceSend, usePageSurfaceContext } from "../lib/page-surface-context";
 import { fanOutChatMessage, useChatFanout } from "../lib/fanout-agents";
 import { useAppForeground } from "../../common/use-app-foreground";
@@ -226,6 +227,22 @@ const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 export function useChatController(opts?: { isActive?: boolean }) {
   const isActive = opts?.isActive ?? true;
   const { t } = useT("chat");
+  // Every rejection used to read as "Failed to send message". Name the cause
+  // instead: the group mention rejection (400, no reason_code) looks like an
+  // outage, and nothing tells the user the @ is what to fix.
+  const toastSendFailure = useCallback(
+    (err: unknown) => {
+      const messages: Record<ChatSendFailureKind, string> = {
+        blocked: t(($) => $.input.send_blocked_toast),
+        runtime_required: t(($) => $.input.runtime_required_toast),
+        mention_agent_not_in_group: t(($) => $.input.mention_agent_not_in_group_toast),
+        mention_not_in_group: t(($) => $.input.mention_not_in_group_toast),
+        generic: t(($) => $.input.send_failed_toast),
+      };
+      toast.error(messages[chatSendFailureKind(err)]);
+    },
+    [t],
+  );
   const wsId = useWorkspaceId();
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
@@ -612,7 +629,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
           );
         } catch (err) {
           apiLogger.error("sendChatMessage.conversation.error", { sessionId: dmSessionId, err });
-          toast.error(t(($) => $.input.send_failed_toast));
+          toastSendFailure(err);
           return false;
         }
         const dmSent: ChatMessage = {
@@ -694,16 +711,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
         sessionId = await ensureSession(content);
       } catch (err) {
         apiLogger.error("sendChatMessage.ensureSession.error", err);
-        // A revoked invoke permission blocks session create with a structured
-        // 403 (MUL-4525) — name the cause instead of a generic failure.
-        const reason = dispatchReasonCode(err);
-        toast.error(
-          reason === "invocation_not_allowed"
-            ? t(($) => $.input.send_blocked_toast)
-            : reason === "agent_runtime_required"
-              ? t(($) => $.input.runtime_required_toast)
-              : t(($) => $.input.send_failed_toast),
-        );
+        toastSendFailure(err);
         return false;
       }
       if (!sessionId) {
@@ -741,18 +749,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
         );
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
-        // Invoke permission can be revoked mid-session; the send is refused with
-        // a structured 403 before anything persists (MUL-4525). Surface the
-        // specific cause so the user knows it is a permission change, not a
-        // transient failure they should retry.
-        const reason = dispatchReasonCode(err);
-        toast.error(
-          reason === "invocation_not_allowed"
-            ? t(($) => $.input.send_blocked_toast)
-            : reason === "agent_runtime_required"
-              ? t(($) => $.input.runtime_required_toast)
-              : t(($) => $.input.send_failed_toast),
-        );
+        // Invoke permission can be revoked mid-session, and the group handler
+        // rejects a mention for a non-participant. Both are 4xx that name the
+        // cause; toastSendFailure maps them instead of a generic failure.
+        toastSendFailure(err);
         return false;
       }
       apiLogger.info("sendChatMessage.success", {
@@ -870,6 +870,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       activeSessionKind,
       user?.id,
       wsId,
+      toastSendFailure,
     ],
   );
 

@@ -125,6 +125,7 @@ vi.mock("@multica/core/api", () => ({
   // Names the 403 that a revoked invoke permission raises (MUL-4525); plain
   // failures have no reason code.
   dispatchReasonCode: () => undefined,
+  clientErrorMessage: () => undefined,
 }));
 vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>

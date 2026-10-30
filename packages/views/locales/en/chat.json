@@ -34,6 +34,8 @@
     "send_failed_toast": "Failed to send message",
     "send_blocked_toast": "Message not sent — you no longer have permission to use this agent",
     "runtime_required_toast": "Message not sent — bind a runtime to this agent first",
+    "mention_agent_not_in_group_toast": "Message not sent — the @-mentioned agent is not in this group. Add it to the group, or drop the @ and send again",
+    "mention_not_in_group_toast": "Message not sent — the @-mentioned person is not in this group. Add them to the group, or drop the @ and send again",
     "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment.",
     "add_tooltip": "Add",
     "upload_file": "Image or files",

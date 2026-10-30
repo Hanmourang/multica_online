@@ -18,7 +18,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
-import { api, dispatchReasonCode } from "@multica/core/api";
+import { api } from "@multica/core/api";
 import {
   isAgentRuntimeBound,
   useAgentPresenceDetail,
@@ -57,6 +57,7 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import { mergeChatResourceSnapshots, rememberPendingChatResources, upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { extractMentionsFromContent } from "../lib/mention-extract";
+import { chatSendFailureKind, type ChatSendFailureKind } from "../lib/send-failure";
 import { isLiveTaskStatus, isStopForbidden, isTaskGone } from "../lib/stop-feedback";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
@@ -98,6 +99,22 @@ const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 
 export function ChatWindow() {
   const { t } = useT("chat");
+  // Every rejection used to read as "Failed to send message". Name the cause
+  // instead: the group mention rejection (400, no reason_code) looks like an
+  // outage, and nothing tells the user the @ is what to fix.
+  const toastSendFailure = useCallback(
+    (err: unknown) => {
+      const messages: Record<ChatSendFailureKind, string> = {
+        blocked: t(($) => $.input.send_blocked_toast),
+        runtime_required: t(($) => $.input.runtime_required_toast),
+        mention_agent_not_in_group: t(($) => $.input.mention_agent_not_in_group_toast),
+        mention_not_in_group: t(($) => $.input.mention_not_in_group_toast),
+        generic: t(($) => $.input.send_failed_toast),
+      };
+      toast.error(messages[chatSendFailureKind(err)]);
+    },
+    [t],
+  );
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -511,7 +528,7 @@ export function ChatWindow() {
           );
         } catch (err) {
           apiLogger.error("sendChatMessage.conversation.error", { sessionId: dmSessionId, err });
-          toast.error(t(($) => $.input.send_failed_toast));
+          toastSendFailure(err);
           return false;
         }
         const dmResources = mergeChatResourceSnapshots(dmResult.resources, resourceSnapshots);
@@ -590,14 +607,7 @@ export function ChatWindow() {
         sessionId = await ensureSession(content);
       } catch (err) {
         apiLogger.error("sendChatMessage.ensureSession.error", err);
-        const reason = dispatchReasonCode(err);
-        toast.error(
-          reason === "invocation_not_allowed"
-            ? t(($) => $.input.send_blocked_toast)
-            : reason === "agent_runtime_required"
-              ? t(($) => $.input.runtime_required_toast)
-              : t(($) => $.input.send_failed_toast),
-        );
+        toastSendFailure(err);
         return false;
       }
       if (!sessionId) {
@@ -635,14 +645,7 @@ export function ChatWindow() {
         );
       } catch (err) {
         apiLogger.error("sendChatMessage.error", { sessionId, err });
-        const reason = dispatchReasonCode(err);
-        toast.error(
-          reason === "invocation_not_allowed"
-            ? t(($) => $.input.send_blocked_toast)
-            : reason === "agent_runtime_required"
-              ? t(($) => $.input.runtime_required_toast)
-              : t(($) => $.input.send_failed_toast),
-        );
+        toastSendFailure(err);
         return false;
       }
       apiLogger.info("sendChatMessage.success", {
@@ -768,6 +771,7 @@ export function ChatWindow() {
       isConversationSession,
       user?.id,
       wsId,
+      toastSendFailure,
     ],
   );
 
