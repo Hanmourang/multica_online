@@ -77,9 +77,9 @@ func runModuleSpecImport(cmd *cobra.Command, args []string) error {
 	}
 
 	requested, _ := cmd.Flags().GetInt("version")
-	file := strings.TrimSpace(flagOr(cmd, "html-path", ""))
+	htmlPath := strings.TrimSpace(flagOr(cmd, "html-path", ""))
 	version := 0
-	if file == "" {
+	if htmlPath == "" {
 		issues, err := fetchModuleIssues(ctx, client, module.ID)
 		if err != nil {
 			return fmt.Errorf("list requirements of module %q: %w", module.Name, err)
@@ -97,21 +97,19 @@ func runModuleSpecImport(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("module %q has no prototype version v%d; available: %s", module.Name, requested, joinVersionList(timeline.Versions))
 		}
 		version = int(target.Version)
-		abs, candidates := resolveModulePrototypePath(target.HtmlPath)
-		if abs == "" {
-			return fmt.Errorf("prototype file of %s v%d is not on this machine.\n  html_path: %s\ntried:\n  %s\nPass --html-path <file> to import from a local copy.",
-				module.Name, target.Version, target.HtmlPath, strings.Join(candidates, "\n  "))
-		}
-		file = abs
-	} else if abs, _ := resolveModulePrototypePath(file); abs != "" {
-		file = abs
+		htmlPath = target.HtmlPath
 	}
-
-	raw, err := os.ReadFile(file)
+	// 正文可能在本地，也可能只存在服务端附件里（界面上下载的原型）：导入必须两边都认，
+	// 否则 agent 在远端 runtime 里对「已上传」的原型永远只能导空白。
+	body, localCandidates, err := loadPrototypeBody(ctx, client, module, htmlPath, int32(version))
 	if err != nil {
-		return fmt.Errorf("read prototype file: %w", err)
+		if len(localCandidates) > 0 {
+			return fmt.Errorf("%w\nlocal candidates tried:\n  %s", err, strings.Join(localCandidates, "\n  "))
+		}
+		return err
 	}
-	html := string(raw)
+	html := body.HTML
+	file := body.Path
 
 	candidates := prototypeimport.Candidates(html)
 	if len(candidates) == 0 {

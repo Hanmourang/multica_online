@@ -17,7 +17,7 @@ under it, and **every one is readable and writable through `multica module …`*
 | the requirements inside it | `module get` (its `issues[]`) | `module requirement add` / `remove` |
 | capability spec (`module_spec/v1`) | `module spec get` | `module spec draft` / `publish`, `module spec feature add` / `update` / `remove`, `module spec import` |
 | capability brief (the right pane) | `module brief get` | `module brief patch` |
-| prototype versions | `module prototype list` / `read` / `diff` | `module prototype register` / `update` / `confirm` / `delete` / `parse` |
+| prototype versions | `module prototype list` / `read` / `diff` | `module prototype register` / `upload` / `update` / `confirm` / `delete` / `parse` |
 | releases (brief × prototype) | `module release list` | `module release publish` / `rollback` |
 | graph bridge (objects / strategies / neighbourhood) | `modules_graph_*` / `graph modules, objects, strategies, neighborhood, changes` | — (read only; see Boundaries) |
 
@@ -38,6 +38,23 @@ commands may touch it:
 never have to reassemble the chain by hand, and a module with no requirements still
 has a readable prototype. Do not rebuild that chain from `issue` / `requirement`
 commands and do not open an `html_path` yourself.
+
+## Start here: one call, then act
+
+Before touching a module, run **one** command:
+
+```bash
+multica module context <module>              # MCP: modules_context
+```
+
+It returns the module and its `spec_version` / `brief_version` / canonical
+prototype version, every feature point with how many of its four detail sections
+are filled (and which are blank), the `brief.*` fields that are still empty, the
+canonical prototype **and where its bytes actually live** (`local` file /
+`server` attachment storage / `unreadable`), the spec × anchor reconcile numbers,
+and `next_commands`. That is the whole background for an update; do not
+re-derive it with five separate `get` calls, and do not start guessing paths
+before you have it.
 
 ## Two front doors, one backend
 
@@ -76,29 +93,34 @@ short.
 | `modules_workspace_get` | `multica module brief get` |
 | `modules_brief_patch` | `multica module brief patch` |
 | `modules_prototype_versions` | `multica module prototype list` |
+| `modules_prototype_read` | `multica module prototype read --raw` |
+| `modules_prototype_upload` | `multica module prototype upload` |
 | `modules_prototype_register` / `_update` / `_confirm` / `_delete` | `multica module prototype register` / `update` / `confirm` / `delete` |
 | `modules_prototype_parse` | `multica module prototype parse` |
 | `modules_prototype_plan_create` / `_get` / `_apply` | `multica module plan create` / `get` / `apply` |
 | `modules_releases_list` / `modules_release_publish` / `modules_release_rollback` | `multica module release list` / `publish` / `rollback` |
 | `modules_reconcile` / `modules_coverage` | `multica module reconcile` / `coverage` |
+| `modules_context` | `multica module context` |
 | `modules_graph_bridges` | `multica graph modules` |
 | `modules_graph_objects` / `_strategies` / `_changes` | `multica graph objects` / `strategies` / `changes` |
 | `modules_graph_neighborhood` | `multica graph neighborhood --depth <1..3>` |
 
-**CLI only** (they need the stored HTML files, which the server does not keep):
-`module prototype diff`, `module prototype read`. `brief versions` and `brief diff`
-are covered by `modules_workspace_get` — its `versions[]` is the same change log.
+**CLI only**: `module prototype diff` — it needs both HTML files in hand. Both
+`brief versions` and `brief diff` are covered by `modules_workspace_get`.
 
 ## Reading
 
 ```bash
+multica module context <module> --output json               # everything below, in one call
 multica module list --project <project-id> --output json   # modules of one project
 multica module list --output json                          # every module in the workspace
 multica module get <module> --output json                  # module + requirements + versions
 multica module prototype list <module> --output json       # VERSION STATUS OWNER FILE REQUIREMENT
-multica module prototype read <module>                     # absolute path of the live version
+multica module prototype read <module>                     # absolute path, or the server copy
 multica module prototype read <module> --version 2         # one specific version
 multica module prototype read <module> --raw               # print the HTML itself
+multica module prototype read <module> --out /tmp/v2.html  # write it out, edit it, upload it back
+multica module prototype read <module> --json              # source: local|server + ids
 multica module brief get <module> --output json            # brief + field_defs + versions + releases
 multica module brief versions <module>                     # who changed which fields, and when
 multica module release list <module> --output json         # paired releases + both pointers
@@ -156,13 +178,13 @@ inventing a command.
 | version timeline + pick one | one row per prototype version, both owners | `module prototype list <module>` |
 | single-version preview | renders the stored HTML | `module prototype read <module> --version <n> --raw` (or just the path) |
 | side-by-side compare | two versions in two panes | data half: `module prototype diff <module> --from <a> --to <b>`; the visual panes are **view only** |
-| 新建原型 (upload) | uploads an HTML file into the archive, then registers it | **upload path is view/UI only** (it needs a chat task id). Write the HTML into the archive directory, then `module prototype register <module> --html-path <file>` |
-| 生成原型 (sparkle) | opens a chat session that builds a new prototype | **you are that builder.** Produce the HTML, then register it; there is no command that "generates" one |
+| 新建原型 (upload) | uploads an HTML file into the archive, then registers it | `module prototype upload <module> --file <path>` — it does what the dialog does: bytes → archive row with `attachment_id` → version row → anchor cache |
+| 生成原型 (sparkle) | opens a chat session that builds a new prototype | **you are that builder.** Produce the HTML, then `module prototype upload` it; there is no command that "generates" one |
 | 关联 | registers an existing HTML as a **requirement**'s prototype and binds the archive row | `requirement prototype register <issue> --html-path <file>` then `artifact bind <project> <artifact-id> --issue <issue>` |
 | 更新文件 | corrects `html_path` / note of the selected version | `module prototype update <module> <version> --html-path <file>` (works on both owners; `--status` only module-owned) |
 | 写变更摘要到需求 | posts the diff summary as a requirement comment | `module prototype diff …` then `issue comment add <issue-id> --content "…"` |
 | Storybook preview | story/community renderer | **view only** |
-| 一键登记预览为模块原型 | copies the previewed version into a confirmed, canonical module-owned version | `module prototype register <module> --html-path <the same file> --status confirmed --set-canonical` |
+| 一键登记预览为模块原型 | copies the previewed version into a confirmed, canonical module-owned version | `module prototype read <module> --version <n> --out /tmp/x.html`, then `module prototype upload <module> --file /tmp/x.html --status confirmed --set-canonical` |
 
 ### Right pane · 模块说明 / 功能点 / 版本记录
 
@@ -312,38 +334,54 @@ per feature point instead of trying to bind many.
 ## Iterating a prototype (the full loop)
 
 ```bash
-# 1. where are we?
-multica module prototype list <module> --output json
-multica module spec get <module> --output json
+# 0. one call: which version is live, where are its bytes, what is still blank
+multica module context <module> --output json
 
-# 2. register the new screen (version defaults to highest + 1)
-multica module prototype register <module> --html-path prototypes/module-v4.html \
-  --prompt "加群设置面板" --status pending
+# 1. get the HTML you are about to change
+multica module prototype read <module> --version <n> --out /tmp/module-v<n>.html
 
-# 3. make reconcile/coverage see the feature points
-multica module prototype parse <module> 4
-#    or, when the spec is still empty: multica module spec import <module>
+# 2. edit /tmp/module-v<n>.html, then store the bytes on the server
+multica module prototype upload <module> --file /tmp/module-v<n>.html \
+  --version <n> --replace --prompt "补齐功能点详解"
+#    a genuinely new iteration instead? drop --replace (version defaults to highest + 1)
+
+# 3. make reconcile/coverage see the feature points (upload already did this)
+multica module prototype parse <module> <n>
 
 # 4. what changed?
-multica module prototype diff <module> --from 3 --to 4
+multica module prototype diff <module> --from <n-1> --to <n>
 
 # 5a. approve in place (module-owned version only)
-multica module prototype confirm <module> 4 --canonical
+multica module prototype confirm <module> <n> --canonical
 
 # 5b. or propose the two-phase upgrade when the spec changes with it
-multica module plan create <module> --candidate-version 4 --decisions '{"browse.search":"keep"}'
+multica module plan create <module> --candidate-version <n> --decisions '{"browse.search":"keep"}'
 multica module plan apply <module> <plan-id> --yes
 ```
 
-- `register` stores `--html-path` as a **repository-relative** path when the file
-  sits under a known root (`requirements/…` or `change_logs/…`), so other machines
-  can resolve it too. `--issue MUL-123` claims the version into that requirement
-  instead of the module (then it is requirement-owned and step 5a no longer
-  applies).
+- **Write prototypes with `upload`, not `register`.** `register` records
+  `version + html_path` and nothing else: no bytes leave your machine. A version
+  registered that way is invisible in the web preview (the preview only renders
+  rows that carry an `attachment_id`) and unreadable from any other machine.
+  Use `register` only when the HTML already lives in the shared archive
+  (`requirements/…`, `change_logs/…`) and the person wants a version row pointing
+  at that file. When in doubt, upload.
+- `upload` does the three steps the 新建原型 dialog does, in this order: bytes →
+  `POST /api/upload-file`; archive row → `prototypes/<module>/prototype-v<n>.<ext>`
+  with `doc_type=prototype` + `attachment_id`; version row whose `html_path` is
+  exactly that `rel_path`. Then it caches the `data-fp` anchors. That order
+  matters: if the version write fails you still have the archive row, and
+  `--replace` can bind it.
+- `--replace` binds the bytes to an **existing** version instead of creating one.
+  That is the repair path for `readable_from: unreadable` in
+  `module context` — the version exists, its `html_path` points at a file nobody
+  can read, and the bytes are what was missing.
+- `--issue MUL-123` claims the version into that requirement instead of the
+  module (then it is requirement-owned and step 5a no longer applies).
 - `parse` reads the HTML, extracts every `data-fp="<code>"` anchor (plus its
   `data-title`) and uploads the map. **Reconcile and coverage read that cache, not
-  the file** — skip it and every feature point looks like an empty slot. Re-run it
-  after any HTML edit.
+  the file** — skip it and every feature point looks like an empty slot. `upload`
+  runs it for you; re-run it after any HTML edit made outside `upload`.
 - `confirm` marks a module-owned version `confirmed`; `--canonical` also moves the
   module's canonical pointer and supersedes the previous canonical version. Moving
   the canonical pointer is a product decision: do it when the person asked for
@@ -371,6 +409,49 @@ multica module plan apply <module> <plan-id> --yes
   any version referenced by a release, and requirement-owned versions are refused
   server-side; the parsed-anchor cache is dropped with it. Prefer `--status
   superseded` when you only want it out of the way.
+
+## Filling in 功能点详解 from the current prototype
+
+"请基于当前原型图补齐一下【模块】功能点详解中的信息，自动更新" is the most common
+request. It is a **prose** job, not a prototype job: the prototype is the source,
+the four detail sections of each feature point are the target.
+
+```bash
+multica module context <module> --output json                 # gaps + live version + where its bytes are
+multica module prototype read <module> --version <n> --raw     # the source of truth for the prose
+```
+
+Then write the prose in one patch (one patch = one brief version, atomic):
+
+```bash
+multica module brief patch <module> --base-version <v> --source agent \
+  --field 'fp.FP-01.desc=群列表位于首页左栏，默认展开最近 5 个群' \
+  --field 'fp.FP-01.req=支持置顶、免打扰、未读计数' \
+  --field 'fp.FP-01.interaction=点击进入会话；长按弹出操作面板' \
+  --fields '{"fp.FP-01.acceptance":[{"text":"点击可进入会话","ok":true}]}' \
+  --note "按 v<n> 原型补齐 FP-01"
+```
+
+Rules that keep this honest:
+
+- Only write what the prototype actually shows. A section the screen does not
+  cover stays blank — `module context` lists it as missing and that is the
+  correct state. Never invent requirements, numbers or copy.
+- `fp.<code>.*` must already exist in the spec (`feature_not_found` otherwise).
+  When the prototype has blocks the spec lacks, import them first:
+  `multica module spec import <module> --dry-run`, then without `--dry-run`.
+- `desc` = what it is / where it sits; `req` = the detail requirements;
+  `interaction` + `deps` = the third section; `acceptance` = the fourth, and it is
+  the only field with ✓/○ structure (`[{"text":"…","ok":true}]`).
+- `--base-version` comes from `context` / `brief get`. A 409 `base_stale` means
+  someone wrote first: re-read, merge, retry. `--source agent` so 版本记录 says
+  who wrote it.
+- Do **not** edit `spec.features[]` to "补齐" prose, and do not `plan apply` or
+  `release publish` on your own: filling the brief is a normal write, the paired
+  release is the person's call.
+- When the person says "自动更新" they mean _write the brief_. If they want the
+  prototype itself changed as well, that is the prototype loop above — and it
+  needs `upload`, not `register`.
 
 ## Version comparison summaries
 
@@ -418,24 +499,28 @@ Say these out loud instead of improvising:
 - **Storybook**, the three view modes and their filters, and **导出报告** are
   renderings/downloads of data you can already read. Do the data work; do not
   pretend the pixels moved.
-- **Upload-created prototypes** (新建原型) need a chat task id for the attachment
-  upload. Writing the HTML into the archive directory and calling `prototype
-  register` produces the same stored version; the person can upload if they insist
-  on the upload row.
+- **Upload-created prototypes** are no longer UI-only: `module prototype upload`
+  (MCP `modules_prototype_upload`) performs the same three steps (bytes → archive
+  row with `attachment_id` → version row). What is still view-only is the dialog
+  itself and the visual preview — the data behind them is fully reachable.
 - **生成原型** is a chat session that asks an agent to produce HTML. You are the
-  agent: build the file, register it, parse it.
+  agent: build the file, `module prototype upload` it, parse it.
 - **发布 / 回滚 / plan apply / 删除 / 移动 canonical** are level B. State exactly
   what will move, then use `--yes` (MCP: `confirm=true`).
 
 ## Rules that save a lot of wandering
 
-- `html_path` coming back from the API is **repository-relative** and has two
-  shapes: `requirements/...` (relative to the archive root) and
-  `change_logs/...` (relative to that root's parent directory). Joining it onto
-  the working directory, or `find`/`ls`-ing around for it, is the single most
-  common way a prototype read fails. Run `multica module prototype read`; it tries
-  the archive root, the sibling `change_logs` root, and the workspace dir, then
-  prints the absolute path.
+- `html_path` is **repository-relative and often virtual**: `requirements/...` and
+  `change_logs/...` resolve under the archive root, but a prototype uploaded
+  through the UI keeps its bytes in attachment storage — no file exists on disk,
+  ever. `module prototype read` tries the local roots first, then pulls the same
+  HTML from the server (`Source: server · artifact … attachment …`). MCP twin:
+  `modules_prototype_read` returns the HTML in the result.
+- **Never hunt for a prototype file.** `ls`, `find`, `mdfind`, `glob`, and
+  `project tab get` are all the wrong tool: `html_path` is a coordinate, not a
+  promise that a file exists. Ask `module context` (or `prototype read`) and it
+  answers `local` / `server` / `unreadable`. Two blind searches in a row mean you
+  skipped `context` — go back to it instead of widening the search.
 - `prototype list` has an OWNER column: `module` rows are yours to edit,
   `requirement` rows belong to the requirement's own flow. The confirmed version
   is starred.
@@ -475,9 +560,16 @@ Say these out loud instead of improvising:
   `multica module list` (or `--project <id>`) and use the name or id it prints.
 - `ambiguous module name`: the same name exists in several projects. Re-run with
   `--project`.
-- `prototype file for module ... does not exist on this machine`: the stored path
-  is stale (common for superseded versions). The message lists every root it
-  tried; switch versions with `--version`, or report that the file is gone.
+- `prototype of module … is neither on this machine nor readable from the
+  server` (or `readable_from: unreadable` in `module context`): the version has no
+  bytes anywhere — a path was registered, nothing was stored. Fix it with
+  `module prototype upload <module> --file <the html> --version <n> --replace`;
+  that is the only command that puts bytes back. Do not keep trying versions and
+  do not go looking for the file on disk.
+- `is not readable: no archive row carrying an attachment matches it`: the archive
+  row lost its `attachment_id` (or points at a different `rel_path`).
+  `prototype upload --replace` rewrites both sides at once; `prototype update
+  --html-path` alone only moves the pointer and will fail the same way again.
 - `no data-fp anchor and no h2/h3 heading found`: `spec import` had nothing to
   import. Add `data-fp="FP-01"` (or an `h2`/`h3` structure) to the HTML and
   re-run; do not fall back to hand-writing the spec for a page with no structure.

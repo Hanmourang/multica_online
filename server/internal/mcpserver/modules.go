@@ -15,7 +15,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/url"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -207,12 +211,39 @@ var moduleTools = []moduleTool{
 	},
 	{
 		def: toolDef{
+			Name:        "modules_prototype_read",
+			Description: "读取某版本原型的 HTML 正文。界面上「上传本地 HTML」登记的原型，正文只存在服务端附件里——html_path 只是个虚拟路径，磁盘上没有这份文件；这时就用本工具拿正文，而不是去找一个不存在的路径。不传 version 时取 confirmed，其次最新。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"version":{"type":"integer","description":"默认 confirmed，其次最新版本"}},"required":["project_id","module_id"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesPrototypeRead,
+	},
+	{
+		def: toolDef{
 			Name:        "modules_prototype_register",
-			Description: "登记一个模块级原型版本（无需求模块也可登记）。set_canonical 需要该版本为 confirmed。",
+			Description: "登记一个模块级原型版本（无需求模块也可登记）。set_canonical 需要该版本为 confirmed。注意：它只记 version + html_path，不上传任何字节——你自己生成的 HTML 请用 modules_prototype_upload，否则这一版在 Web 端预览不到、换台机器也读不到。",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"version":{"type":"integer"},"html_path":{"type":"string"},"prompt":{"type":"string"},"status":{"type":"string","enum":["pending","confirmed","superseded"]},"issue_id":{"type":"string"},"set_canonical":{"type":"boolean"}},"required":["project_id","module_id","version","html_path"],"additionalProperties":false}`),
 		},
 		specOnly: true,
 		run:      runModulesPrototypeRegister,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_prototype_upload",
+			Description: "把原型 HTML 正文直接写成模块的一个版本：上传字节→建档案行（带 attachment_id）→登记版本→缓存 data-fp 锚点，一次做完。register 只记路径、不带字节：客户自己生成的 HTML 必须走这个工具，否则 Web 端预览看不到（预览只认附件），换台机器也读不到。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"html":{"type":"string","description":"原型 HTML 正文（必填）"},"file_name":{"type":"string","description":"文件名，决定扩展名；默认 prototype.html"},"version":{"type":"integer","description":"默认最高版本+1；replace=true 时必填"},"status":{"type":"string","enum":["pending","confirmed","superseded"]},"prompt":{"type":"string"},"issue_id":{"type":"string"},"set_canonical":{"type":"boolean","description":"需 status=confirmed；移动权威原型指针"},"replace":{"type":"boolean","description":"把字节绑到已存在的版本（修复无正文的版本），不新建版本"}},"required":["project_id","module_id","html"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesPrototypeUpload,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_context",
+			Description: "一次拿到更新模块所需的全部上下文：模块与 spec/brief/原型版本指针、每个功能点的详情填充度与缺哪几段、说明里还空着的字段、权威原型版本与正文实际在哪（local/server/unreadable）、spec×锚点对账覆盖率，以及 next_commands。改模块前先调它，不要再逐个 get。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"version":{"type":"integer","description":"要看哪个原型版本，默认 confirmed 其次最新"}},"required":["project_id","module_id"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesContext,
 	},
 	{
 		def: toolDef{
@@ -457,6 +488,55 @@ func (rt moduleCtx) do(ctx context.Context, method, path string, body any) (any,
 	return out, nil
 }
 
+// upload 用 multipart 把字节交给 /api/upload-file 并取回 attachment id。
+//
+// 模块工具里只有原型上传需要它：HTML 比任何 JSON 参数都大，而服务端的上传端点
+// 只接受 multipart。与 do 一样，Authorization 原样透传。
+func (rt moduleCtx) upload(ctx context.Context, path, field, filename string, data []byte) (string, *jsonRPCError) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile(field, filepath.Base(filename))
+	if err != nil {
+		return "", &jsonRPCError{Code: -32000, Message: "cannot build multipart body: " + err.Error()}
+	}
+	if _, err := part.Write(data); err != nil {
+		return "", &jsonRPCError{Code: -32000, Message: "cannot write multipart body: " + err.Error()}
+	}
+	if err := writer.Close(); err != nil {
+		return "", &jsonRPCError{Code: -32000, Message: "cannot close multipart body: " + err.Error()}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rt.base+path, &body)
+	if err != nil {
+		return "", &jsonRPCError{Code: -32000, Message: "cannot build upstream request: " + err.Error()}
+	}
+	req.Header.Set("Authorization", rt.auth)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := rt.client.Do(req)
+	if err != nil {
+		return "", &jsonRPCError{Code: -32000, Message: "upstream upload failed: " + err.Error()}
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, moduleMaxBody))
+	if err != nil {
+		return "", &jsonRPCError{Code: -32000, Message: "cannot read upstream response: " + err.Error()}
+	}
+	if resp.StatusCode >= 400 {
+		return "", &jsonRPCError{Code: -32000, Message: fmt.Sprintf("POST %s → HTTP %d: %s", path, resp.StatusCode, compactJSON(raw))}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", &jsonRPCError{Code: -32000, Message: "upload response was not JSON: " + compactJSON(raw)}
+	}
+	id := objectString(out, "id")
+	if id == "" {
+		return "", &jsonRPCError{Code: -32000, Message: "upload response carried no attachment id"}
+	}
+	return id, nil
+}
+
 func compactJSON(raw []byte) string {
 	trimmed := strings.TrimSpace(string(raw))
 	if len(trimmed) > 800 {
@@ -563,6 +643,8 @@ type moduleArgs struct {
 	Status        string          `json:"status"`
 	IssueID       string          `json:"issue_id"`
 	SetCanonical  bool            `json:"set_canonical"`
+	FileName      string          `json:"file_name"`
+	Replace       bool            `json:"replace"`
 	Search        string          `json:"search"`
 
 	CandidateVersion *int32          `json:"candidate_version"`
@@ -1348,6 +1430,569 @@ func runModulesPrototypeDelete(ctx context.Context, rt moduleCtx, args json.RawM
 	}
 	path := modulePath(a.ProjectID, a.ModuleID, "/prototype-versions/"+strconv.Itoa(int(*a.Version)))
 	return rt.do(ctx, http.MethodDelete, path, nil)
+}
+
+// runModulesPrototypeRead 把原型正文直接交到模型手上。
+//
+// 为什么必须做成工具：界面「上传本地 HTML」登记的原型，字节进的是 attachment 存储，
+// html_path 只是按模块名 + 版本号拼出来的虚拟路径——磁盘上永远没有这份文件。CLI 的
+// `module prototype read` 先找本地、再回落到同一条链路；MCP 侧没有文件系统，只能走服务端。
+func runModulesPrototypeRead(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+
+	listing, jerr := rt.do(ctx, http.MethodGet, modulePath(a.ProjectID, a.ModuleID, "/prototype-versions"), nil)
+	if jerr != nil {
+		return nil, jerr
+	}
+	rows := prototypeVersionRows(listing)
+	if len(rows) == 0 {
+		return nil, &jsonRPCError{Code: -32004, Message: "module has no prototype version yet: register one with modules_prototype_register first"}
+	}
+	target, ok := pickPrototypeRow(rows, a.Version)
+	if !ok {
+		return nil, &jsonRPCError{Code: -32602, Message: fmt.Sprintf("no prototype version %d; available: %v", *a.Version, prototypeVersionNumbers(rows))}
+	}
+	htmlPath := objectString(target, "html_path")
+	version := objectInt32(target, "version")
+	if strings.TrimSpace(htmlPath) == "" {
+		return nil, &jsonRPCError{Code: -32004, Message: fmt.Sprintf("prototype v%d recorded no html_path", version)}
+	}
+
+	refs, jerr := prototypeArtifactRefs(ctx, rt, a.ProjectID, "prototype")
+	if jerr != nil {
+		return nil, jerr
+	}
+	moduleName := moduleNameByID(ctx, rt, a.ProjectID, a.ModuleID)
+	ref, matched := prototypeimport.MatchArtifact(refs, htmlPath, moduleName, version)
+	if !matched {
+		// 从「资产管理」上传的 HTML 落的是 doc_type=asset 的档案行：prototype 子集里
+		// 找不到时再拉一次全量，否则看着有文件却报不可读。
+		if wider, widerErr := prototypeArtifactRefs(ctx, rt, a.ProjectID, ""); widerErr == nil && len(wider) > len(refs) {
+			ref, matched = prototypeimport.MatchArtifact(wider, htmlPath, moduleName, version)
+		}
+	}
+	if !matched {
+		return nil, &jsonRPCError{Code: -32004, Message: fmt.Sprintf(
+			"prototype v%d (%s) is not readable: no archive row carrying an attachment matches it. %s"+
+				"An uploaded prototype lives in attachment storage, so its archive row must carry attachment_id — "+
+				"re-register the version, or fix the pointer with modules_prototype_update.",
+			version, htmlPath, prototypeCandidates(refs))}
+	}
+	body, jerr := rt.do(ctx, http.MethodGet, "/api/attachments/"+ref.AttachmentID+"/content", nil)
+	if jerr != nil {
+		return nil, jerr
+	}
+	html, _ := body.(string)
+	return map[string]any{
+		"module_id":     a.ModuleID,
+		"module_name":   moduleName,
+		"version":       version,
+		"status":        objectString(target, "status"),
+		"html_path":     htmlPath,
+		"source":        "server",
+		"artifact_id":   ref.ID,
+		"attachment_id": ref.AttachmentID,
+		"bytes":         len(html),
+		"html":          html,
+	}, nil
+}
+
+// runModulesPrototypeUpload 是最关键的写入口：模块工具里唯一能把正文变成
+// 「别人也能看到的东西」的路径。
+//
+// 三步与界面「新建原型」逐字一致，顺序不能反：档案行先落，register 失败时还能
+// 用 modules_prototype_update 修指针；反过来会留下一行指向不存在正文的版本——
+// 那正是一个模型反复去找文件的起因。
+func runModulesPrototypeUpload(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+	html := a.HTML
+	if strings.TrimSpace(html) == "" {
+		return nil, &jsonRPCError{Code: -32602, Message: "html is required: this tool carries the bytes. modules_prototype_register only records a path, so a version registered that way cannot be previewed or read elsewhere"}
+	}
+
+	status := strings.TrimSpace(a.Status)
+	if status == "" {
+		status = "pending"
+	}
+	switch status {
+	case "pending", "confirmed", "superseded":
+	default:
+		return nil, &jsonRPCError{Code: -32602, Message: "status must be pending, confirmed or superseded"}
+	}
+	if a.SetCanonical && status != "confirmed" {
+		return nil, &jsonRPCError{Code: -32602, Message: "set_canonical needs status=confirmed: only a confirmed version may become canonical"}
+	}
+
+	moduleName := moduleNameByID(ctx, rt, a.ProjectID, a.ModuleID)
+	if moduleName == "" {
+		return nil, &jsonRPCError{Code: -32004, Message: "module not found in project " + a.ProjectID}
+	}
+
+	version := int32(0)
+	if a.Version != nil {
+		version = *a.Version
+	}
+	if version <= 0 {
+		if a.Replace {
+			return nil, &jsonRPCError{Code: -32602, Message: "replace=true needs an explicit version: it binds the bytes to that existing version"}
+		}
+		listing, jerr := rt.do(ctx, http.MethodGet, modulePath(a.ProjectID, a.ModuleID, "/prototype-versions"), nil)
+		if jerr != nil {
+			return nil, jerr
+		}
+		for _, number := range prototypeVersionNumbers(prototypeVersionRows(listing)) {
+			if number > version {
+				version = number
+			}
+		}
+		version++
+	}
+
+	fileName := strings.TrimSpace(a.FileName)
+	if fileName == "" {
+		fileName = "prototype.html"
+	}
+	relPath := prototypeimport.RelPath(moduleName, version, fileName)
+
+	// 1. 字节
+	attachmentID, jerr := rt.upload(ctx, "/api/upload-file", "file", fileName, []byte(html))
+	if jerr != nil {
+		return nil, jerr
+	}
+
+	// 2. 档案行（Web 端预览只认带 attachment 的档案行）
+	artifact, jerr := rt.do(ctx, http.MethodPost, "/api/projects/"+a.ProjectID+"/artifacts", map[string]any{
+		"scope":         "project",
+		"stage":         1,
+		"doc_type":      "prototype",
+		"rel_path":      relPath,
+		"doc_module":    moduleName,
+		"version":       version,
+		"attachment_id": attachmentID,
+	})
+	if jerr != nil {
+		return nil, &jsonRPCError{Code: -32000, Message: fmt.Sprintf(
+			"bytes uploaded (attachment %s) but the archive row at %s could not be created: %s. "+
+				"The bytes are orphaned; retry the call.", attachmentID, relPath, jerr.Message)}
+	}
+	artifactRow, _ := artifact.(map[string]any)
+	artifactID := objectString(artifactRow, "id")
+
+	// 3. 版本行：html_path 必须与档案行的 rel_path 一致，MatchArtifact 才能精确命中。
+	payload := map[string]any{"html_path": relPath, "status": status}
+	if prompt := strings.TrimSpace(a.Prompt); prompt != "" {
+		payload["prompt"] = prompt
+	}
+	var writeErr *jsonRPCError
+	if a.Replace {
+		_, writeErr = rt.do(ctx, http.MethodPatch, modulePath(a.ProjectID, a.ModuleID, "/prototype-versions/"+strconv.Itoa(int(version))), payload)
+	} else {
+		payload["version"] = version
+		if a.SetCanonical {
+			payload["set_canonical"] = true
+		}
+		if strings.TrimSpace(a.IssueID) != "" {
+			payload["issue_id"] = a.IssueID
+		}
+		_, writeErr = rt.do(ctx, http.MethodPost, modulePath(a.ProjectID, a.ModuleID, "/prototype-versions"), payload)
+	}
+	if writeErr != nil {
+		hint := fmt.Sprintf("Pick another version, or bind the stored bytes with replace=true and version=%d.", version)
+		if a.Replace && strings.Contains(writeErr.Message, "prototype_owned_by_requirement") {
+			hint = "This version belongs to a requirement: update it through the requirement axis, not the module axis."
+		}
+		return nil, &jsonRPCError{Code: -32000, Message: fmt.Sprintf(
+			"bytes and archive row are stored (artifact %s, attachment %s) but writing version v%d failed: %s. %s",
+			artifactID, attachmentID, version, writeErr.Message, hint)}
+	}
+
+	// 4. 锚点缓存（尽力而为）：没它 reconcile / coverage 会把每个功能点判成空位。
+	anchors := prototypeimport.Anchors(html)
+	var parseErr string
+	if len(anchors) > 0 {
+		if _, jerr := rt.do(ctx, http.MethodPost,
+			modulePath(a.ProjectID, a.ModuleID, "/prototype-versions/"+strconv.Itoa(int(version))+"/parse"),
+			map[string]any{"anchors": anchors}); jerr != nil {
+			parseErr = jerr.Message
+		}
+	}
+
+	out := map[string]any{
+		"module_id":     a.ModuleID,
+		"module_name":   moduleName,
+		"version":       version,
+		"status":        status,
+		"html_path":     relPath,
+		"artifact_id":   artifactID,
+		"attachment_id": attachmentID,
+		"bytes":         len(html),
+		"anchors":       len(anchors),
+		"replaced":      a.Replace,
+		"read_command":  "modules_prototype_read",
+	}
+	if parseErr != "" {
+		out["anchor_parse_error"] = parseErr
+	}
+	return out, nil
+}
+
+// contextSegments 与服务端四段详情同一口径。
+var contextSegments = [][]string{
+	{"desc", "loc"},
+	{"req"},
+	{"interaction", "deps"},
+	{"acceptance"},
+}
+
+// runModulesContext 把「改模块需要先看到的全部东西」合成一次调用。
+//
+// 没有它，模型必须先跑 4~5 个工具才能拼出背景，少跑一个就开始猜（猜文件在哪、
+// 猜版本号）。这里不新增业务口径：都用现有只读端点，只是把它们拼在一起并把
+// “接下来该调什么”直接写出来。
+func runModulesContext(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+
+	workspace, jerr := rt.do(ctx, http.MethodGet, modulePath(a.ProjectID, a.ModuleID, "/workspace"), nil)
+	if jerr != nil {
+		return nil, jerr
+	}
+	ws, _ := workspace.(map[string]any)
+	moduleName := objectString(ws, "name")
+	if moduleName == "" {
+		moduleName = moduleNameByID(ctx, rt, a.ProjectID, a.ModuleID)
+	}
+
+	listing, jerr := rt.do(ctx, http.MethodGet, modulePath(a.ProjectID, a.ModuleID, "/prototype-versions"), nil)
+	if jerr != nil {
+		return nil, jerr
+	}
+	rows := prototypeVersionRows(listing)
+
+	proto := map[string]any{"version": int32(0), "readable_from": "none"}
+	var version int32
+	if target, ok := pickPrototypeRow(rows, a.Version); ok {
+		version = objectInt32(target, "version")
+		htmlPath := objectString(target, "html_path")
+		proto["version"] = version
+		proto["status"] = objectString(target, "status")
+		proto["html_path"] = htmlPath
+		proto["read_tool"] = "modules_prototype_read"
+		switch {
+		case strings.TrimSpace(htmlPath) == "":
+			proto["readable_from"] = "unreadable"
+			proto["note"] = "this version recorded no html_path"
+		default:
+			if ref, matched := matchPrototypeArtifact(ctx, rt, a.ProjectID, moduleName, htmlPath, version); matched {
+				proto["readable_from"] = "server"
+				proto["artifact_id"] = ref.ID
+				proto["attachment_id"] = ref.AttachmentID
+			} else {
+				proto["readable_from"] = "unreadable"
+				proto["note"] = "no archive row carrying an attachment matches this html_path: call modules_prototype_upload (replace=true) to store the bytes"
+			}
+		}
+	}
+
+	features := contextFeatures(ws)
+	briefGaps := contextBriefGaps(ws)
+
+	reconcilePath := modulePath(a.ProjectID, a.ModuleID, "/reconcile")
+	if version > 0 {
+		reconcilePath += "?version=" + strconv.Itoa(int(version))
+	}
+	reconcileData, jerr := rt.do(ctx, http.MethodGet, reconcilePath, nil)
+	if jerr != nil {
+		return nil, jerr
+	}
+	reconcile, _ := reconcileData.(map[string]any)
+
+	return map[string]any{
+		"module": map[string]any{
+			"id":                          a.ModuleID,
+			"name":                        moduleName,
+			"project_id":                  a.ProjectID,
+			"spec_version":                objectInt32(ws, "spec_version"),
+			"brief_version":               objectInt32(objectOf(ws, "brief"), "version"),
+			"canonical_prototype_version": objectInt32(ws, "canonical_prototype_version"),
+		},
+		"prototype":     proto,
+		"features":      features,
+		"brief_gaps":    briefGaps,
+		"coverage":      objectOf(reconcile, "coverage"),
+		"reconcile":     reconcile["rows"],
+		"next_commands": contextNextCommands(proto, features, briefGaps, objectInt32(objectOf(ws, "brief"), "version")),
+	}, nil
+}
+
+// matchPrototypeArtifact 与 runModulesPrototypeRead 用同一套降级匹配，但不取正文。
+func matchPrototypeArtifact(ctx context.Context, rt moduleCtx, projectID, moduleName, htmlPath string, version int32) (prototypeimport.ArtifactRef, bool) {
+	refs, jerr := prototypeArtifactRefs(ctx, rt, projectID, "prototype")
+	if jerr != nil {
+		return prototypeimport.ArtifactRef{}, false
+	}
+	if ref, matched := prototypeimport.MatchArtifact(refs, htmlPath, moduleName, version); matched {
+		return ref, true
+	}
+	if wider, widerErr := prototypeArtifactRefs(ctx, rt, projectID, ""); widerErr == nil && len(wider) > len(refs) {
+		return prototypeimport.MatchArtifact(wider, htmlPath, moduleName, version)
+	}
+	return prototypeimport.ArtifactRef{}, false
+}
+
+// contextFeatures 把 /workspace 的 features 收成「哪几段还空着」。
+func contextFeatures(ws map[string]any) []map[string]any {
+	rawRows, _ := ws["features"].([]any)
+	out := make([]map[string]any, 0, len(rawRows))
+	for _, item := range rawRows {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		detail, _ := row["detail"].(map[string]any)
+		missing := make([]string, 0, len(contextSegments))
+		for _, segment := range contextSegments {
+			present := false
+			for _, suffix := range segment {
+				if !isEmptyJSON(detail[suffix]) {
+					present = true
+					break
+				}
+			}
+			if !present {
+				missing = append(missing, segment[0])
+			}
+		}
+		out = append(out, map[string]any{
+			"code":             objectString(row, "code"),
+			"title":            objectString(row, "title"),
+			"filled":           objectInt32(row, "filled"),
+			"total":            objectInt32(row, "total"),
+			"missing":          missing,
+			"acceptance_ok":    objectInt32(row, "acceptance_ok"),
+			"acceptance_total": objectInt32(row, "acceptance_total"),
+		})
+	}
+	return out
+}
+
+// contextBriefGaps 列出模块说明里还没填写的字段。
+func contextBriefGaps(ws map[string]any) []string {
+	fields, _ := objectOf(ws, "brief")["fields"].(map[string]any)
+	defs, _ := ws["field_defs"].([]any)
+	out := make([]string, 0, 8)
+	for _, item := range defs {
+		def, ok := item.(map[string]any)
+		if !ok || objectString(def, "scope") != "brief" {
+			continue
+		}
+		key := objectString(def, "key")
+		if key == "" {
+			continue
+		}
+		entry, _ := fields[key].(map[string]any)
+		if isEmptyJSON(entry["value"]) {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// contextNextCommands 把「还缺什么」翻译成下一步该调哪个工具。
+func contextNextCommands(proto map[string]any, features []map[string]any, briefGaps []string, briefVersion int32) []string {
+	out := make([]string, 0, 5)
+	switch objectString(proto, "readable_from") {
+	case "none":
+		out = append(out, "modules_prototype_upload — the module has no prototype yet; store the bytes, not a path")
+	case "unreadable":
+		out = append(out, fmt.Sprintf("modules_prototype_upload — with version=%d and replace=true, so v%d finally has a readable body", objectInt32(proto, "version"), objectInt32(proto, "version")))
+	default:
+		out = append(out, "modules_prototype_read — fetch the current HTML before editing it")
+	}
+
+	blank := make([]string, 0, len(features))
+	for _, feature := range features {
+		if objectInt32(feature, "filled") < objectInt32(feature, "total") || objectInt32(feature, "acceptance_total") == 0 {
+			blank = append(blank, objectString(feature, "code"))
+		}
+	}
+	if len(blank) > 0 {
+		out = append(out, fmt.Sprintf("modules_brief_patch — base_version=%d, fields {fp.%s.desc: ...} for incomplete features: %s",
+			briefVersion, blank[0], strings.Join(blank, ",")))
+	}
+	if len(briefGaps) > 0 {
+		out = append(out, fmt.Sprintf("modules_brief_patch — blank module brief fields: %s", strings.Join(briefGaps, ", ")))
+	}
+	out = append(out, "modules_reconcile — after the prototype anchors changed")
+	return out
+}
+
+func objectOf(row map[string]any, key string) map[string]any {
+	value, _ := row[key].(map[string]any)
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
+}
+
+func isEmptyJSON(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(typed) == ""
+	case []any:
+		return len(typed) == 0
+	case map[string]any:
+		return len(typed) == 0
+	}
+	return false
+}
+
+// prototypeVersionRows 抽出 GET /prototype-versions 里的版本数组。
+func prototypeVersionRows(data any) []map[string]any {
+	envelope, ok := data.(map[string]any)
+	if !ok {
+		return nil
+	}
+	rawRows, _ := envelope["versions"].([]any)
+	rows := make([]map[string]any, 0, len(rawRows))
+	for _, item := range rawRows {
+		if row, ok := item.(map[string]any); ok {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+// pickPrototypeRow 默认取 confirmed（有 html_path 的那个），否则版本号最大的。
+func pickPrototypeRow(rows []map[string]any, want *int32) (map[string]any, bool) {
+	if want != nil {
+		for _, row := range rows {
+			if objectInt32(row, "version") == *want {
+				return row, true
+			}
+		}
+		return nil, false
+	}
+	var newest map[string]any
+	for _, row := range rows {
+		if objectString(row, "status") == "confirmed" && strings.TrimSpace(objectString(row, "html_path")) != "" {
+			return row, true
+		}
+		if newest == nil || objectInt32(row, "version") > objectInt32(newest, "version") {
+			newest = row
+		}
+	}
+	return newest, newest != nil
+}
+
+func prototypeVersionNumbers(rows []map[string]any) []int32 {
+	out := make([]int32, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, objectInt32(row, "version"))
+	}
+	return out
+}
+
+// prototypeCandidates 把档案里真实存在的原型列出来：登记路径写错时，
+// 一眼就能看出该改成什么。
+func prototypeCandidates(refs []prototypeimport.ArtifactRef) string {
+	lines := prototypeimport.DescribeArtifacts(refs, 5)
+	if len(lines) == 0 {
+		return ""
+	}
+	return "Candidates in the archive: " + strings.Join(lines, " | ") + ". "
+}
+
+// prototypeArtifactRefs 拉项目档案；docType 为空时拉全量。
+func prototypeArtifactRefs(ctx context.Context, rt moduleCtx, projectID, docType string) ([]prototypeimport.ArtifactRef, *jsonRPCError) {
+	path := "/api/projects/" + projectID + "/artifacts"
+	if docType != "" {
+		path += "?doc_type=" + url.QueryEscape(docType)
+	}
+	data, jerr := rt.do(ctx, http.MethodGet, path, nil)
+	if jerr != nil {
+		return nil, jerr
+	}
+	envelope, ok := data.(map[string]any)
+	if !ok {
+		return nil, &jsonRPCError{Code: -32000, Message: "artifact list came back in an unexpected shape"}
+	}
+	rows, _ := envelope["artifacts"].([]any)
+	refs := make([]prototypeimport.ArtifactRef, 0, len(rows))
+	for _, item := range rows {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		refs = append(refs, prototypeimport.ArtifactRef{
+			ID:           objectString(row, "id"),
+			RelPath:      objectString(row, "rel_path"),
+			DocType:      objectString(row, "doc_type"),
+			DocModule:    objectString(row, "doc_module"),
+			Version:      objectInt32(row, "version"),
+			AttachmentID: objectString(row, "attachment_id"),
+		})
+	}
+	return refs, nil
+}
+
+func moduleNameByID(ctx context.Context, rt moduleCtx, projectID, moduleID string) string {
+	data, jerr := rt.do(ctx, http.MethodGet, modulePath(projectID, "", ""), nil)
+	if jerr != nil {
+		return ""
+	}
+	envelope, ok := data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	rows, _ := envelope["modules"].([]any)
+	for _, item := range rows {
+		row, ok := item.(map[string]any)
+		if ok && objectString(row, "id") == moduleID {
+			return objectString(row, "name")
+		}
+	}
+	return ""
+}
+
+func objectString(row map[string]any, key string) string {
+	value, _ := row[key].(string)
+	return value
+}
+
+func objectInt32(row map[string]any, key string) int32 {
+	switch typed := row[key].(type) {
+	case float64:
+		return int32(typed)
+	case int32:
+		return typed
+	case int:
+		return int32(typed)
+	case json.Number:
+		parsed, _ := typed.Int64()
+		return int32(parsed)
+	}
+	return 0
 }
 
 func runModulesPrototypeParse(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {

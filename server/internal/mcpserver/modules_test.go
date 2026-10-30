@@ -124,7 +124,8 @@ func TestModuleFacadeHidesSpecToolsWhenFlagOff(t *testing.T) {
 		case "modules_spec_get", "modules_spec_publish", "modules_reconcile", "modules_coverage",
 			"modules_spec_feature_add", "modules_spec_feature_update", "modules_spec_feature_remove",
 			"modules_spec_import",
-			"modules_prototype_versions", "modules_prototype_register",
+			"modules_prototype_versions", "modules_prototype_register", "modules_prototype_read",
+			"modules_prototype_upload", "modules_context",
 			"modules_prototype_plan_create", "modules_prototype_plan_get", "modules_prototype_plan_apply",
 			"modules_workspace_get", "modules_brief_patch",
 			"modules_releases_list", "modules_release_publish", "modules_release_rollback":
@@ -854,5 +855,170 @@ func TestModuleSpecImportRejectsEmptyInput(t *testing.T) {
 	}
 	if len(*calls) != 0 {
 		t.Fatalf("rejected imports must not reach upstream, got %+v", *calls)
+	}
+}
+
+// 上传登记的原型：html_path 只是虚拟路径，正文在 attachment 里——工具必须顺着
+// 版本 → 档案 → 附件三跳把 HTML 取回来，而不是让调用方去 cat 一个不存在的文件。
+func TestModulePrototypeReadFollowsArtifactToAttachment(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/prototype-versions"):
+			_, _ = w.Write([]byte(`{"versions":[` +
+				`{"version":2,"status":"pending","html_path":"prototypes/m/prototype-v2.html"},` +
+				`{"version":1,"status":"confirmed","html_path":"prototypes/m/prototype-v1.html"}]}`))
+		case r.URL.Path == "/api/projects/"+testProject+"/artifacts":
+			if got := r.URL.Query().Get("doc_type"); got != "prototype" {
+				t.Errorf("artifacts must be filtered to prototype rows, got doc_type=%q", got)
+			}
+			_, _ = w.Write([]byte(`{"artifacts":[{"id":"art-1","rel_path":"prototypes/m/prototype-v1.html",` +
+				`"doc_type":"prototype","doc_module":"模块","version":1,"attachment_id":"att-1"}],"total":1}`))
+		case strings.HasSuffix(r.URL.Path, "/modules"):
+			_, _ = w.Write([]byte(`{"modules":[{"id":"` + testModule + `","name":"模块"}]}`))
+		case r.URL.Path == "/api/attachments/att-1/content":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<h1 data-fp="FP-01">群列表</h1>`))
+		default:
+			t.Errorf("unexpected upstream call: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	srv := NewModuleFacade(upstream.URL, true)
+	text, isErr := callModule(t, srv, "modules_prototype_read", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+	}, "Bearer mat_task")
+	if isErr {
+		t.Fatalf("want the HTML, got error: %s", text)
+	}
+	for _, want := range []string{`FP-01`, `att-1`, `"source":"server"`, `"version":1`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in result: %s", want, text)
+		}
+	}
+}
+
+// register 只记路径，正文永远进不了服务端——这是「agent 改完原型，人在 Web 端
+// 什么也看不到」的根因。upload 必须把字节 → 档案行（带 attachment）→ 版本行
+// 三步都走完，并把 rel_path 拼成与界面一致的形状（含中文、空格转连字符）。
+func TestModulePrototypeUploadStoresBytesBeforeRegistering(t *testing.T) {
+	var (
+		mu     strings.Builder
+		calls  []upstreamCall
+		htmlIn = `<h1 data-fp="fp.FP-01" data-title="群列表">群列表</h1>`
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		calls = append(calls, upstreamCall{method: r.Method, path: r.URL.Path, body: string(raw)})
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/modules") && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"modules":[{"id":"` + testModule + `","name":"1.0 AI 助手（首页）"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/prototype-versions") && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"versions":[{"version":1,"status":"confirmed","html_path":"prototypes/x/prototype-v1.html"}]}`))
+		case r.URL.Path == "/api/upload-file":
+			mu.WriteString(string(raw))
+			_, _ = w.Write([]byte(`{"id":"att-9"}`))
+		case r.URL.Path == "/api/projects/"+testProject+"/artifacts":
+			_, _ = w.Write([]byte(`{"id":"art-9"}`))
+		case strings.HasSuffix(r.URL.Path, "/prototype-versions") && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"id":"ver-2","version":2}`))
+		case strings.HasSuffix(r.URL.Path, "/parse"):
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			t.Errorf("unexpected upstream call: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	srv := NewModuleFacade(upstream.URL, true)
+	text, isErr := callModule(t, srv, "modules_prototype_upload", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"html":       htmlIn,
+	}, "Bearer mat_task")
+	if isErr {
+		t.Fatalf("upload failed: %s", text)
+	}
+
+	// 字节真的发给了 /api/upload-file（multipart），而不是只记一个路径。
+	if !strings.Contains(mu.String(), "fp.FP-01") || !strings.Contains(mu.String(), "群列表") {
+		t.Fatalf("upload body does not carry the HTML: %s", mu.String())
+	}
+
+	var artifact, version map[string]any
+	for _, call := range calls {
+		switch {
+		case call.path == "/api/projects/"+testProject+"/artifacts":
+			_ = json.Unmarshal([]byte(call.body), &artifact)
+		case strings.HasSuffix(call.path, "/prototype-versions") && call.method == http.MethodPost:
+			_ = json.Unmarshal([]byte(call.body), &version)
+		}
+	}
+	wantPath := "prototypes/1.0-AI-助手（首页）/prototype-v2.html"
+	if artifact["rel_path"] != wantPath {
+		t.Fatalf("artifact rel_path = %v, want %s (same shape as the web UI)", artifact["rel_path"], wantPath)
+	}
+	if artifact["attachment_id"] != "att-9" {
+		t.Fatalf("artifact must carry the attachment: %v", artifact)
+	}
+	if version["html_path"] != wantPath {
+		t.Fatalf("version html_path = %v, want the archive rel_path %s", version["html_path"], wantPath)
+	}
+	if artifact == nil || version == nil {
+		t.Fatalf("expected both the archive row and the version row, got calls=%+v", calls)
+	}
+}
+
+// 改模块前的第一站：上下文必须一次回答「原型正文到底在哪」，否则模型会开始翻磁盘。
+func TestModuleContextNamesWhereTheBytesLive(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/workspace"):
+			_, _ = w.Write([]byte(`{"name":"1.0 AI 助手（首页）","spec_version":7,"canonical_prototype_version":1,` +
+				`"brief":{"version":3,"fields":{"brief.goal":{"value":"让用户更快开口"}}},` +
+				`"field_defs":[{"key":"brief.goal","scope":"brief"},{"key":"brief.scope","scope":"brief"}],` +
+				`"features":[{"code":"FP-01","title":"群列表","filled":2,"total":4,` +
+				`"detail":{"desc":"x","req":"y"},"acceptance_ok":0,"acceptance_total":0}]}`))
+		case strings.HasSuffix(r.URL.Path, "/prototype-versions"):
+			_, _ = w.Write([]byte(`{"versions":[{"version":1,"status":"confirmed","html_path":"prototypes/m/prototype-v1.html"}]}`))
+		case r.URL.Path == "/api/projects/"+testProject+"/artifacts":
+			_, _ = w.Write([]byte(`{"artifacts":[{"id":"art-1","rel_path":"prototypes/m/prototype-v1.html",` +
+				`"doc_type":"prototype","doc_module":"m","version":1,"attachment_id":"att-1"}],"total":1}`))
+		case strings.HasSuffix(r.URL.Path, "/reconcile"):
+			if got := r.URL.Query().Get("version"); got != "1" {
+				t.Errorf("reconcile must target the inspected version, got version=%q", got)
+			}
+			_, _ = w.Write([]byte(`{"coverage":{"total":1,"covered":1,"denominator":1},"rows":[]}`))
+		default:
+			t.Errorf("unexpected upstream call: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	srv := NewModuleFacade(upstream.URL, true)
+	text, isErr := callModule(t, srv, "modules_context", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+	}, "Bearer mat_task")
+	if isErr {
+		t.Fatalf("context failed: %s", text)
+	}
+	for _, want := range []string{
+		`"readable_from":"server"`, // 正文在附件存储里，不在磁盘
+		`"version":1`,
+		`"acceptance"`,  // FP-01 缺验收段
+		`"brief.scope"`, // 只有 brief.scope 是空的
+		`modules_brief_patch`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in context: %s", want, text)
+		}
+	}
+	if strings.Contains(text, `"brief.goal"`) {
+		t.Fatalf("brief.goal already has a value and must not be reported as a gap: %s", text)
 	}
 }

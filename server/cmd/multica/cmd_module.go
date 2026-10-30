@@ -258,11 +258,14 @@ var modulePrototypeListCmd = &cobra.Command{
 
 var modulePrototypeReadCmd = &cobra.Command{
 	Use:   "read <module>",
-	Short: "Resolve the live prototype of a module to an absolute file path",
-	Long: `Resolve the prototype HTML of a module to an absolute path on this machine.
+	Short: "Read the live prototype of a module (local file, else the server copy)",
+	Long: `Resolve the prototype HTML of a module.
 
 Without --version the confirmed version is preferred, then the newest one.
-Pass --raw to print the file content instead of the path.`,
+The HTML is looked up on this machine first (html_path inside the archive root /
+change_logs / workspace), then — for prototypes registered through the UI, whose
+bytes live in attachment storage and whose html_path is only a virtual path —
+fetched from the server. Pass --raw to print the HTML instead of the coordinates.`,
 	Args: exactArgs(1),
 	RunE: runModulePrototypeRead,
 }
@@ -283,7 +286,8 @@ func init() {
 	modulePrototypeReadCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
 	modulePrototypeReadCmd.Flags().Int("version", 0, "Prototype version to read (default: confirmed, else newest)")
 	modulePrototypeReadCmd.Flags().Bool("raw", false, "Print the prototype HTML instead of its path")
-	modulePrototypeReadCmd.Flags().Bool("json", false, "Output the resolution result as JSON")
+	modulePrototypeReadCmd.Flags().Bool("json", false, "Output the resolution result as JSON (source: local|server)")
+	modulePrototypeReadCmd.Flags().String("out", "", "Write the HTML to this path so it can be edited and uploaded back")
 
 	moduleCreateCmd.Flags().String("name", "", "Module name (required, unique per project)")
 	moduleCreateCmd.Flags().String("color", "", "Display color (hex, optional)")
@@ -372,6 +376,7 @@ func init() {
 	moduleCmd.AddCommand(moduleReleaseCmd)
 	moduleCmd.AddCommand(moduleReconcileCmd)
 	moduleCmd.AddCommand(moduleCoverageCmd)
+	moduleCmd.AddCommand(moduleContextCmd)
 	moduleCmd.AddCommand(modulePrototypeCmd)
 	rootCmd.AddCommand(moduleCmd)
 }
@@ -1363,6 +1368,10 @@ func runModulePrototypeRead(cmd *cobra.Command, args []string) error {
 	versionFlag, _ := cmd.Flags().GetInt("version")
 	rawOutput, _ := cmd.Flags().GetBool("raw")
 	jsonOutput, _ := cmd.Flags().GetBool("json")
+	outPath := strings.TrimSpace(flagOr(cmd, "out", ""))
+	if outPath != "" && (rawOutput || jsonOutput) {
+		return fmt.Errorf("--out writes the HTML to a file; drop --raw / --json")
+	}
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
@@ -1389,49 +1398,51 @@ func runModulePrototypeRead(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("module %q has no prototype version v%d; available: %s", module.Name, versionFlag, joinVersionList(versions))
 	}
 
-	absPath, candidates := resolveModulePrototypePath(target.HtmlPath)
-	if absPath == "" || !fileExists(absPath) {
-		return fmt.Errorf(
-			"prototype file for module %q v%d does not exist on this machine.\n  html_path: %s\ntried:\n  %s\n"+
-				"The path is probably stale (superseded versions keep their original path). "+
-				"Run `multica module prototype list %s` to see which version still has a file.",
-			module.Name, target.Version, target.HtmlPath,
-			strings.Join(candidates, "\n  "),
-			displayID(module.ID, true),
-		)
-	}
-
-	info, statErr := os.Stat(absPath)
-	if statErr != nil {
-		return fmt.Errorf("stat prototype file %s: %w", absPath, statErr)
+	body, candidates, err := loadPrototypeBody(ctx, client, module, target.HtmlPath, target.Version)
+	if err != nil {
+		if len(candidates) > 0 {
+			return fmt.Errorf("%w\nlocal candidates tried:\n  %s", err, strings.Join(candidates, "\n  "))
+		}
+		return err
 	}
 
 	if rawOutput {
-		data, readErr := os.ReadFile(absPath)
-		if readErr != nil {
-			return fmt.Errorf("read prototype file %s: %w", absPath, readErr)
-		}
-		_, writeErr := os.Stdout.Write(data)
+		_, writeErr := os.Stdout.WriteString(body.HTML)
 		if writeErr != nil {
 			return writeErr
 		}
-		if len(data) > 0 && data[len(data)-1] != '\n' {
+		if body.HTML != "" && !strings.HasSuffix(body.HTML, "\n") {
 			fmt.Println()
 		}
 		return nil
 	}
 
+	if outPath != "" {
+		// 落盘是为了「读出来 → 改 → 写回去」形成一个环。没有这一步，agent 只能把
+		// 整篇 HTML 握在上下文里，改完还得自己拼上传参数。
+		if err := writePrototypeFile(outPath, body.HTML); err != nil {
+			return err
+		}
+		fmt.Printf("Wrote %d bytes to %s\n", len(body.HTML), outPath)
+		fmt.Fprintf(os.Stderr, "\nEdit it, then write it back:\n  multica module prototype upload %s --file %s --version %d --replace\n",
+			displayID(module.ID, true), outPath, target.Version)
+		return nil
+	}
+
 	if jsonOutput {
 		return cli.PrintJSON(os.Stdout, map[string]any{
-			"module_id":   module.ID,
-			"module_name": module.Name,
-			"project_id":  module.ProjectID,
-			"version":     target.Version,
-			"status":      target.Status,
-			"issue":       target.IssueKey,
-			"html_path":   target.HtmlPath,
-			"file":        absPath,
-			"bytes":       info.Size(),
+			"module_id":     module.ID,
+			"module_name":   module.Name,
+			"project_id":    module.ProjectID,
+			"version":       target.Version,
+			"status":        target.Status,
+			"issue":         target.IssueKey,
+			"html_path":     target.HtmlPath,
+			"source":        body.Kind,
+			"file":          body.Path,
+			"bytes":         body.Bytes,
+			"artifact_id":   body.ArtifactID,
+			"attachment_id": body.AttachmentID,
 		})
 	}
 
@@ -1441,9 +1452,30 @@ func runModulePrototypeRead(cmd *cobra.Command, args []string) error {
 		fmt.Printf("From:    %s %s\n", target.IssueKey, target.IssueTitle)
 	}
 	fmt.Printf("Path:    %s\n", target.HtmlPath)
-	fmt.Printf("File:    %s\n", absPath)
-	fmt.Printf("Size:    %d bytes\n", info.Size())
-	fmt.Fprintf(os.Stderr, "\nRead it with: cat %q\n", absPath)
+	if body.Kind == "server" {
+		// 上传登记的原型没有磁盘副本：正文只存在于 attachment 里，说清楚它是怎么来的，
+		// 否则下一个 agent 又会去找一个永远不存在的文件。
+		fmt.Printf("Source:  server · artifact %s · attachment %s\n", body.ArtifactID, body.AttachmentID)
+		fmt.Printf("Size:    %d bytes\n", body.Bytes)
+		fmt.Fprintf(os.Stderr, "\nRead it with: multica module prototype read %s --raw\n", displayID(module.ID, true))
+		return nil
+	}
+	fmt.Printf("File:    %s\n", body.Path)
+	fmt.Printf("Size:    %d bytes\n", body.Bytes)
+	fmt.Fprintf(os.Stderr, "\nRead it with: cat %q\n", body.Path)
+	return nil
+}
+
+// writePrototypeFile 落盘前补好目录：agent 常把 --out 指向一个还不存在的临时目录。
+func writePrototypeFile(path, html string) error {
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create directory for %s: %w", path, err)
+		}
+	}
+	if err := os.WriteFile(path, []byte(html), 0o644); err != nil {
+		return fmt.Errorf("write prototype to %s: %w", path, err)
+	}
 	return nil
 }
 
