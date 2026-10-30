@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Link2, PanelsTopLeft, Pencil, Sparkles } from "lucide-react";
+import { Link2, PanelsTopLeft, Pencil, Plus, Sparkles } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { projectArtifactsOptions } from "@multica/core/artifacts/queries";
 import {
@@ -51,6 +51,8 @@ import {
 import { useIssuePrototypeVersions } from "../use-module-prototypes";
 import { PrototypeManageDialog } from "./prototype-manage-dialog";
 import { PrototypeBuildDialog } from "./prototype-build-dialog";
+import { PrototypeCreateDialog } from "./prototype-create-dialog";
+import { nextPrototypeVersion } from "./prototype-create-model";
 import { PrototypeInspector } from "./prototype-inspector";
 import {
   directoryFilesForPath,
@@ -76,7 +78,13 @@ type FpDiff = ReturnType<typeof diffFeaturePoints>[number];
  * HTML 态：单版预览 + 并排 data-fp 对比 / 变更摘要 / 影响子模块。
  * Storybook 态：代码本体平台页面模块走本地演示画布；其余模块无 discoverViews 则诚实空态。
  */
-export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
+export function ModulePrototypesTab({
+  moduleId,
+  nodeId,
+}: {
+  moduleId: string;
+  nodeId: string | null;
+}) {
   const { t } = useT("archive");
   const wsId = useWorkspaceId();
   const { projectId } = useGraphData();
@@ -89,18 +97,23 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
   const [selectedFp, setSelectedFp] = useState<string | null>(null);
   const [manage, setManage] = useState<"associate" | "update" | null>(null);
   const [buildOpen, setBuildOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const setPageContext = usePageSurfaceContext((state) => state.setContext);
 
   const modulesQuery = useQuery(graphModulesOptions(wsId, projectId));
   const issuesQuery = useQuery(projectIssuesForModulesOptions(wsId, projectId));
   const artifactsQuery = useQuery(projectArtifactsOptions(wsId, projectId));
-  const objectsQuery = useQuery(moduleObjectsOptions(wsId, projectId, nodeId));
-  const neighborhoodQuery = useQuery(moduleNeighborhoodOptions(wsId, projectId, nodeId));
+  // 未绑定图谱的模块没有 node id：对象 / 邻域 / Storybook 三个附加图层自动空态，
+  // 原型本身（上传、预览、版本切换）不依赖图谱。
+  const graphNodeId = nodeId ?? "";
+  const objectsQuery = useQuery(moduleObjectsOptions(wsId, projectId, graphNodeId));
+  const neighborhoodQuery = useQuery(moduleNeighborhoodOptions(wsId, projectId, graphNodeId));
 
-  const module = (modulesQuery.data?.modules ?? []).find((row) => row.graph_node_id === nodeId);
+  // 选中键是模块 UUID（见 graph-data-provider）：未绑定模块也能拿到详情。
+  const module = (modulesQuery.data?.modules ?? []).find((row) => row.id === moduleId);
   // 草案 = 说明轴里还没成对发布的版本数（画面 1 的「草案 n」）。
   const workspaceQuery = useQuery({
-    ...moduleWorkspaceOptions(wsId, projectId, module?.id),
+    ...moduleWorkspaceOptions(wsId, projectId, moduleId),
     retry: false,
   });
   const draftCount = useMemo(() => {
@@ -120,29 +133,32 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
   // 模块自己登记过的原型（可无关联需求）：需求轴为空时用它兜底，
   // 否则「有原型、没需求」的模块会同时呈现空预览 + 空右栏。
   const moduleProtosQuery = useQuery({
-    ...modulePrototypeVersionsOptions(wsId, projectId, module?.id),
+    ...modulePrototypeVersionsOptions(wsId, projectId, moduleId),
     retry: false,
   });
-  const moduleFallback = useMemo<PrototypeVersion | null>(() => {
+  // 模块自有原型（issue_id 可空）：无需求模块的唯一预览轴，同时是「已登记」判定源。
+  const moduleVersions = useMemo<PrototypeVersion[]>(() => {
     const rows = moduleProtosQuery.data?.versions ?? [];
-    if (rows.length === 0) return null;
-    const canonical = moduleProtosQuery.data?.canonical_prototype_version ?? null;
-    const owned =
-      (canonical === null ? undefined : rows.find((row) => row.version === canonical)) ??
-      rows.reduce((max, row) => (row.version > max.version ? row : max), rows[0]!);
-    return {
-      id: owned.id,
-      issue_id: owned.issue_id ?? "",
-      version: owned.version,
-      html_path: owned.html_path,
-      prompt: owned.prompt,
-      marks: [],
-      status: owned.status,
-      created_by_type: "system",
-      created_by_id: null,
-      created_at: owned.created_at,
-    };
+    return [...rows]
+      .sort((a, b) => b.version - a.version)
+      .map((row) => ({
+        id: row.id,
+        issue_id: row.issue_id ?? "",
+        version: row.version,
+        html_path: row.html_path,
+        prompt: row.prompt,
+        marks: [],
+        status: row.status,
+        created_by_type: "system" as const,
+        created_by_id: null,
+        created_at: row.created_at,
+      }));
   }, [moduleProtosQuery.data]);
+  const moduleFallback = useMemo<PrototypeVersion | null>(() => {
+    if (moduleVersions.length === 0) return null;
+    const canonical = moduleProtosQuery.data?.canonical_prototype_version ?? null;
+    return moduleVersions.find((row) => row.version === canonical) ?? moduleVersions[0]!;
+  }, [moduleProtosQuery.data, moduleVersions]);
 
   const reqsWithVersions = reqs.filter((issue) => (versionsQuery.byIssue.get(issue.id)?.length ?? 0) > 0);
   const activeIssue =
@@ -151,8 +167,14 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
     reqs[0];
   const versions = activeIssue ? (versionsQuery.byIssue.get(activeIssue.id) ?? []) : [];
   const pair = pickPrototypePair(versions);
+  // 需求轴为空时，版本下拉改列模块自有原型，否则「已上传、看不见、无法切版」。
+  const versionChoices = versions.length > 0 ? pair.sorted : moduleVersions;
   const current =
-    versions.find((row) => row.id === currentId) ?? pair.current ?? moduleFallback ?? undefined;
+    versions.find((row) => row.id === currentId) ??
+    moduleVersions.find((row) => row.id === currentId) ??
+    pair.current ??
+    moduleFallback ??
+    undefined;
   const baseline =
     versions.find((row) => row.id === baselineId && row.id !== current?.id) ??
     (pair.baseline?.id === current?.id ? undefined : pair.baseline);
@@ -223,8 +245,14 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
 
   const maxVersion = Math.max(
     versions.reduce((max, row) => Math.max(max, row.version), 0),
+    moduleVersions[0]?.version ?? 0,
     moduleFallback?.version ?? 0,
   );
+  // 新版本号在需求轴与模块轴上取最大值 + 1，避免撞 POST 的 (module, version) 去重。
+  const nextProtoVersion = nextPrototypeVersion([
+    ...versions.map((row) => row.version),
+    ...moduleVersions.map((row) => row.version),
+  ]);
   const inflight = reqs.filter((issue) => issue.id !== activeIssue?.id);
 
   if (modulesQuery.isPending || issuesQuery.isPending || versionsQuery.pending) {
@@ -243,7 +271,7 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
   }
 
   const canPreview = Boolean(current && currentArtifact);
-  const designedPrototype = storybookDemoForModule(module?.graph_node_id ?? nodeId);
+  const designedPrototype = storybookDemoForModule(module?.graph_node_id ?? graphNodeId);
   const showDesignedPrototype =
     Boolean(designedPrototype) &&
     currentSource.status === "ready" &&
@@ -251,7 +279,7 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
   const canCompare = versions.length >= 2 && Boolean(baseline && baselineArtifact);
   const viewMode = preview === "html" && canCompare && mode === "compare" ? "compare" : "single";
   const toolbarIssue = activeIssue;
-  const storyReady = hasStorybookDemo(module?.graph_node_id ?? nodeId);
+  const storyReady = hasStorybookDemo(module?.graph_node_id ?? graphNodeId);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[10px] border border-surface-border bg-surface" data-testid="module-prototypes">
@@ -305,7 +333,7 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
               ]}
             />
           )}
-          {preview === "html" && versions.length > 0 && current && (
+          {preview === "html" && versionChoices.length > 0 && current && (
             <CompactSelect
               label={viewMode === "compare" ? t(($) => $.features.version_current) : t(($) => $.features.version_label)}
               ariaLabel={t(($) => $.features.version_current)}
@@ -317,7 +345,7 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
                   if (other) setBaselineId(other.id);
                 }
               }}
-              options={pair.sorted.map((version) => ({
+              options={versionChoices.map((version) => ({
                 id: version.id,
                 label: versionOptionLabel(version),
               }))}
@@ -341,6 +369,10 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
             />
           )}
           <div className="ml-auto flex items-center gap-1.5">
+            <Button type="button" size="xs" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-3.5" />
+              {t(($) => $.features.create_proto_action)}
+            </Button>
             <Button type="button" size="xs" variant="outline" onClick={() => setBuildOpen(true)}>
               <Sparkles className="size-3.5" />
               {t(($) => $.features.build_title)}
@@ -364,13 +396,19 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
           </div>
         </div>
 
+        {nodeId ? null : (
+          <p className="shrink-0 rounded-[8px] border border-dashed border-surface-border bg-muted/25 px-2.5 py-1 text-[10px] leading-relaxed text-muted-foreground">
+            {t(($) => $.features.module_unbound_note)}
+          </p>
+        )}
+
         <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {preview === "storybook" ? (
               storyReady || canPreview ? (
                 <StorybookPane
                   projectId={projectId}
-                  graphNodeId={module?.graph_node_id ?? nodeId}
+                  graphNodeId={module?.graph_node_id ?? graphNodeId}
                   version={current ?? undefined}
                   artifact={currentArtifact}
                   selectedFp={selectedFp}
@@ -387,11 +425,17 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
                 />
               )
             ) : !canPreview ? (
-              <ArchiveEmpty
-                icon={<PanelsTopLeft className="size-5" />}
-                title={t(($) => $.features.prototypes_title)}
-                description={t(($) => $.features.prototypes_empty)}
-              />
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
+                <ArchiveEmpty
+                  icon={<PanelsTopLeft className="size-5" />}
+                  title={t(($) => $.features.prototypes_title)}
+                  description={t(($) => $.features.prototypes_empty)}
+                />
+                <Button type="button" size="xs" onClick={() => setCreateOpen(true)}>
+                  <Plus className="size-3.5" />
+                  {t(($) => $.features.create_proto_action)}
+                </Button>
+              </div>
             ) : viewMode === "single" && current && showDesignedPrototype && designedPrototype?.stories[0] ? (
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-surface-border bg-white">
                 <PvBar
@@ -474,6 +518,15 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
         </div>
       </div>
 
+      <PrototypeCreateDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        projectId={projectId}
+        moduleId={moduleId}
+        moduleName={module?.name}
+        nextVersion={nextProtoVersion}
+        registeredPaths={moduleVersions.map((row) => row.html_path)}
+      />
       <PrototypeBuildDialog
         open={buildOpen}
         onOpenChange={setBuildOpen}

@@ -28,7 +28,8 @@ export function ModuleTableView({ filters }: { filters?: FeatureModuleFilters })
   const resolvedFilters = resolveFeatureFilters(filters ?? EMPTY_FEATURE_FILTERS);
   const { t } = useT("archive");
   const wsId = useWorkspaceId();
-  const { projectId, snapshot, selectedNodeId, setSelectedNodeId } = useGraphData();
+  const { projectId, snapshot, selectedNodeId, selectedModuleId, setSelectedNodeId, setSelectedModuleId } =
+    useGraphData();
   const modulesQuery = useQuery(graphModulesOptions(wsId, projectId));
   const issuesQuery = useQuery(projectIssuesForModulesOptions(wsId, projectId));
 
@@ -73,13 +74,16 @@ export function ModuleTableView({ filters }: { filters?: FeatureModuleFilters })
             const moduleIssues = issuesForModule(issues, projectId, module.id);
             const tasks = rollupTasks(moduleTasks(moduleIssues));
             const health = moduleHealth(Boolean(module.graph_node_id), moduleIssues);
-            const selected = Boolean(module.graph_node_id) && selectedNodeId === module.graph_node_id;
+            const selected = selectedModuleId
+              ? selectedModuleId === module.id
+              : Boolean(module.graph_node_id) && selectedNodeId === module.graph_node_id;
             return (
               <tr
                 key={module.id}
                 className={cn("cursor-pointer", selected && "bg-primary/5")}
                 onClick={() => {
-                  if (module.graph_node_id) setSelectedNodeId(module.graph_node_id);
+                  setSelectedModuleId(module.id);
+                  setSelectedNodeId(module.graph_node_id ?? null);
                 }}
               >
                 <FeatureTd>

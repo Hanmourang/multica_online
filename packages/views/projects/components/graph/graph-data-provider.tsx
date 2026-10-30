@@ -29,6 +29,15 @@ interface GraphDataValue {
   /** Community node id selected in the module list (f10). */
   selectedNodeId: string | null;
   setSelectedNodeId: (nodeId: string | null) => void;
+  /**
+   * Module UUID selected in the module list (f10).
+   *
+   * 模块的稳定主键是 project_module.id；graph_node_id 只是可选的图谱桥接列，
+   * 未绑定的模块没有它。只按 node id 记选中会让「未绑定模块」永远选不中、
+   * 右栏恒为空态，所以选中态必须以模块 UUID 为准，node id 只做兼容与邻域查询。
+   */
+  selectedModuleId: string | null;
+  setSelectedModuleId: (moduleId: string | null) => void;
   /** Matrix cell selected in the grid (f11 drilldown driver). */
   selectedCell: BusMatrixCell | null;
   setSelectedCell: (cell: BusMatrixCell | null) => void;
@@ -45,11 +54,15 @@ export function GraphDataProvider({
 }) {
   const wsId = useWorkspaceId();
   const [selectedNodeId, setSelectedNodeIdState] = useState<string | null>(null);
+  const [selectedModuleId, setSelectedModuleIdState] = useState<string | null>(null);
   const [selectedCell, setSelectedCellState] = useState<BusMatrixCell | null>(null);
 
   const snapshotQuery = useQuery(latestGraphSnapshotOptions(wsId, projectId));
   const setSelectedNodeId = useCallback((nodeId: string | null) => {
     setSelectedNodeIdState((prev) => (prev === nodeId ? prev : nodeId));
+  }, []);
+  const setSelectedModuleId = useCallback((moduleId: string | null) => {
+    setSelectedModuleIdState((prev) => (prev === moduleId ? prev : moduleId));
   }, []);
   const setSelectedCell = useCallback((cell: BusMatrixCell | null) => {
     setSelectedCellState(cell);
@@ -67,6 +80,8 @@ export function GraphDataProvider({
       refetchSnapshot,
       selectedNodeId,
       setSelectedNodeId,
+      selectedModuleId,
+      setSelectedModuleId,
       selectedCell,
       setSelectedCell,
     }),
@@ -74,8 +89,10 @@ export function GraphDataProvider({
       projectId,
       refetchSnapshot,
       selectedCell,
+      selectedModuleId,
       selectedNodeId,
       setSelectedCell,
+      setSelectedModuleId,
       setSelectedNodeId,
       snapshotQuery.data,
       snapshotQuery.isError,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Link2, Palette, Pencil, Plus, Puzzle, Unlink } from "lucide-react";
 import { toast } from "sonner";
@@ -66,7 +66,7 @@ export function ModuleListPanel({
   const resolvedFilters = resolveFeatureFilters(filters ?? EMPTY_FEATURE_FILTERS);
   const { t } = useT("archive");
   const wsId = useWorkspaceId();
-  const { projectId, snapshot, selectedNodeId, setSelectedNodeId } =
+  const { projectId, snapshot, selectedNodeId, selectedModuleId, setSelectedNodeId, setSelectedModuleId } =
     useGraphData();
 
   const [newName, setNewName] = useState("");
@@ -89,11 +89,23 @@ export function ModuleListPanel({
   const summaries = snapshot?.module_summary ?? [];
   const communities = detailQuery.data?.communities ?? [];
 
+  /** 选中以模块 UUID 为准；node id 只作图谱邻域的附带选择（未绑定传 null）。 */
+  const selectModule = useCallback(
+    (module: GraphModuleItem) => {
+      setSelectedModuleId(module.id);
+      setSelectedNodeId(module.graph_node_id ?? null);
+    },
+    [setSelectedModuleId, setSelectedNodeId],
+  );
+
   useEffect(() => {
-    if (selectedNodeId) return;
-    const firstBound = (modulesQuery.data?.modules ?? []).find((module) => module.graph_node_id);
-    if (firstBound?.graph_node_id) setSelectedNodeId(firstBound.graph_node_id);
-  }, [modulesQuery.data, selectedNodeId, setSelectedNodeId]);
+    if (selectedModuleId || selectedNodeId) return;
+    // 默认选中第一个模块：优先已绑定图谱的，没有就取第一个未绑定的 ——
+    // 否则模块全是未绑定时右栏永远是空态，原型与说明都无从入口。
+    const modules = modulesQuery.data?.modules ?? [];
+    const first = modules.find((module) => module.graph_node_id) ?? modules[0];
+    if (first) selectModule(first);
+  }, [modulesQuery.data, selectedModuleId, selectedNodeId, selectModule]);
 
   const rows = useMemo(() => {
     const modules = modulesQuery.data?.modules ?? [];
@@ -177,6 +189,7 @@ export function ModuleListPanel({
         graph_node_id: nodeId,
       });
       setBindingId(null);
+      setSelectedModuleId(module.id);
       setSelectedNodeId(nodeId);
       toast.success(t(($) => $.features.bind_ok));
     } catch {
@@ -187,7 +200,8 @@ export function ModuleListPanel({
   const handleUnbind = async (module: GraphModuleItem) => {
     try {
       await updateModule.mutateAsync({ moduleId: module.id, graph_node_id: "" });
-      if (selectedNodeId === module.graph_node_id) setSelectedNodeId(null);
+      // 解绑只丢图谱桥接，不丢选中 —— 模块本身还能写原型与说明。
+      setSelectedNodeId(null);
       toast.success(t(($) => $.features.unbind_ok));
     } catch {
       toast.error(t(($) => $.features.update_failed));
@@ -304,13 +318,14 @@ export function ModuleListPanel({
         >
           {rows.map((module) => {
             const summary = summaryForModule(summaries, module.graph_node_id, module.name);
-            const selected =
-              Boolean(module.graph_node_id) && selectedNodeId === module.graph_node_id;
+            const selected = selectedModuleId
+              ? selectedModuleId === module.id
+              : Boolean(module.graph_node_id) && selectedNodeId === module.graph_node_id;
             const moduleIssues = issuesForModule(projectIssues, projectId, module.id);
             const reqCount = moduleRequirements(moduleIssues).length || module.issue_count;
             const tasks = rollupTasks(moduleTasks(moduleIssues));
             const health = moduleHealth(Boolean(module.graph_node_id), moduleIssues);
-            const canSelect = Boolean(module.graph_node_id) && editingId !== module.id;
+            const canSelect = editingId !== module.id;
             return (
               <li key={module.id} className="group" data-module-id={module.id}>
                 <div
@@ -319,14 +334,14 @@ export function ModuleListPanel({
                   aria-disabled={!canSelect}
                   tabIndex={canSelect ? 0 : -1}
                   onClick={() => {
-                    if (!canSelect || !module.graph_node_id) return;
-                    setSelectedNodeId(module.graph_node_id);
+                    if (!canSelect) return;
+                    selectModule(module);
                   }}
                   onKeyDown={(event) => {
-                    if (!canSelect || !module.graph_node_id) return;
+                    if (!canSelect) return;
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      setSelectedNodeId(module.graph_node_id);
+                      selectModule(module);
                     }
                   }}
                   className={cn(

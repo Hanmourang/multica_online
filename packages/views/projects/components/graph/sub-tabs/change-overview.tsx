@@ -23,15 +23,25 @@ import {
 
 /**
  * f11 子TAB 2 · 模块变更概览：左需求、右任务进度条（对齐原型画面 11）。
+ *
+ * 模块定位以 moduleId 为准（nodeId 只有已绑定图谱的模块才有）。
  */
-export function ChangeOverviewTab({ nodeId }: { nodeId: string }) {
+export function ChangeOverviewTab({
+  nodeId,
+  moduleId,
+}: {
+  nodeId: string;
+  moduleId?: string;
+}) {
   const { t } = useT("archive");
   const wsId = useWorkspaceId();
   const { projectId } = useGraphData();
   const modulesQuery = useQuery(graphModulesOptions(wsId, projectId));
   const issuesQuery = useQuery(projectIssuesForModulesOptions(wsId, projectId));
 
-  const module = (modulesQuery.data?.modules ?? []).find((row) => row.graph_node_id === nodeId);
+  const module =
+    (moduleId ? (modulesQuery.data?.modules ?? []).find((row) => row.id === moduleId) : undefined) ??
+    (modulesQuery.data?.modules ?? []).find((row) => row.graph_node_id === nodeId);
   const issues = useMemo(() => {
     if (!module) return [];
     return issuesForModule(issuesQuery.data ?? [], projectId, module.id);

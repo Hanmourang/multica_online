@@ -19,7 +19,7 @@ import {
 import { useT } from "../../../i18n";
 import { useGraphData } from "./graph-data-provider";
 import { issuesForModule, moduleRequirements, moduleTasks } from "./module-feature-stats";
-import { ArchiveEmpty } from "../archive/query-states";
+import { ArchiveEmpty, QueryLoading } from "../archive/query-states";
 import { ChangeOverviewTab } from "./sub-tabs/change-overview";
 import { ModulePrototypesTab } from "./sub-tabs/module-prototypes";
 import { PrototypeWorkbench } from "./prototype-workbench";
@@ -44,25 +44,28 @@ export function ModuleDetailPanel() {
   // 结构对账子 TAB 与后端中枢同受 FF_MODULE_SPEC_CENTER 门控：关闭时 TAB 隐藏，
   // 且后端叶子未注册（双层门控，记忆「flag 双层门控」）。
   const specCenterEnabled = useFeatureEnabled(MODULE_SPEC_CENTER_FLAG, false);
-  const { projectId, selectedNodeId } = useGraphData();
+  const { projectId, selectedNodeId, selectedModuleId } = useGraphData();
   const deferredNodeId = useDeferredValue(selectedNodeId);
+  const deferredModuleId = useDeferredValue(selectedModuleId);
   const [tab, setTab] = useState<FeatureSubTab>("prototypes");
-  const modulesQuery = useQuery({
-    ...graphModulesOptions(wsId, projectId),
-    enabled: Boolean(deferredNodeId),
-  });
+  // 模块列表不再按 graph_node_id 选中：未绑定图谱的模块一样能进详情写原型。
+  const modulesQuery = useQuery(graphModulesOptions(wsId, projectId));
+  const modules = modulesQuery.data?.modules ?? [];
+  const selectedModule =
+    modules.find((row) => row.id === deferredModuleId) ??
+    (deferredNodeId
+      ? modules.find((row) => row.graph_node_id === deferredNodeId)
+      : undefined);
   const issuesQuery = useQuery({
     ...projectIssuesForModulesOptions(wsId, projectId),
-    enabled: Boolean(deferredNodeId),
+    enabled: Boolean(selectedModule),
   });
-  const selectedModule = (modulesQuery.data?.modules ?? []).find(
-    (row) => row.graph_node_id === deferredNodeId,
-  );
   const moduleIssues = selectedModule
     ? issuesForModule(issuesQuery.data ?? [], projectId, selectedModule.id)
     : [];
 
-  if (!selectedNodeId) {
+  if (!selectedModule) {
+    if (modulesQuery.isPending) return <QueryLoading rows={5} />;
     return (
       <ArchiveEmpty
         icon={<Boxes className="size-5" />}
@@ -75,7 +78,7 @@ export function ModuleDetailPanel() {
 
   const reqCount = moduleRequirements(moduleIssues).length;
   const taskCount = moduleTasks(moduleIssues).length;
-  const activeNodeId = deferredNodeId ?? selectedNodeId;
+  const moduleNodeId = selectedModule.graph_node_id ?? null;
 
   return (
     <Tabs
@@ -117,11 +120,17 @@ export function ModuleDetailPanel() {
       </TabsList>
       <TabsContent value="prototypes" className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden">
         {tab === "prototypes" ? (
-          <ModulePrototypesTab key={activeNodeId} nodeId={activeNodeId} />
+          <ModulePrototypesTab
+            key={selectedModule.id}
+            moduleId={selectedModule.id}
+            nodeId={moduleNodeId}
+          />
         ) : null}
       </TabsContent>
       <TabsContent value="changes" className="mt-3 min-h-0 flex-1 overflow-auto">
-        {tab === "changes" ? <ChangeOverviewTab nodeId={activeNodeId} /> : null}
+        {tab === "changes" ? (
+          <ChangeOverviewTab nodeId={moduleNodeId ?? ""} moduleId={selectedModule.id} />
+        ) : null}
       </TabsContent>
       {specCenterEnabled && selectedModule ? (
         <TabsContent value="reconcile" className="mt-3 min-h-0 flex-1 overflow-auto">
