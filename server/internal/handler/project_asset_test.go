@@ -225,3 +225,31 @@ func TestParseAssetPagingDefaultsAndBounds(t *testing.T) {
 		t.Fatalf("non-numeric page must default to 1, got %d", page)
 	}
 }
+
+func TestParseAssetMetaFilters(t *testing.T) {
+	cases := []struct {
+		raw       string
+		wantStage string
+		wantRole  string
+		wantOK    bool
+	}{
+		{"", "", "", true},
+		{"stage=all&role=all", "", "", true},
+		{"stage=S2", "S2", "", true},
+		{"role=output", "", "output", true},
+		{"stage=none&role=none", "none", "none", true},
+		{"stage=general", "general", "", true},
+		// 非法值不能静默降级成全量，否则用户会误以为筛选生效。
+		{"stage=S9", "", "", false},
+		{"role=both", "", "", false},
+	}
+
+	for _, tc := range cases {
+		r, _ := http.NewRequest(http.MethodGet, "/api/assets/page?"+tc.raw, nil)
+		stage, role, ok := parseAssetMetaFilters(r)
+		if ok != tc.wantOK || stage != tc.wantStage || role != tc.wantRole {
+			t.Fatalf("%q => (%q,%q,%v), want (%q,%q,%v)",
+				tc.raw, stage, role, ok, tc.wantStage, tc.wantRole, tc.wantOK)
+		}
+	}
+}

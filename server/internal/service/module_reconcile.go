@@ -12,11 +12,14 @@ import (
 // 本文件为纯函数，不触库、不依赖 handler，便于表驱动单测与 Go/TS 双端对齐。
 
 // ModuleSpecFeature 是 module_spec/v1 里的一个功能点（07 附录 B）。
+// Group 是右栏「功能点清单」的分组标签（原型区块，如「浏览」「分析」）；
+// 可为空，空则归入同一个未分组桶。发布时原样往返，不在服务端重算。
 type ModuleSpecFeature struct {
 	Code     string `json:"code"`
 	Title    string `json:"title"`
 	Kind     string `json:"kind"`
 	Priority string `json:"priority,omitempty"`
+	Group    string `json:"group,omitempty"`
 }
 
 // ModuleSpec 是 project_module.spec 的反序列化目标（schema=module_spec/v1）。

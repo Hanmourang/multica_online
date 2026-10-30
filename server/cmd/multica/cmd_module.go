@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -83,6 +86,157 @@ and archive documents are untouched.`,
 	RunE: runModuleDelete,
 }
 
+var moduleSpecCmd = &cobra.Command{
+	Use:   "spec",
+	Short: "Read or write the module capability spec (module_spec/v1)",
+	Long: `The spec is a module's structured feature list: {schema, summary?, features[]}
+with code / title / kind (core|edge) / priority per feature.
+
+  draft    stores the spec without bumping spec_version (a pre-publish workspace)
+  publish  commits it: spec_version +1, feature projection rebuilt, change event recorded
+
+Both endpoints sit behind FF_MODULE_SPEC_CENTER on the server; with the flag off
+they answer 404 by design (the module CRUD commands keep working either way).`,
+}
+
+var moduleSpecGetCmd = &cobra.Command{
+	Use:   "get <module>",
+	Short: "Print the spec, its version and the canonical prototype pointer",
+	Args:  exactArgs(1),
+	RunE:  runModuleSpecGet,
+}
+
+var moduleSpecDraftCmd = &cobra.Command{
+	Use:   "draft <module>",
+	Short: "Store a spec draft (spec_version unchanged)",
+	Args:  exactArgs(1),
+	RunE:  runModuleSpecDraft,
+}
+
+var moduleSpecPublishCmd = &cobra.Command{
+	Use:   "publish <module>",
+	Short: "Publish the spec as a new version (spec_version +1)",
+	Long: `Publishing is the only way a spec becomes the module's truth. Pass
+--expected-version to make the write conditional: if another writer already
+bumped spec_version the server answers 409 and nothing is written.`,
+	Args: exactArgs(1),
+	RunE: runModuleSpecPublish,
+}
+
+var moduleReconcileCmd = &cobra.Command{
+	Use:   "reconcile <module>",
+	Short: "Four-state matrix of spec features × prototype anchors",
+	Args:  exactArgs(1),
+	RunE:  runModuleReconcile,
+}
+var moduleCoverageCmd = &cobra.Command{
+	Use:   "coverage <module>",
+	Short: "Coverage KPI (same numbers as the module list badge)",
+	Args:  exactArgs(1),
+	RunE:  runModuleCoverage,
+}
+
+// 发布两段式：agent 只能产 draft 计划，权威原型指针的移动必须人 apply。
+var modulePlanCmd = &cobra.Command{
+	Use:   "plan",
+	Short: "Prototype publish plans (draft → human apply)",
+	Long: `A plan snapshots “candidate version + new spec + feature decisions” without
+moving anything. Only plan apply promotes the candidate: it moves the canonical
+prototype pointer, bumps spec_version and rebuilds the feature projection in one
+transaction.
+
+  multica module plan create <module> --candidate-version <n> [--spec <json>|--file <path>]
+  multica module plan get <module> <plan-id>
+  multica module plan apply <module> <plan-id> --yes
+
+Draft plans expire after 24h; applying one twice answers 409 plan_already_applied.`,
+}
+
+var modulePlanCreateCmd = &cobra.Command{
+	Use:   "create <module>",
+	Short: "Snapshot a publish plan (nothing is promoted)",
+	Args:  exactArgs(1),
+	RunE:  runModulePlanCreate,
+}
+
+var modulePlanGetCmd = &cobra.Command{
+	Use:   "get <module> <plan-id>",
+	Short: "Read one plan's status and snapshot",
+	Args:  exactArgs(2),
+	RunE:  runModulePlanGet,
+}
+
+var modulePlanApplyCmd = &cobra.Command{
+	Use:   "apply <module> <plan-id>",
+	Short: "Promote the plan: canonical version + spec version + projection (needs --yes)",
+	Args:  exactArgs(2),
+	RunE:  runModulePlanApply,
+}
+
+// 右栏「功能点详解」的读写面：模块说明 + 功能点四段详情 + 成对发布。
+var moduleBriefCmd = &cobra.Command{
+	Use:   "brief",
+	Short: "Read or patch the module brief (the right pane's 说明)",
+	Long: `Every patch appends one brief version; nothing is overwritten. Field keys are
+brief.* (模块说明) or fp.<code>.* (功能点四段：desc / loc / req / interaction /
+deps / acceptance). System fields (module.*, fp.code / since / removed) are
+read-only and answer 422.
+
+  multica module brief get <module>
+  multica module brief patch <module> --base-version <n> --field brief.goal="..."
+                   [--field fp.FP-01.desc="..."] [--note "..."] [--source agent]
+
+--base-version is optimistic locking: if someone else patched first the server
+answers 409 base_stale and prints the current version; re-run with that number.`,
+}
+
+var moduleBriefGetCmd = &cobra.Command{
+	Use:   "get <module>",
+	Short: "Print the workspace: field definitions, brief fields, feature details, versions",
+	Args:  exactArgs(1),
+	RunE:  runModuleBriefGet,
+}
+
+var moduleBriefPatchCmd = &cobra.Command{
+	Use:   "patch <module>",
+	Short: "Append a brief version with one or more field values",
+	Args:  exactArgs(1),
+	RunE:  runModuleBriefPatch,
+}
+
+var moduleReleaseCmd = &cobra.Command{
+	Use:   "release",
+	Short: "Paired releases: brief version × prototype version",
+	Long: `A release pins one brief version to one prototype version and is the only
+place the module's two pointers move. Releasing is a human action; rollback
+never rewrites history — it copies the old fields into a brand new version.
+
+  multica module release list <module>
+  multica module release publish <module> [--brief-version <n>] [--prototype-version <m>] --yes
+  multica module release rollback <module> <release-version> --yes`,
+}
+
+var moduleReleaseListCmd = &cobra.Command{
+	Use:   "list <module>",
+	Short: "List paired releases and the current pointers",
+	Args:  exactArgs(1),
+	RunE:  runModuleReleaseList,
+}
+
+var moduleReleasePublishCmd = &cobra.Command{
+	Use:   "publish <module>",
+	Short: "Publish brief vN × prototype vM (needs --yes)",
+	Args:  exactArgs(1),
+	RunE:  runModuleReleasePublish,
+}
+
+var moduleReleaseRollbackCmd = &cobra.Command{
+	Use:   "rollback <module> <release-version>",
+	Short: "Re-release an old pair as a new version (needs --yes)",
+	Args:  exactArgs(2),
+	RunE:  runModuleReleaseRollback,
+}
+
 var modulePrototypeCmd = &cobra.Command{
 	Use:   "prototype",
 	Short: "List or read the prototypes produced for a module",
@@ -139,13 +293,78 @@ func init() {
 	moduleDeleteCmd.Flags().String("output", "json", "Output format: table or json")
 	addDestructiveFlags(moduleDeleteCmd)
 
+	moduleSpecGetCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	moduleSpecGetCmd.Flags().String("output", "json", "Output format: table or json")
+	moduleSpecDraftCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	moduleSpecDraftCmd.Flags().String("spec", "", "Inline spec JSON (module_spec/v1)")
+	moduleSpecDraftCmd.Flags().String("file", "", "Read the spec JSON from a file; use - for stdin")
+	moduleSpecDraftCmd.Flags().String("output", "json", "Output format: table or json")
+	moduleSpecPublishCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	moduleSpecPublishCmd.Flags().String("spec", "", "Inline spec JSON (module_spec/v1)")
+	moduleSpecPublishCmd.Flags().String("file", "", "Read the spec JSON from a file; use - for stdin")
+	moduleSpecPublishCmd.Flags().Int("expected-version", 0, "Only publish when the current spec_version equals this value (409 otherwise)")
+	moduleSpecPublishCmd.Flags().String("output", "json", "Output format: table or json")
+	moduleReconcileCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	moduleReconcileCmd.Flags().Int("version", 0, "Reconcile against one prototype version (default: the canonical one)")
+	moduleReconcileCmd.Flags().String("output", "json", "Output format: table or json")
+	moduleCoverageCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	moduleCoverageCmd.Flags().String("output", "json", "Output format: table or json")
+	modulePlanCreateCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	modulePlanCreateCmd.Flags().Int("candidate-version", 0, "Prototype version to promote (required)")
+	modulePlanCreateCmd.Flags().String("spec", "", "Inline new spec JSON (default: keep the published spec)")
+	modulePlanCreateCmd.Flags().String("file", "", "Read the new spec JSON from a file; use - for stdin")
+	modulePlanCreateCmd.Flags().String("decisions", "", "Inline feature decisions JSON (code -> decision)")
+	modulePlanCreateCmd.Flags().String("output", "json", "Output format: table or json")
+	modulePlanGetCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	modulePlanGetCmd.Flags().String("output", "json", "Output format: table or json")
+	modulePlanApplyCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	modulePlanApplyCmd.Flags().String("output", "json", "Output format: table or json")
+	moduleBriefGetCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	moduleBriefGetCmd.Flags().String("output", "json", "Output format: table or json")
+	moduleBriefPatchCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	moduleBriefPatchCmd.Flags().Int("base-version", -1, "Current brief version (required; 0 for a module that was never patched)")
+	moduleBriefPatchCmd.Flags().StringArray("field", nil, "key=value; repeatable (brief.goal=\"...\", fp.FP-01.desc=\"...\")")
+	moduleBriefPatchCmd.Flags().String("fields", "", "Inline JSON object of key -> value (instead of --field)")
+	moduleBriefPatchCmd.Flags().String("note", "", "One-line summary stored in the version history")
+	moduleBriefPatchCmd.Flags().String("source", "", "manual | agent | mcp | extract (default manual)")
+	moduleBriefPatchCmd.Flags().String("output", "json", "Output format: table or json")
+	moduleReleaseListCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	moduleReleaseListCmd.Flags().String("output", "json", "Output format: table or json")
+	moduleReleasePublishCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	moduleReleasePublishCmd.Flags().Int("brief-version", 0, "Brief version to release (default: the current one)")
+	moduleReleasePublishCmd.Flags().Int("prototype-version", 0, "Prototype version to pair with it (default: the canonical one)")
+	moduleReleasePublishCmd.Flags().String("note", "", "Release note")
+	moduleReleasePublishCmd.Flags().String("output", "json", "Output format: table or json")
+	addDestructiveFlags(moduleReleasePublishCmd)
+	moduleReleaseRollbackCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	moduleReleaseRollbackCmd.Flags().String("output", "json", "Output format: table or json")
+	addDestructiveFlags(moduleReleaseRollbackCmd)
+	addDestructiveFlags(modulePlanApplyCmd)
+
 	modulePrototypeCmd.AddCommand(modulePrototypeListCmd)
 	modulePrototypeCmd.AddCommand(modulePrototypeReadCmd)
+	moduleSpecCmd.AddCommand(moduleSpecGetCmd)
+	moduleSpecCmd.AddCommand(moduleSpecDraftCmd)
+	moduleSpecCmd.AddCommand(moduleSpecPublishCmd)
+	modulePlanCmd.AddCommand(modulePlanCreateCmd)
+	modulePlanCmd.AddCommand(modulePlanGetCmd)
+	modulePlanCmd.AddCommand(modulePlanApplyCmd)
+	moduleBriefCmd.AddCommand(moduleBriefGetCmd)
+	moduleBriefCmd.AddCommand(moduleBriefPatchCmd)
+	moduleReleaseCmd.AddCommand(moduleReleaseListCmd)
+	moduleReleaseCmd.AddCommand(moduleReleasePublishCmd)
+	moduleReleaseCmd.AddCommand(moduleReleaseRollbackCmd)
 	moduleCmd.AddCommand(moduleListCmd)
 	moduleCmd.AddCommand(moduleGetCmd)
 	moduleCmd.AddCommand(moduleCreateCmd)
 	moduleCmd.AddCommand(moduleUpdateCmd)
 	moduleCmd.AddCommand(moduleDeleteCmd)
+	moduleCmd.AddCommand(moduleSpecCmd)
+	moduleCmd.AddCommand(modulePlanCmd)
+	moduleCmd.AddCommand(moduleBriefCmd)
+	moduleCmd.AddCommand(moduleReleaseCmd)
+	moduleCmd.AddCommand(moduleReconcileCmd)
+	moduleCmd.AddCommand(moduleCoverageCmd)
 	moduleCmd.AddCommand(modulePrototypeCmd)
 	rootCmd.AddCommand(moduleCmd)
 }
@@ -540,6 +759,448 @@ func runModuleDelete(cmd *cobra.Command, args []string) error {
 		"name":      module.Name,
 		"project":   module.ProjectID,
 	})
+}
+
+// ── 模块能力规格：spec / reconcile / coverage ────────────────────────────
+//
+// 这四条命令与界面的「原型图」子 TAB 同源：同一组 /spec、/prototype-reconcile、
+// /coverage 端点，因此 agent 改完规格后，人看到的版本号、功能点与覆盖率立即一致。
+
+func moduleScopedPath(module moduleRecord, suffix string) string {
+	return "/api/projects/" + url.PathEscape(module.ProjectID) +
+		"/modules/" + url.PathEscape(module.ID) + suffix
+}
+
+// moduleGateHint 把 flag 门控导致的 404 翻译成可执行的提示。
+func moduleGateHint(err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "404") {
+		return fmt.Errorf("%w (spec / prototype / reconcile endpoints are gated by FF_MODULE_SPEC_CENTER; set it to true and restart the API)", err)
+	}
+	return err
+}
+
+func runModuleSpecGet(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.GetJSON(ctx, moduleScopedPath(module, "/spec"), &out)); err != nil {
+		return fmt.Errorf("get module spec: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runModuleSpecDraft(cmd *cobra.Command, args []string) error {
+	spec, err := moduleSpecPayload(cmd)
+	if err != nil {
+		return err
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.PostJSON(ctx, moduleScopedPath(module, "/spec/draft"), map[string]any{"spec": spec}, &out)); err != nil {
+		return fmt.Errorf("draft module spec: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runModuleSpecPublish(cmd *cobra.Command, args []string) error {
+	spec, err := moduleSpecPayload(cmd)
+	if err != nil {
+		return err
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	body := map[string]any{"spec": spec}
+	if cmd.Flags().Changed("expected-version") {
+		expected, _ := cmd.Flags().GetInt("expected-version")
+		body["expected_version"] = expected
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.PostJSON(ctx, moduleScopedPath(module, "/spec/publish"), body, &out)); err != nil {
+		return fmt.Errorf("publish module spec: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runModuleReconcile(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	path := moduleScopedPath(module, "/prototype-reconcile")
+	if version, _ := cmd.Flags().GetInt("version"); version > 0 {
+		path += fmt.Sprintf("?version=%d", version)
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.GetJSON(ctx, path, &out)); err != nil {
+		return fmt.Errorf("reconcile module: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runModuleCoverage(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.GetJSON(ctx, moduleScopedPath(module, "/coverage"), &out)); err != nil {
+		return fmt.Errorf("module coverage: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runModulePlanCreate(cmd *cobra.Command, args []string) error {
+	candidate, _ := cmd.Flags().GetInt("candidate-version")
+	if candidate <= 0 {
+		return fmt.Errorf("pass --candidate-version <n> (the prototype version to promote; see `multica module prototype list`)")
+	}
+	body := map[string]any{"candidate_version": candidate}
+	if strings.TrimSpace(flagOr(cmd, "spec", "")) != "" || strings.TrimSpace(flagOr(cmd, "file", "")) != "" {
+		spec, err := moduleSpecPayload(cmd)
+		if err != nil {
+			return err
+		}
+		body["new_spec"] = spec
+	}
+	if decisions, err := moduleOptionalJSON(flagOr(cmd, "decisions", ""), "decisions"); err != nil {
+		return err
+	} else if decisions != nil {
+		body["decisions"] = decisions
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.PostJSON(ctx, moduleScopedPath(module, "/prototype-plans"), body, &out)); err != nil {
+		return fmt.Errorf("create prototype plan: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runModulePlanGet(cmd *cobra.Command, args []string) error {
+	planID, err := modulePlanID(args[1])
+	if err != nil {
+		return err
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.GetJSON(ctx, moduleScopedPath(module, "/prototype-plans/"+planID), &out)); err != nil {
+		return fmt.Errorf("get prototype plan: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runModulePlanApply(cmd *cobra.Command, args []string) error {
+	planID, err := modulePlanID(args[1])
+	if err != nil {
+		return err
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	if err := confirmDestructive(cmd, fmt.Sprintf(
+		"Apply prototype plan %s to module %q (%s): the canonical prototype pointer moves, spec_version is bumped and the feature projection is rebuilt.",
+		planID, module.Name, module.ID)); err != nil {
+		return err
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.PostJSON(ctx, moduleScopedPath(module, "/prototype-plans/"+planID+"/apply"), nil, &out)); err != nil {
+		return fmt.Errorf("apply prototype plan: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+// ── 右栏工作区：brief / release ──────────────────────────────────────
+
+func runModuleBriefGet(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.GetJSON(ctx, moduleScopedPath(module, "/workspace"), &out)); err != nil {
+		return fmt.Errorf("get module workspace: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runModuleBriefPatch(cmd *cobra.Command, args []string) error {
+	baseVersion, _ := cmd.Flags().GetInt("base-version")
+	if baseVersion < 0 {
+		return fmt.Errorf("pass --base-version <n> from `multica module brief get` (0 if the module was never patched)")
+	}
+	fields := map[string]any{}
+	if raw := strings.TrimSpace(flagOr(cmd, "fields", "")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+			return fmt.Errorf("--fields must be a JSON object: %w", err)
+		}
+	}
+	pairs, _ := cmd.Flags().GetStringArray("field")
+	for _, pair := range pairs {
+		key, value, found := strings.Cut(pair, "=")
+		if !found || strings.TrimSpace(key) == "" {
+			return fmt.Errorf("--field expects key=value, got %q", pair)
+		}
+		fields[strings.TrimSpace(key)] = moduleFieldValue(value)
+	}
+	if len(fields) == 0 {
+		return fmt.Errorf("pass at least one --field key=value or --fields <json>")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	body := map[string]any{"base_version": baseVersion, "fields": fields}
+	if note := strings.TrimSpace(flagOr(cmd, "note", "")); note != "" {
+		body["note"] = note
+	}
+	if source := strings.TrimSpace(flagOr(cmd, "source", "")); source != "" {
+		body["source"] = source
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.PostJSON(ctx, moduleScopedPath(module, "/workspace/patch"), body, &out)); err != nil {
+		return fmt.Errorf("patch module brief (409 means someone else patched first — re-run with the current_version it prints): %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+// moduleFieldValue 让 --field 的字符串值尽量保持 JSON 类型（数字/布尔/数组）。
+func moduleFieldValue(raw string) any {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	switch trimmed[0] {
+	case '[', '{', '"':
+		var out any
+		if err := json.Unmarshal([]byte(trimmed), &out); err == nil {
+			return out
+		}
+	}
+	switch trimmed {
+	case "true":
+		return true
+	case "false":
+		return false
+	case "null":
+		return nil
+	}
+	return raw
+}
+
+func runModuleReleaseList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.GetJSON(ctx, moduleScopedPath(module, "/releases"), &out)); err != nil {
+		return fmt.Errorf("list module releases: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runModuleReleasePublish(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	if err := confirmDestructive(cmd, fmt.Sprintf(
+		"Release module %q (%s): the current brief version is paired with a prototype version and both module pointers move.",
+		module.Name, module.ID)); err != nil {
+		return err
+	}
+	body := map[string]any{}
+	if briefVersion, _ := cmd.Flags().GetInt("brief-version"); briefVersion > 0 {
+		body["brief_version"] = briefVersion
+	}
+	if prototypeVersion, _ := cmd.Flags().GetInt("prototype-version"); prototypeVersion > 0 {
+		body["prototype_version"] = prototypeVersion
+	}
+	if note := strings.TrimSpace(flagOr(cmd, "note", "")); note != "" {
+		body["note"] = note
+	}
+	var out map[string]any
+	if err := moduleGateHint(client.PostJSON(ctx, moduleScopedPath(module, "/releases"), body, &out)); err != nil {
+		return fmt.Errorf("publish module release: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runModuleReleaseRollback(cmd *cobra.Command, args []string) error {
+	releaseVersion, err := strconv.Atoi(strings.TrimSpace(args[1]))
+	if err != nil || releaseVersion <= 0 {
+		return fmt.Errorf("release version must be a positive integer, got %q", args[1])
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	module, _, err := resolveModule(ctx, client, flagOr(cmd, "project", ""), args[0])
+	if err != nil {
+		return err
+	}
+	if err := confirmDestructive(cmd, fmt.Sprintf(
+		"Roll module %q (%s) back to R%d: a new brief version and a new release are appended; history is kept.",
+		module.Name, module.ID, releaseVersion)); err != nil {
+		return err
+	}
+	path := moduleScopedPath(module, fmt.Sprintf("/releases/%d/rollback", releaseVersion))
+	var out map[string]any
+	if err := moduleGateHint(client.PostJSON(ctx, path, nil, &out)); err != nil {
+		return fmt.Errorf("rollback module release: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+// modulePlanID 检查计划 id 形状，避开把 slug 拼进路径。
+func modulePlanID(input string) (string, error) {
+	id := strings.TrimSpace(input)
+	if len(id) != 36 {
+		return "", fmt.Errorf("plan id must be the full UUID printed by `multica module plan create`")
+	}
+	return id, nil
+}
+
+// moduleOptionalJSON 解析可省略的内联 JSON 参数。
+func moduleOptionalJSON(value, name string) (json.RawMessage, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(value), &probe); err != nil {
+		return nil, fmt.Errorf("--%s is not a JSON object: %w", name, err)
+	}
+	return json.RawMessage(value), nil
+}
+
+// moduleSpecPayload 读 --spec / --file（- 读 stdin），并做一次形状检查：
+// 必须是对象且带 features，避免把无效 JSON 送到服务端才报 422。
+func moduleSpecPayload(cmd *cobra.Command) (json.RawMessage, error) {
+	inline := strings.TrimSpace(flagOr(cmd, "spec", ""))
+	file := strings.TrimSpace(flagOr(cmd, "file", ""))
+	if inline != "" && file != "" {
+		return nil, fmt.Errorf("pass either --spec or --file, not both")
+	}
+	var raw []byte
+	switch {
+	case inline != "":
+		raw = []byte(inline)
+	case file == "-":
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("read spec from stdin: %w", err)
+		}
+		raw = data
+	case file != "":
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("read spec file: %w", err)
+		}
+		raw = data
+	default:
+		return nil, fmt.Errorf("pass --spec '<json>' or --file <path> (use - for stdin)")
+	}
+	var probe map[string]any
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil, fmt.Errorf("spec is not valid JSON: %w", err)
+	}
+	if _, ok := probe["features"]; !ok {
+		return nil, fmt.Errorf(`spec must be a module_spec/v1 object containing "features"`)
+	}
+	return json.RawMessage(raw), nil
 }
 
 func runModuleGet(cmd *cobra.Command, args []string) error {

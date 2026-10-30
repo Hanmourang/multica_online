@@ -1561,6 +1561,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/me/onboarding/runtime-bootstrap", h.BootstrapOnboardingRuntime)
 		r.Post("/api/me/onboarding/no-runtime-bootstrap", h.BootstrapOnboardingNoRuntime)
 		r.Post("/api/cli-token", h.IssueCliToken)
+		// MCP 工具面（2026-10-30）：项目 → 功能模块 的增删改查 / spec / 原型版本 /
+		// 对账，供 agent 经 multica-feature-modules 技能调用。工具内部把一次调用
+		// 转发回本服务同名端点（带上调用方 Authorization），因此权限、flag 门控、
+		// 审计与 change_event 全部复用既有 handler，不产生第二套业务口径。
+		// 放在已鉴权的用户作用域组：MCP 请求必须带 Bearer，请求头原样透传。
+		moduleMCP := mcpserver.NewModuleFacade(
+			os.Getenv("MULTICA_PUBLIC_URL"),
+			featureflags.ModuleSpecCenterEnabled(context.Background(), h.FeatureFlags),
+		)
+		r.Handle("/api/mcp/modules", moduleMCP.Handler())
 		// Addresses other devices (the phone app, a second laptop) can dial to
 		// reach THIS backend: the same-Wi-Fi IPv4 plus, when a tunnel is
 		// running, its https/wss pair. User-scoped rather than workspace-scoped
@@ -2093,6 +2103,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Post("/modules/{moduleId}/prototype-plans", h.CreatePrototypePlan)
 						r.Get("/modules/{moduleId}/prototype-plans/{planId}", h.GetPrototypePlan)
 						r.Post("/modules/{moduleId}/prototype-plans/{planId}/apply", h.ApplyPrototypePlan)
+						// 右栏「功能点详解」工作区（原型图 TAB v2 · 画面 3/5/6 · migration 499）：
+						// 说明字段级 append-only 版本 + 成对发布。发布/回滚仅人可调用（handler 内 403）。
+						r.Get("/modules/{moduleId}/workspace", h.GetModuleWorkspace)
+						r.Post("/modules/{moduleId}/workspace/patch", h.PatchModuleWorkspace)
+						r.Get("/modules/{moduleId}/releases", h.GetModuleReleases)
+						r.Post("/modules/{moduleId}/releases", h.PublishModuleRelease)
+						r.Post("/modules/{moduleId}/releases/{version}/rollback", h.RollbackModuleRelease)
 					}
 					r.Get("/role-defaults", h.ListProjectRoleDefaults)
 					r.Put("/role-defaults", h.ReplaceProjectRoleDefaults)

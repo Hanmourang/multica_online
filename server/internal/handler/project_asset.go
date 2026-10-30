@@ -43,7 +43,7 @@ var validAssetCategories = map[string]bool{
 
 // 阶段/角色/链型枚举（migration 473，原型 v2：阶段×输入产物×需求/Bug 关联）。
 var (
-	validAssetStages    = map[string]bool{"S1": true, "S2": true, "S3": true, "S4": true, "S5": true, "general": true}
+	validAssetStages    = map[string]bool{"S0": true, "S1": true, "S2": true, "S3": true, "S4": true, "S5": true, "general": true}
 	validAssetRoles     = map[string]bool{"input": true, "output": true}
 	validAssetLinkTypes = map[string]bool{"depends_on": true, "produces": true, "resolves": true}
 )
@@ -290,7 +290,8 @@ type WorkspaceAssetPage struct {
 // ListWorkspaceAssets 处理 GET /api/assets/page —— 跨当前 workspace 所有项目的绑定
 // 聚合（项目级 + 工作项级都列出），供左侧栏「资产管理」系统化管理。作用域过滤仅按
 // workspace_id（防串租），可选 category / name / projectId（侧栏的项目下拉过滤，
-// 非法 uuid 直接 400 而非静默降级成全域，避免用户误以为「该项目无资产」）；解绑复用
+// 非法 uuid 直接 400 而非静默降级成全域，避免用户误以为「该项目无资产」）/ stage /
+// role（阶段与对象在 SQL 内过滤，这样分页总数与筛选结果一致）；解绑复用
 // 项目级 DELETE（binding 行自带 project_id，unbind SQL 只按 workspace+project+id 匹配，
 // 故工作项级绑定亦可经此路径解绑）。
 func (h *Handler) ListWorkspaceAssets(w http.ResponseWriter, r *http.Request) {
@@ -301,6 +302,11 @@ func (h *Handler) ListWorkspaceAssets(w http.ResponseWriter, r *http.Request) {
 	}
 	page, pageSize := parseAssetPaging(r)
 	category, nameQ, _ := parseAssetFilters(r)
+	stage, role, ok := parseAssetMetaFilters(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid stage or role")
+		return
+	}
 
 	var projectID pgtype.UUID
 	if raw := strings.TrimSpace(r.URL.Query().Get("projectId")); raw != "" {
@@ -312,7 +318,7 @@ func (h *Handler) ListWorkspaceAssets(w http.ResponseWriter, r *http.Request) {
 		projectID = u
 	}
 
-	items, total, err := h.queryWorkspaceAssetBindings(r.Context(), wsUUID, category, nameQ, projectID, page, pageSize)
+	items, total, err := h.queryWorkspaceAssetBindings(r.Context(), wsUUID, category, nameQ, stage, role, projectID, page, pageSize)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list workspace assets")
 		return
@@ -328,8 +334,10 @@ func (h *Handler) ListWorkspaceAssets(w http.ResponseWriter, r *http.Request) {
 
 // queryWorkspaceAssetBindings 联表 project / issue 标题，按 workspace 聚合分页读取。
 // 用 LEFT JOIN：孤儿 binding（项目已删）仍出现但标题为空，前端降级展示原始 id。
-// projectID.Valid 时把作用域收窄到单项目（侧栏项目下拉过滤）。
-func (h *Handler) queryWorkspaceAssetBindings(ctx context.Context, workspaceID pgtype.UUID, category, nameQ string, projectID pgtype.UUID, page, pageSize int) ([]WorkspaceAssetBinding, int, error) {
+// projectID.Valid 时把作用域收窄到单项目（侧栏项目下拉过滤）。stage / role 在 SQL
+// 内过滤（"none" = NULL 或空串），前端不再对当前页做二次过滤，于是每页行数稳定、
+// 末页不会因为筛掉大半行而留白。
+func (h *Handler) queryWorkspaceAssetBindings(ctx context.Context, workspaceID pgtype.UUID, category, nameQ, stage, role string, projectID pgtype.UUID, page, pageSize int) ([]WorkspaceAssetBinding, int, error) {
 	var conds []string
 	var args []any
 	args = append(args, workspaceID)
@@ -345,6 +353,23 @@ func (h *Handler) queryWorkspaceAssetBindings(ctx context.Context, workspaceID p
 	if nameQ != "" {
 		args = append(args, "%"+nameQ+"%")
 		conds = append(conds, "b.asset_name ILIKE $"+strconv.Itoa(len(args)))
+	}
+	for _, meta := range []struct {
+		column string
+		value  string
+	}{
+		{"lifecycle_stage", stage},
+		{"asset_role", role},
+	} {
+		switch meta.value {
+		case "":
+			// 不过滤
+		case "none":
+			conds = append(conds, "NULLIF(b."+meta.column+", '') IS NULL")
+		default:
+			args = append(args, meta.value)
+			conds = append(conds, "b."+meta.column+" = $"+strconv.Itoa(len(args)))
+		}
 	}
 	where := strings.Join(conds, " AND ")
 
@@ -1162,6 +1187,46 @@ func parseAssetFilters(r *http.Request) (category, nameQ string, issueID pgtype.
 	return
 }
 
+// assetStageFilterValues / assetRoleFilterValues 是工作区级阶段与对象过滤的合法取值，
+// 与前端 AssetLifecycleStage / AssetRole（packages/core/types/asset.ts）对齐。
+var assetStageFilterValues = map[string]struct{}{
+	"S0": {}, "S1": {}, "S2": {}, "S3": {}, "S4": {}, "S5": {}, "general": {},
+}
+
+var assetRoleFilterValues = map[string]struct{}{
+	"input": {}, "output": {},
+}
+
+// parseAssetMetaFilters 解析工作区级清单的阶段 / 对象过滤（与分页同一次查询，
+// 以便 totalCount / totalPages 与筛选结果一致）。空串与 "all" 表示不过滤，
+// "none" 表示「未分阶 / 未定对象」（NULL 或空串）。非法值返回 400，
+// 与 projectId 同策略——静默降级成全量会让用户误以为筛选生效。
+func parseAssetMetaFilters(r *http.Request) (stage, role string, ok bool) {
+	q := r.URL.Query()
+	for _, spec := range []struct {
+		key     string
+		allowed map[string]struct{}
+		dst     *string
+	}{
+		{"stage", assetStageFilterValues, &stage},
+		{"role", assetRoleFilterValues, &role},
+	} {
+		raw := strings.TrimSpace(q.Get(spec.key))
+		if raw == "" || raw == "all" {
+			continue
+		}
+		if raw == "none" {
+			*spec.dst = raw
+			continue
+		}
+		if _, valid := spec.allowed[raw]; !valid {
+			return "", "", false
+		}
+		*spec.dst = raw
+	}
+	return stage, role, true
+}
+
 // extractRefURL 读取 external_ref 里的仓库 url（若有）。
 func extractRefURL(ref json.RawMessage) string {
 	var payload struct {
@@ -1375,10 +1440,19 @@ func (h *Handler) UpdateAssetMeta(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var out assetBindingRow
-	query := `UPDATE project_asset_binding SET ` + strings.Join(sets, ", ") + `
+	query := `SELECT ` + assetBindingColumns + `
+FROM project_asset_binding
+WHERE id = $1 AND workspace_id = $2 AND project_id = $3`
+	queryArgs := []any{bindingID, project.WorkspaceID, project.ID}
+	if len(sets) > 0 {
+		query = `UPDATE project_asset_binding SET ` + strings.Join(sets, ", ") + `
 WHERE id = $1 AND workspace_id = $2 AND project_id = $3
 RETURNING ` + assetBindingColumns
-	err = tx.QueryRow(ctx, query, args...).Scan(
+		queryArgs = args
+	}
+	// 只改关联（links）时 sets 为空：此时不能拼 UPDATE，否则得到空 SET 子句的
+	// 非法 SQL；改为纯读回一行，仅做归属校验，再加下断言 404 语义一致。
+	err = tx.QueryRow(ctx, query, queryArgs...).Scan(
 		&out.id, &out.workspaceID, &out.projectID, &out.issueID, &out.assetCategory,
 		&out.resourceID, &out.externalRef, &out.assetName, &out.assetSubtype, &out.source,
 		&out.recommended, &out.recommendReason, &out.lifecycleStage, &out.assetRole, &out.tags,

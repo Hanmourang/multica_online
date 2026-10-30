@@ -188,16 +188,44 @@ func (h *Handler) RegisterModulePrototypeVersion(w http.ResponseWriter, r *http.
 	}
 
 	var out prototypeVersionRow
-	err := h.DB.QueryRow(ctx, `
-		INSERT INTO issue_prototype_version
-		  (issue_id, workspace_id, module_id, version, html_path, prompt, status, created_by_type, created_by_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'member', $8)
-		RETURNING id, version, html_path, prompt, status, issue_id, created_at`,
-		issueID, project.WorkspaceID, moduleID, req.Version, req.HtmlPath, req.Prompt, status, parseUUID(userID),
-	).Scan(&out.id, &out.version, &out.htmlPath, &out.prompt, &out.status, &out.issueID, &out.createdAt)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to register prototype version")
-		return
+	// 存量原型行（需求级、module_id 为空）登记为模块原型时直接认领：插入新行会撞
+	// issue_prototype_version 的 UNIQUE(issue_id, version)，而这正是「把当前预览这版
+	// 登记成模块原型」的主路径（历史需求原型都没有回填 module_id）。
+	claimed := false
+	if issueID.Valid {
+		tag, err := h.DB.Exec(ctx, `
+			UPDATE issue_prototype_version
+			   SET module_id = $1, status = $2
+			 WHERE issue_id = $3 AND version = $4 AND module_id IS NULL`,
+			moduleID, status, issueID, req.Version)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to claim prototype version")
+			return
+		}
+		claimed = tag.RowsAffected() > 0
+	}
+	if claimed {
+		err := h.DB.QueryRow(ctx, `
+			SELECT id, version, html_path, prompt, status, issue_id, created_at
+			  FROM issue_prototype_version
+			 WHERE issue_id = $1 AND version = $2`, issueID, req.Version,
+		).Scan(&out.id, &out.version, &out.htmlPath, &out.prompt, &out.status, &out.issueID, &out.createdAt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to register prototype version")
+			return
+		}
+	} else {
+		err := h.DB.QueryRow(ctx, `
+			INSERT INTO issue_prototype_version
+			  (issue_id, workspace_id, module_id, version, html_path, prompt, status, created_by_type, created_by_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'member', $8)
+			RETURNING id, version, html_path, prompt, status, issue_id, created_at`,
+			issueID, project.WorkspaceID, moduleID, req.Version, req.HtmlPath, req.Prompt, status, parseUUID(userID),
+		).Scan(&out.id, &out.version, &out.htmlPath, &out.prompt, &out.status, &out.issueID, &out.createdAt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to register prototype version")
+			return
+		}
 	}
 
 	if req.SetCanonical {

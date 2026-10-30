@@ -48,6 +48,12 @@ type ProjectArtifactResponse struct {
 	SyncedAt       string  `json:"synced_at"`
 	CreatedAt      string  `json:"created_at"`
 	UpdatedAt      string  `json:"updated_at"`
+	// AssetBindingID / AssetRole 是解析后的「档案 ↔ 资产」关联，供交付物 TAB
+	// 区分产出物与输入物（nil = 该档案没有关联任何资产）。两类关联不可互换：
+	// 原生入档看 project_artifact.asset_binding_id，archive-import 只能回退
+	// project_asset_binding.external_ref.artifact_id（migration 474 契约）。
+	AssetBindingID *string `json:"asset_binding_id,omitempty"`
+	AssetRole      *string `json:"asset_role,omitempty"`
 }
 
 // projectArtifactRow is the scan target for a full project_artifact row.
@@ -546,6 +552,53 @@ func upsertProjectArtifact(ctx context.Context, tx pgx.Tx, project db.Project, a
 	return inserted, manualKept, err
 }
 
+// artifactAssetLink 是档案行解析出的资产关联（bindingID + 对象角色；role 空串 = 未标）。
+type artifactAssetLink struct {
+	bindingID string
+	role      string
+}
+
+// resolveArtifactAssetLinks 批量解析项目内档案 → 资产关联。两类关联不可互换
+// （migration 474 契约）：原生资产入档只在 project_artifact.asset_binding_id
+// 上，archive-import 只把 artifact_id 存在 binding.external_ref 里，因此前者
+// 优先、后者回退。交付物口径只依赖这份映射，解析失败不让列表整体 500——
+// 最坏情况是该行退化成「未关联资产」，与历史行为一致。
+func (h *Handler) resolveArtifactAssetLinks(ctx context.Context, projectID pgtype.UUID) map[string]artifactAssetLink {
+	links := map[string]artifactAssetLink{}
+	rows, err := h.DB.Query(ctx, `
+		SELECT artifact_id, binding_id, role FROM (
+			SELECT a.id::text AS artifact_id, b.id::text AS binding_id, COALESCE(b.asset_role, '') AS role, 0 AS pri
+			FROM project_artifact a
+			JOIN project_asset_binding b ON b.id = a.asset_binding_id
+			WHERE a.project_id = $1 AND a.deleted_at IS NULL
+			UNION ALL
+			SELECT b.external_ref->>'artifact_id', b.id::text, COALESCE(b.asset_role, ''), 1
+			FROM project_asset_binding b
+			WHERE b.project_id = $1
+			  AND b.external_ref->>'artifact_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+		) linked
+		ORDER BY pri`, projectID)
+	if err != nil {
+		slog.Warn("list artifacts: resolve asset links failed",
+			"project_id", uuidToString(projectID), "error", err)
+		return links
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var artifactID, bindingID, role string
+		if scanErr := rows.Scan(&artifactID, &bindingID, &role); scanErr != nil {
+			slog.Warn("list artifacts: scan asset link failed",
+				"project_id", uuidToString(projectID), "error", scanErr)
+			return links
+		}
+		if _, exists := links[artifactID]; exists {
+			continue // 原生关联优先，UNION ALL 里回退行不覆盖
+		}
+		links[artifactID] = artifactAssetLink{bindingID: bindingID, role: role}
+	}
+	return links
+}
+
 // ListProjectArtifacts implements GET /api/projects/{id}/artifacts with
 // optional scope / stage / doc_type / issue_id filters. Soft-deleted rows are
 // always excluded.
@@ -653,6 +706,20 @@ func (h *Handler) ListProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list project artifacts")
 		return
+	}
+	// 交付物口径所需的资产关联：只补响应字段，不改变列表本身（档案 TAB 仍要
+	// 看到输入物）。前端据此把对象≠产物的档案挡在交付物 TAB 之外。
+	links := h.resolveArtifactAssetLinks(r.Context(), project.ID)
+	for i := range artifacts {
+		link, ok := links[artifacts[i].ID]
+		if !ok {
+			continue
+		}
+		bindingID, role := link.bindingID, link.role
+		artifacts[i].AssetBindingID = &bindingID
+		if role != "" {
+			artifacts[i].AssetRole = &role
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"artifacts": artifacts, "total": len(artifacts)})
 }

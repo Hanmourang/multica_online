@@ -187,6 +187,43 @@ func TestUpdateAssetMetaSyncFailureRollsBack(t *testing.T) {
 	}
 }
 
+// 行内关联编辑器只提交 links（不带阶段/标签），此时 SET 子句为空——早前会拼出
+// `UPDATE ... SET  WHERE ...` 的非法 SQL 而 500，这条用例钉住「仅改关联」路径。
+func TestUpdateAssetMetaLinksOnly(t *testing.T) {
+	projectID, _ := placementFixture(t)
+	bindingID := insertAssetBinding(t, projectID, "仅改关联", nil, `{}`)
+	issueID := dbfx.Issue(t, "行内关联需求", testutil.Cols{"project_id": projectID})
+
+	put := func(links []map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := withURLParams(
+			newRequest(http.MethodPut, "/api/projects/"+projectID+"/assets/"+bindingID+"/meta",
+				map[string]any{"links": links}),
+			"id", projectID, "bindingId", bindingID,
+		)
+		testHandler.UpdateAssetMeta(w, req)
+		return w
+	}
+
+	if w := put([]map[string]any{{"issue_id": issueID, "link_type": "produces"}}); w.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200, body = %s", w.Code, w.Body.String())
+	}
+	count := dbfx.Count(t, `SELECT count(*) FROM asset_issue_link WHERE asset_binding_id = $1`, bindingID)
+	if count != 1 {
+		t.Errorf("links = %d, want 1", count)
+	}
+
+	// 提交空集 = 清空关联，同样不能 500。
+	if w := put([]map[string]any{}); w.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200, body = %s", w.Code, w.Body.String())
+	}
+	count = dbfx.Count(t, `SELECT count(*) FROM asset_issue_link WHERE asset_binding_id = $1`, bindingID)
+	if count != 0 {
+		t.Errorf("links = %d, want 0", count)
+	}
+}
+
 func TestBindAssetSyncFailureRollsBack(t *testing.T) {
 	projectID, _ := placementFixture(t)
 	w := httptest.NewRecorder()

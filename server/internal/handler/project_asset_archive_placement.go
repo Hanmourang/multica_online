@@ -5,6 +5,8 @@ package handler
 // S1 项目规划 ↔ 1 ↔ research；S2 产品原型 ↔ 2 ↔ product-design；
 // S3 技术方案 ↔ 3 ↔ architecture；S4 问题复盘 ↔ 4 ↔ retrospective；
 // S5 需求迭代 ↔ 5 ↔ iteration。general / 未标 → (NULL, 'asset') 未分阶保留区。
+// S0 需求描述 ↔ (NULL, 'requirement')：不在 1..5 日历阶段域内，只作需求 × 阶段
+// 矩阵的 S0 列归属（migration 500 放宽 lifecycle CHECK）。
 //
 // 货架归属只认 doc_type；doc_module 是货架内的独立模块标签，不参与阶段映射。
 // 资产同步、档案 PATCH、归档重分类、manifest 同步共同调用本文件，正反映射只此一份。
@@ -26,6 +28,7 @@ type archivePlacement struct {
 var assetUnstagedPlacement = archivePlacement{Stage: 0, DocType: "asset"}
 
 var lifecyclePlacementMap = map[string]archivePlacement{
+	"S0": {0, "requirement"},
 	"S1": {1, "research"},
 	"S2": {2, "product-design"},
 	"S3": {3, "architecture"},
@@ -33,10 +36,10 @@ var lifecyclePlacementMap = map[string]archivePlacement{
 	"S5": {5, "iteration"},
 }
 
-// isAssetLinkedShelfDocType：五货架 doc_type 集合（资产关联行的合法归属）。
+// isAssetLinkedShelfDocType：资产关联行的合法归属 doc_type：五货架 + S0 需求描述。
 func isAssetLinkedShelfDocType(docType string) bool {
 	switch docType {
-	case "research", "product-design", "architecture", "retrospective", "iteration":
+	case "research", "product-design", "architecture", "retrospective", "iteration", "requirement":
 		return true
 	}
 	return false
@@ -74,13 +77,17 @@ func placementForArchiveStage(stage pgtype.Int4) (archivePlacement, bool) {
 	return archivePlacement{}, false
 }
 
-// lifecycleForArchivePlacement：档案 placement → 资产阶段。只接受五种合法组合
-// 及 (NULL, asset)；矛盾组合、开放式非货架 doc_type 一律 ok=false。
+// lifecycleForArchivePlacement：档案 placement → 资产阶段。只接受五种合法组合、
+// S0 (NULL, requirement) 及 (NULL, asset)；矛盾组合、开放式非货架 doc_type 一律
+// ok=false。
 func lifecycleForArchivePlacement(stage pgtype.Int4, docType string) (string, bool) {
 	docType = strings.TrimSpace(docType)
 	if !stage.Valid {
 		if docType == "asset" {
 			return "general", true
+		}
+		if docType == "requirement" {
+			return "S0", true
 		}
 		return "", false
 	}

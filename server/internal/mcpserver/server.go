@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // 协议版本：与主流 MCP 客户端对齐的稳定标识。
@@ -54,6 +55,19 @@ type Store interface {
 // scopeKey 是注入/读取 Scope 的 context key。
 type scopeKey struct{}
 
+// authKey 携带入站请求的 Authorization 头，供 modules_* 工具原样透传。
+type authKey struct{}
+
+// WithAuthorization 由 HTTP 入口把调用方凭据放入 context。
+func WithAuthorization(ctx context.Context, value string) context.Context {
+	return context.WithValue(ctx, authKey{}, value)
+}
+
+func authorizationFromContext(ctx context.Context) string {
+	value, _ := ctx.Value(authKey{}).(string)
+	return value
+}
+
 // WithScope 供鉴权中间件把本次请求的可见作用域放入 context。
 func WithScope(ctx context.Context, s Scope) context.Context {
 	return context.WithValue(ctx, scopeKey{}, s)
@@ -67,8 +81,9 @@ func ScopeFromContext(ctx context.Context) (Scope, bool) {
 
 // Server 把 Store 暴露为 MCP tools over JSON-RPC。
 type Server struct {
-	store Store
-	tools []toolDef
+	store   Store
+	tools   []toolDef
+	modules *moduleToolset
 }
 
 type toolDef struct {
@@ -87,6 +102,22 @@ func New(store Store) *Server {
 			{Name: "assets_get_content", Description: "按 bindingId 取资产正文/内容指针（原型图、架构 spec、验收标准等）", InputSchema: json.RawMessage(`{"type":"object","properties":{"bindingId":{"type":"string"}},"required":["bindingId"],"additionalProperties":false}`)},
 		},
 	}
+}
+
+// NewModuleFacade 构造只带「项目 → 功能模块」工具面的服务器（不暴露资产工具，
+// 因此也不需要资产读作用域）。调用方把它的 Handler() 挂在已鉴权的路由组下。
+func NewModuleFacade(baseURL string, specCenter bool) *Server {
+	s := &Server{tools: []toolDef{}}
+	s.modules = newModuleToolset(baseURL, specCenter)
+	return s
+}
+
+// WithModuleTools 打开「项目 → 功能模块」工具面。baseURL 是 multica 自身的公网
+// 基址（MULTICA_PUBLIC_URL）；空串时工具仍会列出，但调用会返回可读的配置错误。
+// specCenter 与后端 FF_MODULE_SPEC_CENTER 同步：关闭时 spec/原型/对账工具不列出。
+func (s *Server) WithModuleTools(baseURL string, specCenter bool) *Server {
+	s.modules = newModuleToolset(baseURL, specCenter)
+	return s
 }
 
 // jsonRPCRequest/Response 是 JSON-RPC 2.0 的最小信封。
@@ -128,7 +159,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	// 通知（无 id，如 notifications/initialized）不回体。
 	isNotification := len(req.ID) == 0 || string(req.ID) == "null"
-	result, jerr := s.dispatch(r.Context(), req)
+	ctx := WithAuthorization(r.Context(), r.Header.Get("Authorization"))
+	result, jerr := s.dispatch(ctx, req)
 	if isNotification {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -151,7 +183,11 @@ func (s *Server) dispatch(ctx context.Context, req jsonRPCRequest) (any, *jsonRP
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		return map[string]any{"tools": s.tools}, nil
+		tools := s.tools
+		if s.modules != nil {
+			tools = append(append([]toolDef{}, tools...), s.modules.Tools()...)
+		}
+		return map[string]any{"tools": tools}, nil
 	case "tools/call":
 		return s.callTool(ctx, req.Params)
 	default:
@@ -169,11 +205,19 @@ func (s *Server) callTool(ctx context.Context, raw json.RawMessage) (any, *jsonR
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &jsonRPCError{Code: -32602, Message: "invalid params"}
 	}
-	scope, ok := ScopeFromContext(ctx)
-	if !ok {
-		return nil, &jsonRPCError{Code: -32001, Message: "unauthorized: no asset scope"}
+	var data any
+	var terr *jsonRPCError
+	if s.modules != nil && strings.HasPrefix(p.Name, "modules_") {
+		// 模块工具面走「工具 → REST」转发，鉴权由被调用的 handler 重做，
+		// 因此不要求资产读作用域。
+		data, terr = s.modules.Call(ctx, p.Name, p.Arguments)
+	} else {
+		scope, ok := ScopeFromContext(ctx)
+		if !ok {
+			return nil, &jsonRPCError{Code: -32001, Message: "unauthorized: no asset scope"}
+		}
+		data, terr = s.execTool(ctx, scope, p.Name, p.Arguments)
 	}
-	data, terr := s.execTool(ctx, scope, p.Name, p.Arguments)
 	text, _ := json.Marshal(data)
 	if terr != nil {
 		return map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": terr.Message}}}, nil

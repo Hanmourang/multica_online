@@ -9,12 +9,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func TestArchivePlacementForLifecycle_FiveStages(t *testing.T) {
+func TestArchivePlacementForLifecycle_SixStages(t *testing.T) {
 	cases := []struct {
 		lifecycle string
 		wantStage int32
 		wantType  string
 	}{
+		{"S0", 0, "requirement"}, // S0 需求描述：stage NULL（0 哨兵）+ requirement
 		{"S1", 1, "research"},
 		{"S2", 2, "product-design"},
 		{"S3", 3, "architecture"},
@@ -59,6 +60,7 @@ func TestLifecycleForArchivePlacement(t *testing.T) {
 		{pgtype.Int4{Int32: 3, Valid: true}, "architecture", "S3"},
 		{pgtype.Int4{Int32: 4, Valid: true}, "retrospective", "S4"},
 		{pgtype.Int4{Int32: 5, Valid: true}, "iteration", "S5"},
+		{pgtype.Int4{}, "requirement", "S0"},
 		{pgtype.Int4{}, "asset", "general"},
 	}
 	for _, c := range cases {
@@ -87,12 +89,12 @@ func TestLifecycleForArchivePlacement(t *testing.T) {
 }
 
 func TestIsAssetLinkedShelfDocType(t *testing.T) {
-	for _, dt := range []string{"research", "product-design", "architecture", "retrospective", "iteration"} {
+	for _, dt := range []string{"research", "product-design", "architecture", "retrospective", "iteration", "requirement"} {
 		if !isAssetLinkedShelfDocType(dt) {
 			t.Errorf("%q is a linked shelf doc_type", dt)
 		}
 	}
-	for _, dt := range []string{"asset", "work-plan", "requirement", "", "meeting-notes"} {
+	for _, dt := range []string{"asset", "work-plan", "", "meeting-notes"} {
 		if isAssetLinkedShelfDocType(dt) {
 			t.Errorf("%q must not be a linked shelf doc_type", dt)
 		}

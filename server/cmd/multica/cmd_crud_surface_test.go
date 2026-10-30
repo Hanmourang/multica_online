@@ -208,6 +208,38 @@ func TestFourthRoundDestructiveCommandsExposeYesFlag(t *testing.T) {
 	}
 }
 
+// 模块能力规格面（spec / plan / reconcile / coverage）必须全部挂上：它们与界面
+// 「原型图」子 TAB 同源，也是 multica-feature-modules 技能里写的命令。文档里能写的
+// 命令必须真实存在，否则只是把弯路从代码搬到技能里。
+func TestModuleSpecSurfaceIsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"module", "spec", "get"},
+		{"module", "spec", "draft"},
+		{"module", "spec", "publish"},
+		{"module", "plan", "create"},
+		{"module", "plan", "get"},
+		{"module", "plan", "apply"},
+		{"module", "reconcile"},
+		{"module", "coverage"},
+		{"module", "brief", "get"},
+		{"module", "brief", "patch"},
+		{"module", "release", "list"},
+		{"module", "release", "publish"},
+		{"module", "release", "rollback"},
+	} {
+		findCommandByPath(t, rootCmd, path...)
+	}
+	if cmd := findCommandByPath(t, rootCmd, "module", "plan", "apply"); cmd.Flags().Lookup("yes") == nil {
+		t.Fatalf("module plan apply has no --yes flag, so an agent run could not be refused")
+	}
+	if cmd := findCommandByPath(t, rootCmd, "module", "release", "publish"); cmd.Flags().Lookup("yes") == nil {
+		t.Fatalf("module release publish has no --yes flag, so an agent run could not be refused")
+	}
+	if cmd := findCommandByPath(t, rootCmd, "module", "release", "rollback"); cmd.Flags().Lookup("yes") == nil {
+		t.Fatalf("module release rollback has no --yes flag, so an agent run could not be refused")
+	}
+}
+
 func findCommandByPath(t *testing.T, root *cobra.Command, path ...string) *cobra.Command {
 	t.Helper()
 	current := root
