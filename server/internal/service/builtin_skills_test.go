@@ -707,6 +707,55 @@ func TestProjectTabsSkillCoversTabMap(t *testing.T) {
 	}
 }
 
+// TestModulePrototypeRefineSkillPinsTheBoundedWorkflow 锁死这条技能存在的理由：
+// 「只改指定功能模块」不是语气问题，而是四个可执行动作缺一不可 ——
+// ①一次取全模块上下文；②把当前原型源码落盘（html_path 只是坐标，磁盘上常常没有文件）；
+// ③上传后用 prototype diff 证明改动没有溢出目标锚点；④验收引用 coverage 与
+// fp.<code>.acceptance，而不是「应该没问题」。任何一条被删掉，agent 就会退回
+// 「顺手把别的也改一下」和「改完了」这两种失败模式。
+func TestModulePrototypeRefineSkillPinsTheBoundedWorkflow(t *testing.T) {
+	skill, ok := findSkill(t, "multica-module-prototype-refine")
+	if !ok {
+		return
+	}
+	fm, body, ok := splitFrontmatter(skill.Content)
+	if !ok {
+		t.Fatalf("SKILL.md must lead with a --- frontmatter block")
+	}
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false (this triggers from a refinement request, not a slash command)", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); got != "Bash(multica *)" {
+		t.Errorf("allowed-tools = %q, want Bash(multica *) (every step is a multica CLI call)", got)
+	}
+
+	// Each entry is a step the contract cannot lose; the exact flags are what the
+	// CLI actually accepts today, so a renamed flag breaks here, not in the field.
+	mustContain := []string{
+		"multica module context <module> --output json",
+		"multica module prototype read <module> --version <n> --out .refine/prototype-v<n>.html",
+		"multica module prototype upload <module> --file .refine/prototype-v<n>.html",
+		"multica module prototype diff <module> --from <n> --to <n+1>",
+		"multica module coverage <module> --output json",
+		"multica module brief patch <module> --base-version <v> --source agent",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("skill body is missing the step %q", want)
+		}
+	}
+
+	// The boundary proof and the anchor contract are the two sentences that make
+	// "only this module" checkable rather than aspirational.
+	mustExplain := []string{"subset", "data-fp", "canonical"}
+	for _, want := range mustExplain {
+		if !strings.Contains(body, want) {
+			t.Errorf("skill body never mentions %q", want)
+		}
+	}
+}
+
 func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	t.Helper()
 	for _, s := range loadBuiltinSkills() {

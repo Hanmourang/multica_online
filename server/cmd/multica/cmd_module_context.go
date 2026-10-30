@@ -106,7 +106,7 @@ func runModuleContext(cmd *cobra.Command, args []string) error {
 
 	// 对账口径只在后端：这里只搬运数字，不自算。
 	var reconcile map[string]any
-	reconcilePath := moduleScopedPath(module, "/reconcile")
+	reconcilePath := moduleScopedPath(module, "/prototype-reconcile")
 	if intAt(proto, "version") > 0 {
 		reconcilePath += "?version=" + strconv.Itoa(intAt(proto, "version"))
 	}

@@ -430,7 +430,13 @@ export function PlatformSkillsSection({
       <p className="mt-1 max-w-3xl text-caption leading-5 text-muted-foreground">
         {t(($) => $.page.platform.description)}
       </p>
-      <ul className="mt-3 divide-y rounded-lg border">
+      {/* 平台技能列一个上限并自己滚：它是 `shrink-0` 的固定块，而平台技能有 25 个
+          （单行 ~53px），不封顶会把固定高度的页面撑到 1400px+，下方「搜索栏 + 工作区
+          技能列表」被挤成 0 高；页面本身是 overflow-hidden，于是既没有滚动条也滚不动，
+          后面的内容直接看不见。封顶后两段各自滚动，视口高度不同也都有余量。
+          上限取 55vh/520px：平台技能是这块的主角（~25 条），一屏能落在 9-10 条；
+          封顶仍给工作区列表留出至少 3-4 行（1280x720 下 ~200px）。 */}
+      <ul className="mt-3 max-h-[min(55vh,520px)] divide-y overflow-y-auto overscroll-contain rounded-lg border [scrollbar-width:thin]">
         {skills.map((skill) => (
           <li key={skill.id}>
             {/* The row is the affordance: platform skills have no page of
