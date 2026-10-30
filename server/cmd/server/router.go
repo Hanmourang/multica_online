@@ -2096,6 +2096,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Post("/modules/{moduleId}/spec/publish", h.PublishModuleSpec)
 						r.Get("/modules/{moduleId}/prototype-versions", h.ListModulePrototypeVersions)
 						r.Post("/modules/{moduleId}/prototype-versions", h.RegisterModulePrototypeVersion)
+						// 模块自有版本的维护面（2026-10-30）：登记错了改指针、认可用 confirm、
+						// 废版本删掉。三条都只认 issue_id 为空的模块自有版本，需求原型仍走 /issues。
+						r.Patch("/modules/{moduleId}/prototype-versions/{version}", h.UpdateModulePrototypeVersion)
+						r.Delete("/modules/{moduleId}/prototype-versions/{version}", h.DeleteModulePrototypeVersion)
+						r.Post("/modules/{moduleId}/prototype-versions/{version}/confirm", h.ConfirmModulePrototypeVersion)
 						r.Post("/modules/{moduleId}/prototype-versions/{version}/parse", h.ParseModulePrototype)
 						r.Get("/modules/{moduleId}/prototype-reconcile", h.GetPrototypeReconcile)
 						r.Get("/modules/{moduleId}/coverage", h.GetModuleCoverage)

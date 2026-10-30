@@ -37,7 +37,14 @@ re-derive absolute file paths by hand:
   multica module create <project> --name <n> [--color <c>] [--graph-node <id>]
   multica module update <module> [--name <n>] [--color <c>] [--graph-node <id>]
   multica module delete <module> --yes
+  multica module spec feature add|update|remove <module>   # 功能点单条增删改
+  multica module brief patch <module> --base-version <n> --field brief.goal="..."
   multica module prototype list <module>     # every version + whether the file exists
+  multica module prototype register <module> --html-path <file>   # 新一版原型
+  multica module prototype confirm|update|delete <module> <v>     # 维护某一版
+  multica module prototype parse <module>     # 抽 data-fp 锚点，reconcile 才有数
+  multica module prototype diff <module> --from v --to v          # 版本对比总结
+  multica module brief versions|diff <module> # 说明版本记录 / 字段级对比
   multica module prototype read <module>     # absolute path of the live version`,
 }
 
@@ -239,7 +246,7 @@ var moduleReleaseRollbackCmd = &cobra.Command{
 
 var modulePrototypeCmd = &cobra.Command{
 	Use:   "prototype",
-	Short: "List or read the prototypes produced for a module",
+	Short: "List, read, register, maintain, parse or diff a module's prototypes",
 }
 
 var modulePrototypeListCmd = &cobra.Command{
@@ -406,9 +413,13 @@ type modulePrototypeVersion struct {
 	Version   int32  `json:"version"`
 	Status    string `json:"status"`
 	HtmlPath  string `json:"html_path"`
+	Prompt    string `json:"prompt"`
 	CreatedAt string `json:"created_at"`
 
-	// Filled in locally: the issue the version was registered through.
+	// Filled in locally: who owns the row (module = registered on the module,
+	// requirement = produced by one of its requirements) and which issue it was
+	// registered through.
+	Owner      string `json:"owner,omitempty"`
 	IssueKey   string `json:"issue_key,omitempty"`
 	IssueTitle string `json:"issue_title,omitempty"`
 }
@@ -1222,10 +1233,11 @@ func runModuleGet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("list requirements of module %q: %w", module.Name, err)
 	}
-	versions, err := fetchModulePrototypeVersions(ctx, client, issues)
+	timeline, err := fetchModuleTimeline(ctx, client, module, issues)
 	if err != nil {
 		return err
 	}
+	versions := timeline.Versions
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
@@ -1233,6 +1245,7 @@ func runModuleGet(cmd *cobra.Command, args []string) error {
 			"module":     module,
 			"issues":     issues,
 			"prototypes": versions,
+			"canonical":  timeline.Canonical,
 		})
 	}
 
@@ -1287,41 +1300,53 @@ func runModulePrototypeList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("list requirements of module %q: %w", module.Name, err)
 	}
-	versions, err := fetchModulePrototypeVersions(ctx, client, issues)
+	timeline, err := fetchModuleTimeline(ctx, client, module, issues)
 	if err != nil {
 		return err
 	}
+	versions := timeline.Versions
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, map[string]any{
-			"module":   map[string]string{"id": module.ID, "name": module.Name, "project_id": module.ProjectID},
-			"versions": versions,
+			"module":    map[string]string{"id": module.ID, "name": module.Name, "project_id": module.ProjectID},
+			"canonical": timeline.Canonical,
+			"gated":     timeline.Gated,
+			"versions":  versions,
 		})
 	}
 
 	if len(versions) == 0 {
 		fmt.Printf("Module %q has no prototype versions yet.\n", module.Name)
-		if len(issues) > 0 {
-			fmt.Fprintf(os.Stderr, "Requirements of this module: %s\nRegister one with `multica requirement prototype register <issue> --html-path <path>`.\n", joinIssueKeys(issues))
-		}
+		fmt.Fprintf(os.Stderr, "Register one with `multica module prototype register %s --html-path <file>`%s.\n",
+			displayID(module.ID, true), requirementHint(issues))
 		return nil
 	}
 
-	headers := []string{"VERSION", "STATUS", "FILE", "REQUIREMENT", "PATH"}
+	headers := []string{"VERSION", "STATUS", "OWNER", "FILE", "REQUIREMENT", "PATH"}
 	rows := make([][]string, 0, len(versions))
 	for _, v := range versions {
+		status := statusOrUnknown(v.Status)
+		if timeline.Canonical != nil && int32(*timeline.Canonical) == v.Version {
+			status += " *"
+		}
 		rows = append(rows, []string{
 			fmt.Sprintf("v%d", v.Version),
-			statusOrUnknown(v.Status),
+			status,
+			v.Owner,
 			modulePrototypeFileState(v.HtmlPath),
 			v.IssueKey,
 			v.HtmlPath,
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	if timeline.Canonical != nil {
+		fmt.Printf("\n* canonical prototype version\n")
+	}
 
-	fmt.Fprintf(os.Stderr, "Next:\n  multica module prototype read %s --version %d\n", displayID(module.ID, true), versions[0].Version)
+	fmt.Fprintf(os.Stderr, "Next:\n  multica module prototype read %s --version %d\n  multica module prototype diff %s --from %d --to %d\n",
+		displayID(module.ID, true), versions[0].Version,
+		displayID(module.ID, true), previousVersion(versions, versions[0].Version), versions[0].Version)
 	return nil
 }
 
@@ -1347,15 +1372,16 @@ func runModulePrototypeRead(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("list requirements of module %q: %w", module.Name, err)
 	}
-	versions, err := fetchModulePrototypeVersions(ctx, client, issues)
+	timeline, err := fetchModuleTimeline(ctx, client, module, issues)
 	if err != nil {
 		return err
 	}
+	versions := timeline.Versions
 
 	target := pickModulePrototypeVersion(versions, versionFlag)
 	if target == nil {
 		if len(versions) == 0 {
-			return fmt.Errorf("module %q has no prototype versions yet; register one with `multica requirement prototype register <issue> --html-path <path>`", module.Name)
+			return fmt.Errorf("module %q has no prototype versions yet; register one with `multica module prototype register %s --html-path <file>`", module.Name, displayID(module.ID, true))
 		}
 		return fmt.Errorf("module %q has no prototype version v%d; available: %s", module.Name, versionFlag, joinVersionList(versions))
 	}

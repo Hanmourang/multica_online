@@ -240,6 +240,55 @@ func TestModuleSpecSurfaceIsRegistered(t *testing.T) {
 	}
 }
 
+// 模块内容面（单条功能点、说明字段、需求归属）与原型维护面（登记/修正/确认/
+// 删除/解析）必须全部挂上：技能里写了什么命令，命令行就得真有什么命令，否则
+// 「agent 自主迭代全部原型图」只是一句口号。
+func TestModuleContentAndPrototypeSurfaceIsRegistered(t *testing.T) {
+	for _, path := range [][]string{
+		{"module", "spec", "feature", "add"},
+		{"module", "spec", "feature", "update"},
+		{"module", "spec", "feature", "remove"},
+		{"module", "requirement", "add"},
+		{"module", "requirement", "remove"},
+		{"module", "brief", "versions"},
+		{"module", "brief", "diff"},
+		{"module", "prototype", "register"},
+		{"module", "prototype", "update"},
+		{"module", "prototype", "confirm"},
+		{"module", "prototype", "delete"},
+		{"module", "prototype", "parse"},
+		{"module", "prototype", "diff"},
+	} {
+		findCommandByPath(t, rootCmd, path...)
+	}
+
+	// 删除必须在非终端环境下可被拒绝。
+	if cmd := findCommandByPath(t, rootCmd, "module", "prototype", "delete"); cmd.Flags().Lookup("yes") == nil {
+		t.Fatalf("module prototype delete has no --yes flag, so an agent run could not be refused")
+	}
+	// 登记/修正要能改路径，解析要能指定文件，确认要能移权威指针。
+	for _, path := range [][]string{
+		{"module", "prototype", "register"},
+		{"module", "prototype", "update"},
+	} {
+		if cmd := findCommandByPath(t, rootCmd, path...); cmd.Flags().Lookup("html-path") == nil {
+			t.Fatalf("%v has no --html-path flag; the version could be registered but never corrected", path)
+		}
+	}
+	if cmd := findCommandByPath(t, rootCmd, "module", "prototype", "confirm"); cmd.Flags().Lookup("canonical") == nil {
+		t.Fatalf("module prototype confirm has no --canonical flag; a confirmed version could never become the canonical one")
+	}
+	if cmd := findCommandByPath(t, rootCmd, "module", "prototype", "parse"); cmd.Flags().Lookup("html-path") == nil {
+		t.Fatalf("module prototype parse has no --html-path flag; a version whose file is not on disk could not be parsed")
+	}
+	if cmd := findCommandByPath(t, rootCmd, "module", "brief", "patch"); cmd.Flags().Lookup("base-version") == nil {
+		t.Fatalf("module brief patch has no --base-version flag; the optimistic lock cannot be honored")
+	}
+	if cmd := findCommandByPath(t, rootCmd, "module", "prototype", "diff"); cmd.Flags().Lookup("from") == nil || cmd.Flags().Lookup("to") == nil {
+		t.Fatalf("module prototype diff has no --from/--to flags; two arbitrary versions could not be compared")
+	}
+}
+
 func findCommandByPath(t *testing.T, root *cobra.Command, path ...string) *cobra.Command {
 	t.Helper()
 	current := root

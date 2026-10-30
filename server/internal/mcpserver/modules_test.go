@@ -402,6 +402,114 @@ func TestModuleBriefPatchNeedsBaseVersion(t *testing.T) {
 	}
 }
 
+// 模块自有原型的维护面：修正 / 确认 / 删除 / 解析。四条都是「不产生新版本」
+// 的编辑动作，映射错了就会静默改到别的版本，所以 method + path 一起钉死。
+func TestModulePrototypeMaintenanceTools(t *testing.T) {
+	srv, calls := newModuleFacade(t, true)
+	auth := "Bearer mat_test"
+
+	if _, isErr := callModule(t, srv, "modules_prototype_update", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"version":    3,
+		"prompt":     "修正为群设置版",
+	}, auth); isErr {
+		t.Fatalf("prompt-only update should succeed")
+	}
+	patch := (*calls)[0]
+	if patch.method != http.MethodPatch ||
+		patch.path != "/api/projects/"+testProject+"/modules/"+testModule+"/prototype-versions/3" {
+		t.Fatalf("bad update target: %s %s", patch.method, patch.path)
+	}
+	if strings.Contains(patch.body, "html_path") || strings.Contains(patch.body, "status") {
+		t.Fatalf("absent fields must not be forwarded: %s", patch.body)
+	}
+	if !strings.Contains(patch.body, "修正为群设置版") {
+		t.Fatalf("update body missing prompt: %s", patch.body)
+	}
+
+	*calls = nil
+	if _, isErr := callModule(t, srv, "modules_prototype_update", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"version":    3,
+	}, auth); !isErr {
+		t.Fatalf("an update with no field must be rejected")
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("empty update must not reach the API, got %d calls", len(*calls))
+	}
+
+	if _, isErr := callModule(t, srv, "modules_prototype_confirm", map[string]any{
+		"project_id":    testProject,
+		"module_id":     testModule,
+		"version":       3,
+		"set_canonical": true,
+	}, auth); isErr {
+		t.Fatalf("confirm should succeed")
+	}
+	confirm := (*calls)[len(*calls)-1]
+	if confirm.method != http.MethodPost ||
+		confirm.path != "/api/projects/"+testProject+"/modules/"+testModule+"/prototype-versions/3/confirm" {
+		t.Fatalf("bad confirm target: %s %s", confirm.method, confirm.path)
+	}
+	if !strings.Contains(confirm.body, `"set_canonical":true`) {
+		t.Fatalf("confirm body must carry set_canonical: %s", confirm.body)
+	}
+
+	*calls = nil
+	text, isErr := callModule(t, srv, "modules_prototype_delete", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"version":    3,
+	}, auth)
+	if !isErr || !strings.Contains(text, "confirm=true") {
+		t.Fatalf("want confirm gate, got isErr=%v text=%s", isErr, text)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("refused delete must not reach the API")
+	}
+	if _, isErr := callModule(t, srv, "modules_prototype_delete", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"version":    3,
+		"confirm":    true,
+	}, auth); isErr {
+		t.Fatalf("confirmed delete should pass the gate")
+	}
+	if got := (*calls)[len(*calls)-1]; got.method != http.MethodDelete ||
+		!strings.HasSuffix(got.path, "/prototype-versions/3") {
+		t.Fatalf("bad delete target: %s %s", got.method, got.path)
+	}
+
+	*calls = nil
+	if _, isErr := callModule(t, srv, "modules_prototype_parse", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"version":    3,
+	}, auth); !isErr {
+		t.Fatalf("parse without anchors must be rejected")
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("anchors-less parse must not reach the API")
+	}
+	if _, isErr := callModule(t, srv, "modules_prototype_parse", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"version":    3,
+		"anchors":    map[string]any{"fp.chat.group": map[string]any{"count": 1, "title": "群设置"}},
+	}, auth); isErr {
+		t.Fatalf("parse with anchors should succeed")
+	}
+	parse := (*calls)[len(*calls)-1]
+	if parse.method != http.MethodPost || !strings.HasSuffix(parse.path, "/prototype-versions/3/parse") {
+		t.Fatalf("bad parse target: %s %s", parse.method, parse.path)
+	}
+	if !strings.Contains(parse.body, "fp.chat.group") {
+		t.Fatalf("parse body must carry the anchors: %s", parse.body)
+	}
+}
+
 func TestModuleToolsNeedSelfBaseURL(t *testing.T) {
 	srv := NewModuleFacade("", false)
 	text, isErr := callModule(t, srv, "modules_list", map[string]any{"project_id": testProject}, "Bearer mat_test")

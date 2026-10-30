@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -158,6 +159,42 @@ var moduleTools = []moduleTool{
 		},
 		specOnly: true,
 		run:      runModulesPrototypeRegister,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_prototype_update",
+			Description: "修正一个模块自有版本的 html_path / prompt / status（只提交出现的字段）。用于修正登记错误；新一版内容用 register 新版本号。权威版本不允许离开 confirmed，需求名下版本一律拒绝。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"version":{"type":"integer"},"html_path":{"type":"string"},"prompt":{"type":"string"},"status":{"type":"string","enum":["pending","confirmed","superseded"]}},"required":["project_id","module_id","version"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesPrototypeUpdate,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_prototype_confirm",
+			Description: "把一个模块自有版本标为 confirmed；set_canonical=true 时同时移动权威指针并把上一版置为 superseded。不升 spec、不重建投影（那是 plan apply）。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"version":{"type":"integer"},"set_canonical":{"type":"boolean"}},"required":["project_id","module_id","version"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesPrototypeConfirm,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_prototype_delete",
+			Description: "删除一个模块自有原型版本（同时清掉它的锚点缓存）。破坏性动作：必须传 confirm=true。权威版本与被发布引用过的版本会被服务端拒绝。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"version":{"type":"integer"},"confirm":{"type":"boolean","description":"必须为 true 才执行删除"}},"required":["project_id","module_id","version","confirm"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesPrototypeDelete,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_prototype_parse",
+			Description: "上传某版本的 data-fp 锚点解析结果（code → {count,title}）。reconcile / coverage 读的是这张缓存：不调它，对账会把每个功能点都判为空位。原型 HTML 里的标记形如 data-fp=\"fp.xxx\" data-title=\"标题\"。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"version":{"type":"integer"},"anchors":{"type":"object","description":"code → {count,title}"}},"required":["project_id","module_id","version","anchors"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesPrototypeParse,
 	},
 	{
 		def: toolDef{
@@ -396,6 +433,7 @@ type moduleArgs struct {
 	Fields           json.RawMessage `json:"fields"`
 	Source           string          `json:"source"`
 	Note             string          `json:"note"`
+	Anchors          json.RawMessage `json:"anchors"`
 	BriefVersion     *int32          `json:"brief_version"`
 	PrototypeVersion *int32          `json:"prototype_version"`
 	ReleaseVersion   *int32          `json:"release_version"`
@@ -635,7 +673,8 @@ func runModulesPrototypeVersions(ctx context.Context, rt moduleCtx, args json.Ra
 	}
 	suffix := "/prototype-versions"
 	if a.CanonicalOnly {
-		suffix += "?canonical_only=true"
+		// handler 读的是 canonical=1（不是 canonical_only）。
+		suffix += "?canonical=1"
 	}
 	return rt.do(ctx, http.MethodGet, modulePath(a.ProjectID, a.ModuleID, suffix), nil)
 }
@@ -671,6 +710,99 @@ func runModulesPrototypeRegister(ctx context.Context, rt moduleCtx, args json.Ra
 		body["set_canonical"] = true
 	}
 	return rt.do(ctx, http.MethodPost, modulePath(a.ProjectID, a.ModuleID, "/prototype-versions"), body)
+}
+
+func runModulesPrototypeUpdate(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+	if a.Version == nil {
+		return nil, &jsonRPCError{Code: -32602, Message: "version required"}
+	}
+	// 只转发「出现的」字段：PATCH 的语义就是不动没提到的列，
+	// 而 prompt/status 的空串是合法值，不能靠零值判断。
+	var present map[string]any
+	if err := json.Unmarshal(args, &present); err != nil {
+		return nil, &jsonRPCError{Code: -32602, Message: "invalid arguments: " + err.Error()}
+	}
+	body := map[string]any{}
+	if _, ok := present["html_path"]; ok {
+		body["html_path"] = a.HTMLPath
+	}
+	if _, ok := present["prompt"]; ok {
+		body["prompt"] = a.Prompt
+	}
+	if _, ok := present["status"]; ok {
+		body["status"] = a.Status
+	}
+	if len(body) == 0 {
+		return nil, &jsonRPCError{Code: -32602, Message: "nothing to update: pass html_path, prompt or status"}
+	}
+	path := modulePath(a.ProjectID, a.ModuleID, "/prototype-versions/"+strconv.Itoa(int(*a.Version)))
+	return rt.do(ctx, http.MethodPatch, path, body)
+}
+
+func runModulesPrototypeConfirm(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+	if a.Version == nil {
+		return nil, &jsonRPCError{Code: -32602, Message: "version required"}
+	}
+	var body any
+	if a.SetCanonical {
+		body = map[string]any{"set_canonical": true}
+	}
+	path := modulePath(a.ProjectID, a.ModuleID, "/prototype-versions/"+strconv.Itoa(int(*a.Version))+"/confirm")
+	return rt.do(ctx, http.MethodPost, path, body)
+}
+
+func runModulesPrototypeDelete(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+	if a.Version == nil {
+		return nil, &jsonRPCError{Code: -32602, Message: "version required"}
+	}
+	if !a.Confirm {
+		return nil, &jsonRPCError{
+			Code:    -32003,
+			Message: "destructive action refused: pass confirm=true. The version and its parsed anchors are removed; the canonical version and any version referenced by a release are refused server-side.",
+		}
+	}
+	path := modulePath(a.ProjectID, a.ModuleID, "/prototype-versions/"+strconv.Itoa(int(*a.Version)))
+	return rt.do(ctx, http.MethodDelete, path, nil)
+}
+
+func runModulesPrototypeParse(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+	if a.Version == nil {
+		return nil, &jsonRPCError{Code: -32602, Message: "version required"}
+	}
+	anchors := bytes.TrimSpace(a.Anchors)
+	if len(anchors) == 0 || string(anchors) == "null" {
+		return nil, &jsonRPCError{Code: -32602, Message: "anchors required: map of feature code → {count, title}, e.g. {\"fp.chat.group\": {\"count\": 1, \"title\": \"群设置\"}}"}
+	}
+	path := modulePath(a.ProjectID, a.ModuleID, "/prototype-versions/"+strconv.Itoa(int(*a.Version))+"/parse")
+	return rt.do(ctx, http.MethodPost, path, map[string]any{"anchors": json.RawMessage(anchors)})
 }
 
 func runModulesPlanCreate(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {

@@ -611,8 +611,27 @@ func TestFeatureModulesSkillCoversPrototypeChain(t *testing.T) {
 	}
 
 	mustContain := []string{
-		// 模块不拥有原型：文件挂在需求的 prototype version 上，agent 必须走这条链。
-		"module → requirements → prototype versions → file",
+		// 六类对象都要有可写通路：漏一类，agent 就会退回猜端点。
+		"multica module requirement add",
+		"multica module spec feature add",
+		"multica module spec feature update",
+		"multica module spec feature remove",
+		"multica module brief patch",
+		"multica module prototype register",
+		"multica module prototype update",
+		"multica module prototype confirm",
+		"multica module prototype delete",
+		"multica module prototype parse",
+		"multica module release publish",
+		"multica module release rollback",
+		// 版本对比总结是这一轮的核心诉求，两条命令都不能掉。
+		"multica module prototype diff",
+		"multica module brief diff",
+		"multica module brief versions",
+		// 版本有两种归属，模块级维护面只能改模块自有版本。
+		"module-owned",
+		"requirement-owned",
+		// 基础读取面与 html_path 陷阱。
 		"multica module list --project <project-id> --output json",
 		"multica module get <module> --output json",
 		"multica module prototype list <module> --output json",
@@ -629,6 +648,18 @@ func TestFeatureModulesSkillCoversPrototypeChain(t *testing.T) {
 	for _, want := range mustContain {
 		if !strings.Contains(body, want) {
 			t.Errorf("feature-modules skill missing %q", want)
+		}
+	}
+
+	// 旧口径：模块不拥有原型、登记只能走 MCP。这两句会把 agent 劝退到不存在的路径上。
+	mustNotContain := []string{
+		"MCP only",
+		"owns no prototype HTML of its own",
+		"module → requirements → prototype versions → file",
+	}
+	for _, unwanted := range mustNotContain {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("feature-modules skill still says %q", unwanted)
 		}
 	}
 }
