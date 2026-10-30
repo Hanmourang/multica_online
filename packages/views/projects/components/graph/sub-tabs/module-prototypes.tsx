@@ -14,6 +14,10 @@ import {
 } from "@multica/core/graph/queries";
 import { useChatStore } from "@multica/core/chat";
 import { useCreateComment } from "@multica/core/issues/mutations";
+import {
+  modulePrototypeVersionsOptions,
+  moduleWorkspaceOptions,
+} from "@multica/core/projects";
 import type {
   Issue,
   ProjectArtifact,
@@ -94,11 +98,51 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
   const neighborhoodQuery = useQuery(moduleNeighborhoodOptions(wsId, projectId, nodeId));
 
   const module = (modulesQuery.data?.modules ?? []).find((row) => row.graph_node_id === nodeId);
+  // 草案 = 说明轴里还没成对发布的版本数（画面 1 的「草案 n」）。
+  const workspaceQuery = useQuery({
+    ...moduleWorkspaceOptions(wsId, projectId, module?.id),
+    retry: false,
+  });
+  const draftCount = useMemo(() => {
+    const workspace = workspaceQuery.data;
+    if (!workspace) return 0;
+    const releasedTo = workspace.releases.reduce(
+      (max, row) => Math.max(max, row.brief_version),
+      0,
+    );
+    return workspace.versions.filter((row) => row.version > releasedTo).length;
+  }, [workspaceQuery.data]);
   const reqs = module
     ? moduleRequirements(issuesForModule(issuesQuery.data ?? [], projectId, module.id))
     : [];
   const reqIds = reqs.map((issue) => issue.id);
   const versionsQuery = useIssuePrototypeVersions(reqIds);
+  // 模块自己登记过的原型（可无关联需求）：需求轴为空时用它兜底，
+  // 否则「有原型、没需求」的模块会同时呈现空预览 + 空右栏。
+  const moduleProtosQuery = useQuery({
+    ...modulePrototypeVersionsOptions(wsId, projectId, module?.id),
+    retry: false,
+  });
+  const moduleFallback = useMemo<PrototypeVersion | null>(() => {
+    const rows = moduleProtosQuery.data?.versions ?? [];
+    if (rows.length === 0) return null;
+    const canonical = moduleProtosQuery.data?.canonical_prototype_version ?? null;
+    const owned =
+      (canonical === null ? undefined : rows.find((row) => row.version === canonical)) ??
+      rows.reduce((max, row) => (row.version > max.version ? row : max), rows[0]!);
+    return {
+      id: owned.id,
+      issue_id: owned.issue_id ?? "",
+      version: owned.version,
+      html_path: owned.html_path,
+      prompt: owned.prompt,
+      marks: [],
+      status: owned.status,
+      created_by_type: "system",
+      created_by_id: null,
+      created_at: owned.created_at,
+    };
+  }, [moduleProtosQuery.data]);
 
   const reqsWithVersions = reqs.filter((issue) => (versionsQuery.byIssue.get(issue.id)?.length ?? 0) > 0);
   const activeIssue =
@@ -108,7 +152,7 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
   const versions = activeIssue ? (versionsQuery.byIssue.get(activeIssue.id) ?? []) : [];
   const pair = pickPrototypePair(versions);
   const current =
-    versions.find((row) => row.id === currentId) ?? pair.current;
+    versions.find((row) => row.id === currentId) ?? pair.current ?? moduleFallback ?? undefined;
   const baseline =
     versions.find((row) => row.id === baselineId && row.id !== current?.id) ??
     (pair.baseline?.id === current?.id ? undefined : pair.baseline);
@@ -177,7 +221,10 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
     setPageContext,
   ]);
 
-  const maxVersion = versions.reduce((max, row) => Math.max(max, row.version), 0);
+  const maxVersion = Math.max(
+    versions.reduce((max, row) => Math.max(max, row.version), 0),
+    moduleFallback?.version ?? 0,
+  );
   const inflight = reqs.filter((issue) => issue.id !== activeIssue?.id);
 
   if (modulesQuery.isPending || issuesQuery.isPending || versionsQuery.pending) {
@@ -209,10 +256,12 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[10px] border border-surface-border bg-surface" data-testid="module-prototypes">
       <div className="flex shrink-0 items-center gap-1.5 border-b border-surface-border bg-muted/25 px-3 py-2">
-        <span className="rounded-[3px] bg-primary/12 px-1 py-px text-[8.5px] font-bold text-primary">
-          {t(($) => $.features.subtab_tag, { count: 1 })}
-        </span>
         <span className="text-[11px] font-bold">{t(($) => $.features.prototypes_title)}</span>
+        {draftCount > 0 ? (
+          <span className="rounded-full bg-amber-500/15 px-1.5 py-px text-[8.5px] font-bold text-amber-700 dark:text-amber-400">
+            {t(($) => $.features.prototypes_draft, { n: draftCount })}
+          </span>
+        ) : null}
         <span className="ml-auto truncate font-mono text-[9px] font-semibold text-muted-foreground">
           {toolbarIssue ? issueShortLabel(toolbarIssue) : t(($) => $.features.prototypes_ready)}
           {maxVersion > 0 ? ` · v${maxVersion}` : ""}
@@ -315,7 +364,7 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {preview === "storybook" ? (
               storyReady || canPreview ? (
@@ -407,10 +456,19 @@ export function ModulePrototypesTab({ nodeId }: { nodeId: string }) {
               moduleName={module?.name}
               issue={activeIssue}
               allIssues={issuesQuery.data ?? []}
-              version={current ?? undefined}
+              preview={
+                current
+                  ? {
+                      version: Number(current.version),
+                      htmlPath: current.html_path,
+                      issueId: activeIssue?.id,
+                    }
+                  : undefined
+              }
               points={inspectorPoints}
               selectedFp={selectedFp}
               onSelectFp={setSelectedFp}
+              html={currentHtml}
             />
           ) : null}
         </div>

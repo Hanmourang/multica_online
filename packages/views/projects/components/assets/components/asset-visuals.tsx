@@ -106,8 +106,17 @@ export function AssetCategoryTile({
   );
 }
 
+/**
+ * 徽标统一度量：11px（text-micro）字号 + 4px 垂直内边距 + 上下各 1px 描边，
+ * 实际高度 22px。此前用 text-[10px]/py-px，在高分屏与网页端 100% 缩放下
+ * 中文阶段名（“S1 项目规划”）辨识度明显偏低。
+ */
+export const ASSET_BADGE_CLASS =
+  "inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-micro font-medium leading-none";
+
 // 阶段主色带 ring 描边 + 稍深底色，让表格列扫读时阶段分组一眼可辨。
 const STAGE_TONES: Record<AssetLifecycleStage, string> = {
+  S0: "bg-fuchsia-500/15 text-fuchsia-700 ring-1 ring-inset ring-fuchsia-500/30 dark:text-fuchsia-300",
   S1: "bg-violet-500/15 text-violet-700 ring-1 ring-inset ring-violet-500/30 dark:text-violet-300",
   S2: "bg-sky-500/15 text-sky-700 ring-1 ring-inset ring-sky-500/30 dark:text-sky-300",
   S3: "bg-amber-500/15 text-amber-700 ring-1 ring-inset ring-amber-500/30 dark:text-amber-300",
@@ -153,6 +162,7 @@ export function tagTone(tag: string): string {
 export function AssetStageBadge({ stage }: { stage: AssetLifecycleStage }) {
   const { t } = useT("assets");
   const labels: Record<AssetLifecycleStage, string> = {
+    S0: t(($) => $.stages.S0),
     S1: t(($) => $.stages.S1),
     S2: t(($) => $.stages.S2),
     S3: t(($) => $.stages.S3),
@@ -161,9 +171,7 @@ export function AssetStageBadge({ stage }: { stage: AssetLifecycleStage }) {
     general: t(($) => $.stages.general),
   };
   return (
-    <span
-      className={`inline-flex shrink-0 items-center rounded-md px-1.5 py-px text-[10px] font-semibold ${STAGE_TONES[stage] ?? STAGE_TONES.general}`}
-    >
+    <span className={`${ASSET_BADGE_CLASS} font-semibold ${STAGE_TONES[stage] ?? STAGE_TONES.general}`}>
       {labels[stage] ?? stage}
     </span>
   );
@@ -172,11 +180,11 @@ export function AssetStageBadge({ stage }: { stage: AssetLifecycleStage }) {
 export function AssetRoleBadge({ role }: { role: AssetRole }) {
   const { t } = useT("assets");
   return role === "input" ? (
-    <span className="inline-flex shrink-0 items-center rounded-md bg-blue-500/15 px-1.5 py-px text-[10px] font-semibold text-blue-700 ring-1 ring-inset ring-blue-500/30 dark:text-blue-300">
+    <span className={`${ASSET_BADGE_CLASS} font-semibold bg-blue-500/15 text-blue-700 ring-1 ring-inset ring-blue-500/30 dark:text-blue-300`}>
       {t(($) => $.roles.input)}
     </span>
   ) : (
-    <span className="inline-flex shrink-0 items-center rounded-md bg-green-500/15 px-1.5 py-px text-[10px] font-semibold text-green-700 ring-1 ring-inset ring-green-500/30 dark:text-green-300">
+    <span className={`${ASSET_BADGE_CLASS} font-semibold bg-green-500/15 text-green-700 ring-1 ring-inset ring-green-500/30 dark:text-green-300`}>
       {t(($) => $.roles.output)}
     </span>
   );
@@ -193,7 +201,7 @@ export function AssetStageRoleBadges({
   const { t } = useT("assets");
   if (!stage && !role) {
     return (
-      <span className="inline-flex shrink-0 items-center rounded-md border border-dashed border-surface-border px-1.5 py-px text-[10px] text-muted-foreground">
+      <span className={`${ASSET_BADGE_CLASS} border border-dashed border-surface-border text-muted-foreground`}>
         {t(($) => $.stages.none)}
       </span>
     );
@@ -211,18 +219,18 @@ export function AssetTagChips({ tags, max = 3 }: { tags?: string[]; max?: number
   const shown = tags.slice(0, max);
   const rest = tags.length - shown.length;
   return (
-    <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
+    <span className="inline-flex min-w-0 items-center gap-1">
       {shown.map((tag) => (
         <span
           key={tag}
-          className={`max-w-28 truncate rounded-md px-1.5 py-px text-[10px] font-medium ${tagTone(tag)}`}
+          className={`max-w-32 shrink-0 truncate rounded-md px-1.5 py-0.5 text-micro font-medium leading-none ${tagTone(tag)}`}
           title={tag}
         >
           {tag}
         </span>
       ))}
       {rest > 0 ? (
-        <span className="text-[10px] text-muted-foreground">{`+${rest}`}</span>
+        <span className="shrink-0 text-micro text-muted-foreground">{`+${rest}`}</span>
       ) : null}
     </span>
   );

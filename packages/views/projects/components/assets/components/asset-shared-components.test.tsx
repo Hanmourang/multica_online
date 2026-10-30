@@ -15,8 +15,9 @@ vi.mock("@multica/core/hooks", () => ({
 
 // 行内编辑的 mutation 在共享层测试中只验证装配关系（按行 project_id 提交），
 // 真实请求链路由 core mutations 自己的测试覆盖。
+const mockUpdateMeta = vi.hoisted(() => vi.fn());
 vi.mock("@multica/core/assets/mutations", () => ({
-  useUpdateAssetMeta: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateAssetMeta: () => ({ mutate: mockUpdateMeta, isPending: false }),
   useBatchUpdateAssetMeta: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
@@ -118,11 +119,48 @@ describe("AssetTable", () => {
     expect(screen.queryByRole("columnheader", { name: "Links" })).toBeNull();
     screen.getByRole("columnheader", { name: "Requirements" });
     screen.getByRole("columnheader", { name: "Tasks" });
-    screen.getByText("Requirements 1");
+    // 只读关联徽标：图标 + 计数（aria-label = "列名 + 条数"），点开看逐条明细
+    screen.getByLabelText("Requirements 1");
+    expect(screen.queryByLabelText("Tasks 0")).toBeNull();
     screen.getByRole("columnheader", { name: "Bound to" });
     screen.getByTestId("own");
     fireEvent.click(screen.getByLabelText("Edit"));
     expect(onEdit).toHaveBeenCalled();
+  });
+
+  it("edits requirement links inline when candidates are provided", async () => {
+    const user = userEvent.setup();
+    mockUpdateMeta.mockReset();
+    renderUi(
+      <AssetTable
+        rows={[binding("1")]}
+        features={{
+          inlineEdit: true,
+          showLinks: true,
+          linkCandidates: {
+            requirement: [
+              { id: "issue-req", title: "登录改造", status: "in_progress", is_requirement: true },
+            ],
+            task: [],
+          },
+        }}
+      />,
+    );
+    // 需求/任务两列各自一个可编辑入口（当前均为 0 条）。
+    const triggers = screen.getAllByLabelText("Manage linked work items (0)");
+    expect(triggers).toHaveLength(2);
+    await user.click(triggers[0]!);
+    await user.click(screen.getByText("登录改造"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    // 新增需求默认 produces，且 links 是全量替换：只带本次选中的一条。
+    expect(mockUpdateMeta).toHaveBeenCalledWith(
+      {
+        projectId: "p-1",
+        bindingId: "1",
+        data: { links: [{ issue_id: "issue-req", link_type: "produces" }] },
+      },
+      expect.anything(),
+    );
   });
 
   it("keeps read-only badges when inlineEdit is off and inline selects when on", () => {

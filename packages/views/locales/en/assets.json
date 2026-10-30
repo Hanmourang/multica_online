@@ -47,7 +47,15 @@
     "cancel": "Cancel",
     "save": "Save",
     "edit": "Edit",
-    "preview": "Preview"
+    "preview": "Preview",
+    "upload": "Upload"
+  },
+  "intake": {
+    "title_batch": "Upload assets",
+    "desc_batch": "Import a local folder or files — every accepted file is uploaded and bound to the target project in one pass.",
+    "project_label": "Target project",
+    "project_hint": "Uploads and bindings land in this project",
+    "no_project": "No projects yet — create one before adding assets."
   },
   "confirm_unbind": {
     "title": "Unbind this asset?",
@@ -91,7 +99,11 @@
   },
   "batch": {
     "select_folder": "Import from folder",
+    "pick_folder_hint": "Whole directory, recursively",
     "select_files": "Import files",
+    "pick_files_hint": "Pick several files at once",
+    "meta_title": "Import attributes",
+    "meta_hint": "Optional — applied to this batch",
     "folder_hint": "Pick a local folder — documents (md / doc / pdf / html / images …) are uploaded one by one and bound as assets automatically. Hidden files, files over 20 MB and unsupported types are skipped.",
     "no_files": "No importable files were selected.",
     "too_large": "too large (>20MB)",
@@ -99,6 +111,7 @@
     "unsupported_type": "unsupported type",
     "uploading": "Uploading {{done}} / {{total}}",
     "uploading_current": "Current: {{name}}",
+    "progress_note": "Files upload one by one; cancel anytime and keep what is already imported.",
     "cancel": "Cancel",
     "cancelling": "Cancelling…",
     "cancelled": "Cancelled — {{done}} / {{total}} already imported (kept)",
@@ -116,6 +129,7 @@
   "stages": {
     "all": "All stages",
     "none": "Not tagged",
+    "S0": "S0 Requirement Brief",
     "S1": "S1 Project Planning",
     "S2": "S2 Product Prototype",
     "S3": "S3 Technical Design",
@@ -199,7 +213,12 @@
     "unsupported_type": "This file type can't be previewed inline — download it to view."
   },
   "inline_edit": {
-    "tags_placeholder": "Add tag…"
+    "tags_placeholder": "Add tag…",
+    "link_manage": "Manage linked work items ({{count}})",
+    "link_search_requirement": "Filter requirements…",
+    "link_search_task": "Filter tasks…",
+    "link_selected": "{{count}} selected",
+    "link_empty": "Nothing available to link."
   },
   "batch_edit": {
     "title": "Batch edit metadata",

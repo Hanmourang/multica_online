@@ -152,7 +152,36 @@ export function decoratePrototypeFeatures(
 }
 
 function innerText(html: string): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * 只留可见正文：脚本/样式/注释里的字符串也是「文本」，但那是渲染模板而不是原型区块，
+ * 直接扫全文会把 `${esc(n.name)}` 这类占位符当成标题搬进功能点。
+ */
+function visibleHtml(html: string): string {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ");
+}
+
+/** 模板占位符、未闭合标签残片与超长句都不是可读的区块名。 */
+function isReadableTitle(text: string): boolean {
+  if (!text) return false;
+  if (/[<>]/.test(text)) return false;
+  if (/\$\{|{{\s*\w|}}/.test(text)) return false;
+  return text.length <= 60;
 }
 
 function moduleSlug(text: string): string {
@@ -169,31 +198,32 @@ function moduleSlug(text: string): string {
  * 覆盖没有标注 fp 的 HTML 原型。
  */
 export function extractPrototypeModules(html: string): PrototypeModule[] {
-  const fps = extractFeaturePoints(html);
+  const body = visibleHtml(html);
+  const fps = extractFeaturePoints(body);
   if (fps.length > 0) {
     return fps.map((point) => ({ ...point, source: "fp" as const }));
   }
   const out: PrototypeModule[] = [];
   const seen = new Set<string>();
   const push = (id: string, title: string, text: string, source: PrototypeModule["source"]) => {
-    if (!title || seen.has(id)) return;
+    if (!isReadableTitle(title) || seen.has(id)) return;
     seen.add(id);
     out.push({ id, title, text, source });
   };
-  const docTitle = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  const docTitle = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(body);
   if (docTitle) {
     const text = innerText(docTitle[1] ?? "");
     push("doc.title", text, text, "heading");
   }
   const headingRe = /<h([1-3])[^>]*>([\s\S]*?)<\/h\1>/gi;
-  let heading: RegExpExecArray | null = headingRe.exec(html);
+  let heading: RegExpExecArray | null = headingRe.exec(body);
   while (heading) {
     const text = innerText(heading[2] ?? "");
     push(`h${heading[1]}.${moduleSlug(text)}`, text, text, "heading");
-    heading = headingRe.exec(html);
+    heading = headingRe.exec(body);
   }
   const navRe = /<nav\b[\s\S]*?<\/nav>/gi;
-  let nav: RegExpExecArray | null = navRe.exec(html);
+  let nav: RegExpExecArray | null = navRe.exec(body);
   while (nav) {
     const linkRe = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
     let link: RegExpExecArray | null = linkRe.exec(nav[0]);
@@ -203,7 +233,7 @@ export function extractPrototypeModules(html: string): PrototypeModule[] {
       push(`nav.${moduleSlug(href || text)}`, text, href ? `${text} · ${href}` : text, "nav");
       link = linkRe.exec(nav[0]);
     }
-    nav = navRe.exec(html);
+    nav = navRe.exec(body);
   }
   return out;
 }

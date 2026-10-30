@@ -155,7 +155,11 @@ export function ArtifactPreviewPane({
               <RichContent content={source.text} density="document" />
             </div>
           ) : source.text != null ? (
-            <pre className={`${bodyClass} font-mono text-[11px] whitespace-pre-wrap`}>
+            // 13px + relaxed leading: the pane is up to 1440px wide, so an 11px
+            // body read as unreadably small next to the document (markdown) path.
+            <pre
+              className={`${bodyClass} font-mono text-label leading-relaxed whitespace-pre-wrap break-words`}
+            >
               {source.text}
             </pre>
           ) : source.url ? (

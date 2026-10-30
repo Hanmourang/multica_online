@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Download, LayoutGrid, List, Plus, RefreshCw, Share2 } from "lucide-react";
+import { ChevronRight, Download, LayoutGrid, List, Plus, RefreshCw, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRebridgeGraphSnapshot } from "@multica/core/graph/mutations";
@@ -36,12 +36,17 @@ import {
 } from "./module-feature-stats";
 
 /**
- * 画面 11 / C3：工具栏 + 三种视图。模块列表是左右分栏（左 296px 卡片，右四/五子 TAB）。
+ * 画面 11 / C3：工具栏 + 三种视图。模块列表是左右分栏（左 216px 卡片，可收成 44px 竖条，右子 TAB）。
+ *
+ * 视觉分层（2026-10-30）：左栏用渐变浅灰底 + 卡片式选中行，主区用近白背景，
+ * 靠明度差把原型区推成视觉主体；收起后左栏只留竖排标签，宽度让给原型。
  */
 export function ProductFeaturesTab() {
   const [viewMode, setViewMode] = useState<FeatureViewMode>("modules");
   const [filters, setFilters] = useState<FeatureModuleFilters>(EMPTY_FEATURE_FILTERS);
   const [creating, setCreating] = useState(false);
+  const [listCollapsed, setListCollapsed] = useState(false);
+  const { t } = useT("archive");
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-surface-border bg-surface">
@@ -57,15 +62,38 @@ export function ProductFeaturesTab() {
         }}
       />
       {viewMode === "modules" ? (
-        <div className="flex min-h-0 flex-1 items-stretch">
-          <aside className="flex w-[clamp(200px,22vw,340px)] shrink-0 flex-col overflow-hidden border-r border-surface-border bg-surface px-3 py-3">
-            <ModuleListPanel
-              filters={filters}
-              creating={creating}
-              onCreatingChange={setCreating}
-            />
+        <div className="flex min-h-0 flex-1 items-stretch bg-muted/25">
+          <aside
+            className={cn(
+              "flex shrink-0 flex-col overflow-hidden border-r border-surface-border bg-gradient-to-b from-muted/50 to-muted/20 transition-[width] duration-150",
+              listCollapsed ? "w-11" : "w-[216px]",
+            )}
+          >
+            {listCollapsed ? (
+              <button
+                type="button"
+                onClick={() => setListCollapsed(false)}
+                title={t(($) => $.features.inspector_expand)}
+                aria-label={t(($) => $.features.inspector_expand)}
+                className="flex h-full w-full flex-col items-center gap-2 py-2.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              >
+                <ChevronRight className="size-3.5" aria-hidden />
+                <span className="text-[10px] font-bold tracking-[0.2em] [writing-mode:vertical-rl]">
+                  {t(($) => $.features.view_modules)}
+                </span>
+              </button>
+            ) : (
+              <div className="min-h-0 flex-1 px-2.5 py-2.5">
+                <ModuleListPanel
+                  filters={filters}
+                  creating={creating}
+                  onCreatingChange={setCreating}
+                  onCollapse={() => setListCollapsed(true)}
+                />
+              </div>
+            )}
           </aside>
-          <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-muted/15 px-4 py-3">
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background px-4 py-3">
             <ModuleDetailPanel />
           </main>
         </div>

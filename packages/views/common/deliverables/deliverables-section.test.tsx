@@ -54,7 +54,8 @@ describe("DeliverablesSection", () => {
     renderSection(<DeliverablesSection taskId={T1} replyText={null} />);
     await waitFor(() => expect(screen.getByText("a.md")).toBeInTheDocument());
     expect(screen.getByTestId("deliverables-section")).toBeInTheDocument();
-    expect(screen.getByText("docs/a.md")).toBeInTheDocument();
+    // The path hint carries only the folder — the file name sits beside it.
+    expect(screen.getByText("docs/")).toBeInTheDocument();
     expect(screen.getByText("Added")).toBeInTheDocument();
   });
 

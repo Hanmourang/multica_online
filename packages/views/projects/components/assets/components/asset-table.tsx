@@ -12,7 +12,6 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -21,11 +20,14 @@ import {
 } from "@multica/ui/components/ui/table";
 import { useT } from "../../../../i18n";
 import { AppLink } from "../../../../navigation";
+import { cn } from "@multica/ui/lib/utils";
 import { assetPreviewMode } from "./asset-preview-mode";
 import {
+  InlineIssueLinkEditor,
   InlineRoleSelect,
   InlineStageSelect,
   InlineTagsEditor,
+  type InlineIssueCandidate,
 } from "./asset-inline-edit";
 import {
   REQUIREMENT_TONE_CLASS,
@@ -49,6 +51,15 @@ import {
  * 原「关联」列拆为需求/任务两列，按 issue 是否顶层（issueInfoById）分桶并以
  * 各自色相徽标区分；徽标可点开 Popover 查看逐条明细（标题深链 + 状态色徽）。
  * 「来源」列同步下线（字段仅作数据属性，不再占列宽）。
+ *
+ * 布局：table-fixed + 按表宽比例定列——自动布局会把富余空间按「内容基准宽」摊分，
+ * 名称列（长路径）会被撑到近半张表，且 max-w 只是基准不是硬上限；固定布局下
+ * 百分比才是精确值。名称列 22%~28%、标签列 16%~22% 按容器查询分档，其余列定宽 px。
+ * 长文件名只在名称单元格内 truncate，不再挤压右侧列。
+ * 容器查询（@container）按面板真实宽度渐进显隐次要列——选择列 @3xl、归属 @4xl、
+ * 绑定时间 @5xl；阶段/对象/标签/需求/任务恒显，保证任何宽度下行内编辑入口都在。
+ * 空值入口（标签 / 需求 / 任务）改为行悬停或键盘聚焦才显形，避免整屏「＋」噪音。
+ * 表头 sticky 吸顶，行内工具栏与分页不再被内容顶飞。
  */
 
 /** 需求/任务明细展示所需的最小 issue 信息（工作区页从 overview 聚合注入）。 */
@@ -58,8 +69,14 @@ export type AssetIssueInfo = {
   is_requirement?: boolean;
 };
 
+/** 行内关联候选（容器按 is_requirement 分桶预热，缺省时关联列只读）。 */
+export type AssetLinkCandidates = {
+  requirement: readonly InlineIssueCandidate[];
+  task: readonly InlineIssueCandidate[];
+};
+
 export type AssetCollectionFeatures = {
-  /** true 时阶段/对象/标签列为行内快编；false 为只读徽标。 */
+  /** true 时阶段/对象/标签/需求/任务列为行内快编；false 为只读徽标。 */
   inlineEdit?: boolean;
   /** 显示「需求」「任务」两列（取代原单列关联）。 */
   showLinks?: boolean;
@@ -72,7 +89,35 @@ export type AssetCollectionFeatures = {
   issueInfoById?: ReadonlyMap<string, AssetIssueInfo>;
   /** 需求/任务明细行的深链构造器（容器侧注入，共享层不感知路由）。 */
   issueHref?: (issueId: string) => string;
+  /** 需求/任务行内关联编辑的可选项；与 inlineEdit 同时提供才开启行内关联。 */
+  linkCandidates?: AssetLinkCandidates;
 };
+
+// ──────────────────────────────────────────────
+// 列度量：内容驱动宽度（min/max 封顶）+ 容器查询显隐（表头与单元格共用同一份常量）
+// ──────────────────────────────────────────────
+
+const COL_SELECT = "w-[40px] hidden @3xl:table-cell";
+/**
+ * 名称列：按表宽比例而不是按内容。自动布局会把富余空间按「内容基准宽」摊掉，
+ * 长路径会把这一列撑到近半张表；固定布局下百分比是精确值，宽容器收紧到 27%、
+ * 窄容器给 31% 弥补其他定宽列占比过高（按容器查询分档，非媒体查询）。
+ * 各档都比标签列多给 5–9 个点：文件名/路径过长时被截断的信息量更大。
+ */
+const COL_NAME = "w-[27%] @4xl:w-[31%] @6xl:w-[27%]";
+const COL_STAGE = "w-[120px]";
+const COL_ROLE = "w-[96px]";
+/**
+ * 标签列：同样用比例（名称列的对称项）。固定布局里 `max-w` 不生效（实测被忽略，
+ * 未定宽的列会被剩余空间胀到 800+），所以只能用百分比对照名称列给份额。
+ */
+const COL_TAGS = "w-[16%] @4xl:w-[18%] @6xl:w-[22%]";
+const COL_LINK = "w-[64px]";
+const COL_BOUND = "w-[180px] hidden @4xl:table-cell";
+const COL_CREATED = "w-[92px] hidden @5xl:table-cell";
+const COL_ACTIONS = "w-[96px] text-right";
+/** 吸顶表头：横向滚动容器里也保持在顶部，底色必须不透明。 */
+const HEAD = "sticky top-0 z-10 bg-background";
 
 export function AssetTable({
   rows,
@@ -99,60 +144,78 @@ export function AssetTable({
   const selectable = selectedIds !== undefined && onToggleSelect !== undefined;
   const allSelected =
     selectable && rows.length > 0 && rows.every((row) => selectedIds.has(row.id));
+  // 关联行内编辑需要 inlineEdit + 候选两条都就绪；只读时退回明细弹窗。
+  const inlineLinks = Boolean(f.inlineEdit && f.linkCandidates);
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          {selectable ? (
-            <TableHead className="w-8">
-              <Checkbox
-                checked={allSelected}
-                onCheckedChange={() => onToggleAll?.()}
-                aria-label={t(($) => $.selection.select_all)}
-              />
+    <div className="@container w-full">
+      <table className="w-full min-w-[720px] table-fixed caption-bottom text-body [&_td]:h-12 [&_td]:px-3 [&_td]:py-1.5 [&_th]:h-9 [&_th]:px-3 [&_th]:text-caption [&_th]:font-medium [&_th]:text-muted-foreground">
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            {selectable ? (
+              <TableHead className={`${HEAD} ${COL_SELECT}`}>
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={() => onToggleAll?.()}
+                  aria-label={t(($) => $.selection.select_all)}
+                />
+              </TableHead>
+            ) : null}
+            <TableHead className={`${HEAD} ${COL_NAME}`}>{t(($) => $.columns.name)}</TableHead>
+            <TableHead className={`${HEAD} ${COL_STAGE}`}>{t(($) => $.columns.stage)}</TableHead>
+            <TableHead className={`${HEAD} ${COL_ROLE}`}>{t(($) => $.columns.role)}</TableHead>
+            <TableHead className={`${HEAD} ${COL_TAGS}`}>{t(($) => $.columns.tags)}</TableHead>
+            {f.showLinks ? (
+              <>
+                <TableHead className={`${HEAD} ${COL_LINK}`}>
+                  {t(($) => $.columns.requirement)}
+                </TableHead>
+                <TableHead className={`${HEAD} ${COL_LINK}`}>{t(($) => $.columns.task)}</TableHead>
+              </>
+            ) : null}
+            {f.showOwnership ? (
+              <TableHead className={`${HEAD} ${COL_BOUND}`}>
+                {t(($) => $.columns.bound_to)}
+              </TableHead>
+            ) : null}
+            <TableHead className={`${HEAD} ${COL_CREATED}`}>
+              {t(($) => $.columns.created_at)}
             </TableHead>
-          ) : null}
-          <TableHead>{t(($) => $.columns.name)}</TableHead>
-          <TableHead>{t(($) => $.columns.stage)}</TableHead>
-          <TableHead>{t(($) => $.columns.role)}</TableHead>
-          <TableHead>{t(($) => $.columns.tags)}</TableHead>
-          {f.showLinks ? (
-            <>
-              <TableHead>{t(($) => $.columns.requirement)}</TableHead>
-              <TableHead>{t(($) => $.columns.task)}</TableHead>
-            </>
-          ) : null}
-          {f.showOwnership ? <TableHead>{t(($) => $.columns.bound_to)}</TableHead> : null}
-          <TableHead>{t(($) => $.columns.created_at)}</TableHead>
-          <TableHead className="text-right">{t(($) => $.columns.actions)}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <AssetTableRow
-            key={row.id}
-            row={row}
-            features={f}
-            selected={selectable ? selectedIds.has(row.id) : false}
-            canPreview={assetPreviewMode(row) !== null}
-            links={f.linksById?.get(row.id) ?? row.links ?? []}
-            onToggleSelect={selectable ? () => onToggleSelect(row.id) : undefined}
-            onPreview={onPreview ? () => onPreview(row) : undefined}
-            onEdit={() => f.onEdit?.(row)}
-            onUnbind={onUnbind ? () => onUnbind(row) : undefined}
-            unbindBusy={unbindBusyId === row.id}
-          />
-        ))}
-      </TableBody>
-    </Table>
+            <TableHead className={`${HEAD} ${COL_ACTIONS}`}>
+              {t(($) => $.columns.actions)}
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => (
+            <AssetTableRow
+              key={row.id}
+              row={row}
+              features={f}
+              inlineLinks={inlineLinks}
+              selected={selectable ? selectedIds.has(row.id) : false}
+              selectable={selectable}
+              canPreview={assetPreviewMode(row) !== null}
+              links={f.linksById?.get(row.id) ?? row.links ?? []}
+              onToggleSelect={selectable ? () => onToggleSelect(row.id) : undefined}
+              onPreview={onPreview ? () => onPreview(row) : undefined}
+              onEdit={() => f.onEdit?.(row)}
+              onUnbind={onUnbind ? () => onUnbind(row) : undefined}
+              unbindBusy={unbindBusyId === row.id}
+            />
+          ))}
+        </TableBody>
+      </table>
+    </div>
   );
 }
 
 function AssetTableRow({
   row,
   features,
+  inlineLinks,
   selected,
+  selectable,
   canPreview,
   links,
   onToggleSelect,
@@ -163,7 +226,9 @@ function AssetTableRow({
 }: {
   row: AssetBinding;
   features: AssetCollectionFeatures;
+  inlineLinks: boolean;
   selected: boolean;
+  selectable: boolean;
   canPreview: boolean;
   links: AssetIssueLink[];
   onToggleSelect?: () => void;
@@ -184,22 +249,49 @@ function AssetTableRow({
     }
     return { requirementLinks: requirements, taskLinks: tasks };
   }, [links, features.issueInfoById]);
+
+  const renderLinks = (
+    bucket: "requirement" | "task",
+    bucketLinks: AssetIssueLink[],
+    otherLinks: AssetIssueLink[],
+  ) =>
+    inlineLinks && features.linkCandidates ? (
+      <InlineIssueLinkEditor
+        row={row}
+        bucket={bucket}
+        bucketLinks={bucketLinks}
+        otherLinks={otherLinks}
+        candidates={features.linkCandidates[bucket]}
+      />
+    ) : (
+      <LinkCountBadge
+        links={bucketLinks}
+        toneClass={bucket === "requirement" ? REQUIREMENT_TONE_CLASS : TASK_TONE_CLASS}
+        icon={
+          bucket === "requirement" ? <Workflow className="size-3" /> : <ListTodo className="size-3" />
+        }
+        label={t(($) => (bucket === "requirement" ? $.columns.requirement : $.columns.task))}
+        features={features}
+      />
+    );
+
   return (
-    <TableRow className={selected ? "bg-accent/30" : undefined}>
-      {onToggleSelect ? (
-        <TableCell className="w-8 p-0 pl-2">
+    <TableRow className={cn("group/row", selected && "bg-accent/30")}>
+      {selectable ? (
+        <TableCell className={COL_SELECT}>
           <Checkbox checked={selected} onCheckedChange={onToggleSelect} />
         </TableCell>
       ) : null}
-      <TableCell>
+      <TableCell className={`${COL_NAME} overflow-hidden`}>
         <div className="flex min-w-0 items-center gap-2">
           <AssetCategoryTile category={row.asset_category} subtype={row.asset_subtype} />
-          <div className="min-w-0">
+          {/* 列宽已由 table-fixed 钉死，文本块只负责在剩余宽度内截断。 */}
+          <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-1.5">
               {canPreview ? (
                 <button
                   type="button"
-                  className="min-w-0 cursor-pointer truncate font-medium text-left hover:text-violet-600 hover:underline dark:hover:text-violet-400"
+                  className="min-w-0 cursor-pointer truncate text-left font-medium hover:text-violet-600 hover:underline dark:hover:text-violet-400"
                   title={row.asset_name}
                   onClick={onPreview}
                 >
@@ -225,7 +317,7 @@ function AssetTableRow({
           </div>
         </div>
       </TableCell>
-      <TableCell>
+      <TableCell className={COL_STAGE}>
         {features.inlineEdit ? (
           <InlineStageSelect row={row} />
         ) : row.lifecycle_stage ? (
@@ -234,7 +326,7 @@ function AssetTableRow({
           <span className="text-caption text-muted-foreground">—</span>
         )}
       </TableCell>
-      <TableCell>
+      <TableCell className={COL_ROLE}>
         {features.inlineEdit ? (
           <InlineRoleSelect row={row} />
         ) : row.asset_role ? (
@@ -243,62 +335,68 @@ function AssetTableRow({
           <span className="text-caption text-muted-foreground">—</span>
         )}
       </TableCell>
-      <TableCell>
-        {features.inlineEdit ? <InlineTagsEditor row={row} /> : <AssetTagChips tags={row.tags} />}
+      <TableCell className={`${COL_TAGS} overflow-hidden`}>
+        {features.inlineEdit ? (
+          <InlineTagsEditor row={row} />
+        ) : (
+          <AssetTagChips tags={row.tags} max={2} />
+        )}
       </TableCell>
       {features.showLinks ? (
         <>
-          <TableCell>
-            <LinkCountBadge links={requirementLinks} toneClass={REQUIREMENT_TONE_CLASS} icon={<Workflow className="size-3" />} label={t(($) => $.columns.requirement)} features={features} />
+          <TableCell className={COL_LINK}>
+            {renderLinks("requirement", requirementLinks, taskLinks)}
           </TableCell>
-          <TableCell>
-            <LinkCountBadge links={taskLinks} toneClass={TASK_TONE_CLASS} icon={<ListTodo className="size-3" />} label={t(($) => $.columns.task)} features={features} />
+          <TableCell className={COL_LINK}>
+            {renderLinks("task", taskLinks, requirementLinks)}
           </TableCell>
         </>
       ) : null}
       {features.showOwnership ? (
-        <TableCell className="text-caption">{features.ownershipLabel?.(row) ?? null}</TableCell>
+        <TableCell className={`${COL_BOUND} overflow-hidden text-caption`}>
+          {features.ownershipLabel?.(row) ?? null}
+        </TableCell>
       ) : null}
-      <TableCell className="text-caption text-muted-foreground">
+      <TableCell className={`${COL_CREATED} text-caption text-muted-foreground`}>
         {formatAssetDate(row.created_at)}
       </TableCell>
-      <TableCell className="text-right">
-        <div className="flex items-center justify-end gap-1">
+      <TableCell className={COL_ACTIONS}>
+        <div className="flex items-center justify-end gap-0.5">
           {canPreview ? (
             <Button
               type="button"
-              size="xs"
+              size="icon-xs"
               variant="ghost"
               onClick={onPreview}
               aria-label={t(($) => $.actions.preview)}
+              title={t(($) => $.actions.preview)}
             >
               <Eye />
-              {t(($) => $.actions.preview)}
             </Button>
           ) : null}
           {features.onEdit ? (
             <Button
               type="button"
-              size="xs"
+              size="icon-xs"
               variant="ghost"
               onClick={onEdit}
               aria-label={t(($) => $.actions.edit)}
+              title={t(($) => $.actions.edit)}
             >
               <Pencil />
-              {t(($) => $.actions.edit)}
             </Button>
           ) : null}
           {onUnbind ? (
             <Button
               type="button"
-              size="xs"
+              size="icon-xs"
               variant="ghost"
               disabled={unbindBusy}
               onClick={onUnbind}
               aria-label={t(($) => $.actions.unbind)}
+              title={t(($) => $.actions.unbind)}
             >
               <Unlink />
-              {t(($) => $.actions.unbind)}
             </Button>
           ) : null}
         </div>
@@ -308,8 +406,9 @@ function AssetTableRow({
 }
 
 /**
- * 需求/任务徽标：非零时用各自色相（indigo/teal），零用破折号占位；
- * 点击展开 Popover 明细——逐行圆点 + 标题（可深链）+ 状态色徽 + 链型。
+ * 需求/任务徽标（只读态）：非零时用各自色相（indigo/teal）并显示条数，
+ * 零用破折号占位；点击展开 Popover 明细——逐行圆点 + 标题（可深链）+ 状态色徽 + 链型。
+ * 列宽只有 48px，因此徽标只保留「图标 + 计数」，列头已说明语义。
  */
 function LinkCountBadge({
   links,
@@ -333,13 +432,14 @@ function LinkCountBadge({
       <PopoverTrigger
         className="cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
         title={t(($) => $.columns.view_links, { count: links.length })}
+        aria-label={`${label} ${links.length}`}
       >
-        <Badge className={`gap-1 border-0 text-micro ${toneClass}`}>
+        <Badge className={`gap-1 border-0 px-1.5 text-micro ${toneClass}`}>
           {icon}
-          {label} {links.length}
+          <span className="tabular-nums">{links.length}</span>
         </Badge>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 max-h-72 overflow-y-auto">
+      <PopoverContent align="start" className="max-h-72 w-80 overflow-y-auto">
         <ul className="flex flex-col gap-0.5">
           {links.map((l) => {
             const info = features.issueInfoById?.get(l.issue_id);

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -108,5 +108,27 @@ describe("BindAssetDialog", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Go to manual entry" }));
     expect(screen.getByPlaceholderText("e.g. order-service")).toBeInTheDocument();
+  });
+
+  // 上传与绑定入口复用同一弹窗实例：切到「目录导入」时标题必须换成上传口径，
+  // 且同一时刻只留一个面板（旧面板未卸载会把弹窗撑高一整块候选区）。
+  it("switches the header and leaves a single panel when opening folder import", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    expect(
+      await screen.findByText("No matching candidates. Try another keyword, or add one manually."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Bind" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Folder import" }));
+
+    expect(await screen.findByRole("heading", { name: "Upload assets" })).toBeInTheDocument();
+    expect(screen.getByText("Import from folder")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByText("No matching candidates. Try another keyword, or add one manually."),
+      ).not.toBeInTheDocument(),
+    );
   });
 });

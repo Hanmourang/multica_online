@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Eye, FileStack, FolderGit2, FolderSearch, Link2, MoreHorizontal, Package, Pencil, Play, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Tags, Ticket } from "lucide-react";
+import { Eye, FileStack, FolderGit2, FolderSearch, MoreHorizontal, Package, Pencil, Play, Plus, Search, ShieldCheck, SlidersHorizontal, Tags, Ticket, X } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { usePatchArtifact, useSyncProjectArtifacts } from "@multica/core/artifacts/mutations";
+import { workspaceOverviewOptions } from "@multica/core/assets/queries";
 import {
   archiveSyncConfigOptions,
   projectArtifactListOptions,
@@ -37,7 +38,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { isDesktopShell } from "../../../platform";
@@ -70,18 +70,16 @@ import {
 } from "./artifact-module-tag";
 import { ArtifactPreviewDialog } from "./artifact-preview";
 import { ArtifactPreviewPane } from "./artifact-preview-pane";
-import { ContractMapping } from "./contract-mapping";
-import { SyncConsole } from "./sync-console";
 import { formatTimestamp, QueryError, QueryLoading } from "./query-states";
 
 /**
  * f4 项目档案主入口。
  *
- * Top-level tabs: 浏览（matrix + list）/ 同步控制台（f3）/ 映射说明（f1）。
- * The browser owns the filtered artifact query — scope/stage/doc_type ride
- * the request URL (and thus the query key), search + missing-only are client
- * side. Selecting a chip drives the right-hand summary panel; 预览 opens the
- * f5 dialog, 重新归类 opens the f6 dialog.
+ * 单层浏览视图（matrix + list）：二级页签「同步与关联 / 档案设置」已下线，
+ * 档案即默认内容。The browser owns the filtered artifact query — scope/stage/
+ * doc_type ride the request URL (and thus the query key), search + missing-only
+ * are client side. Selecting a chip drives the right-hand summary panel；预览
+ * opens the f5 dialog，重新归类 opens the f6 dialog.
  */
 export function ArchiveTab({
   projectId,
@@ -96,7 +94,6 @@ export function ArchiveTab({
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
 
-  const [pane, setPane] = useState<"browser" | "sync" | "mapping">("browser");
   const [scope, setScope] = useState<ArtifactScope | null>(null);
   const [stage, setStage] = useState<ArtifactStage | null>(null);
   const [docType, setDocType] = useState<string | null>(null);
@@ -151,6 +148,22 @@ export function ArchiveTab({
     () => (issuesQuery.data ?? []).filter((issue) => issue.project_id === projectId),
     [issuesQuery.data, projectId],
   );
+  /**
+   * 资产节点分布：档案 → 关联资产的 lifecycle_stage。矩阵列归属优先用它
+   * （人工在资产管理里标注的阶段），拿不到再回退文档类型判定。
+   */
+  const assetOverviewQuery = useQuery(workspaceOverviewOptions(wsId, projectId));
+  const assetStages = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const binding of assetOverviewQuery.data?.bindings ?? []) {
+      const artifactId = binding.external_ref?.artifact_id;
+      if (typeof artifactId !== "string" || !artifactId) continue;
+      const stage = binding.lifecycle_stage ?? null;
+      // 同一档案可能挂多条资产：有阶段的覆盖无阶段的。
+      if (stage || !map.has(artifactId)) map.set(artifactId, stage);
+    }
+    return map;
+  }, [assetOverviewQuery.data]);
   const boundPath = useMemo(() => {
     const boundId = projectQuery.data?.archive_resource_id;
     if (!boundId) return null;
@@ -251,14 +264,6 @@ export function ArchiveTab({
   };
 
   const artifacts = listQuery.data?.artifacts ?? [];
-
-  const unboundCount = useMemo(
-    () =>
-      (listQuery.data?.artifacts ?? []).filter(
-        (artifact) => artifact.scope === "requirement" && !artifact.issue_id,
-      ).length,
-    [listQuery.data],
-  );
 
   const selected = useMemo(
     () => artifacts.find((a) => a.id === selectedId) ?? null,
@@ -411,11 +416,17 @@ export function ArchiveTab({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && pickedIds.size > 0) setPickedIds(new Set());
+      if (event.key !== "Escape") return;
+      if (pickedIds.size > 0) {
+        setPickedIds(new Set());
+        return;
+      }
+      // 预览弹窗打开时 Esc 由弹窗自己关闭，不再同时收起右侧栏。
+      if (previewIndex === null) setSelectedId(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pickedIds.size]);
+  }, [pickedIds.size, previewIndex]);
 
   /** f5 navigation group: same requirement (or same non-requirement scope), stage-ordered. */
   const previewGroup = useMemo(
@@ -445,50 +456,7 @@ export function ArchiveTab({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="archive-tab">
-      <Tabs
-        value={pane}
-        onValueChange={(next) => setPane(next as "browser" | "sync" | "mapping")}
-        className="gap-3"
-      >
-        <TabsList variant="line">
-          <TabsTrigger value="browser">{t(($) => $.tabs.archive)}</TabsTrigger>
-          <TabsTrigger value="sync">{t(($) => $.sync.title)}</TabsTrigger>
-          <TabsTrigger value="mapping">{t(($) => $.mapping.title)}</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="sync" className="min-h-0 overflow-y-auto px-1 pb-6">
-          <SyncConsole
-            projectId={projectId}
-            archiveRoot={archiveRoot ?? boundPath}
-            onImport={() => setImportOpen(true)}
-            onDesktopSync={desktop ? handleSync : undefined}
-            desktopSyncPending={syncBusy}
-            onEdit={(artifact) => {
-              setEditorSeed(null);
-              setEditorArtifact(artifact);
-              setEditorOpen(true);
-            }}
-          />
-        </TabsContent>
-        <TabsContent value="mapping" className="min-h-0 overflow-y-auto px-1 pb-6">
-          <ContractMapping
-            projectId={projectId}
-            archiveRoot={archiveRoot ?? boundPath}
-            onImport={() => setImportOpen(true)}
-            onCreate={() => {
-              setEditorArtifact(null);
-              setEditorSeed({ scope: "project", docType: "architecture" });
-              setEditorOpen(true);
-            }}
-            onEdit={(artifact) => {
-              setEditorSeed(null);
-              setEditorArtifact(artifact);
-              setEditorOpen(true);
-            }}
-          />
-        </TabsContent>
-
-        <TabsContent value="browser" className="flex min-h-0 flex-col gap-2">
+      <div className="flex min-h-0 flex-1 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex rounded-md border border-surface-border p-0.5">
               {(
@@ -586,17 +554,6 @@ export function ArchiveTab({
                   <DropdownMenuItem onClick={() => setImportOpen(true)}>
                     <FolderSearch />
                     {t(($) => $.import.action)}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setPane("mapping")}>
-                    <Settings2 />
-                    {t(($) => $.archive_toolbar.settings)}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setPane("sync")}>
-                    <Link2 />
-                    {t(($) => $.archive_toolbar.sync_relate)}
-                    {unboundCount > 0
-                      ? ` · ${t(($) => $.archive_toolbar.unbound_count, { n: unboundCount })}`
-                      : null}
                   </DropdownMenuItem>
                   {onExportFiling ? (
                     <>
@@ -755,6 +712,7 @@ export function ArchiveTab({
                 <ArtifactMatrix
                   artifacts={artifacts}
                   issues={projectIssues}
+                  assetStages={assetStages}
                   requirementHref={(issueId) => paths.projectRequirement(projectId, issueId)}
                   selectedId={selectedId}
                   onSelect={openPreview}
@@ -788,22 +746,38 @@ export function ArchiveTab({
             </div>
 
             {selected ? (
-            <aside className="hidden min-h-0 space-y-2 overflow-y-auto rounded-lg border border-surface-border bg-surface p-3 lg:block">
+            <aside
+              className="hidden min-h-0 space-y-2 overflow-y-auto rounded-lg border border-surface-border bg-surface p-3 lg:block"
+              data-testid="archive-inspector-aside"
+            >
                 <>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 text-left"
-                    onClick={() => openPreview(selected)}
-                  >
-                    <FileStack className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate text-caption font-medium">
-                      {artifactDisplayName(selected.rel_path)}
-                    </span>
-                    <ArtifactModuleBadge
-                      tag={artifactModuleTag(selected.rel_path, selected.doc_module)}
-                      title={t(($) => $.browser.module)}
-                    />
-                  </button>
+                  <div className="flex items-start gap-1">
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      onClick={() => openPreview(selected)}
+                    >
+                      <FileStack className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-caption font-medium">
+                        {artifactDisplayName(selected.rel_path)}
+                      </span>
+                      <ArtifactModuleBadge
+                        tag={artifactModuleTag(selected.rel_path, selected.doc_module)}
+                        title={t(($) => $.browser.module)}
+                      />
+                    </button>
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      className="shrink-0"
+                      aria-label={t(($) => $.common.close)}
+                      title={t(($) => $.common.close)}
+                      onClick={() => setSelectedId(null)}
+                    >
+                      <X />
+                    </Button>
+                  </div>
                   <ArtifactPreviewPane
                     artifact={selected}
                     projectId={projectId}
@@ -905,8 +879,7 @@ export function ArchiveTab({
             </aside>
             ) : null}
           </div>
-        </TabsContent>
-      </Tabs>
+      </div>
 
       {/* f5 preview dialog */}
       <ArtifactPreviewDialog

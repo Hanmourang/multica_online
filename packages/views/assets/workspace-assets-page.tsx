@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DatabaseZap,
@@ -10,8 +10,8 @@ import {
   List,
   Network,
   Pencil,
-  Plus,
   Search,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -76,6 +76,11 @@ import {
 import { useT } from "../i18n";
 import { AppLink } from "../navigation";
 import {
+  PAGE_GUTTER,
+  PAGE_TOOLBAR,
+  PageHeader,
+} from "../layout/page-header";
+import {
   REQUIREMENT_DOT_CLASS,
   TASK_DOT_CLASS,
   statusToneClass,
@@ -87,7 +92,8 @@ import {
   AssetPreviewDialog,
   assetPreviewMode,
 } from "../projects/components/assets/components/asset-preview-dialog";
-import { AssetTable, type AssetIssueInfo } from "../projects/components/assets/components/asset-table";
+import { AssetTable, type AssetIssueInfo, type AssetLinkCandidates } from "../projects/components/assets/components/asset-table";
+import type { InlineIssueCandidate } from "../projects/components/assets/components/asset-inline-edit";
 import { AssetCardGrid } from "../projects/components/assets/components/asset-card-grid";
 import { AssetSelectionToolbar } from "../projects/components/assets/components/asset-selection-toolbar";
 import { AssetBatchEditDialog } from "../projects/components/assets/components/asset-batch-edit-dialog";
@@ -96,6 +102,10 @@ import {
   pruneSelectedIds,
   submitBatchByProject,
 } from "../projects/components/assets/components/asset-batch-draft";
+import {
+  estimateFillPageSize,
+  useFillPageSize,
+} from "../projects/components/assets/hooks/use-fill-page-size";
 
 /**
  * 工作区级「资产管理」独立模块（左侧栏 工作区 → 资产管理）。
@@ -140,16 +150,22 @@ export function WorkspaceAssetsPage() {
   // TAB's category / page selection).
   const storeKey = assetFilterKey(wsId, "__workspace__");
   const filters = useAssetFilters(storeKey);
-  const { setName, setPage } = useAssetFilterStore();
+  const { setName, setPage, setPageSize } = useAssetFilterStore();
 
   const [view, setView] = useState<AssetView>("list");
   // 列表视图内部形态：表格（默认，分页）⇄ 卡片画廊，口径同项目 TAB。
   const [listView, setListView] = useState<"table" | "grid">("table");
   const [stageFilter, setStageFilter] = useState<StageFilter>("all");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
+  // 首轮查询等首次测量落定（或超时兑底）再放行，见下方 useFillPageSize。
+  const [pageSized, setPageSized] = useState(false);
   // 项目下拉过滤："all" = 全域；选中单项目时解锁绑定 / 档案同步等项目能力。
   const [projectFilter, setProjectFilter] = useState<string>("all");
+  // 新增入口（上传 / 绑定）的目标项目 + 默认 TAB：本页是跨项目聚合面，
+  // 端点仍是项目级，所以对话框内先选目标项目。
   const [bindOpen, setBindOpen] = useState(false);
+  const [bindTab, setBindTab] = useState<"candidates" | "batch">("candidates");
+  const [bindProjectId, setBindProjectId] = useState<string>("");
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
   // binding 行自带 project_id，解绑 / 编辑只需 AssetBinding 形状（overview 数据源）。
   const [unbindTarget, setUnbindTarget] = useState<AssetBinding | null>(null);
@@ -173,6 +189,7 @@ export function WorkspaceAssetsPage() {
   );
   const stageLabels = useMemo<Record<AssetLifecycleStage, string>>(
     () => ({
+      S0: t(($) => $.stages.S0),
       S1: t(($) => $.stages.S1),
       S2: t(($) => $.stages.S2),
       S3: t(($) => $.stages.S3),
@@ -198,33 +215,74 @@ export function WorkspaceAssetsPage() {
       ...(filters.category ? { category: filters.category } : {}),
       ...(filters.name.trim() ? { name: filters.name.trim() } : {}),
       ...(projectFilter !== "all" ? { projectId: projectFilter } : {}),
+      // 阶段 / 对象下推服务端：分页总数与筛选结果同口径，每页仍是“排满”的行数，
+      // 不会因为页内二次过滤只剩几行而留白。
+      ...(stageFilter !== "all" ? { stage: stageFilter } : {}),
+      ...(roleFilter !== "all" ? { role: roleFilter } : {}),
     }),
-    [filters.page, filters.pageSize, filters.category, filters.name, projectFilter],
+    [
+      filters.page,
+      filters.pageSize,
+      filters.category,
+      filters.name,
+      projectFilter,
+      stageFilter,
+      roleFilter,
+    ],
   );
 
-  const listQuery = useQuery(workspaceAssetsOptions(wsId, listFilters));
+  const listQuery = useQuery({
+    ...workspaceAssetsOptions(wsId, listFilters),
+    // 首屏先量再取数：页尺寸是测出来的，不等一次测量就会先用 store 默认的
+    // 20 取一轮、随后再跳成实测值（多一次请求 + 一次行数跳动）。
+    enabled: pageSized && Boolean(wsId),
+  });
   const page = listQuery.data;
-  const rows = useMemo(() => {
-    let items = page?.items ?? [];
-    if (stageFilter !== "all") {
-      items = items.filter((r) =>
-        stageFilter === "none" ? !r.lifecycle_stage : r.lifecycle_stage === stageFilter,
-      );
-    }
-    if (roleFilter !== "all") {
-      items = items.filter((r) =>
-        roleFilter === "none" ? !r.asset_role : r.asset_role === roleFilter,
-      );
-    }
-    return items;
-  }, [page, stageFilter, roleFilter]);
+  const rows = useMemo(() => page?.items ?? [], [page]);
 
   // 矩阵 / 工作项×资产视图与编辑抽屉的聚合面（含 links + 候选工作项）；
-  // 选中项目时服务端按 projectId 收窄，与分页列表口径一致。
+  // 选中项目时服务端按 projectId 收窄，与分页列表口径一致。声明在测量之前：
+  // 统计条的终态高度取决于它（骨架与真实条在窄容器里差一行图例）。
   const overviewQuery = useQuery(
     workspaceOverviewOptions(wsId, projectFilter !== "all" ? projectFilter : undefined),
   );
   const overview = overviewQuery.data;
+
+  // Fit-to-viewport paging（仅表格形态）：每页条数由表格盒子的实际高度决定，
+  // 排满即换页。筛选都在服务端完成，所以量到的行数就是最终行数；等 overview
+  // 落定再量，才能量到统计条定型后的高度。
+  const tableBoxRef = useRef<HTMLDivElement | null>(null);
+  useFillPageSize(
+    tableBoxRef,
+    (size) => {
+      setPageSize(storeKey, size);
+      setPageSized(true);
+    },
+    {
+      enabled: view === "list" && listView === "table" && !overviewQuery.isPending,
+      rowCount: rows.length,
+      totalCount: page?.totalCount ?? 0,
+    },
+  );
+
+  // 兑底：盒子迟迟量不到高（隐藏容器 / overview 未回）时不能永久停在骨架上。
+  // 不用 store 默认的 20 直接放行——那样一屏会被 20 行撑出滚动；改用视口高度
+  // 估一个保守值，测量一旦成功会用实测值覆盖。
+  useEffect(() => {
+    if (pageSized) return;
+    const timer = setTimeout(() => {
+      setPageSize(storeKey, estimateFillPageSize(window.innerHeight));
+      setPageSized(true);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [pageSized, setPageSize, storeKey]);
+
+  // 页尺寸变大 / 筛选收窄后页码可能越界，拉回末页避免空页。
+  useEffect(() => {
+    const totalPages = page?.totalPages ?? 0;
+    if (totalPages > 0 && filters.page > totalPages) setPage(storeKey, totalPages);
+  }, [page?.totalPages, filters.page, setPage, storeKey]);
+
   const filteredOverviewBindings = useMemo(() => {
     const items = overview?.bindings ?? [];
     const q = filters.name.trim().toLowerCase();
@@ -265,6 +323,25 @@ export function WorkspaceAssetsPage() {
       map.set(i.id, { title: i.title, status: i.status, is_requirement: i.is_requirement ?? false });
     }
     return map;
+  }, [overview]);
+
+  // 行内关联编辑的候选（按 is_requirement 分桶）：overview 未就绪时不开放
+  // 行内关联——PUT meta 的 links 是全量替换，候选未知时写入会误删既有关联。
+  const inlineLinkCandidates = useMemo<AssetLinkCandidates | undefined>(() => {
+    if (!overview) return undefined;
+    const requirement: InlineIssueCandidate[] = [];
+    const task: InlineIssueCandidate[] = [];
+    for (const i of overview.issues ?? []) {
+      const candidate: InlineIssueCandidate = {
+        id: i.id,
+        title: i.title,
+        status: i.status,
+        project_id: i.project_id,
+        is_requirement: i.is_requirement ?? false,
+      };
+      (i.is_requirement ? requirement : task).push(candidate);
+    }
+    return { requirement, task };
   }, [overview]);
 
   // 可选行集：表格形态 = 当前页行；卡片形态 = 筛选后全量 overview（与分页解耦）。
@@ -338,6 +415,26 @@ export function WorkspaceAssetsPage() {
     for (const pr of projectsQuery.data ?? []) map.set(pr.id, pr.title);
     return map;
   }, [projectsQuery.data]);
+  // 对话框内选项目用（不含「全部项目」）：上传 / 绑定必须落到具体项目。
+  const projectOptions = useMemo(
+    () => (projectsQuery.data ?? []).map((pr) => ({ value: pr.id, label: pr.title })),
+    [projectsQuery.data],
+  );
+
+  /**
+   * 新增入口：上传新增（目录导入 TAB）与绑定（候选/手动 TAB）共用同一对话框。
+   * 目标项目缺省跟随顶部项目过滤；全域时取列表第一个，用户可在对话框内改。
+   */
+  const openIntake = (tab: "candidates" | "batch") => {
+    const target = projectFilter !== "all" ? projectFilter : projectOptions[0]?.value ?? "";
+    if (!target) {
+      toast.error(t(($) => $.intake.no_project));
+      return;
+    }
+    setBindProjectId(target);
+    setBindTab(tab);
+    setBindOpen(true);
+  };
 
   // 档案 → 资产批量导入（对齐项目 TAB 空态）：endpoint 是项目级，仅选中单项目时可用。
   const syncProjectId = projectFilter === "all" ? "" : projectFilter;
@@ -396,80 +493,68 @@ export function WorkspaceAssetsPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4 sm:p-6" data-testid="workspace-assets-page">
-      {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="flex items-center gap-2 text-title font-semibold">
-            <Link2 className="size-5 text-muted-foreground" />
-            {t(($) => $.workspace_title)}
-          </h1>
-          <p className="text-caption text-muted-foreground">{t(($) => $.workspace_subtitle)}</p>
+    <div className="flex h-full min-h-0 flex-col" data-testid="workspace-assets-page">
+      {/* 页头对齐全站 PageHeader 规范（h-12 + px-4 + border-b），不再自写大标题块；
+          说明文案降为 micro 级别与标题同基线，省下的 44px 全给列表首屏。 */}
+      <PageHeader>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <Link2 className="size-4 shrink-0 text-muted-foreground" />
+          <h1 className="shrink-0 text-title-sm font-semibold">{t(($) => $.workspace_title)}</h1>
+          <span className="min-w-0 truncate text-micro text-muted-foreground">
+            {t(($) => $.workspace_subtitle)}
+          </span>
         </div>
         {/* 新增绑定在项目上下文完成；本页是聚合管理面，给一条回到项目的引导。 */}
         <AppLink
           href={p.projects()}
-          className="inline-flex items-center gap-1.5 rounded-md border border-surface-border px-2.5 py-1.5 text-caption font-medium hover:bg-accent/60"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
         >
           <FolderKanban className="size-3.5" />
           {t(($) => $.go_to_projects)}
         </AppLink>
-      </div>
+      </PageHeader>
 
-      {/* View segment（列表 | 阶段矩阵 | 工作项 × 资产，对齐原型 v2） */}
-      <div className="flex items-center gap-1" role="tablist" aria-label={t(($) => $.views.list)}>
-        <ViewTab active={view === "list"} onClick={() => setView("list")} icon={<List className="size-3.5" />}>
-          {t(($) => $.views.list)}
-        </ViewTab>
-        <ViewTab active={view === "matrix"} onClick={() => setView("matrix")} icon={<LayoutGrid className="size-3.5" />}>
-          {t(($) => $.views.matrix)}
-        </ViewTab>
-        <ViewTab active={view === "issues"} onClick={() => setView("issues")} icon={<Network className="size-3.5" />}>
-          {t(($) => $.views.issues)}
-        </ViewTab>
-      </div>
-
-      {/* Filter toolbar：名称走服务端（列表）/内存（矩阵、关联）；
-          stage / role 是 473 新维度，前端统一二次过滤两个数据面。「分类」维度
-          已按产品要求从管理面下线（创建链路仍写默认分类）。 */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-48 max-w-sm flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={filters.name}
-            onChange={(event) => setName(storeKey, event.target.value)}
-            placeholder={t(($) => $.search_placeholder)}
-            aria-label={t(($) => $.search_placeholder)}
-            className="pl-8"
-          />
+      {/* 一行 chrome：左 = 视图切换（列表 | 阶段矩阵 | 工作项 × 资产），
+          右 = 项目过滤 / 表格⇄卡片 / 绑定（与 PageHeader 同栏高、同 gutter） */}
+      <div className={PAGE_TOOLBAR}>
+        <div className="flex min-w-0 items-center gap-1" role="tablist" aria-label={t(($) => $.views.list)}>
+          <ViewTab active={view === "list"} onClick={() => setView("list")} icon={<List className="size-3.5" />}>
+            {t(($) => $.views.list)}
+          </ViewTab>
+          <ViewTab active={view === "matrix"} onClick={() => setView("matrix")} icon={<LayoutGrid className="size-3.5" />}>
+            {t(($) => $.views.matrix)}
+          </ViewTab>
+          <ViewTab active={view === "issues"} onClick={() => setView("issues")} icon={<Network className="size-3.5" />}>
+            {t(($) => $.views.issues)}
+          </ViewTab>
         </div>
-        {/* 项目下拉过滤：page 端走服务端 projectId，overview 端走其同名口径。 */}
-        <Select
-          items={projectItems}
-          value={projectFilter}
-          onValueChange={(value) => {
-            if (!value || value === projectFilter) return;
-            setProjectFilter(value);
-            setPage(storeKey, 1);
-          }}
-        >
-          <SelectTrigger size="sm" className="w-44 shrink-0">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {projectItems.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-2">
+          {/* 项目下拉过滤：page 端走服务端 projectId，overview 端走其同名口径。 */}
+          <Select
+            items={projectItems}
+            value={projectFilter}
+            onValueChange={(value) => {
+              if (!value || value === projectFilter) return;
+              setProjectFilter(value);
+              setPage(storeKey, 1);
+            }}
+          >
+            <SelectTrigger size="sm" className="w-40 shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {projectItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {view === "list" && filteredOverviewBindings.length > 0 ? (
             <div className="flex items-center gap-0.5 rounded-lg border border-surface-border p-0.5">
               <Button
                 type="button"
-                size="xs"
+                size="icon-sm"
                 variant={listView === "table" ? "secondary" : "ghost"}
                 aria-label={t(($) => $.view_switch.list)}
                 title={t(($) => $.view_switch.list)}
@@ -479,7 +564,7 @@ export function WorkspaceAssetsPage() {
               </Button>
               <Button
                 type="button"
-                size="xs"
+                size="icon-sm"
                 variant={listView === "grid" ? "secondary" : "ghost"}
                 aria-label={t(($) => $.view_switch.grid)}
                 title={t(($) => $.view_switch.grid)}
@@ -490,14 +575,54 @@ export function WorkspaceAssetsPage() {
             </div>
           ) : null}
           {projectFilter !== "all" ? (
-            <Button type="button" size="sm" onClick={() => setBindOpen(true)}>
-              <Plus />
-              {t(($) => $.actions.bind)}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={syncArchive.isPending}
+              onClick={() => void handleSyncFromArchive()}
+            >
+              <DatabaseZap />
+              {t(($) => $.actions.sync_from_archive)}
             </Button>
           ) : null}
+          {/* 新增入口常驻：全域下在对话框内选目标项目，不再依赖先选项目。 */}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={projectOptions.length === 0}
+            onClick={() => openIntake("candidates")}
+          >
+            <Link2 />
+            {t(($) => $.actions.bind)}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={projectOptions.length === 0}
+            onClick={() => openIntake("batch")}
+          >
+            <Upload />
+            {t(($) => $.actions.upload)}
+          </Button>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+
+      {/* 检索 + 阶段 / 角色筛选：名称走服务端（列表）/内存（矩阵、关联）；
+          stage / role 是 473 新维度，前端统一二次过滤两个数据面。「分类」维度
+          已按产品要求从管理面下线（创建链路仍写默认分类）。 */}
+      <div className={`${PAGE_GUTTER} flex flex-wrap items-center gap-2 pb-2`}>
+        <div className="relative w-52 shrink-0">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={filters.name}
+            onChange={(event) => setName(storeKey, event.target.value)}
+            placeholder={t(($) => $.search_placeholder)}
+            aria-label={t(($) => $.search_placeholder)}
+            className="pl-8"
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-1">
           <StageChip active={stageFilter === "all"} onClick={() => setStageFilter("all")}>
             {t(($) => $.stages.all)}
@@ -511,7 +636,7 @@ export function WorkspaceAssetsPage() {
             {t(($) => $.stages.none)}
           </StageChip>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1">
           <RoleTab active={roleFilter === "all"} onClick={() => setRoleFilter("all")}>
             {t(($) => $.roles.all)}
           </RoleTab>
@@ -527,10 +652,18 @@ export function WorkspaceAssetsPage() {
         </div>
       </div>
 
-      {/* 统计条对齐项目 TAB：列表·表格形态展示，数据为筛选后全量 overview */}
+      {/* 统计条对齐项目 TAB：单行紧凑条，数据为筛选后全量 overview */}
       {view === "list" && listView === "table" ? (
-        <AssetStatsBar items={filteredOverviewBindings} />
+        <div className={`${PAGE_GUTTER} pb-2`}>
+          <AssetStatsBar
+            items={filteredOverviewBindings}
+            pending={overviewQuery.isPending}
+          />
+        </div>
       ) : null}
+
+      {/* 视图主体：列表/矩阵/关联各自吃掉剩余高度，分页与选择工具栏固定在底部 */}
+      <div className={`${PAGE_GUTTER} flex min-h-0 flex-1 flex-col gap-2 pb-3`}>
 
       {/* View bodies */}
       {view === "list" ? (
@@ -555,11 +688,13 @@ export function WorkspaceAssetsPage() {
             error={listQuery.isError}
             errorMessage={String(listQuery.error ?? "")}
             onRetry={() => void listQuery.refetch()}
+            containerRef={tableBoxRef}
             {...commonProps}
             onUnbind={setUnbindTarget}
             unbindBusyId={unbindMutation.isPending ? unbindTarget?.id : undefined}
             linksById={linksById}
             issueInfoById={issueInfoById}
+            linkCandidates={inlineLinkCandidates}
             projectTitles={projectTitleById}
             onPreview={openPreview}
             showSync={Boolean(syncProjectId) && !filters.category && !filters.name.trim()}
@@ -603,10 +738,12 @@ export function WorkspaceAssetsPage() {
           page={filters.page}
           totalPages={page?.totalPages ?? 0}
           totalCount={page?.totalCount ?? 0}
+          pending={listQuery.isPending}
           onPrev={() => setPage(storeKey, filters.page - 1)}
           onNext={() => setPage(storeKey, filters.page + 1)}
         />
       ) : null}
+      </div>
 
       <AlertDialog open={unbindTarget !== null} onOpenChange={(open) => !open && setUnbindTarget(null)}>
         <AlertDialogContent>
@@ -633,13 +770,19 @@ export function WorkspaceAssetsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 绑定对话框复用项目 TAB 同款组件：仅选中单项目时有意义（endpoint 项目级）。 */}
-      {projectFilter !== "all" ? (
+      {/* 绑定 / 上传对话框（项目 TAB 同款）：本页跨项目，需先选定目标项目；
+          defaultTab 决定入口是「候选/手动」还是「目录导入（上传）」。 */}
+      {bindProjectId ? (
         <BindAssetDialog
-          projectId={projectFilter}
+          projectId={bindProjectId}
+          projectOptions={projectOptions}
+          onProjectChange={setBindProjectId}
+          defaultTab={bindTab}
           open={bindOpen}
           onOpenChange={setBindOpen}
-          defaultCategory={filters.category ?? "code_repository"}
+          defaultCategory={
+            bindTab === "batch" ? (filters.category ?? "other") : (filters.category ?? "code_repository")
+          }
         />
       ) : null}
 
@@ -695,7 +838,7 @@ function ViewTab({
   children: React.ReactNode;
 }) {
   return (
-    <Button type="button" size="xs" variant={active ? "default" : "outline"} aria-selected={active} onClick={onClick}>
+    <Button type="button" size="sm" variant={active ? "default" : "outline"} aria-selected={active} onClick={onClick}>
       {icon}
       {children}
     </Button>
@@ -704,7 +847,7 @@ function ViewTab({
 
 function StageChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <Button type="button" size="xs" variant={active ? "default" : "outline"} aria-pressed={active} onClick={onClick}>
+    <Button type="button" size="sm" variant={active ? "default" : "outline"} aria-pressed={active} onClick={onClick}>
       {children}
     </Button>
   );
@@ -727,12 +870,14 @@ function AssetsListView({
   error,
   errorMessage,
   onRetry,
+  containerRef,
   paths,
   onEdit,
   onUnbind,
   unbindBusyId,
   linksById,
   issueInfoById,
+  linkCandidates,
   projectTitles,
   onPreview,
   showSync,
@@ -747,10 +892,13 @@ function AssetsListView({
   error: boolean;
   errorMessage: string;
   onRetry: () => void;
+  /** 表格盒子：fit-to-viewport 分页在这里量高度（见 useFillPageSize）。 */
+  containerRef: RefObject<HTMLDivElement | null>;
   onUnbind: (row: AssetBinding) => void;
   unbindBusyId?: string;
   linksById: Map<string, AssetIssueLink[]>;
   issueInfoById: Map<string, AssetIssueInfo>;
+  linkCandidates?: AssetLinkCandidates;
   projectTitles: Map<string, string>;
   onPreview: (row: AssetBinding) => void;
   showSync: boolean;
@@ -793,11 +941,14 @@ function AssetsListView({
     <AssetTable
       rows={rows}
       features={{
+        // 对齐项目 TAB：阶段/对象/标签/需求/任务均可行内直接编辑（之前只能开 Sheet）。
+        inlineEdit: true,
         showLinks: true,
         showOwnership: true,
         onEdit,
         linksById,
         issueInfoById,
+        linkCandidates,
         issueHref: (issueId) => paths.issueDetail(issueId),
         ownershipLabel: (row) => (
           <AssetBoundToCell
@@ -815,7 +966,7 @@ function AssetsListView({
       unbindBusyId={unbindBusyId}
     />
   );
-  return <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-surface-border">{body}</div>;
+  return <div ref={containerRef} className="min-h-0 flex-1 overflow-auto rounded-lg border border-surface-border">{body}</div>;
 }
 
 /**
@@ -1480,26 +1631,29 @@ function WorkspaceAssetsPager({
   page,
   totalPages,
   totalCount,
+  pending = false,
   onPrev,
   onNext,
 }: {
   page: number;
   totalPages: number;
   totalCount: number;
+  /** 首轮数据未到：占位但不移除，免得分页条消失时表格盒子临时变高。 */
+  pending?: boolean;
   onPrev: () => void;
   onNext: () => void;
 }) {
   const { t } = useT("assets");
-  if (totalCount === 0) return null;
+  if (totalCount === 0 && !pending) return null;
   return (
-    <div className="flex items-center justify-end gap-2">
-      <Button type="button" size="xs" variant="outline" disabled={page <= 1} onClick={onPrev}>
+    <div className={`flex items-center justify-end gap-2${pending ? " invisible" : ""}`}>
+      <Button type="button" size="sm" variant="outline" disabled={page <= 1} onClick={onPrev}>
         {t(($) => $.pager.prev)}
       </Button>
       <span className="text-caption text-muted-foreground tabular-nums">
         {t(($) => $.pager.page_of, { page, totalPages: Math.max(totalPages, 1) })}
       </span>
-      <Button type="button" size="xs" variant="outline" disabled={page >= totalPages} onClick={onNext}>
+      <Button type="button" size="sm" variant="outline" disabled={page >= totalPages} onClick={onNext}>
         {t(($) => $.pager.next)}
       </Button>
     </div>

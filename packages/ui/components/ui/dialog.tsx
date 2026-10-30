@@ -50,6 +50,10 @@ function DialogContent({
   return (
     <DialogPortal>
       <DialogOverlay />
+      {/* Note for callers: the default width is capped by `sm:max-w-sm`, and a
+          bare `max-w-*` from `className` does NOT beat a variant — a wide dialog
+          has to spell its width on the `sm:` variant (or use `!max-w-*`).
+          Without that, a "max-w-5xl" preview still renders 384px wide. */}
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(

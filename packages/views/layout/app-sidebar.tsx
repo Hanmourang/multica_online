@@ -6,7 +6,6 @@ import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
 import { HelpLauncher } from "./help-launcher";
-import { JoinDiscordCard } from "./join-discord-card";
 import {
   DndContext,
   PointerSensor,
@@ -429,6 +428,13 @@ function PinSkeleton() {
 interface AppSidebarProps {
   /** Rendered above SidebarHeader (e.g. desktop traffic light spacer) */
   topSlot?: React.ReactNode;
+  /**
+   * Rendered at the right edge of the workspace-switcher row (e.g. the shell's
+   * `SidebarTrigger`). Parking it here instead of a strip above the header
+   * keeps the row height where the title already is, so collapsing costs no
+   * extra vertical space; the icon rail stacks it under the workspace tile.
+   */
+  headerActionSlot?: React.ReactNode;
   /** Rendered in the header between workspace switcher and new-issue button (e.g. search trigger) */
   searchSlot?: React.ReactNode;
   /** Extra className for SidebarHeader */
@@ -437,7 +443,13 @@ interface AppSidebarProps {
   headerStyle?: React.CSSProperties;
 }
 
-export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
+export function AppSidebar({
+  topSlot,
+  headerActionSlot,
+  searchSlot,
+  headerClassName,
+  headerStyle,
+}: AppSidebarProps = {}) {
   const { t } = useT("layout");
   const { pathname, push } = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -614,11 +626,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         {/* Workspace Switcher */}
         <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>
           <SidebarMenu>
-            <SidebarMenuItem>
+            <SidebarMenuItem
+              className={cn(
+                "flex items-center gap-1",
+                headerActionSlot && "group-data-[collapsible=icon]:flex-col",
+              )}
+            >
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <SidebarMenuButton>
+                    <SidebarMenuButton className={headerActionSlot ? "min-w-0 flex-1" : undefined}>
                       <span className="relative">
                         <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
                         {/* Shared brand dot: a pending invitation OR another
@@ -629,7 +646,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
                       </span>
-                      <span className="flex-1 truncate font-medium group-data-[collapsible=icon]:hidden">
+                      <span className="flex-1 truncate text-title-sm font-semibold group-data-[collapsible=icon]:hidden">
                         {workspace?.name ?? "Multica"}
                       </span>
                       <ChevronDown className="size-3 text-muted-foreground group-data-[collapsible=icon]:hidden" />
@@ -741,6 +758,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
+              {headerActionSlot ? <div className="shrink-0">{headerActionSlot}</div> : null}
             </SidebarMenuItem>
           </SidebarMenu>
           <SidebarMenu>
@@ -911,12 +929,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
-          {/* One utility strip: the Discord link takes the leading space the
-              help trigger was leaving empty. `justify-end` keeps the trigger
-              right-aligned once the Discord link is dismissed. The promo row
-              has no place in the icon strip — the help trigger (7px round) does. */}
+          {/* The footer carries the help trigger alone now that the Discord
+              promo is gone; `justify-end` keeps it on the trailing edge, where
+              it has always lived. */}
           <div className="flex items-center justify-end gap-1">
-            {!sidebarCollapsed && <JoinDiscordCard />}
             <HelpLauncher />
           </div>
         </SidebarFooter>

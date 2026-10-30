@@ -45,13 +45,25 @@ export function DeliverablePreviewDialog({
   const language = languageForPath(d.path);
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="flex h-[85vh] max-w-5xl flex-col gap-0 overflow-hidden p-0">
+      {/* Width must be spelled on the `sm:` variant: DialogContent ships
+          `sm:max-w-sm`, which wins over a bare `max-w-*` and collapsed this
+          preview to 384px — code then broke mid-token on every line. The
+          header carries its own close button, so the default one is off. */}
+      <DialogContent
+        showCloseButton={false}
+        className="flex h-[min(88vh,900px)] w-[min(94vw,1200px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(94vw,1200px)]"
+      >
         <DialogTitle className="sr-only">{d.name}</DialogTitle>
         <div className="flex shrink-0 items-center gap-3 border-b bg-muted/40 px-4 py-2.5">
           <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-caption font-medium">{d.name}</div>
-            <div className="truncate font-mono text-micro text-muted-foreground">{d.path}</div>
+            <div className="truncate text-body font-medium">{d.name}</div>
+            <div
+              className="truncate font-mono text-micro text-muted-foreground"
+              title={d.path}
+            >
+              {d.path}
+            </div>
           </div>
           {language && (
             <span className="shrink-0 rounded border px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
@@ -92,13 +104,15 @@ export function DeliverablePreviewDialog({
             </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-h-0 flex-1 overflow-hidden">
           {d.content !== undefined && isMarkdownPath(d.path) ? (
-            <div
-              data-testid="deliverable-markdown"
-              className="mx-auto max-w-3xl px-8 py-7"
-            >
-              <RichContent content={d.content} density="document" />
+            <div className="h-full overflow-auto">
+              <div
+                data-testid="deliverable-markdown"
+                className="mx-auto max-w-3xl px-8 py-7"
+              >
+                <RichContent content={d.content} density="document" />
+              </div>
             </div>
           ) : d.content !== undefined ? (
             <CodePreview path={d.path} text={d.content} />
@@ -127,7 +141,7 @@ function CodePreview({ path, text }: { path: string; text: string }) {
   return (
     <pre
       data-testid="deliverable-code"
-      className="transcript-code h-full overflow-auto p-5 font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-all"
+      className="transcript-code h-full overflow-auto p-5 font-mono text-label leading-relaxed whitespace-pre"
     >
       {html === null ? (
         <code>{text}</code>
@@ -162,7 +176,7 @@ function DiffPreview({ path, lines }: { path: string; lines: TraceDiffLine[] }) 
   return (
     <pre
       data-testid="deliverable-diff"
-      className="transcript-code h-full overflow-auto p-5 font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-all"
+      className="transcript-code h-full overflow-auto p-5 font-mono text-label leading-relaxed whitespace-pre"
     >
       {renderDiffRows(lines, highlighted)}
     </pre>

@@ -61,7 +61,10 @@ export function ProjectPriorityBadge({ project, handleUpdate, triggerClassName, 
             triggerClassName
           )}>
             <PriorityIcon priority={project.priority} />
-            <span className={cn("text-caption", priorityCfg.color)}>{priorityLabels[project.priority]}</span>
+            {/* Size lives on the button so a caller can lift the whole chip to
+                `text-label` with `triggerClassName`; a hardcoded size here
+                would keep the label at caption and clip the larger pill. */}
+            <span className={priorityCfg.color}>{priorityLabels[project.priority]}</span>
           </button>
         }
       />

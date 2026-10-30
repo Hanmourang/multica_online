@@ -276,7 +276,7 @@
   "chat": {
     "floating_title": "Floating window",
     "floating_label": "Floating chat window",
-    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab."
+    "floating_hint": "Always show the chat launcher in the corner of every page — with this on it opens a floating window, with it off it takes you to the Chat tab."
   },
   "issue": {
     "description": "Choose which fields each create dialog keeps on its toolbar. Hidden fields stay available from the ⋯ menu and reappear while they hold a value.",

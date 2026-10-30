@@ -47,7 +47,15 @@
     "cancel": "取消",
     "save": "保存",
     "edit": "编辑",
-    "preview": "预览"
+    "preview": "预览",
+    "upload": "上传新增"
+  },
+  "intake": {
+    "title_batch": "上传资产",
+    "desc_batch": "从本地目录或文件批量导入，识别到的文件会逐个上传并绑定到目标项目。",
+    "project_label": "目标项目",
+    "project_hint": "上传与绑定都会落到该项目",
+    "no_project": "工作区还没有项目，先创建项目再新增资产。"
   },
   "confirm_unbind": {
     "title": "解绑该资产？",
@@ -91,7 +99,11 @@
   },
   "batch": {
     "select_folder": "从文件夹导入",
+    "pick_folder_hint": "递归导入整个目录",
     "select_files": "选择文件导入",
+    "pick_files_hint": "一次选择多个文件",
+    "meta_title": "导入属性",
+    "meta_hint": "可选，统一应用到本批文件",
     "folder_hint": "选择本地目录，文档（md / doc / pdf / html / 图片等）将逐个上传并自动绑定为资产；隐藏文件、超过 20MB 与不支持的类型会自动跳过。",
     "no_files": "没有选到可导入的文件。",
     "too_large": "超过 20MB",
@@ -99,6 +111,7 @@
     "unsupported_type": "不支持的类型",
     "uploading": "上传中 {{done}} / {{total}}",
     "uploading_current": "当前：{{name}}",
+    "progress_note": "逐个上传中，可随时取消——已导入的文件会保留。",
     "cancel": "取消",
     "cancelling": "取消中…",
     "cancelled": "已取消——已完成 {{done}} / {{total}}（已导入部分保留）",
@@ -116,6 +129,7 @@
   "stages": {
     "all": "全部阶段",
     "none": "未标阶段",
+    "S0": "S0 需求描述",
     "S1": "S1 项目规划",
     "S2": "S2 产品原型",
     "S3": "S3 技术方案",
@@ -199,7 +213,12 @@
     "unsupported_type": "该文件类型暂不支持内联预览，请下载后查看。"
   },
   "inline_edit": {
-    "tags_placeholder": "添加标签…"
+    "tags_placeholder": "添加标签…",
+    "link_manage": "管理关联工作项（{{count}}）",
+    "link_search_requirement": "筛选需求…",
+    "link_search_task": "筛选任务…",
+    "link_selected": "已选 {{count}} 项",
+    "link_empty": "暂无可关联的工作项。"
   },
   "batch_edit": {
     "title": "批量修改元信息",

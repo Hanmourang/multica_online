@@ -21,6 +21,7 @@ import {
   acceptanceVerdict,
   projectRequirements,
 } from "../requirements/requirement-helpers";
+import { splitDeliverables } from "./deliverable-scope";
 
 type KindFilter = "all" | "prototype" | "code" | "doc" | "report";
 type ArchiveFilter = "all" | "pending";
@@ -67,7 +68,12 @@ export function ProjectDeliverablesTab({
     () => projectRequirements(issuesQuery.data ?? [], projectId),
     [issuesQuery.data, projectId],
   );
-  const artifacts = artifactsQuery.data?.artifacts ?? [];
+  // 交付物 = 产出物：资产管理上传的输入物（对象≠产物 / 未标）在这里被挡下，
+  // 只统计隐藏条数如实提示，不篡改服务端返回的全量档案。
+  const { deliverables: artifacts, hiddenNonOutput } = useMemo(
+    () => splitDeliverables(artifactsQuery.data?.artifacts ?? []),
+    [artifactsQuery.data],
+  );
 
   const groups = useMemo(() => {
     const byIssue = new Map<string, ProjectArtifact[]>();
@@ -174,6 +180,14 @@ export function ProjectDeliverablesTab({
         >
           {t(($) => $.proj_dlv.pending_archive)} {pendingCount}
         </button>
+        {hiddenNonOutput > 0 && (
+          <span
+            className="text-micro text-muted-foreground"
+            data-testid="deliverables-hidden-non-output"
+          >
+            {t(($) => $.proj_dlv.hidden_non_output, { count: hiddenNonOutput })}
+          </span>
+        )}
       </div>
 
       {requirements.length === 0 && artifacts.length === 0 ? (

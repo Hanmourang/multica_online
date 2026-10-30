@@ -145,18 +145,23 @@ function leadFilterValue(p: Project): string | null {
 // navigation; inline controls stop propagation so edit/menu clicks stay local.
 // ---------------------------------------------------------------------------
 
+// Each track keeps slack past its worst case (a 24px avatar beside
+// "hanmourang" at 13px, "19/50" beside a 16px ring) so the metadata reads as
+// separate columns instead of one grey cluster pinned to the right edge.
 const COLUMN_WIDTHS: Record<ProjectColumnKey, number> = {
-  priority: 116,
-  progress: 88,
-  lead: 132,
-  issues: 80,
-  created: 104,
+  priority: 132,
+  progress: 112,
+  lead: 164,
+  issues: 84,
+  created: 116,
 };
 
 // Fixed tracks: edges 12+12, checkbox 16, name min 200, status 116,
-// kebab 28 = 384, plus the 10 gap-x-3 gaps between the wide template's
-// 11 tracks.
-const FIXED_TRACKS_WIDTH = 384 + 10 * 12;
+// kebab 28 = 384, plus the 10 gap-x-5 (20px) gaps between the wide template's
+// 11 tracks. Σ = 1192px, which still fits the narrowest desktop pane
+// (1280 viewport → 80px icon rail → 1200px of content), so widening the gutters
+// did not buy a horizontal scrollbar at the breakpoint the shell collapses at.
+const FIXED_TRACKS_WIDTH = 384 + 10 * 20;
 
 // Render/track order: checkbox, name, status (core, fixed 116px), priority,
 // progress, lead, issues, created, kebab. MUST be a literal string —
@@ -165,6 +170,7 @@ const FIXED_TRACKS_WIDTH = 384 + 10 * 12;
 // collapses to one column.
 const GRID_COLS =
   "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_116px_1.75rem_0.75rem] " +
+  "gap-x-3 @2xl:gap-x-5 " +
   "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_116px_var(--pjc-priority)_var(--pjc-progress)_var(--pjc-lead)_var(--pjc-issues)_var(--pjc-created)_1.75rem_0.75rem]";
 
 const stopRowNavigation = (e: MouseEvent) => e.stopPropagation();
@@ -192,13 +198,13 @@ function columnTrackVars(
 
 function ProgressRing({ project }: { project: Project }) {
   if (project.issue_count === 0) {
-    return <span className="text-caption text-faint-foreground">—</span>;
+    return <span className="text-label text-faint-foreground">—</span>;
   }
   const pct = Math.round((project.done_count / project.issue_count) * 100);
   return (
-    <span className="flex items-center gap-1.5">
-      <span className="relative h-3.5 w-3.5">
-        <svg className="h-3.5 w-3.5 -rotate-90" viewBox="0 0 16 16">
+    <span className="flex items-center gap-2">
+      <span className="relative size-4">
+        <svg className="size-4 -rotate-90" viewBox="0 0 16 16">
           <circle className="text-muted" strokeWidth="2" stroke="currentColor" fill="none" r="6" cx="8" cy="8" />
           <circle
             className="text-emerald-500"
@@ -213,7 +219,7 @@ function ProgressRing({ project }: { project: Project }) {
           />
         </svg>
       </span>
-      <span className="text-caption tabular-nums text-muted-foreground">
+      <span className="text-label tabular-nums text-muted-foreground">
         {project.done_count}/{project.issue_count}
       </span>
     </span>
@@ -391,12 +397,14 @@ function ProjectTableRow({
 
   return (
     <ListGridRow
-      className={`h-11 cursor-pointer ${selected ? "bg-accent/30" : ""}`}
+      className={`h-14 cursor-pointer ${selected ? "bg-accent/30" : ""}`}
       {...rowLink(rowHref, project.title)}
     >
       <CheckboxCell checked={selected} onToggle={onToggleSelect} />
-      <ListGridCell className="gap-2">
-        <ProjectIcon project={project} size="sm" />
+      <ListGridCell className="gap-3">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted">
+          <ProjectIcon project={project} size="md" />
+        </span>
         <span className="min-w-0 truncate text-body font-medium">
           {project.title}
         </span>
@@ -404,12 +412,22 @@ function ProjectTableRow({
 
       {/* status — core column, always visible */}
       <ListGridCell onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
-        <ProjectStatusBadge project={project} handleUpdate={handleUpdate} align="start" />
+        <ProjectStatusBadge
+          project={project}
+          handleUpdate={handleUpdate}
+          align="start"
+          triggerClassName="px-2 py-1 text-label"
+        />
       </ListGridCell>
 
       {isColVisible("priority") ? (
         <ListGridCell className="hidden @2xl:flex" onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
-          <ProjectPriorityBadge project={project} handleUpdate={handleUpdate} align="start" />
+          <ProjectPriorityBadge
+            project={project}
+            handleUpdate={handleUpdate}
+            align="start"
+            triggerClassName="px-2 py-1 text-label"
+          />
         </ListGridCell>
       ) : (
         <ListGridCell className="hidden px-0 @2xl:flex" />
@@ -432,14 +450,14 @@ function ProjectTableRow({
             renderTrigger={(leadName) => (
               <button
                 type="button"
-                className="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-accent/60"
+                className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 transition-colors hover:bg-accent/60"
               >
                 {project.lead_type && project.lead_id ? (
-                  <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
+                  <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="md" enableHoverCard />
                 ) : (
-                  <span className="inline-flex h-[18px] w-[18px] rounded-full border border-dashed border-muted-foreground/30" />
+                  <span className="inline-flex size-6 rounded-full border border-dashed border-muted-foreground/30" />
                 )}
-                <span className="min-w-0 truncate text-caption text-muted-foreground">
+                <span className="min-w-0 truncate text-label text-muted-foreground">
                   {leadName ?? "—"}
                 </span>
               </button>
@@ -451,7 +469,7 @@ function ProjectTableRow({
       )}
 
       {isColVisible("issues") ? (
-        <ListGridCell className="hidden justify-end font-mono text-caption tabular-nums text-muted-foreground @2xl:flex">
+        <ListGridCell className="hidden justify-end font-mono text-label tabular-nums text-muted-foreground @2xl:flex">
           {project.issue_count}
         </ListGridCell>
       ) : (
@@ -459,7 +477,7 @@ function ProjectTableRow({
       )}
 
       {isColVisible("created") ? (
-        <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
+        <ListGridCell className="hidden whitespace-nowrap text-label tabular-nums text-muted-foreground @2xl:flex">
           {formatRelativeDate(project.created_at)}
         </ListGridCell>
       ) : (
@@ -497,7 +515,7 @@ function ProjectTableHeader({
     sortField === field ? sortDirection : false;
   const anySelected = allSelected || someSelected;
   return (
-    <ListGridHeader>
+    <ListGridHeader className="h-10 border-b border-surface-border">
       <div className="flex items-center justify-center">
         <button
           type="button"
@@ -601,68 +619,71 @@ function ProjectCard({
 
   return (
     <div className="group/card group/row flex flex-col rounded-md border bg-card transition-colors hover:border-primary/50">
-      <div className="p-3 pb-2">
-        <div className="flex items-center gap-2">
-          <AppLink
-            href={wsPaths.projectDetail(project.id)}
-            className="flex min-w-0 flex-1 items-center gap-2"
-          >
-            <ProjectIcon project={project} size="sm" />
-            <h3 className="truncate text-body font-medium">{project.title}</h3>
-          </AppLink>
+      <div className="flex flex-1 flex-col gap-3 p-4">
+        <div className="flex items-start gap-3">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
+            <ProjectIcon project={project} size="md" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <AppLink
+                href={wsPaths.projectDetail(project.id)}
+                className="min-w-0 flex-1"
+              >
+                <h3 className="truncate text-body font-medium">{project.title}</h3>
+              </AppLink>
+              <ProjectStatusBadge project={project} handleUpdate={handleUpdate} triggerClassName="shrink-0" />
+            </div>
+            {project.description ? (
+              <p className="mt-1 line-clamp-2 text-caption text-muted-foreground">
+                {project.description}
+              </p>
+            ) : null}
+          </div>
           <ProjectRowActions project={project} pinned={pinned} canDelete={canDelete} />
-          <ProjectStatusBadge project={project} handleUpdate={handleUpdate} triggerClassName="shrink-0" />
         </div>
 
-        {project.issue_count > 0 ? (
-          <div className="flex items-center justify-end gap-1.5 pt-2">
-            <div className="relative h-4 w-4">
-              <svg className="h-4 w-4 -rotate-90" viewBox="0 0 16 16">
-                <circle className="text-muted" strokeWidth="2" stroke="currentColor" fill="none" r="6" cx="8" cy="8" />
-                <circle
-                  className="text-emerald-500"
-                  strokeWidth="2"
-                  stroke="currentColor"
-                  fill="none"
-                  r="6"
-                  cx="8"
-                  cy="8"
-                  strokeDasharray={`${progressPercent * 0.377} 37.7`}
-                  strokeLinecap="round"
+        <div className="flex items-center gap-2">
+          {project.issue_count > 0 ? (
+            <>
+              <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-emerald-500"
+                  style={{ width: `${progressPercent}%` }}
                 />
-              </svg>
-            </div>
-            <span className="text-micro tabular-nums text-muted-foreground">
-              {project.done_count}/{project.issue_count}
+              </div>
+              <span className="shrink-0 text-caption tabular-nums text-muted-foreground">
+                {project.done_count}/{project.issue_count}
+              </span>
+            </>
+          ) : (
+            <span className="text-caption text-faint-foreground">
+              {t(($) => $.detail.no_issues_yet)}
             </span>
-          </div>
-        ) : (
-          <span className="flex justify-end pt-2 text-micro text-muted-foreground">
-            {t(($) => $.detail.no_issues_yet)}
-          </span>
-        )}
+          )}
+        </div>
       </div>
 
-      <div className="mt-0 flex items-center justify-between border-t px-3 pb-3 pt-2">
+      <div className="flex items-center justify-between gap-2 border-t px-4 py-2.5">
         <ProjectLeadPicker
           project={project}
           handleUpdate={handleUpdate}
           renderTrigger={(leadName) => (
-            <button type="button" className="-mx-1.5 flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-accent/60">
+            <button type="button" className="-mx-1.5 flex min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-accent/60">
               {project.lead_type && project.lead_id ? (
                 <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
               ) : (
-                <span className="inline-flex h-5 w-5 rounded-full border border-dashed border-muted-foreground/30" />
+                <span className="inline-flex size-5 rounded-full border border-dashed border-muted-foreground/30" />
               )}
-              <span className="max-w-[60px] truncate text-micro text-muted-foreground">
+              <span className="max-w-24 truncate text-caption text-muted-foreground">
                 {leadName ?? t(($) => $.lead.no_lead)}
               </span>
             </button>
           )}
         />
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <ProjectPriorityBadge project={project} handleUpdate={handleUpdate} align="start" />
-          <span className="text-micro text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             {formatRelativeDate(project.created_at)}
           </span>
         </div>
@@ -1302,7 +1323,7 @@ export function ProjectsPage() {
           ) : (
             <div className={cn("min-h-0 flex-1 overflow-y-auto pt-4", PAGE_GUTTER)}>
               <div
-                className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
+                className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
                 style={{ paddingBottom: LIST_GRID_BOTTOM_CLEARANCE }}
               >
                 {visible.map((project) => (
@@ -1335,20 +1356,21 @@ function LoadingState({ isCompact }: { isCompact: boolean }) {
       <div className={cn("min-h-0 flex-1 overflow-auto pt-4", PAGE_GUTTER)}>
         <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-11 w-full rounded-md" />
+            <Skeleton key={i} className="h-14 w-full rounded-md" />
           ))}
         </div>
       </div>
     );
   }
   return (
-    <div className={cn("grid grid-cols-1 gap-3 pt-4 sm:grid-cols-2 lg:grid-cols-4", PAGE_GUTTER)}>
+    <div className={cn("grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2 lg:grid-cols-4", PAGE_GUTTER)}>
       {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="flex flex-col gap-2 rounded-md border p-3">
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-8 w-8 rounded" />
+        <div key={i} className="flex flex-col gap-3 rounded-md border p-4">
+          <div className="flex items-center gap-3">
+            <Skeleton className="size-8 rounded-md" />
             <Skeleton className="h-4 w-3/4" />
           </div>
+          <Skeleton className="h-1.5 w-full rounded-full" />
           <div className="flex gap-1.5">
             <Skeleton className="h-5 w-16 rounded" />
             <Skeleton className="h-5 w-20 rounded" />

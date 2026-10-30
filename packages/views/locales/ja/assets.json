@@ -47,7 +47,15 @@
     "cancel": "キャンセル",
     "save": "保存",
     "edit": "編集",
-    "preview": "プレビュー"
+    "preview": "プレビュー",
+    "upload": "アップロード"
+  },
+  "intake": {
+    "title_batch": "アセットをアップロード",
+    "desc_batch": "ローカルのフォルダまたはファイルを一括で取り込み、対象ファイルを 1 件ずつアップロードして対象プロジェクトに紐付けます。",
+    "project_label": "対象プロジェクト",
+    "project_hint": "アップロードと紐付けはこのプロジェクトに登録されます",
+    "no_project": "ワークスペースにプロジェクトがありません。先にプロジェクトを作成してください。"
   },
   "confirm_unbind": {
     "title": "このアセットのバインドを解除しますか？",
@@ -90,8 +98,12 @@
     "tags_placeholder": "design、api-doc（カンマ区切り）"
   },
   "batch": {
-    "select_folder": "フォルダからインポート",
-    "select_files": "ファイルを選択してインポート",
+    "select_folder": "フォルダから取り込む",
+    "pick_folder_hint": "ディレクトリ全体を再帰的に取り込む",
+    "select_files": "ファイルを選択して取り込む",
+    "pick_files_hint": "複数ファイルをまとめて選択",
+    "meta_title": "取り込み属性",
+    "meta_hint": "任意・今回のバッチ全体に適用",
     "folder_hint": "ローカルフォルダを選択すると、ドキュメント（md / doc / pdf / html / 画像など）を1件ずつアップロードしアセットとして自動バインドします。隠しファイル・20MB 超過・未対応形式はスキップされます。",
     "no_files": "インポート可能なファイルが選択されていません。",
     "too_large": "サイズ超過（>20MB）",
@@ -99,6 +111,7 @@
     "unsupported_type": "未対応の形式",
     "uploading": "アップロード中 {{done}} / {{total}}",
     "uploading_current": "現在: {{name}}",
+    "progress_note": "1 件ずつアップロードします。途中でキャンセルでき、取り込み済みのファイルは保持されます。",
     "cancel": "キャンセル",
     "cancelling": "キャンセル中…",
     "cancelled": "キャンセルしました — 完了 {{done}} / {{total}}（インポート済みは保持）",
@@ -116,6 +129,7 @@
   "stages": {
     "all": "全ステージ",
     "none": "未設定",
+    "S0": "S0 要件記述",
     "S1": "S1 プロジェクト計画",
     "S2": "S2 プロダクトプロトタイプ",
     "S3": "S3 技術設計",
@@ -199,7 +213,12 @@
     "unsupported_type": "このファイル形式はインラインプレビューに対応していません。ダウンロードしてご覧ください。"
   },
   "inline_edit": {
-    "tags_placeholder": "タグを追加…"
+    "tags_placeholder": "タグを追加…",
+    "link_manage": "関連する作業項目を管理（{{count}}）",
+    "link_search_requirement": "要件を絞り込む…",
+    "link_search_task": "タスクを絞り込む…",
+    "link_selected": "{{count}} 件選択",
+    "link_empty": "関連付けできる項目がありません。"
   },
   "batch_edit": {
     "title": "メタ情報を一括編集",

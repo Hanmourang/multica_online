@@ -121,44 +121,54 @@ export function DeliverablesSection({
         <ul className="divide-y divide-border/60">
           {items.map((d, i) => {
             const isArchived = archivedPaths.has(d.path);
+            const dir = deliverableDir(d.path);
             return (
-              <li key={d.path} className="group flex items-center gap-3 px-3 py-2.5">
+              <li
+                key={d.path}
+                className="group flex h-11 items-center gap-3 px-3 transition-colors hover:bg-accent/40"
+              >
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <button
                         type="button"
                         onClick={() => setPreviewIndex(i)}
-                        className="min-w-0 flex-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-accent/50"
+                        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       >
-                        <div className="flex min-w-0 items-center gap-2">
-                          <FileText
-                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                            aria-hidden
-                          />
-                          <span className="truncate text-caption font-medium">{d.name}</span>
-                          {d.kind === "added" ? (
-                            <span className="shrink-0 rounded bg-success/10 px-1.5 py-0.5 text-micro text-success">
-                              {t(($) => $.deliverables.badge_added)}
-                            </span>
-                          ) : (
-                            <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-micro text-info">
-                              {t(($) => $.deliverables.badge_modified)}
-                            </span>
-                          )}
-                        </div>
-                        <div
-                          className="mt-0.5 truncate pl-6 font-mono text-micro text-muted-foreground"
-                          title={d.path}
-                        >
-                          {shortenDeliverablePath(d.path)}
-                        </div>
+                        {/* Name, kind and directory share one row: two stacked
+                            lines left the diff counts floating at the far edge
+                            with nothing to align against. The directory line
+                            also repeats the file name inline — the name is
+                            already on the left, so only the folder is shown. */}
+                        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                          <FileText className="size-3.5" aria-hidden />
+                        </span>
+                        <span className="max-w-[60%] shrink-0 truncate text-caption font-medium">
+                          {d.name}
+                        </span>
+                        {d.kind === "added" ? (
+                          <span className="shrink-0 rounded bg-success/10 px-1.5 py-0.5 text-micro text-success">
+                            {t(($) => $.deliverables.badge_added)}
+                          </span>
+                        ) : (
+                          <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-micro text-info">
+                            {t(($) => $.deliverables.badge_modified)}
+                          </span>
+                        )}
+                        {dir && (
+                          <span
+                            className="min-w-0 flex-1 truncate font-mono text-micro text-muted-foreground"
+                            title={d.path}
+                          >
+                            {dir}
+                          </span>
+                        )}
                       </button>
                     }
                   />
                   <TooltipContent>{t(($) => $.deliverables.open_hint)}</TooltipContent>
                 </Tooltip>
-                <span className="shrink-0 font-mono text-micro tabular-nums">
+                <span className="w-20 shrink-0 text-right font-mono text-micro tabular-nums">
                   {d.addedLines > 0 && <span className="text-success">+{d.addedLines}</span>}
                   {d.removedLines > 0 && (
                     <span className="text-destructive">
@@ -166,32 +176,34 @@ export function DeliverablesSection({
                     </span>
                   )}
                 </span>
-                {canArchive &&
-                  (isArchived ? (
-                    <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-success/15 px-1.5 py-0.5 text-micro text-success">
-                      <Check className="h-2.5 w-2.5" aria-hidden />
-                      {t(($) => $.deliverables.archived)}
-                    </span>
-                  ) : (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setArchiveTarget(d);
-                            }}
-                            aria-label={t(($) => $.deliverables.archive)}
-                            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border bg-card text-muted-foreground opacity-0 transition-opacity hover:border-primary/60 hover:text-foreground group-hover:opacity-100"
-                          >
-                            <Archive className="h-3 w-3" aria-hidden />
-                          </button>
-                        }
-                      />
-                      <TooltipContent>{t(($) => $.deliverables.archive)}</TooltipContent>
-                    </Tooltip>
-                  ))}
+                <span className="flex w-16 shrink-0 justify-end">
+                  {canArchive &&
+                    (isArchived ? (
+                      <span className="inline-flex items-center gap-0.5 rounded bg-success/15 px-1.5 py-0.5 text-micro text-success">
+                        <Check className="h-2.5 w-2.5" aria-hidden />
+                        {t(($) => $.deliverables.archived)}
+                      </span>
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setArchiveTarget(d);
+                              }}
+                              aria-label={t(($) => $.deliverables.archive)}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded border bg-card text-muted-foreground opacity-0 transition-opacity hover:border-primary/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                            >
+                              <Archive className="h-3 w-3" aria-hidden />
+                            </button>
+                          }
+                        />
+                        <TooltipContent>{t(($) => $.deliverables.archive)}</TooltipContent>
+                      </Tooltip>
+                    ))}
+                </span>
               </li>
             );
           })}
@@ -265,6 +277,15 @@ function ArchiveAllButton({
         : t(($) => $.deliverables.archive_all)}
     </button>
   );
+}
+
+/** Directory part of a deliverable path, kept to the last couple of segments so
+ *  a deep worktree path still reads as "where" instead of dumping the whole
+ *  workspace hash into the row. */
+function deliverableDir(path: string): string {
+  const cut = path.lastIndexOf("/");
+  if (cut <= 0) return "";
+  return `${shortenDeliverablePath(path.slice(0, cut), 2)}/`;
 }
 
 /** 从交付物推导归档默认 doc_type（去扩展名的文件名）。 */

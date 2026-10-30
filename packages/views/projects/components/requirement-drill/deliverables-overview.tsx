@@ -637,8 +637,13 @@ function DerivedStatusCard({
       </div>
       {hasSubtasks && (
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+          {/* A finished stage paints success instead of the ink-heavy primary,
+              which at 100% read as a stray black rule under the counter. */}
           <div
-            className="h-full rounded-full bg-primary"
+            className={cn(
+              "h-full rounded-full",
+              pct >= 100 ? "bg-success" : "bg-primary",
+            )}
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -858,7 +863,12 @@ function CompletenessCard({
               {t(($) => $.deliverables.completeness_gate_ready, { ready, total })}
             </div>
             {missingDocs.length > 0 ? (
-              <div className="mt-0.5 truncate text-micro text-destructive">
+              // Two lines: the ring leaves ~150px for the list, and truncating at
+              // one line cut "prototype · plan · decomposition" mid-word.
+              <div
+                className="mt-0.5 line-clamp-2 text-micro text-destructive"
+                title={missingDocs.join(" · ")}
+              >
                 {t(($) => $.deliverables.completeness_missing_docs, {
                   docs: missingDocs.join(" · "),
                 })}

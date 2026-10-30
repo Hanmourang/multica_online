@@ -29,6 +29,7 @@ import { RequirementsManagementTab } from "./requirements/requirements-managemen
 import { RequirementDetailView } from "./requirements/requirement-detail-view";
 import { AcceptanceTab } from "./acceptance/acceptance-tab";
 import { ProjectDeliverablesTab } from "./deliverables/project-deliverables-tab";
+import { splitDeliverables } from "./deliverables/deliverable-scope";
 import { TaskTrackingToolbar } from "./tasks/task-tracking-tab";
 import { ProjectTaskTrackingProvider } from "../../issues/components/project-task-tracking-context";
 import {
@@ -124,7 +125,7 @@ function TabBadge({
   return (
     <span
       className={cn(
-        "ml-1 rounded-full px-1.5 py-0 text-micro tabular-nums",
+        "min-w-4 rounded-full px-1.5 text-center text-micro leading-4 tabular-nums",
         tone === "alert"
           ? "bg-destructive/15 text-destructive"
           : "bg-muted text-muted-foreground",
@@ -261,7 +262,7 @@ export function ProjectArchiveViews({
       features: unboundModules,
       requirements: pending,
       acceptance: failedAcc,
-      deliverables: artifactsQuery.data?.total ?? 0,
+      deliverables: splitDeliverables(artifactsQuery.data?.artifacts ?? []).deliverables.length,
       filing: filingQuery.data?.blocking_count ?? 0,
     };
   }, [issuesQuery.data, artifactsQuery.data, modulesQuery.data, filingQuery.data, projectId]);
@@ -310,25 +311,34 @@ export function ProjectArchiveViews({
 
   const showRequirementDetail =
     activeView === "requirements" && Boolean(urlReq);
-  // 迭代 TAB 是双栏 master-detail，自己持有两列的滚动；容器侧改成满高不滚，
-  // 与 graph 视图同一套 flex 布局前提（侧栏 overflow-y-auto 需父级有界高度）。
-  const isSplitOptions = activeView === "sprints";
+  // 迭代 / 资产管理 TAB 自己持有内部滚动（双栏 master-detail、表格 sticky 表头 +
+  // 分页常驻底部）；容器侧改成满高不滚，与 graph 视图同一套 flex 布局前提
+  // （侧栏 overflow-y-auto 需父级有界高度）。
+  const isSplitOptions = activeView === "sprints" || activeView === "assets";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-surface-border px-4">
-        <Tabs value={activeView} onValueChange={selectView}>
-          <TabsList variant="line">
-            {views.map((view) => (
-              <TabsTrigger key={view.value} value={view.value}>
-                {view.label}
-                {view.badge != null && (
-                  <TabBadge count={view.badge} tone={view.alert ? "alert" : "muted"} />
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+      {/* TAB 条：44px 栏高 + 12px 左右内距 + 8px 项间距，十个 TAB 不再挤成一行小字；
+          活动下划线压到栏底分隔线上。窄容器横向滚动（隐藏滚动条）而不是缩窄每一项。 */}
+      <div className="relative shrink-0 border-b border-surface-border">
+        <div className="flex items-center overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <Tabs value={activeView} onValueChange={selectView} className="w-max">
+            <TabsList variant="line" className="h-11! gap-1 p-0">
+              {views.map((view) => (
+                <TabsTrigger
+                  key={view.value}
+                  value={view.value}
+                  className="h-11! flex-none gap-1.5 rounded-md px-3 after:bottom-0!"
+                >
+                  {view.label}
+                  {view.badge != null && (
+                    <TabBadge count={view.badge} tone={view.alert ? "alert" : "muted"} />
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
       </div>
 
       {activeView === "tasks" ? (

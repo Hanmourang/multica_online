@@ -36,4 +36,17 @@ describe("extractPrototypeModules", () => {
       "nav:桌面工作台",
     ]);
   });
+
+  it("decodes entities in section titles", () => {
+    const modules = extractPrototypeModules(`<h2>前后端开发流程[Aone&amp;O2]</h2>`);
+    expect(modules.map((row) => row.title)).toEqual(["前后端开发流程[Aone&O2]"]);
+  });
+
+  it("skips template placeholders rendered inside scripts", () => {
+    const modules = extractPrototypeModules(`
+      <h1>开发流程</h1>
+      <script>const row = \`<h3>\${esc(n.name)} \${n.goal}</h3>\`;</script>
+    `);
+    expect(modules.map((row) => row.title)).toEqual(["开发流程"]);
+  });
 });

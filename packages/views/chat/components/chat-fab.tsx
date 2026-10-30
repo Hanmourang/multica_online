@@ -17,14 +17,40 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
+import { useNavigation } from "../../navigation";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
+import { isFloatingChatRouteSuppressed } from "../floating-chat-visibility";
 
 const logger = createLogger("chat.ui");
 
-export function ChatFab() {
+interface ChatFabProps {
+  /**
+   * Whether the floating window may open here, resolved by `FloatingChat` from
+   * the Settings → Chat preference and the Chat-tab route gate. The launcher
+   * itself ignores both: it is permanent, so every click has to land
+   * somewhere meaningful.
+   */
+  windowAllowed: boolean;
+  /** Workspace Chat tab, used when the window is unavailable. */
+  chatPath: string;
+}
+
+/**
+ * On the Chat tab the window cannot mount, so handing the click to the page
+ * composer is the only outcome that isn't a dead button — the icon reads as
+ * "chat is over here". The composer only exists once a session does, so in the
+ * empty state the click is inert rather than disruptive.
+ */
+function focusPageComposer() {
+  const surface = document.querySelector('[data-slot="chat-input-surface"]');
+  surface?.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus();
+}
+
+export function ChatFab({ windowAllowed, chatPath }: ChatFabProps) {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
+  const { pathname, push } = useNavigation();
   const isOpen = useChatStore((s) => s.isOpen);
   const toggle = useChatStore((s) => s.toggle);
   // The keyboard route to this button is only useful if it's discoverable, so
@@ -41,14 +67,26 @@ export function ChatFab() {
     enabled: !isOpen,
   });
 
-  if (isOpen) return null;
-
+  // Deliberately no early return for `isOpen`: the launcher is permanent.
+  // While the window is open it sits behind the panel (see the z-index note
+  // below), so unmounting it only ever meant "the icon is gone and nothing on
+  // screen explains why".
   const unreadSessionCount = countUnreadChatSessions(sessions);
   const isRunning = hasPending?.has_pending ?? false;
 
   const handleClick = () => {
-    logger.info("fab.click (open chat)", { unreadSessionCount, isRunning });
-    toggle();
+    logger.info("fab.click", { windowAllowed, isOpen, unreadSessionCount, isRunning });
+    if (windowAllowed) {
+      toggle();
+      return;
+    }
+    // The window cannot exist here (Chat tab, or the floating preference is
+    // off), so the launcher is a shortcut instead of a toggle.
+    if (isFloatingChatRouteSuppressed(pathname, chatPath)) {
+      focusPageComposer();
+      return;
+    }
+    push(chatPath);
   };
 
   // Tooltip text carries the running/unread state on hover; the FAB itself no
@@ -67,7 +105,11 @@ export function ChatFab() {
         className={cn(
           // Geometry comes from the shared tokens so the clearance pages
           // reserve for this corner is derived from the same numbers.
-          "absolute bottom-[var(--chat-launcher-inset)] right-[var(--chat-launcher-inset)] z-50 flex size-[var(--chat-launcher-size)] touch-manipulation items-center justify-center rounded-full bg-surface-raised text-muted-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border transition-[background-color,color,box-shadow] hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-page-canvas active:bg-surface-hover",
+          //
+          // One level below the window's `z-50`: the launcher is now always
+          // mounted, and on wide viewports the open panel would otherwise
+          // paint under the button and bury its composer controls.
+          "absolute bottom-[var(--chat-launcher-inset)] right-[var(--chat-launcher-inset)] z-40 flex size-[var(--chat-launcher-size)] touch-manipulation items-center justify-center rounded-full bg-surface-raised text-muted-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border transition-[background-color,color,box-shadow] hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-page-canvas active:bg-surface-hover",
           // Impulse the button itself while a chat task is running — no
           // outer ring to keep things calm.
           isRunning && "animate-chat-impulse",

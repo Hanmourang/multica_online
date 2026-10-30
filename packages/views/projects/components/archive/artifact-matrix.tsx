@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronUp, FileStack } from "lucide-react";
 import type { ArtifactStage, Issue, ProjectArtifact } from "@multica/core/types";
-import { ARTIFACT_STAGES } from "@multica/core/artifacts";
 import type { ArtifactEditorSeed } from "./artifact-editor-dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -23,9 +22,15 @@ import {
 } from "./archive-relocate";
 import { ArtifactModuleChipControl } from "./artifact-module-tag";
 import {
-  blockingReadiness,
-  missingBlockingDocTypes,
+  columnForArtifact,
+  columnReadiness,
+  docKindOf,
+  entersRequirementMatrix,
+  missingBlockingDocKinds,
   requirementMissingBlocking as requirementHasBlockingGap,
+  DOC_KIND_PLACEMENT,
+  REQUIREMENT_COLUMNS,
+  type RequirementColumn,
 } from "./archive-stage-gate";
 import { ArchiveEmpty } from "./query-states";
 
@@ -34,42 +39,28 @@ import { ArchiveEmpty } from "./query-states";
  *
  * Pure presentation: the parent (ArchiveTab) owns the query + filters and
  * passes the artifact rows in; this component groups them by requirement
- * (requirement_key → issue_id → unassigned) and stage, renders one chip per
- * file (label from rel_path; card header is doc_type), and reports selection
- * clicks.
+ * (requirement_key → issue_id → task_id) and column (asset node stage first,
+ * then doc kind), renders one chip per file (label from rel_path; card header
+ * is doc_type), and reports selection clicks.
  */
 
-// 五阶段矩阵列从 Core placement 派生（五阶段对齐 plan §6.3），不本地硬编码。
-const STAGES: readonly ArtifactStage[] = ARTIFACT_STAGES;
-
-const PROJECT_SHELVES: Array<{
-  docType: PlanningShelf;
-  title:
-    | "shelf_research"
-    | "shelf_product_design"
-    | "shelf_architecture"
-    | "shelf_retrospective"
-    | "shelf_iteration";
-}> = [
-  { docType: "research", title: "shelf_research" },
-  { docType: "product-design", title: "shelf_product_design" },
-  { docType: "architecture", title: "shelf_architecture" },
-  { docType: "retrospective", title: "shelf_retrospective" },
-  { docType: "iteration", title: "shelf_iteration" },
+/** 项目级四货架 S1 项目规划 → S4 落地及复盘；S5 需求迭代随归属档案进矩阵。 */
+const PROJECT_SHELVES: Array<{ docType: PlanningShelf; stage: ArtifactStage }> = [
+  { docType: "research", stage: 1 },
+  { docType: "product-design", stage: 2 },
+  { docType: "architecture", stage: 3 },
+  { docType: "retrospective", stage: 4 },
 ];
 
 function requirementMissingBlocking(row: RequirementRow): boolean {
-  return requirementHasBlockingGap({
-    rootDocs: row.cells.get(null) ?? [],
-    filesByStage: row.cells,
-  });
+  return requirementHasBlockingGap(row.cells);
 }
 
 interface RequirementRow {
   key: string;
   label: string;
   issueId: string | null;
-  cells: Map<ArtifactStage | null, ProjectArtifact[]>;
+  cells: Map<RequirementColumn, ProjectArtifact[]>;
 }
 
 interface ScopeGroup {
@@ -260,9 +251,9 @@ function ExpandableArtifactList({
 const REQ_ID_CLASS =
   "block min-w-0 truncate font-mono text-caption font-bold text-brand hover:underline";
 
-/** 需求信息三子列 + S1–S4 + 就绪度。 */
+/** 需求信息三子列 + S0/S2/S3/S4 四列 + 就绪度。 */
 const MATRIX_GRID =
-  "grid grid-cols-[minmax(6.5rem,7.75rem)_minmax(8.5rem,1.15fr)_minmax(7.5rem,8.75rem)_repeat(5,minmax(128px,1fr))_5.75rem]";
+  "grid grid-cols-[minmax(6.5rem,7.75rem)_minmax(8.5rem,1.15fr)_minmax(7.5rem,8.75rem)_repeat(4,minmax(148px,1fr))_5.75rem]";
 
 export function ArtifactMatrix({
   artifacts,
@@ -271,6 +262,7 @@ export function ArtifactMatrix({
   selectedId,
   onSelect,
   onOpenRequirement,
+  assetStages,
   onCreateMissing,
   missingOnly,
   tagging,
@@ -287,6 +279,8 @@ export function ArtifactMatrix({
   selectedId: string | null;
   onSelect: (artifact: ProjectArtifact) => void;
   onOpenRequirement?: (issueId: string, drill?: string) => void;
+  /** 资产节点分布：artifactId → 资产 lifecycle_stage；列归属优先用它。 */
+  assetStages?: Map<string, string | null>;
   onCreateMissing?: (seed: ArtifactEditorSeed) => void;
   missingOnly: boolean;
   tagging?: boolean;
@@ -301,16 +295,13 @@ export function ArtifactMatrix({
   const [overShelf, setOverShelf] = useState<PlanningShelf | null>(null);
 
   const { projectRows, sharedRows, filingRows, requirementRows } = useMemo(
-    () => groupArtifacts(artifacts, t),
-    [artifacts, t],
+    () => groupArtifacts(artifacts, t, assetStages),
+    [artifacts, t, assetStages],
   );
   const projectByType = useMemo(() => {
     const map = new Map(projectRows.map((row) => [row.docType, row.items]));
     return map;
   }, [projectRows]);
-  // 资产自动同步行（source='asset'，doc_type='asset'）：不在四固定货架内，
-  // 单独成区展示，避免绑定的知识/文档在矩阵视图隐身。
-  const assetItems = useMemo(() => projectByType.get("asset") ?? [], [projectByType]);
 
   const visibleRequirementRows = useMemo(
     () =>
@@ -330,7 +321,7 @@ export function ArtifactMatrix({
         <ArchiveMarqueeSurface
           onPickIds={(ids, additive) => onPickMany?.(ids, additive)}
         >
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {PROJECT_SHELVES.map((shelf) => {
             const items = projectByType.get(shelf.docType) ?? [];
             const missing = items.length === 0;
@@ -368,7 +359,7 @@ export function ArtifactMatrix({
               >
                 <div className="flex items-center gap-2">
                   <span className="text-caption font-medium">
-                    {shelfTitle(t, shelf.title)}
+                    {stageName(t, shelf.stage)}
                   </span>
                   <code className="text-[10px] text-muted-foreground">{shelf.docType}</code>
                   <span className="ml-auto text-caption tabular-nums text-muted-foreground">
@@ -435,32 +426,6 @@ export function ArtifactMatrix({
         )}
       </section>
 
-      {assetItems.length > 0 && (
-        <section className="space-y-2" aria-label={t(($) => $.browser.source_asset)}>
-          <h4 className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.browser.source_asset)}
-          </h4>
-          <div className="rounded-lg border border-surface-border bg-surface p-3">
-            <div className="flex items-center gap-2">
-              <code className="text-caption font-medium">{assetItems[0]?.doc_type}</code>
-              <span className="ml-auto text-caption tabular-nums text-muted-foreground">
-                {assetItems.length}
-              </span>
-            </div>
-            <ExpandableArtifactList
-              items={assetItems}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              tagging={tagging}
-              pickedIds={pickedIds}
-              onTogglePick={onTogglePick}
-              onSaveTag={onSaveTag}
-              tagBusy={tagBusy}
-            />
-          </div>
-        </section>
-      )}
-
       {filingRows.length > 0 && (
         <section className="space-y-2" aria-label={t(($) => $.browser.filing_title)}>
           <h4 className="text-caption font-medium text-muted-foreground">
@@ -494,7 +459,7 @@ export function ArtifactMatrix({
         </section>
       )}
 
-      {/* Requirement × stage matrix */}
+      {/* Requirement × stage matrix（S0 需求描述 / S2 产品原型 / S3 技术方案 / S4 落地及复盘） */}
       <section className="space-y-2" aria-label={t(($) => $.browser.matrix_title)}>
         <h4 className="text-caption font-medium text-muted-foreground">
           {t(($) => $.browser.matrix_title)}
@@ -503,7 +468,7 @@ export function ArtifactMatrix({
           <ArchiveEmpty title={t(($) => $.browser.empty)} icon={<FileStack className="size-4" />} />
         ) : (
           <div className="overflow-x-auto rounded-lg border border-surface-border">
-            <div className="min-w-[1080px]">
+            <div className="min-w-[1120px]">
               <div
                 className={cn(
                   MATRIX_GRID,
@@ -513,9 +478,9 @@ export function ArtifactMatrix({
                 <div className="col-span-3 border-r border-surface-border px-3 py-1.5">
                   {t(($) => $.browser.mx_req_info)}
                 </div>
-                {STAGES.map((stage) => (
-                  <div key={stage} className="row-span-2 flex items-end px-3 py-2">
-                    {stageName(t, stage)}
+                {REQUIREMENT_COLUMNS.map((column) => (
+                  <div key={column} className="row-span-2 flex items-end px-3 py-2">
+                    {columnName(t, column)}
                   </div>
                 ))}
                 <div className="row-span-2 flex items-end justify-end px-2 py-2 text-right">
@@ -532,10 +497,7 @@ export function ArtifactMatrix({
                 </div>
               </div>
               {visibleRequirementRows.map((row) => {
-                const readiness = blockingReadiness({
-                  rootDocs: row.cells.get(null) ?? [],
-                  filesByStage: row.cells,
-                });
+                const readiness = columnReadiness(row.cells);
                 const gap = Math.max(0, readiness.total - readiness.filled);
                 const display = matrixRequirementDisplay(row, issues);
                 return (
@@ -566,11 +528,11 @@ export function ArtifactMatrix({
                         issues={issues}
                       />
                     </div>
-                    {STAGES.map((stage) => {
-                      const cellArtifacts = row.cells.get(stage) ?? [];
-                      const missing = missingBlockingDocTypes(stage, cellArtifacts);
+                    {REQUIREMENT_COLUMNS.map((column) => {
+                      const cellArtifacts = row.cells.get(column) ?? [];
+                      const missing = missingBlockingDocKinds(column, cellArtifacts);
                       return (
-                        <div key={stage} className="min-w-0 border-l border-surface-border px-2 py-2">
+                        <div key={column} className="min-w-0 border-l border-surface-border px-2 py-2">
                           {cellArtifacts.length > 0 && (
                             <ul className="space-y-1">
                               {cellArtifacts.map((artifact) => (
@@ -607,27 +569,30 @@ export function ArtifactMatrix({
                               ))}
                             </ul>
                           )}
-                          {missing.map((docType) => (
-                            <button
-                              key={docType}
-                              type="button"
-                              className="mt-1 w-full rounded-md border border-dashed border-destructive/50 bg-destructive/5 p-1.5 text-center text-[10px] font-medium text-destructive hover:bg-destructive/10"
-                              onClick={() =>
-                                onCreateMissing?.({
-                                  scope: "requirement",
-                                  stage,
-                                  docType,
-                                  requirementKey:
-                                    row.key.startsWith("REQ-") ? row.key : null,
-                                  issueId: row.issueId,
-                                  title: matrixRequirementDisplay(row, issues).title ?? row.label,
-                                })
-                              }
-                            >
-                              {t(($) => $.browser.missing_doc, { doc: docType })}
-                              {onCreateMissing ? ` · ${t(($) => $.manage.create)}` : ""}
-                            </button>
-                          ))}
+                          {missing.map((kind) => {
+                            const placement = DOC_KIND_PLACEMENT[kind];
+                            return (
+                              <button
+                                key={kind}
+                                type="button"
+                                className="mt-1 w-full rounded-md border border-dashed border-destructive/50 bg-destructive/5 p-1.5 text-center text-[10px] font-medium text-destructive hover:bg-destructive/10"
+                                onClick={() =>
+                                  onCreateMissing?.({
+                                    scope: "requirement",
+                                    stage: placement.stage,
+                                    docType: placement.docType,
+                                    requirementKey:
+                                      row.key.startsWith("REQ-") ? row.key : null,
+                                    issueId: row.issueId,
+                                    title: matrixRequirementDisplay(row, issues).title ?? row.label,
+                                  })
+                                }
+                              >
+                                {t(($) => $.browser.missing_doc, { doc: kind })}
+                                {onCreateMissing ? ` · ${t(($) => $.manage.create)}` : ""}
+                              </button>
+                            );
+                          })}
                           {cellArtifacts.length === 0 && missing.length === 0 && (
                             <p className="text-center text-[10px] text-muted-foreground">—</p>
                           )}
@@ -643,6 +608,7 @@ export function ArtifactMatrix({
             </div>
           </div>
         )}
+
       </section>
     </div>
   );
@@ -773,7 +739,11 @@ function isFilingArtifact(artifact: ProjectArtifact): boolean {
   );
 }
 
-function groupArtifacts(artifacts: ProjectArtifact[], t: Translator) {
+function groupArtifacts(
+  artifacts: ProjectArtifact[],
+  t: Translator,
+  assetStages?: Map<string, string | null>,
+) {
   const projectMap = new Map<string, ProjectArtifact[]>();
   const sharedMap = new Map<string, ProjectArtifact[]>();
   const filingMap = new Map<string, ProjectArtifact[]>();
@@ -786,32 +756,35 @@ function groupArtifacts(artifacts: ProjectArtifact[], t: Translator) {
       else filingMap.set(artifact.doc_type, [artifact]);
       continue;
     }
-    if (artifact.scope === "requirement") {
-      const rowKey = artifact.requirement_key ?? artifact.issue_id ?? "__unassigned__";
+    // 有需求 / 任务归属的文档进矩阵；列归属优先用资产节点阶段（见 columnForArtifact）。
+    if (entersRequirementMatrix(artifact)) {
+      const column = columnForArtifact(artifact, assetStages?.get(artifact.id));
+      const rowKey =
+        artifact.requirement_key ??
+        artifact.issue_id ??
+        artifact.task_id ??
+        "__unassigned__";
       let row = rowMap.get(rowKey);
       if (!row) {
         row = {
           key: rowKey,
           label:
-            artifact.requirement_key ??
-            (artifact.issue_id
-              ? artifact.issue_id
-              : t(($) => $.browser.unassigned)),
+            rowKey === "__unassigned__" ? t(($) => $.browser.unassigned) : rowKey,
           issueId: artifact.issue_id ?? null,
           cells: new Map(),
         };
         rowMap.set(rowKey, row);
       }
-      const cellKey = artifact.stage ?? null;
-      const cell = row.cells.get(cellKey);
+      const cell = row.cells.get(column);
       if (cell) cell.push(artifact);
-      else row.cells.set(cellKey, [artifact]);
-    } else {
-      const target = artifact.scope === "project" ? projectMap : sharedMap;
-      const bucket = target.get(artifact.doc_type);
-      if (bucket) bucket.push(artifact);
-      else target.set(artifact.doc_type, [artifact]);
+      else row.cells.set(column, [artifact]);
+      // 需求级档案只在矩阵出现；项目级货架文档同时保留在四张卡片中。
+      if (artifact.scope === "requirement") continue;
     }
+    const target = artifact.scope === "project" ? projectMap : sharedMap;
+    const bucket = target.get(artifact.doc_type);
+    if (bucket) bucket.push(artifact);
+    else target.set(artifact.doc_type, [artifact]);
   }
 
   const toGroups = (
@@ -829,11 +802,8 @@ function groupArtifacts(artifacts: ProjectArtifact[], t: Translator) {
     }));
 
   const requirementRows = [...rowMap.values()].map((row) => {
-    for (const [stage, items] of row.cells) {
-      row.cells.set(
-        stage,
-        dedupeByDocType(items).sort((a, b) => a.doc_type.localeCompare(b.doc_type)),
-      );
+    for (const [column, items] of row.cells) {
+      row.cells.set(column, dedupeByDocKind(items));
     }
     return row;
   });
@@ -847,40 +817,19 @@ function groupArtifacts(artifacts: ProjectArtifact[], t: Translator) {
   };
 }
 
-/** Keep only the newest version per doc_type within a matrix cell. */
-function dedupeByDocType(items: ProjectArtifact[]): ProjectArtifact[] {
+/** 矩阵单元格内按文档类型去重：只留每种证据的最新版。 */
+function dedupeByDocKind(items: ProjectArtifact[]): ProjectArtifact[] {
   const map = new Map<string, ProjectArtifact>();
   for (const item of items) {
-    const existing = map.get(item.doc_type);
-    if (!existing || item.version > existing.version) map.set(item.doc_type, item);
+    const kind = docKindOf(item);
+    const key = kind === "other" ? item.rel_path : kind;
+    const existing = map.get(key);
+    if (!existing || item.version > existing.version) map.set(key, item);
   }
-  return [...map.values()];
+  return [...map.values()].sort((a, b) => docKindOf(a).localeCompare(docKindOf(b)));
 }
 
 /** Stage display name via i18n. */
-function shelfTitle(
-  t: Translator,
-  key:
-    | "shelf_research"
-    | "shelf_product_design"
-    | "shelf_architecture"
-    | "shelf_retrospective"
-    | "shelf_iteration",
-): string {
-  switch (key) {
-    case "shelf_research":
-      return t(($) => $.browser.shelf_research);
-    case "shelf_product_design":
-      return t(($) => $.browser.shelf_product_design);
-    case "shelf_architecture":
-      return t(($) => $.browser.shelf_architecture);
-    case "shelf_retrospective":
-      return t(($) => $.browser.shelf_retrospective);
-    case "shelf_iteration":
-      return t(($) => $.browser.shelf_iteration);
-  }
-}
-
 function stageName(t: Translator, stage: ArtifactStage): string {
   switch (stage) {
     case 1:
@@ -893,5 +842,19 @@ function stageName(t: Translator, stage: ArtifactStage): string {
       return t(($) => $.browser.stage_s4);
     case 5:
       return t(($) => $.browser.stage_s5);
+  }
+}
+
+/** 矩阵列标题：S0 需求描述 / S2 产品原型 / S3 技术方案 / S4 落地及复盘。 */
+function columnName(t: Translator, column: RequirementColumn): string {
+  switch (column) {
+    case "s0":
+      return t(($) => $.browser.stage_s0);
+    case "s2":
+      return t(($) => $.browser.stage_s2);
+    case "s3":
+      return t(($) => $.browser.stage_s3);
+    case "s4":
+      return t(($) => $.browser.stage_s4);
   }
 }

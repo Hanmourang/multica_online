@@ -18,25 +18,24 @@ import {
 } from "@multica/core/graph/queries";
 import { useT } from "../../../i18n";
 import { useGraphData } from "./graph-data-provider";
-import { issuesForModule, moduleRequirements, moduleTasks, summaryForModule } from "./module-feature-stats";
+import { issuesForModule, moduleRequirements, moduleTasks } from "./module-feature-stats";
 import { ArchiveEmpty } from "../archive/query-states";
 import { ChangeOverviewTab } from "./sub-tabs/change-overview";
-import { ModuleObjectsTab } from "./sub-tabs/module-objects";
-import { ModuleStrategiesTab } from "./sub-tabs/module-strategies";
-import { GraphNeighborhoodTab } from "./sub-tabs/graph-neighborhood";
 import { ModulePrototypesTab } from "./sub-tabs/module-prototypes";
 import { PrototypeWorkbench } from "./prototype-workbench";
 
-type FeatureSubTab = "prototypes" | "changes" | "objects" | "strategies" | "neighborhood" | "reconcile";
+type FeatureSubTab = "prototypes" | "changes" | "reconcile";
 
 /**
- * f10 右栏 · 模块详情（4 个子 Tab，原型标注 4：原型平铺、实现为切换式）。
+ * f10 右栏 · 模块详情（原型图 / 变更概览 / 验收与覆盖）。
+ *
+ * 2026-10-30 收敛：模块对象、模块策略、图谱邻域三个子 TAB 删除。
+ * 它们不是独立的产品概念，而是功能点的「实现证据」——数据仍作为原型对比的
+ * 图层（objects/nodes）参与渲染，但不再占一个顶层入口。
  *
  * The sub-tab value persists across module switches on purpose — comparing
  * the same facet between modules is the primary workflow.
- * Only the active panel mounts (Base UI keepMounted=false); badge counts
- * come from the snapshot / issue cache so switching does not prefetch
- * objects, strategies, neighborhood, or prototype HTML.
+ * Only the active panel mounts (Base UI keepMounted=false).
  */
 export function ModuleDetailPanel() {
   const { t } = useT("archive");
@@ -45,7 +44,7 @@ export function ModuleDetailPanel() {
   // 结构对账子 TAB 与后端中枢同受 FF_MODULE_SPEC_CENTER 门控：关闭时 TAB 隐藏，
   // 且后端叶子未注册（双层门控，记忆「flag 双层门控」）。
   const specCenterEnabled = useFeatureEnabled(MODULE_SPEC_CENTER_FLAG, false);
-  const { projectId, snapshot, selectedNodeId } = useGraphData();
+  const { projectId, selectedNodeId } = useGraphData();
   const deferredNodeId = useDeferredValue(selectedNodeId);
   const [tab, setTab] = useState<FeatureSubTab>("prototypes");
   const modulesQuery = useQuery({
@@ -62,11 +61,6 @@ export function ModuleDetailPanel() {
   const moduleIssues = selectedModule
     ? issuesForModule(issuesQuery.data ?? [], projectId, selectedModule.id)
     : [];
-  const summary = summaryForModule(
-    snapshot?.module_summary ?? [],
-    deferredNodeId,
-    selectedModule?.name ?? "",
-  );
 
   if (!selectedNodeId) {
     return (
@@ -81,22 +75,13 @@ export function ModuleDetailPanel() {
 
   const reqCount = moduleRequirements(moduleIssues).length;
   const taskCount = moduleTasks(moduleIssues).length;
-  const objectCount = summary?.obj_count ?? 0;
-  const strategyCount = summary?.strategy_count ?? 0;
   const activeNodeId = deferredNodeId ?? selectedNodeId;
 
   return (
     <Tabs
       value={tab}
       onValueChange={(value) => {
-        if (
-          value === "prototypes" ||
-          value === "changes" ||
-          value === "objects" ||
-          value === "strategies" ||
-          value === "neighborhood" ||
-          value === "reconcile"
-        ) {
+        if (value === "prototypes" || value === "changes" || value === "reconcile") {
           setTab(value);
         }
       }}
@@ -121,30 +106,6 @@ export function ModuleDetailPanel() {
             {t(($) => $.features.sub_change_count, { req: reqCount, task: taskCount })}
           </span>
         </TabsTrigger>
-        <TabsTrigger
-          value="objects"
-          className="rounded-none border-b-2 border-transparent px-3 py-2 text-[11.5px] font-semibold data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-        >
-          {t(($) => $.features.sub_objects)}
-          <span className="ml-1 rounded-full bg-muted px-1.5 text-[9px] tabular-nums text-muted-foreground">
-            {objectCount}
-          </span>
-        </TabsTrigger>
-        <TabsTrigger
-          value="strategies"
-          className="rounded-none border-b-2 border-transparent px-3 py-2 text-[11.5px] font-semibold data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-        >
-          {t(($) => $.features.sub_strategies)}
-          <span className="ml-1 rounded-full bg-muted px-1.5 text-[9px] tabular-nums text-muted-foreground">
-            {strategyCount}
-          </span>
-        </TabsTrigger>
-        <TabsTrigger
-          value="neighborhood"
-          className="rounded-none border-b-2 border-transparent px-3 py-2 text-[11.5px] font-semibold data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-        >
-          {t(($) => $.features.sub_neighborhood)}
-        </TabsTrigger>
         {specCenterEnabled && selectedModule ? (
           <TabsTrigger
             value="reconcile"
@@ -161,15 +122,6 @@ export function ModuleDetailPanel() {
       </TabsContent>
       <TabsContent value="changes" className="mt-3 min-h-0 flex-1 overflow-auto">
         {tab === "changes" ? <ChangeOverviewTab nodeId={activeNodeId} /> : null}
-      </TabsContent>
-      <TabsContent value="objects" className="mt-3 min-h-0 flex-1 overflow-auto">
-        {tab === "objects" ? <ModuleObjectsTab nodeId={activeNodeId} /> : null}
-      </TabsContent>
-      <TabsContent value="strategies" className="mt-3 min-h-0 flex-1 overflow-auto">
-        {tab === "strategies" ? <ModuleStrategiesTab nodeId={activeNodeId} /> : null}
-      </TabsContent>
-      <TabsContent value="neighborhood" className="mt-3 min-h-0 flex-1 overflow-auto">
-        {tab === "neighborhood" ? <GraphNeighborhoodTab nodeId={activeNodeId} /> : null}
       </TabsContent>
       {specCenterEnabled && selectedModule ? (
         <TabsContent value="reconcile" className="mt-3 min-h-0 flex-1 overflow-auto">

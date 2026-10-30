@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link2, Palette, Pencil, Plus, Puzzle, Unlink } from "lucide-react";
+import { ChevronLeft, Link2, Palette, Pencil, Plus, Puzzle, Unlink } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -49,15 +49,19 @@ import {
 /**
  * C3 左栏：功能模块列表 + 人工管理（新建 / 重命名 / 改色 / 绑定 / 解绑 / 删除）。
  * 图谱投影字段（对象数 / 策略数）只读；人工字段走 PATCH /modules。
+ *
+ * 宽度默认 216px（可经 onCollapse 收成 44px 竖条），行内度量按窄栏收紧。
  */
 export function ModuleListPanel({
   filters,
   creating = false,
   onCreatingChange,
+  onCollapse,
 }: {
   filters?: FeatureModuleFilters;
   creating?: boolean;
   onCreatingChange?: (value: boolean) => void;
+  onCollapse?: () => void;
 }) {
   const resolvedFilters = resolveFeatureFilters(filters ?? EMPTY_FEATURE_FILTERS);
   const { t } = useT("archive");
@@ -198,23 +202,28 @@ export function ModuleListPanel({
   }
 
   const total = modulesQuery.data.total;
-  const objectTotal = summaries.reduce((sum, row) => sum + row.obj_count, 0);
-  const strategyTotal = summaries.reduce((sum, row) => sum + row.strategy_count, 0);
   const projectIssues = issuesQuery.data ?? [];
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
-      <div className="flex items-center gap-2 px-0.5">
+      <div className="flex items-center gap-1.5 px-0.5">
         <h3 className="text-[9.5px] font-bold tracking-wide text-muted-foreground">
           {t(($) => $.features.module_list)}
         </h3>
         <span className="ml-auto text-[10px] font-semibold tabular-nums text-muted-foreground">
-          {t(($) => $.features.list_totals, {
-            modules: total,
-            objects: objectTotal,
-            strategies: strategyTotal,
-          })}
+          {total}
         </span>
+        {onCollapse ? (
+          <button
+            type="button"
+            onClick={onCollapse}
+            title={t(($) => $.features.inspector_collapse)}
+            aria-label={t(($) => $.features.inspector_collapse)}
+            className="-mr-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <ChevronLeft className="size-3.5" aria-hidden />
+          </button>
+        ) : null}
       </div>
 
       {creating && (
@@ -321,11 +330,12 @@ export function ModuleListPanel({
                     }
                   }}
                   className={cn(
-                    "w-full rounded-[9px] border bg-surface px-2.5 py-2 text-left transition-colors",
+                    "w-full rounded-lg border bg-surface px-2 py-1.5 text-left transition-colors",
                     !module.graph_node_id && "border-dashed bg-amber-500/[0.04]",
                     canSelect && "cursor-pointer",
-                    canSelect && !selected && "hover:bg-accent/40",
-                    selected && "border-primary shadow-[0_0_0_2px] shadow-primary/15",
+                    canSelect && !selected && "hover:border-primary/25 hover:bg-accent/40",
+                    selected &&
+                      "border-primary/40 bg-surface shadow-[inset_3px_0_0_var(--primary),0_2px_7px_rgb(15_23_42/0.06)]",
                     createdId === module.id && "border-brand shadow-[0_0_0_2px] shadow-brand/20",
                   )}
                 >
@@ -424,7 +434,7 @@ export function ModuleListPanel({
                       )}
                     </span>
                   </div>
-                  <div className="mt-1.5 flex gap-3 text-[9.5px] text-muted-foreground">
+                  <div className="mt-1.5 flex gap-2.5 text-[9.5px] text-muted-foreground">
                     <span>
                       {t(($) => $.features.stat_objects)}{" "}
                       <b className="text-[11px] tabular-nums text-foreground">

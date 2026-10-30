@@ -129,7 +129,9 @@ export function ArtifactPreviewDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[min(94vh,1080px)] !w-[min(96vw,1440px)] !max-w-[min(96vw,1440px)] flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="shrink-0 border-b border-surface-border px-5 py-3">
+        {/* pr-12 keeps the pagination clear of DialogContent's own close button,
+            which is absolutely positioned at top-2 right-2. */}
+        <DialogHeader className="shrink-0 border-b border-surface-border px-5 py-3 pr-12">
           <div className="flex items-center gap-2">
             <DialogTitle className="truncate text-title-sm">
               {fileNameOf(artifact.rel_path)}
@@ -181,7 +183,7 @@ export function ArtifactPreviewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface/50 p-5">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface/50 p-4">
           <ArtifactPreviewPane
             artifact={artifact}
             projectId={projectId}

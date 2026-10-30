@@ -1,9 +1,11 @@
 "use client";
 
-// 资产统计概览条：数字卡（总数 / 已标阶段 / 未标阶段 / 未打标签）+ 阶段占比
-// 堆叠条。数据来自当前筛选下的全量 items（前端 pageSize 拉全），
+// 资产统计概览条：单行紧凑条（总数 / 已标阶段 / 未标阶段 / 未打标签 + 阶段占比
+// 堆叠条）。数据来自当前筛选下的全量 items（前端 pageSize 拉全），
 // 与列表分页解耦，纯展示无写操作。「分类」字段已按产品要求下线，
 // 分布维度改由生命周期阶段驱动。
+// 版式：原先两行卡片（实测 131px）把列表首屏挤掉一半，现压成一行
+// （≈38px）；明细图例只在 @4xl 以上容器里补齐，窄面板靠 tooltip。
 
 import { useMemo } from "react";
 import type { AssetBinding, AssetLifecycleStage } from "@multica/core/types";
@@ -18,6 +20,7 @@ const STAGE_COUNT_KEYS = ASSET_LIFECYCLE_STAGES.filter(
 
 // 堆叠条/图例实心色相与表格阶段徽标 STAGE_TONES 同源（violet/sky/amber/emerald/teal）。
 const STAGE_DOT_CLASS: Record<string, string> = {
+  S0: "bg-fuchsia-500",
   S1: "bg-violet-500",
   S2: "bg-sky-500",
   S3: "bg-amber-500",
@@ -26,16 +29,27 @@ const STAGE_DOT_CLASS: Record<string, string> = {
   general: "bg-slate-400",
 };
 
-function StatTile({ label, value, tone }: { label: string; value: number; tone: string }) {
+function Metric({ label, value, tone }: { label: string; value: number; tone: string }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-lg border border-surface-border bg-card px-3 py-2">
-      <span className={`text-body-lg font-semibold tabular-nums ${tone}`}>{value}</span>
-      <span className="truncate text-micro text-muted-foreground">{label}</span>
-    </div>
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className={`text-label font-semibold tabular-nums ${tone}`}>{value}</span>
+      <span className="text-micro text-muted-foreground">{label}</span>
+    </span>
   );
 }
 
-export function AssetStatsBar({ items }: { items: AssetBinding[] }) {
+const STATS_BAR_CLASS =
+  "@container flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-surface-border bg-card px-3 py-2";
+
+export function AssetStatsBar({
+  items,
+  pending = false,
+}: {
+  items: AssetBinding[];
+  /** 全量数据尚未到达。此时占位同高度的骨架而不是直接不渲染：统计条一旦
+   *  塔陷，下方的表格盒子就会临时变高，「排满一页」的首测会多算一行。 */
+  pending?: boolean;
+}) {
   const { t } = useT("assets");
 
   const stats = useMemo(() => {
@@ -57,61 +71,92 @@ export function AssetStatsBar({ items }: { items: AssetBinding[] }) {
     return { total, unstaged: total - staged, staged, untagged, stageCount, coveredStages };
   }, [items]);
 
-  if (stats.total === 0) return null;
+  if (stats.total === 0) {
+    if (!pending) return null;
+    // 与真实条目同一套字号 / 间距，只把内容设为不可见，高度就会一致。
+    return (
+      <div className={STATS_BAR_CLASS} data-testid="asset-stats-bar-skeleton" aria-hidden>
+        <div className="invisible flex flex-wrap items-center gap-x-4 gap-y-1">
+          <Metric label={t(($) => $.stats.total)} value={0} tone="text-foreground" />
+          <Metric label={t(($) => $.stats.staged)} value={0} tone="text-sky-600" />
+          <Metric label={t(($) => $.stats.unstaged)} value={0} tone="text-rose-600" />
+          <Metric label={t(($) => $.stats.untagged)} value={0} tone="text-amber-600" />
+        </div>
+        <div className="invisible flex min-w-40 flex-1 items-center gap-2">
+          <span className="shrink-0 text-micro text-muted-foreground">
+            {t(($) => $.stats.stage_share, { covered: 0 })}
+          </span>
+          <div className="h-1.5 min-w-16 flex-1 rounded-full bg-muted" />
+        </div>
+        <div className="invisible hidden items-center gap-x-3 @4xl:flex">
+          <span className="text-micro text-muted-foreground">--</span>
+        </div>
+      </div>
+    );
+  }
+
+  const segments: Array<{ key: string; label: string; count: number; dot: string }> = [
+    { key: "unstaged", label: t(($) => $.stats.unstaged), count: stats.unstaged, dot: "bg-slate-300 dark:bg-slate-600" },
+    ...[...STAGE_COUNT_KEYS, "general"].map((stage) => ({
+      key: stage,
+      label: t(($) => $.stages[stage as (typeof ASSET_LIFECYCLE_STAGES)[number]]),
+      count: stats.stageCount[stage] ?? 0,
+      dot: STAGE_DOT_CLASS[stage] ?? "bg-slate-400",
+    })),
+  ].filter((segment) => segment.count > 0);
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex gap-2">
-        <StatTile label={t(($) => $.stats.total)} value={stats.total} tone="text-foreground" />
-        <StatTile label={t(($) => $.stats.staged)} value={stats.staged} tone="text-sky-600 dark:text-sky-400" />
-        <StatTile label={t(($) => $.stats.unstaged)} value={stats.unstaged} tone={stats.unstaged > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"} />
-        <StatTile label={t(($) => $.stats.untagged)} value={stats.untagged} tone={stats.untagged > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"} />
+    <div
+      className={STATS_BAR_CLASS}
+      data-testid="asset-stats-bar"
+    >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <Metric label={t(($) => $.stats.total)} value={stats.total} tone="text-foreground" />
+        <Metric
+          label={t(($) => $.stats.staged)}
+          value={stats.staged}
+          tone="text-sky-600 dark:text-sky-400"
+        />
+        <Metric
+          label={t(($) => $.stats.unstaged)}
+          value={stats.unstaged}
+          tone={stats.unstaged > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}
+        />
+        <Metric
+          label={t(($) => $.stats.untagged)}
+          value={stats.untagged}
+          tone={stats.untagged > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}
+        />
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-surface-border bg-card px-3 py-2">
-        {/* 阶段占比堆叠条 + 图例（分类分布已随「分类」字段下线，改按生命周期阶段） */}
-        <div className="flex min-w-52 flex-1 flex-col gap-1.5">
-          <span className="text-micro text-muted-foreground">
-            {t(($) => $.stats.stage_share, { covered: stats.coveredStages })}
-          </span>
-          <div className="flex h-1.5 overflow-hidden rounded-full bg-muted">
-            {stats.unstaged > 0 ? (
-              <span className="bg-slate-300 dark:bg-slate-600" style={{ width: `${(stats.unstaged / stats.total) * 100}%` }} title={`${t(($) => $.stats.unstaged)}: ${stats.unstaged}`} />
-            ) : null}
-            {[...STAGE_COUNT_KEYS, "general"].map((stage) => {
-              const count = stats.stageCount[stage] ?? 0;
-              if (!count) return null;
-              return (
-                <span
-                  key={stage}
-                  className={STAGE_DOT_CLASS[stage]}
-                  style={{ width: `${(count / stats.total) * 100}%` }}
-                  title={`${stage}: ${count}`}
-                />
-              );
-            })}
-          </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            {stats.unstaged > 0 ? (
-              <span className="inline-flex items-center gap-1 text-micro text-muted-foreground">
-                <span className="size-1.5 rounded-full bg-slate-300 dark:bg-slate-600" />
-                {t(($) => $.stats.unstaged)}
-                <span className="font-medium tabular-nums">{stats.unstaged}</span>
-              </span>
-            ) : null}
-            {[...STAGE_COUNT_KEYS, "general"].map((stage) => {
-              const count = stats.stageCount[stage] ?? 0;
-              if (!count) return null;
-              return (
-                <span key={stage} className="inline-flex items-center gap-1 text-micro text-muted-foreground">
-                  <span className={`size-1.5 rounded-full ${STAGE_DOT_CLASS[stage]}`} />
-                  {t(($) => $.stages[stage as (typeof ASSET_LIFECYCLE_STAGES)[number]])}
-                  <span className="font-medium tabular-nums">{count}</span>
-                </span>
-              );
-            })}
-          </div>
+      {/* 阶段占比堆叠条：窄面板只留条形 + 覆盖度，@4xl 起补明细图例。 */}
+      <div className="flex min-w-40 flex-1 items-center gap-2">
+        <span className="shrink-0 text-micro text-muted-foreground">
+          {t(($) => $.stats.stage_share, { covered: stats.coveredStages })}
+        </span>
+        <div className="flex h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-muted">
+          {segments.map((segment) => (
+            <span
+              key={segment.key}
+              className={segment.dot}
+              style={{ width: `${(segment.count / stats.total) * 100}%` }}
+              title={`${segment.label}: ${segment.count}`}
+            />
+          ))}
         </div>
+      </div>
+
+      <div className="hidden items-center gap-x-3 gap-y-1 @4xl:flex @4xl:flex-wrap">
+        {segments.map((segment) => (
+          <span
+            key={segment.key}
+            className="inline-flex items-center gap-1 text-micro text-muted-foreground"
+          >
+            <span className={`size-1.5 rounded-full ${segment.dot}`} />
+            {segment.label}
+            <span className="font-medium tabular-nums">{segment.count}</span>
+          </span>
+        ))}
       </div>
     </div>
   );
