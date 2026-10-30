@@ -398,6 +398,9 @@ type moduleIssue struct {
 	Title      string `json:"title"`
 	Status     string `json:"status"`
 	Number     int    `json:"number"`
+	// FeatureCode 这条 issue 绑定的功能点（空 = 只到模块粒度）。把归属链的
+	// 最后一跳也吐出来，agent 才能看出哪些功能点还没人干、哪些被重复拆了。
+	FeatureCode string `json:"feature_code,omitempty"`
 }
 
 func (i moduleIssue) label() string {

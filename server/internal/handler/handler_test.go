@@ -88,6 +88,16 @@ func TestMain(m *testing.M) {
 		pool.Close()
 		os.Exit(1)
 	}
+	if err := ensureIssueWorkflowSchema(ctx, pool); err != nil {
+		fmt.Printf("Failed to apply issue workflow schema: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
+	if err := ensureIssueFeaturePointSchema(ctx, pool); err != nil {
+		fmt.Printf("Failed to apply issue feature point schema: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
 
 	queries := db.New(pool)
 	hub := realtime.NewHub()
@@ -323,6 +333,107 @@ func ensureChatResourceSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
 			return fmt.Errorf("apply chat resource migration %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// ensureIssueWorkflowSchema 与上面几个 ensure 同范式：工作流（490/491/492）的列
+// 与表是 issue 创建/更新路径的必经依赖（未选工作流的项目走 Default 工作流），
+// 但本机开发库可能还没跑。三份迁移自身幂等（CREATE TABLE IF NOT EXISTS /
+// ADD COLUMN IF NOT EXISTS），列已存在即整包跳过。
+//
+// 为什么不直接 `make migrate-up`：本机迁移账本另有历史漂移（464 被测试辅助函数
+// 提前应用，账本里没有记录），up 会停在 464。逐条探列探测才能跟其它 ensure 一致。
+func ensureIssueWorkflowSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	var exists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'project'
+			  AND column_name = 'workflow_id'
+		)
+	`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	for _, name := range []string{
+		"490_issue_workflow.up.sql",
+		"491_project_workflow_id.up.sql",
+		"492_agent_task_workflow_step.up.sql",
+	} {
+		sqlBytes, err := os.ReadFile("../migrations/" + name)
+		if err != nil {
+			sqlBytes, err = os.ReadFile("../../migrations/" + name)
+		}
+		if err != nil {
+			return fmt.Errorf("issue workflow migration %s not found: %w", name, err)
+		}
+		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+			return fmt.Errorf("apply issue workflow migration %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// ensureIssueFeaturePointSchema 同上：任务绑定功能点这条能力要三份迁移就位——
+// 484（project_module.spec，487 回填要读它）、487（功能点投影表，
+// validateIssueFeatureCode 就查它）、501（issue.feature_code）。三份自身幂等，
+// 逐项探到已就位就 no-op。
+func ensureIssueFeaturePointSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	steps := []struct {
+		probe string
+		file  string
+	}{
+		{
+			probe: `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'project_module' AND column_name = 'spec')`,
+			file: "484_module_spec_center.up.sql",
+		},
+		{
+			// 模块规格发布要往审计表写一行；本机缺这张表时，发布类测试会以
+			// 「failed to record change event」这种看不出 schema 原因的形式失败。
+			probe: `SELECT to_regclass('module_change_event') IS NOT NULL`,
+			file:  "486_module_change_event.up.sql",
+		},
+		{
+			probe: `SELECT to_regclass('project_module_feature') IS NOT NULL`,
+			file:  "487_module_feature_projection.up.sql",
+		},
+		{
+			// GetProjectModule（SELECT * 展开）已经带上 499 新增的两个指针列，
+			// 本机库缺它们时连「读模块」都会报错，测试会误显示成归属校验失败。
+			probe: `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'project_module' AND column_name = 'brief_version')`,
+			file: "499_module_workspace_fields.up.sql",
+		},
+		{
+			probe: `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'issue' AND column_name = 'feature_code')`,
+			file: "501_issue_feature_point.up.sql",
+		},
+	}
+	for _, step := range steps {
+		var ready bool
+		if err := pool.QueryRow(ctx, step.probe).Scan(&ready); err != nil {
+			return err
+		}
+		if ready {
+			continue
+		}
+		sqlBytes, err := os.ReadFile("../migrations/" + step.file)
+		if err != nil {
+			sqlBytes, err = os.ReadFile("../../migrations/" + step.file)
+		}
+		if err != nil {
+			return fmt.Errorf("issue feature point migration %s not found: %w", step.file, err)
+		}
+		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+			return fmt.Errorf("apply issue feature point migration %s: %w", step.file, err)
 		}
 	}
 	return nil

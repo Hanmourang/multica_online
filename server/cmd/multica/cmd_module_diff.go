@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/prototypeimport"
 )
 
 // 原型版本对比：把「v2 → v3 到底改了什么」变成一段 agent 能直接引用的结论。
@@ -89,22 +90,18 @@ func init() {
 
 // ── HTML 抽取（与 packages/views/.../module-feature-stats.ts 同构）─────────
 
+// prototypeAnchor 是 diff 自己的渲染形状。锚点抽取口径与「从原型导入」共用
+// internal/prototypeimport——两边算出不同的锚点，diff 与 reconcile 就会各说各话。
 type prototypeAnchor struct {
 	Count int    `json:"count"`
 	Title string `json:"title,omitempty"`
 }
 
 var (
-	anchorTagRe   = mustCompile(`(?is)<[a-z][a-z0-9]*\b[^>]*\bdata-fp=["']([^"']+)["'][^>]*>`)
-	anchorTitleRe = mustCompile(`(?is)data-title=["']([^"']*)["']`)
-	docTitleRe    = mustCompile(`(?is)<title[^>]*>([\s\S]*?)</title>`)
-	headingTagRe  = mustCompile(`(?is)<h([1-3])[^>]*>([\s\S]*?)</h[1-3]>`)
-	tagStripRe    = mustCompile(`(?is)<[^>]+>`)
-	spaceRunRe    = mustCompile(`\s+`)
-	scriptRe      = mustCompile(`(?is)<script\b[\s\S]*?</script>`)
-	styleRe       = mustCompile(`(?is)<style\b[\s\S]*?</style>`)
-	commentRe     = mustCompile(`(?is)<!--[\s\S]*?-->`)
-	noscriptRe    = mustCompile(`(?is)<noscript\b[\s\S]*?</noscript>`)
+	docTitleRe   = mustCompile(`(?is)<title[^>]*>([\s\S]*?)</title>`)
+	headingTagRe = mustCompile(`(?is)<h([1-3])[^>]*>([\s\S]*?)</h[1-3]>`)
+	tagStripRe   = mustCompile(`(?is)<[^>]+>`)
+	spaceRunRe   = mustCompile(`\s+`)
 )
 
 func mustCompile(pattern string) *regexp.Regexp { return regexp.MustCompile(pattern) }
@@ -113,31 +110,15 @@ func mustCompile(pattern string) *regexp.Regexp { return regexp.MustCompile(patt
 // 服务端的 reconcile 只认这张表，所以「原型有没有标记」在这一步就有结论。
 func extractPrototypeAnchors(html string) map[string]prototypeAnchor {
 	out := map[string]prototypeAnchor{}
-	for _, match := range anchorTagRe.FindAllStringSubmatch(html, -1) {
-		code := strings.TrimSpace(match[1])
-		if code == "" {
-			continue
-		}
-		entry := out[code]
-		entry.Count++
-		if entry.Title == "" {
-			if title := anchorTitleRe.FindStringSubmatch(match[0]); len(title) > 1 {
-				entry.Title = strings.TrimSpace(title[1])
-			}
-		}
-		out[code] = entry
+	for code, anchor := range prototypeimport.Anchors(html) {
+		out[code] = prototypeAnchor{Count: anchor.Count, Title: anchor.Title}
 	}
 	return out
 }
 
 // prototypeVisibleHTML 去脚本/样式/注释：它们的字符串也是「文本」，
 // 但那是渲染模板而不是页面区块。
-func prototypeVisibleHTML(html string) string {
-	html = commentRe.ReplaceAllString(html, " ")
-	html = scriptRe.ReplaceAllString(html, " ")
-	html = styleRe.ReplaceAllString(html, " ")
-	return noscriptRe.ReplaceAllString(html, " ")
-}
+func prototypeVisibleHTML(html string) string { return prototypeimport.VisibleHTML(html) }
 
 func prototypeInnerText(html string) string {
 	text := tagStripRe.ReplaceAllString(html, " ")

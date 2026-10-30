@@ -216,6 +216,24 @@ func fetchModuleTimeline(ctx context.Context, client *cli.APIClient, module modu
 	return modulePrototypeTimeline{Versions: out, Canonical: canonical, Gated: gated}, nil
 }
 
+// modulePrototypeIssueID 找出版本归属的需求（模块自有版本返回空串）。
+func modulePrototypeIssueID(ctx context.Context, client *cli.APIClient, module moduleRecord, version int) (string, error) {
+	issues, err := fetchModuleIssues(ctx, client, module.ID)
+	if err != nil {
+		return "", fmt.Errorf("list requirements of module %q: %w", module.Name, err)
+	}
+	timeline, err := fetchModuleTimeline(ctx, client, module, issues)
+	if err != nil {
+		return "", err
+	}
+	for _, row := range timeline.Versions {
+		if int(row.Version) == version && row.IssueID != "" {
+			return row.IssueID, nil
+		}
+	}
+	return "", nil
+}
+
 // maxModulePrototypeVersion 返回可用作「下一版」的版本号。
 func maxModulePrototypeVersion(versions []modulePrototypeVersion) int32 {
 	var max int32
@@ -384,7 +402,39 @@ func runModulePrototypeUpdate(cmd *cobra.Command, args []string) error {
 	}
 	var out map[string]any
 	path := moduleScopedPath(module, fmt.Sprintf("/prototype-versions/%d", version))
-	if err := moduleGateHint(client.PatchJSON(ctx, path, body, &out)); err != nil {
+	err = moduleGateHint(client.PatchJSON(ctx, path, body, &out))
+	if err != nil && strings.Contains(err.Error(), "prototype_owned_by_requirement") {
+		// 右栏的「更新文件」对两条轴上的版本都有效；这里走同一条路：
+		// 先定位归属需求，再打需求侧端点。status 是模块自有的开关，不能顺手改。
+		if _, hasStatus := body["status"]; hasStatus {
+			return fmt.Errorf("version v%d belongs to a requirement: --status only applies to module-owned versions; requirement versions follow the requirement's own flow", version)
+		}
+		issueID, lookupErr := modulePrototypeIssueID(ctx, client, module, version)
+		if lookupErr != nil {
+			return fmt.Errorf("version v%d belongs to a requirement and its owner could not be resolved: %w", version, lookupErr)
+		}
+		if issueID == "" {
+			return fmt.Errorf("version v%d belongs to a requirement that is no longer attached to module %q; run `multica module prototype list %s` to see the current owners",
+				version, module.Name, displayID(module.ID, true))
+		}
+		issueBody := map[string]any{}
+		if value, ok := body["html_path"]; ok {
+			issueBody["html_path"] = value
+		}
+		if value, ok := body["prompt"]; ok {
+			issueBody["prompt"] = value
+		}
+		var issueOut map[string]any
+		if err := client.PatchJSON(ctx, "/api/issues/"+issueID+"/prototypes/"+strconv.Itoa(version), issueBody, &issueOut); err != nil {
+			return fmt.Errorf("update prototype version on the requirement axis: %w", err)
+		}
+		if output, _ := cmd.Flags().GetString("output"); output == "table" {
+			fmt.Printf("Updated v%d of module %s (owner: requirement %s)\n", version, module.Name, issueID)
+			return nil
+		}
+		return cli.PrintJSON(cmd.OutOrStdout(), issueOut)
+	}
+	if err != nil {
 		return fmt.Errorf("update prototype version: %w", err)
 	}
 	return cli.PrintJSON(cmd.OutOrStdout(), out)

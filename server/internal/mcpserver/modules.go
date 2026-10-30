@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/prototypeimport"
 )
 
 // moduleMaxBody 限制单次上游响应体，避免把大 HTML 注入给模型。
@@ -117,6 +119,22 @@ var moduleTools = []moduleTool{
 	},
 	{
 		def: toolDef{
+			Name:        "modules_requirements_attach",
+			Description: "把一条需求（或任务）挂到模块下：只改 issue.module_id，可选 feature_code 同时绑到一个功能点。这是精细化迭代的粒度（一个 issue 对应一个功能点）。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"issue_id":{"type":"string"},"feature_code":{"type":"string","description":"可选；必须是该模块已有的功能点编号"}},"required":["project_id","module_id","issue_id"],"additionalProperties":false}`),
+		},
+		run: runModulesRequirementsAttach,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_requirements_detach",
+			Description: "把一条需求从模块上摘下来（issue.module_id = null）。功能点归属由服务端级联清空；需求本身不删。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string","description":"归属校验用，可选"},"issue_id":{"type":"string"}},"required":["project_id","issue_id"],"additionalProperties":false}`),
+		},
+		run: runModulesRequirementsDetach,
+	},
+	{
+		def: toolDef{
 			Name:        "modules_spec_get",
 			Description: "读取模块能力规格（module_spec/v1：summary + features[]）与 spec_version、权威原型版本号。",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"}},"required":["project_id","module_id"],"additionalProperties":false}`),
@@ -141,6 +159,42 @@ var moduleTools = []moduleTool{
 		},
 		specOnly: true,
 		run:      runModulesSpecPublish,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_spec_feature_add",
+			Description: "给 spec 追加一个功能点（单条读改写：只动这一行，其余原样往返）。code 必须新；默认发布（spec_version+1、重建投影），draft=true 只存草稿。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"code":{"type":"string","description":"功能点编号，例如 FP-05"},"title":{"type":"string"},"kind":{"type":"string","enum":["core","edge"],"description":"默认 core"},"priority":{"type":"string"},"group":{"type":"string","description":"分组名，与原型 h2 区块同名最省事"},"draft":{"type":"boolean"},"expected_version":{"type":"integer","description":"可选乐观锁；不传则用刚读到的 spec_version"}},"required":["project_id","module_id","code","title"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesSpecFeatureAdd,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_spec_feature_update",
+			Description: "修改一个功能点的 title / kind / priority / group，或用 code_new 改编号（原型锚点也要一起改，否则对账会读成「删除+新增」）。至少传一个字段。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"code":{"type":"string","description":"要改的功能点编号"},"code_new":{"type":"string"},"title":{"type":"string"},"kind":{"type":"string","enum":["core","edge"]},"priority":{"type":"string"},"group":{"type":"string"},"draft":{"type":"boolean"},"expected_version":{"type":"integer"}},"required":["project_id","module_id","code"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesSpecFeatureUpdate,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_spec_feature_remove",
+			Description: "从 spec 删掉一个功能点（按 code 精确匹配）。四段详情（fp.<code>.*）留在说明版本里但不再渲染；删除前先跟用户确认是否真的要删。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"module_id":{"type":"string"},"code":{"type":"string"},"draft":{"type":"boolean"},"expected_version":{"type":"integer"}},"required":["project_id","module_id","code"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesSpecFeatureRemove,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_spec_import",
+			Description: "「从原型导入」：把原型里真实画出来的东西变成功能点——优先 data-fp 锚点（保留原型自己声明的编号，reconcile 按 code 匹配），没有锚点才退到 h2/h3 区块标题并按 FP-nn 续号。已在 spec 里的编号/标题跳过，所以重跑不会翻倍。HTML 必须内联传入（服务端读不到你机器上的文件）。dry_run=true 只回报不写入。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"项目 UUID"},"module_id":{"type":"string","description":"模块 UUID"},"html":{"type":"string","description":"原型的 HTML 正文（不是路径）"},"dry_run":{"type":"boolean","description":"只回报会新增什么，不写入"},"draft":{"type":"boolean","description":"存为草稿，spec_version 不变"},"expected_version":{"type":"integer","description":"可选乐观锁：当前 spec_version 不等于该值则 409"},"fill_brief":{"type":"boolean","description":"用原型的区块名/导航顺序补空着的 brief.scope / brief.flow，默认 true"},"prototype_version":{"type":"integer","description":"把 data-fp 锚点缓存上传到这个原型版本号；不传则 reconcile / coverage 看不到新功能点"}},"required":["project_id","module_id","html"],"additionalProperties":false}`),
+		},
+		specOnly: true,
+		run:      runModulesSpecImport,
 	},
 	{
 		def: toolDef{
@@ -286,6 +340,50 @@ var moduleTools = []moduleTool{
 		specOnly: true,
 		run:      runModulesReleaseRollback,
 	},
+	// 图谱桥接读（2026-10-30）：左栏的「对象 / 策略」计数、图谱视图与变更概览都
+	// 来自这几条只读端点。CLI 是 multica graph modules|objects|strategies|neighborhood|changes，
+	// 这里给出等价工具，让只有 MCP 的运行时读到同一份数字。写入口 graph/rebridge 仍然
+	// 不给 agent：它一次重连全项目的模块↔对象映射，是人的决定。
+	{
+		def: toolDef{
+			Name:        "modules_graph_bridges",
+			Description: "列出功能模块与图谱节点的桥接状态（module id / graph_node_id / 对象数 / 策略数）。页面左栏的「对象」「策略」计数与「仅看未绑定」筛选读的就是它。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"}},"required":["project_id"],"additionalProperties":false}`),
+		},
+		run: runModulesGraphBridges,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_graph_objects",
+			Description: "列出桥接到某图谱节点的模块里的业务对象（表 / 页面 / 接口等）。graph_node_id 取 modules_graph_bridges 返回的 graph_node_id，不是 module_id；未桥接的模块没有这个值。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"graph_node_id":{"type":"string"}},"required":["project_id","graph_node_id"],"additionalProperties":false}`),
+		},
+		run: runModulesGraphObjects,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_graph_strategies",
+			Description: "列出该模块从本体对象投影出的策略。只读；与左栏「策略」计数同源。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"graph_node_id":{"type":"string"}},"required":["project_id","graph_node_id"],"additionalProperties":false}`),
+		},
+		run: runModulesGraphStrategies,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_graph_neighborhood",
+			Description: "取一个模块在图谱里的自我中心网络（节点 + 边）。depth 取 1..3，默认 1。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"graph_node_id":{"type":"string"},"depth":{"type":"integer","minimum":1,"maximum":3}},"required":["project_id","graph_node_id"],"additionalProperties":false}`),
+		},
+		run: runModulesGraphNeighborhood,
+	},
+	{
+		def: toolDef{
+			Name:        "modules_graph_changes",
+			Description: "列出挂在该模块下的工作项（最新 50 条）。变更概览里「这版改了什么」的需求侧数据就是它。",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"graph_node_id":{"type":"string"}},"required":["project_id","graph_node_id"],"additionalProperties":false}`),
+		},
+		run: runModulesGraphChanges,
+	},
 }
 
 // Call 分派一次 modules_* 调用。base 用配置的自有地址，auth 透传入站请求。
@@ -405,19 +503,62 @@ func modulePath(projectID, moduleID, suffix string) string {
 	return "/api/projects/" + projectID + "/modules/" + moduleID + suffix
 }
 
+// graphModulePath 组装 /api/projects/{p}/graph/modules[/{nodeId}<suffix>]。
+func graphModulePath(projectID, nodeID, suffix string) string {
+	if nodeID == "" {
+		return "/api/projects/" + projectID + "/graph/modules" + suffix
+	}
+	return "/api/projects/" + projectID + "/graph/modules/" + nodeID + suffix
+}
+
+// graphNodeArg 取出并校验图谱节点 id。它来自扫描产物，不保证是 UUID：
+// 只允许字母、数字与 -_.: 且长度 ≤128，避免参数变成路径穿越或多出查询串。
+func graphNodeArg(a moduleArgs) (string, *jsonRPCError) {
+	if a.GraphNodeID == nil {
+		return "", &jsonRPCError{Code: -32602, Message: "graph_node_id required: read modules_graph_bridges first"}
+	}
+	value := strings.TrimSpace(*a.GraphNodeID)
+	if value == "" {
+		return "", &jsonRPCError{Code: -32602, Message: "graph_node_id required: read modules_graph_bridges first"}
+	}
+	if len(value) > 128 {
+		return "", &jsonRPCError{Code: -32602, Message: "graph_node_id is too long"}
+	}
+	for _, c := range value {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '-', c == '_', c == '.', c == ':':
+		default:
+			return "", &jsonRPCError{Code: -32602, Message: "graph_node_id contains unsupported characters"}
+		}
+	}
+	return value, nil
+}
+
 type moduleArgs struct {
 	ProjectID     string          `json:"project_id"`
 	ModuleID      string          `json:"module_id"`
 	Name          string          `json:"name"`
 	Color         string          `json:"color"`
 	GraphNodeID   *string         `json:"graph_node_id"`
+	Depth         *int32          `json:"depth"`
 	Confirm       bool            `json:"confirm"`
 	Kind          string          `json:"kind"`
+	Code          string          `json:"code"`
+	CodeNew       string          `json:"code_new"`
+	Title         string          `json:"title"`
+	Priority      string          `json:"priority"`
+	Group         string          `json:"group"`
+	Draft         bool            `json:"draft"`
+	FeatureCode   string          `json:"feature_code"`
 	Spec          json.RawMessage `json:"spec"`
 	Expected      *int32          `json:"expected_version"`
 	CanonicalOnly bool            `json:"canonical_only"`
 	Version       *int32          `json:"version"`
 	HTMLPath      string          `json:"html_path"`
+	HTML          string          `json:"html"`
+	DryRun        bool            `json:"dry_run"`
+	FillBrief     *bool           `json:"fill_brief"`
 	Prompt        string          `json:"prompt"`
 	Status        string          `json:"status"`
 	IssueID       string          `json:"issue_id"`
@@ -661,6 +802,429 @@ func runModulesSpecPublish(ctx context.Context, rt moduleCtx, args json.RawMessa
 		body["expected_version"] = *a.Expected
 	}
 	return rt.do(ctx, http.MethodPost, modulePath(a.ProjectID, a.ModuleID, "/spec/publish"), body)
+}
+
+// ── 单条功能点的读改写 ─────────────────────────────────────────────────
+//
+// 界面与 CLI 改一个功能点都是「读整份 → 只改这一行 → publish」。MCP 侧必须同形，
+// 否则只接 MCP 的 agent 会去整份覆盖，少写一行就是一次静默删除。
+
+func runModulesSpecFeatureAdd(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+	code := strings.TrimSpace(a.Code)
+	if code == "" {
+		return nil, &jsonRPCError{Code: -32602, Message: "code required (e.g. FP-05)"}
+	}
+	title := strings.TrimSpace(a.Title)
+	if title == "" {
+		return nil, &jsonRPCError{Code: -32602, Message: "title required"}
+	}
+	kind := strings.TrimSpace(a.Kind)
+	if kind == "" {
+		kind = "core"
+	}
+	if kind != "core" && kind != "edge" {
+		return nil, &jsonRPCError{Code: -32602, Message: "kind must be core or edge"}
+	}
+
+	spec, version, jerr := loadSpecForEdit(ctx, rt, a.ProjectID, a.ModuleID)
+	if jerr != nil {
+		return nil, jerr
+	}
+	features := specFeatures(spec)
+	if specFeatureIndex(features, code) >= 0 {
+		return nil, &jsonRPCError{Code: -32005, Message: "feature " + code + " already exists; use modules_spec_feature_update"}
+	}
+	feature := map[string]any{"code": code, "title": title, "kind": kind}
+	if priority := strings.TrimSpace(a.Priority); priority != "" {
+		feature["priority"] = priority
+	}
+	if group := strings.TrimSpace(a.Group); group != "" {
+		feature["group"] = group
+	}
+	spec["features"] = append(features, feature)
+	return writeSpecForEdit(ctx, rt, a, spec, version, "add", code)
+}
+
+func runModulesSpecFeatureUpdate(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+	code := strings.TrimSpace(a.Code)
+	if code == "" {
+		return nil, &jsonRPCError{Code: -32602, Message: "code required"}
+	}
+	codeNew := strings.TrimSpace(a.CodeNew)
+	title := strings.TrimSpace(a.Title)
+	kind := strings.TrimSpace(a.Kind)
+	priority := strings.TrimSpace(a.Priority)
+	group := strings.TrimSpace(a.Group)
+	if title == "" && kind == "" && priority == "" && group == "" && codeNew == "" {
+		return nil, &jsonRPCError{Code: -32602, Message: "nothing to update: pass title, kind, priority, group or code_new"}
+	}
+	if kind != "" && kind != "core" && kind != "edge" {
+		return nil, &jsonRPCError{Code: -32602, Message: "kind must be core or edge"}
+	}
+
+	spec, version, jerr := loadSpecForEdit(ctx, rt, a.ProjectID, a.ModuleID)
+	if jerr != nil {
+		return nil, jerr
+	}
+	features := specFeatures(spec)
+	index := specFeatureIndex(features, code)
+	if index < 0 {
+		return nil, &jsonRPCError{Code: -32004, Message: "feature not found in spec: " + code}
+	}
+	feature, ok := features[index].(map[string]any)
+	if !ok {
+		return nil, &jsonRPCError{Code: -32000, Message: "spec row " + code + " is not an object; fix it with modules_spec_publish"}
+	}
+	if title != "" {
+		feature["title"] = title
+	}
+	if kind != "" {
+		feature["kind"] = kind
+	}
+	if priority != "" {
+		feature["priority"] = priority
+	}
+	if group != "" {
+		feature["group"] = group
+	}
+	if codeNew != "" && codeNew != code {
+		if specFeatureIndex(features, codeNew) >= 0 {
+			return nil, &jsonRPCError{Code: -32005, Message: "feature " + codeNew + " already exists; pick another code_new"}
+		}
+		feature["code"] = codeNew
+		code = codeNew
+	}
+	spec["features"] = features
+	return writeSpecForEdit(ctx, rt, a, spec, version, "update", code)
+}
+
+func runModulesSpecFeatureRemove(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+	code := strings.TrimSpace(a.Code)
+	if code == "" {
+		return nil, &jsonRPCError{Code: -32602, Message: "code required"}
+	}
+
+	spec, version, jerr := loadSpecForEdit(ctx, rt, a.ProjectID, a.ModuleID)
+	if jerr != nil {
+		return nil, jerr
+	}
+	features := specFeatures(spec)
+	index := specFeatureIndex(features, code)
+	if index < 0 {
+		return nil, &jsonRPCError{Code: -32004, Message: "feature not found in spec: " + code}
+	}
+	spec["features"] = append(append([]any{}, features[:index]...), features[index+1:]...)
+	return writeSpecForEdit(ctx, rt, a, spec, version, "remove", code)
+}
+
+// loadSpecForEdit 读回整份已发布 spec（保留未知字段），并拿出 spec_version 做乐观锁。
+func loadSpecForEdit(ctx context.Context, rt moduleCtx, projectID, moduleID string) (map[string]any, int32, *jsonRPCError) {
+	data, jerr := rt.do(ctx, http.MethodGet, modulePath(projectID, moduleID, "/spec"), nil)
+	if jerr != nil {
+		return nil, 0, jerr
+	}
+	envelope, ok := data.(map[string]any)
+	if !ok {
+		return nil, 0, &jsonRPCError{Code: -32000, Message: "unexpected spec response"}
+	}
+	spec, _ := envelope["spec"].(map[string]any)
+	if spec == nil {
+		spec = map[string]any{}
+	}
+	if schema, _ := spec["schema"].(string); strings.TrimSpace(schema) == "" {
+		spec["schema"] = "module_spec/v1"
+	}
+	if _, ok := spec["features"].([]any); !ok {
+		spec["features"] = []any{}
+	}
+	version := int32(0)
+	if value, ok := envelope["spec_version"].(float64); ok {
+		version = int32(value)
+	}
+	return spec, version, nil
+}
+
+func specFeatures(spec map[string]any) []any {
+	features, _ := spec["features"].([]any)
+	if features == nil {
+		return []any{}
+	}
+	return features
+}
+
+func specFeatureIndex(features []any, code string) int {
+	for index, row := range features {
+		feature, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		value, _ := feature["code"].(string)
+		if strings.TrimSpace(value) == code {
+			return index
+		}
+	}
+	return -1
+}
+
+// writeSpecForEdit 写回：默认 publish（带乐观锁），draft=true 只存草稿。
+func writeSpecForEdit(ctx context.Context, rt moduleCtx, a moduleArgs, spec map[string]any, version int32, action, code string) (any, *jsonRPCError) {
+	out, jerr := publishSpec(ctx, rt, a, spec, version)
+	if jerr != nil {
+		return nil, jerr
+	}
+	return map[string]any{
+		"action":        action,
+		"code":          code,
+		"draft":         a.Draft,
+		"feature_count": len(specFeatures(spec)),
+		"result":        out,
+	}, nil
+}
+
+// publishSpec 把整份 spec 发回服务端：draft 不涨 spec_version，发布走乐观锁
+// （不传 expected_version 就用刚读到的那个）。
+func publishSpec(ctx context.Context, rt moduleCtx, a moduleArgs, spec map[string]any, version int32) (any, *jsonRPCError) {
+	body := map[string]any{"spec": spec}
+	path := modulePath(a.ProjectID, a.ModuleID, "/spec/publish")
+	if a.Draft {
+		path = modulePath(a.ProjectID, a.ModuleID, "/spec/draft")
+	} else {
+		expected := version
+		if a.Expected != nil {
+			expected = *a.Expected
+		}
+		body["expected_version"] = expected
+	}
+	return rt.do(ctx, http.MethodPost, path, body)
+}
+
+// ── 从原型导入 ────────────────────────────────────────────────
+//
+// 界面上的「从原型导入」是浏览器读 HTML 后局部合并（见 prototype-inspector 的
+// useImportFromPrototype）；MCP 侧也必须同形，否则 agent 会去整份覆盖 spec。解析
+// 与合并的纯函数在 internal/prototypeimport，与 CLI `module spec import` 共用。
+//
+// 与服务端的「不解析 HTML」约定不矛盾：锚点缓存仍由调用方上传，这里只是把同一
+// 份 HTML 里能读出的结构算成候选，不落任何解析结果到别的表。
+const moduleImportMaxHTML = 2 << 20
+
+func runModulesSpecImport(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+	html := a.HTML
+	if strings.TrimSpace(html) == "" {
+		return nil, &jsonRPCError{Code: -32602, Message: "html required: pass the prototype's HTML body (the server cannot read a file path on your machine; use `multica module spec import --html-path` if the file is local)"}
+	}
+	if len(html) > moduleImportMaxHTML {
+		return nil, &jsonRPCError{Code: -32602, Message: fmt.Sprintf("html is larger than %d bytes: register the file as a prototype version and import the blocks you need", moduleImportMaxHTML)}
+	}
+	if a.PrototypeVersion != nil && *a.PrototypeVersion <= 0 {
+		return nil, &jsonRPCError{Code: -32602, Message: "prototype_version must be a positive version number"}
+	}
+	candidates := prototypeimport.Candidates(html)
+	if len(candidates) == 0 {
+		return nil, &jsonRPCError{Code: -32602, Message: `no data-fp anchor and no h2/h3 heading in html: nothing to import (add data-fp="FP-01" to the blocks you want as feature points)`}
+	}
+
+	spec, version, jerr := loadSpecForEdit(ctx, rt, a.ProjectID, a.ModuleID)
+	if jerr != nil {
+		return nil, jerr
+	}
+	features := specFeatures(spec)
+	added, skipped := prototypeimport.Merge(features, candidates)
+
+	report := map[string]any{
+		"action":               "import",
+		"dry_run":              a.DryRun,
+		"draft":                a.Draft,
+		"added":                added,
+		"skipped":              skipped,
+		"spec_version_before":  version,
+		"feature_count_before": len(features),
+		"written":              false,
+	}
+
+	// brief 只补空着的字段：导入不该覆盖人写过的说明。
+	if a.FillBrief == nil || *a.FillBrief {
+		fields, briefVersion, jerr := importBriefFields(ctx, rt, a.ProjectID, a.ModuleID, html)
+		if jerr != nil {
+			return nil, jerr
+		}
+		report["brief_fields"] = fields
+		report["brief_version"] = briefVersion
+	}
+
+	// 一条新功能点都没有，或只是 dry-run：不写入，直接回报。（重跑同一份原型走这里）
+	if a.DryRun || len(added) == 0 {
+		report["feature_count"] = len(features) + len(added)
+		return report, nil
+	}
+
+	// features 是 []any（保留 spec 里未知字段），added 是 []map[string]any，逐条转。
+	merged := make([]any, 0, len(features)+len(added))
+	merged = append(merged, features...)
+	for _, feature := range added {
+		merged = append(merged, feature)
+	}
+	spec["features"] = merged
+	published, jerr := publishSpec(ctx, rt, a, spec, version)
+	if jerr != nil {
+		return nil, jerr
+	}
+	report["written"] = true
+	report["feature_count"] = len(specFeatures(spec))
+	report["result"] = published
+	// 以服务端回的 spec_version 为准：草稿不涨、发布 +1，拿不到才自己推。
+	nextVersion := version
+	if !a.Draft {
+		if value, ok := specVersionFrom(published); ok {
+			nextVersion = value
+		} else {
+			nextVersion = version + 1
+		}
+	}
+	report["spec_version"] = nextVersion
+
+	// 下面两步失败不把整个导入判失败：功能点已经写进去了，缺的只是周边缓存，
+	// 但要如实回报，否则 reconcile 的空位会被当成「导入没生效」。
+	if fields, ok := report["brief_fields"].(map[string]any); ok && len(fields) > 0 {
+		if briefVersion, ok := report["brief_version"].(int); ok && briefVersion >= 0 {
+			body := map[string]any{
+				"base_version": briefVersion,
+				"fields":       fields,
+				"source":       "extract",
+				"note":         "从原型导入",
+			}
+			if _, jerr := rt.do(ctx, http.MethodPost, modulePath(a.ProjectID, a.ModuleID, "/workspace/patch"), body); jerr != nil {
+				report["brief_warning"] = "brief patch failed, spec is already written: " + jerr.Message
+			} else {
+				report["brief_patched"] = true
+			}
+		}
+	}
+
+	if a.PrototypeVersion != nil {
+		anchors := prototypeimport.Anchors(html)
+		if len(anchors) > 0 {
+			path := modulePath(a.ProjectID, a.ModuleID, fmt.Sprintf("/prototype-versions/%d/parse", *a.PrototypeVersion))
+			if _, jerr := rt.do(ctx, http.MethodPost, path, map[string]any{"anchors": anchors}); jerr != nil {
+				report["anchors_warning"] = "anchor cache upload failed, reconcile stays empty: " + jerr.Message
+			} else {
+				report["anchors_uploaded"] = len(anchors)
+			}
+		}
+	}
+	return report, nil
+}
+
+// importBriefFields 读右栏工作区，只在字段还空着时提出 brief.scope / brief.flow。
+// 返回 briefVersion = -1 表示没有可补的（原型只有一个区块、或已有人写过）。
+func importBriefFields(ctx context.Context, rt moduleCtx, projectID, moduleID, html string) (map[string]any, int, *jsonRPCError) {
+	sections := prototypeimport.SectionTitles(html)
+	flow := prototypeimport.NavFlow(html)
+	if len(sections) <= 1 && len(flow) <= 1 {
+		return map[string]any{}, -1, nil
+	}
+	data, jerr := rt.do(ctx, http.MethodGet, modulePath(projectID, moduleID, "/workspace"), nil)
+	if jerr != nil {
+		return nil, -1, jerr
+	}
+	envelope, ok := data.(map[string]any)
+	if !ok {
+		// 形状读不懂就不补，别挡导入本身。
+		return map[string]any{}, -1, nil
+	}
+	brief, _ := envelope["brief"].(map[string]any)
+	fields, _ := brief["fields"].(map[string]any)
+	current := make(map[string]string, len(fields))
+	for key, raw := range fields {
+		entry, _ := raw.(map[string]any)
+		current[key] = prototypeimport.RenderScalar(entry["value"])
+	}
+	version := -1
+	if value, ok := brief["version"].(float64); ok {
+		version = int(value)
+	}
+	return prototypeimport.BriefFields(sections, flow, current), version, nil
+}
+
+// specVersionFrom 从 publish 的响应里取 spec_version；取不到就由调用方自己推。
+func specVersionFrom(result any) (int32, bool) {
+	envelope, ok := result.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	switch value := envelope["spec_version"].(type) {
+	case float64:
+		return int32(value), true
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+			return int32(n), true
+		}
+	}
+	return 0, false
+}
+
+func runModulesRequirementsAttach(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("issue_id", a.IssueID); jerr != nil {
+		return nil, jerr
+	}
+	body := map[string]any{"module_id": a.ModuleID}
+	if feature := strings.TrimSpace(a.FeatureCode); feature != "" {
+		// 服务端会校验编号属于该模块（不属于则 404），这里不先查一遍。
+		body["feature_code"] = feature
+	}
+	return rt.do(ctx, http.MethodPut, "/api/issues/"+a.IssueID, body)
+}
+
+func runModulesRequirementsDetach(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	if _, jerr := uuidPath("issue_id", a.IssueID); jerr != nil {
+		return nil, jerr
+	}
+	if a.ModuleID != "" {
+		if _, jerr := uuidPath("module_id", a.ModuleID); jerr != nil {
+			return nil, jerr
+		}
+	}
+	// null 才是「摘除」；空串会被服务端当成无效 UUID。
+	return rt.do(ctx, http.MethodPut, "/api/issues/"+a.IssueID, map[string]any{"module_id": nil})
 }
 
 func runModulesPrototypeVersions(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
@@ -963,4 +1527,51 @@ func runModulesReleaseRollback(ctx context.Context, rt moduleCtx, args json.RawM
 	}
 	suffix := fmt.Sprintf("/releases/%d/rollback", *a.ReleaseVersion)
 	return rt.do(ctx, http.MethodPost, modulePath(a.ProjectID, a.ModuleID, suffix), nil)
+}
+
+// ── 图谱桥接读 ────────────────────────────────────────────────
+
+func runModulesGraphBridges(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	return rt.do(ctx, http.MethodGet, graphModulePath(a.ProjectID, "", ""), nil)
+}
+
+func runModulesGraphObjects(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	return runModulesGraphRead(ctx, rt, args, "/objects", "")
+}
+
+func runModulesGraphStrategies(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	return runModulesGraphRead(ctx, rt, args, "/strategies", "")
+}
+
+func runModulesGraphChanges(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	return runModulesGraphRead(ctx, rt, args, "/changes", "")
+}
+
+func runModulesGraphNeighborhood(ctx context.Context, rt moduleCtx, args json.RawMessage) (any, *jsonRPCError) {
+	query := ""
+	if a, jerr := parseArgs(args); jerr == nil && a.Depth != nil {
+		depth := *a.Depth
+		if depth < 1 || depth > 3 {
+			return nil, &jsonRPCError{Code: -32602, Message: "depth must be 1..3"}
+		}
+		query = fmt.Sprintf("?depth=%d", depth)
+	}
+	return runModulesGraphRead(ctx, rt, args, "/neighborhood", query)
+}
+
+// runModulesGraphRead 是四条 per-node 读的公用体：参数校验一致，只有尾段不同。
+func runModulesGraphRead(ctx context.Context, rt moduleCtx, args json.RawMessage, suffix, query string) (any, *jsonRPCError) {
+	a, jerr := parseArgs(args)
+	if jerr != nil {
+		return nil, jerr
+	}
+	nodeID, jerr := graphNodeArg(a)
+	if jerr != nil {
+		return nil, jerr
+	}
+	return rt.do(ctx, http.MethodGet, graphModulePath(a.ProjectID, nodeID, suffix)+query, nil)
 }

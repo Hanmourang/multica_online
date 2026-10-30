@@ -122,6 +122,8 @@ func TestModuleFacadeHidesSpecToolsWhenFlagOff(t *testing.T) {
 	for _, name := range listedTools(t, srv) {
 		switch name {
 		case "modules_spec_get", "modules_spec_publish", "modules_reconcile", "modules_coverage",
+			"modules_spec_feature_add", "modules_spec_feature_update", "modules_spec_feature_remove",
+			"modules_spec_import",
 			"modules_prototype_versions", "modules_prototype_register",
 			"modules_prototype_plan_create", "modules_prototype_plan_get", "modules_prototype_plan_apply",
 			"modules_workspace_get", "modules_brief_patch",
@@ -515,5 +517,342 @@ func TestModuleToolsNeedSelfBaseURL(t *testing.T) {
 	text, isErr := callModule(t, srv, "modules_list", map[string]any{"project_id": testProject}, "Bearer mat_test")
 	if !isErr || !strings.Contains(text, "MULTICA_PUBLIC_URL") {
 		t.Fatalf("want configuration error, got isErr=%v text=%s", isErr, text)
+	}
+}
+
+// specFeatureUpstream 顶替「GET /spec 返回 FP-01，写动作回 spec_version」的上游。
+func specFeatureUpstream(t *testing.T, calls *[]upstreamCall) *Server {
+	t.Helper()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		*calls = append(*calls, upstreamCall{
+			method: r.Method,
+			path:   r.URL.Path,
+			auth:   r.Header.Get("Authorization"),
+			body:   string(raw),
+		})
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/spec") {
+			_, _ = w.Write([]byte(`{"spec":{"schema":"module_spec/v1","summary":"s","features":[{"code":"FP-01","title":"登录","kind":"core"}]},"spec_version":3}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"spec_version":4}`))
+	}))
+	t.Cleanup(upstream.Close)
+	return NewModuleFacade(upstream.URL, true)
+}
+
+// 单条功能点的读改写：先读整份 spec，只动点名那一行，再带乐观锁 publish。
+// 这三条工具存在的理由就是不让 MCP-only 的 agent 去整份覆盖。
+func TestModuleSpecFeatureToolsReadModifyWrite(t *testing.T) {
+	calls := &[]upstreamCall{}
+	srv := specFeatureUpstream(t, calls)
+	auth := "Bearer mat_test"
+
+	text, isErr := callModule(t, srv, "modules_spec_feature_add", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"code":       "FP-02",
+		"title":      "群设置",
+		"group":      "会话",
+	}, auth)
+	if isErr {
+		t.Fatalf("add should succeed, got %s", text)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("want read + publish, got %d calls: %+v", len(*calls), *calls)
+	}
+	read, publish := (*calls)[0], (*calls)[1]
+	if read.method != http.MethodGet || read.path != "/api/projects/"+testProject+"/modules/"+testModule+"/spec" {
+		t.Fatalf("bad read target: %s %s", read.method, read.path)
+	}
+	if publish.method != http.MethodPost || publish.path != "/api/projects/"+testProject+"/modules/"+testModule+"/spec/publish" {
+		t.Fatalf("bad publish target: %s %s", publish.method, publish.path)
+	}
+	if publish.auth != auth {
+		t.Fatalf("Authorization must be forwarded verbatim, got %q", publish.auth)
+	}
+	for _, want := range []string{`"FP-01"`, `"FP-02"`, `群设置`, `"expected_version":3`} {
+		if !strings.Contains(publish.body, want) {
+			t.Fatalf("publish body missing %s: %s", want, publish.body)
+		}
+	}
+	if !strings.Contains(text, `"feature_count":2`) {
+		t.Fatalf("result must report the new count, got %s", text)
+	}
+
+	*calls = (*calls)[:0]
+	if _, isErr := callModule(t, srv, "modules_spec_feature_add", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"code":       "FP-01",
+		"title":      "重复",
+	}, auth); !isErr {
+		t.Fatalf("adding an existing code must be refused before publishing")
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("duplicate add must stop after the read, got %d calls", len(*calls))
+	}
+
+	*calls = (*calls)[:0]
+	if _, isErr := callModule(t, srv, "modules_spec_feature_update", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"code":       "FP-01",
+		"title":      "登录（改）",
+	}, auth); isErr {
+		t.Fatalf("update should succeed")
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("want read + publish, got %d calls", len(*calls))
+	}
+	updated := (*calls)[1].body
+	if !strings.Contains(updated, `"title":"登录（改）"`) || !strings.Contains(updated, `"kind":"core"`) {
+		t.Fatalf("update must only touch the named row: %s", updated)
+	}
+
+	*calls = (*calls)[:0]
+	if _, isErr := callModule(t, srv, "modules_spec_feature_remove", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"code":       "FP-01",
+	}, auth); isErr {
+		t.Fatalf("remove should succeed")
+	}
+	removed := (*calls)[1].body
+	if strings.Contains(removed, `"FP-01"`) {
+		t.Fatalf("remove must drop the row from the published spec: %s", removed)
+	}
+	if !strings.Contains(removed, `"features":[]`) {
+		t.Fatalf("remove must leave an empty feature list: %s", removed)
+	}
+}
+
+// 改一个不存在的功能点：必须报错，不能隐式新增。
+func TestModuleSpecFeatureUpdateRejectsUnknownCode(t *testing.T) {
+	calls := &[]upstreamCall{}
+	srv := specFeatureUpstream(t, calls)
+	text, isErr := callModule(t, srv, "modules_spec_feature_update", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"code":       "FP-99",
+		"title":      "不存在",
+	}, "Bearer mat_test")
+	if !isErr || !strings.Contains(text, "not found") {
+		t.Fatalf("want not-found, got isErr=%v text=%s", isErr, text)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("unknown code must stop after the read, got %d calls", len(*calls))
+	}
+}
+
+// 需求归属的挂载/摘除只改 issue.module_id（与 CLI setModuleRequirement 同一口径）。
+func TestModuleRequirementAttachDetachForwardToIssue(t *testing.T) {
+	srv, calls := newModuleFacade(t, false)
+	issue := "33333333-3333-3333-3333-333333333333"
+	auth := "Bearer mat_test"
+
+	if _, isErr := callModule(t, srv, "modules_requirements_attach", map[string]any{
+		"project_id":   testProject,
+		"module_id":    testModule,
+		"issue_id":     issue,
+		"feature_code": "FP-03",
+	}, auth); isErr {
+		t.Fatalf("attach should succeed")
+	}
+	attach := (*calls)[0]
+	if attach.method != http.MethodPut || attach.path != "/api/issues/"+issue {
+		t.Fatalf("bad attach target: %s %s", attach.method, attach.path)
+	}
+	for _, want := range []string{testModule, "FP-03"} {
+		if !strings.Contains(attach.body, want) {
+			t.Fatalf("attach body missing %s: %s", want, attach.body)
+		}
+	}
+
+	if _, isErr := callModule(t, srv, "modules_requirements_detach", map[string]any{
+		"project_id": testProject,
+		"issue_id":   issue,
+	}, auth); isErr {
+		t.Fatalf("detach should succeed")
+	}
+	detach := (*calls)[1]
+	if detach.method != http.MethodPut || detach.path != "/api/issues/"+issue {
+		t.Fatalf("bad detach target: %s %s", detach.method, detach.path)
+	}
+	if !strings.Contains(detach.body, `"module_id":null`) {
+		t.Fatalf("detach must send null, not an empty string: %s", detach.body)
+	}
+}
+
+// 图谱桥接读：五条工具各自打到页面对应的只读端点，且都是 GET。
+func TestModuleGraphReadToolsForwardToGraphRoutes(t *testing.T) {
+	srv, calls := newModuleFacade(t, false)
+	node := "graph:module-7"
+	auth := "Bearer mat_test"
+
+	cases := []struct {
+		tool  string
+		args  map[string]any
+		path  string
+		query string
+	}{
+		{"modules_graph_bridges", map[string]any{"project_id": testProject},
+			"/api/projects/" + testProject + "/graph/modules", ""},
+		{"modules_graph_objects", map[string]any{"project_id": testProject, "graph_node_id": node},
+			"/api/projects/" + testProject + "/graph/modules/" + node + "/objects", ""},
+		{"modules_graph_strategies", map[string]any{"project_id": testProject, "graph_node_id": node},
+			"/api/projects/" + testProject + "/graph/modules/" + node + "/strategies", ""},
+		{"modules_graph_changes", map[string]any{"project_id": testProject, "graph_node_id": node},
+			"/api/projects/" + testProject + "/graph/modules/" + node + "/changes", ""},
+		{"modules_graph_neighborhood", map[string]any{"project_id": testProject, "graph_node_id": node, "depth": 2},
+			"/api/projects/" + testProject + "/graph/modules/" + node + "/neighborhood", "depth=2"},
+	}
+	for _, tc := range cases {
+		*calls = (*calls)[:0]
+		if _, isErr := callModule(t, srv, tc.tool, tc.args, auth); isErr {
+			t.Fatalf("%s should succeed", tc.tool)
+		}
+		if len(*calls) != 1 {
+			t.Fatalf("%s: want 1 call, got %d", tc.tool, len(*calls))
+		}
+		got := (*calls)[0]
+		if got.method != http.MethodGet || got.path != tc.path || got.query != tc.query {
+			t.Fatalf("%s: got %s %s?%s, want GET %s?%s", tc.tool, got.method, got.path, got.query, tc.path, tc.query)
+		}
+		if got.auth != auth {
+			t.Fatalf("%s must forward Authorization, got %q", tc.tool, got.auth)
+		}
+	}
+}
+
+// 图谱节点 id 来自扫描产物、不保证 UUID，但不能被拿来拼路径穿越。
+func TestModuleGraphReadRejectsUnsafeNodeID(t *testing.T) {
+	srv, calls := newModuleFacade(t, false)
+	for _, node := range []string{"", "../../issue", "node/../x", "node?x=1"} {
+		text, isErr := callModule(t, srv, "modules_graph_objects", map[string]any{
+			"project_id":    testProject,
+			"graph_node_id": node,
+		}, "Bearer mat_test")
+		if !isErr {
+			t.Fatalf("node %q must be rejected, got %s", node, text)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("an unsafe node id must not reach upstream, got %d calls", len(*calls))
+	}
+}
+
+// 邻域深度超出 1..3 时不发请求。
+func TestModuleGraphNeighborhoodRejectsBadDepth(t *testing.T) {
+	srv, calls := newModuleFacade(t, false)
+	for _, depth := range []int{0, 4, -1} {
+		if _, isErr := callModule(t, srv, "modules_graph_neighborhood", map[string]any{
+			"project_id":    testProject,
+			"graph_node_id": "node-1",
+			"depth":         depth,
+		}, "Bearer mat_test"); !isErr {
+			t.Fatalf("depth %d must be rejected", depth)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("a bad depth must not reach upstream, got %d calls", len(*calls))
+	}
+}
+
+// 每个工具的 InputSchema 都是手写 JSON：一处括号或引号写错，tools/list 会在运行时
+// 崩给所有 agent 看，而编译期毫无提示。顺带盯住 required 必须真的声明过。
+func TestModuleToolSchemasAreValidJSON(t *testing.T) {
+	for _, tool := range moduleTools {
+		var schema struct {
+			Type       string                     `json:"type"`
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		}
+		if err := json.Unmarshal(tool.def.InputSchema, &schema); err != nil {
+			t.Fatalf("%s: InputSchema is not valid JSON: %v", tool.def.Name, err)
+		}
+		if schema.Type != "object" {
+			t.Fatalf("%s: InputSchema.type must be object, got %q", tool.def.Name, schema.Type)
+		}
+		for _, key := range schema.Required {
+			if _, ok := schema.Properties[key]; !ok {
+				t.Fatalf("%s: required key %q is not declared in properties", tool.def.Name, key)
+			}
+		}
+	}
+}
+
+// 「从原型导入」把 HTML 里的 data-fp 锚点变成功能点：读 spec → 合并 → 发布。
+// 服务端读不到 agent 机器上的文件，所以正文是内联传的，路径只有 /spec 与 /spec/publish。
+func TestModuleSpecImportPublishesAnchorsAsFeaturePoints(t *testing.T) {
+	srv, calls := newModuleFacade(t, true)
+	html := `<section data-fp="FP-01" data-title="群列表"></section>` +
+		`<section data-fp="FP-02" data-title="群设置"></section>`
+	text, isErr := callModule(t, srv, "modules_spec_import", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"html":       html,
+	}, "Bearer mat_task")
+	if isErr {
+		t.Fatalf("unexpected tool error: %s", text)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("want GET spec + POST publish, got %+v", *calls)
+	}
+	if call := (*calls)[0]; call.method != http.MethodGet || call.path != "/api/projects/"+testProject+"/modules/"+testModule+"/spec" {
+		t.Fatalf("first call must read the spec, got %s %s", call.method, call.path)
+	}
+	publish := (*calls)[1]
+	if publish.method != http.MethodPost || publish.path != "/api/projects/"+testProject+"/modules/"+testModule+"/spec/publish" {
+		t.Fatalf("second call must publish, got %s %s", publish.method, publish.path)
+	}
+	for _, want := range []string{"FP-01", "群列表", "FP-02", "expected_version"} {
+		if !strings.Contains(publish.body, want) {
+			t.Fatalf("publish body must carry %q, got %s", want, publish.body)
+		}
+	}
+	if !strings.Contains(text, `"written":true`) || !strings.Contains(text, "FP-01") {
+		t.Fatalf("report must say it wrote the imported codes, got %s", text)
+	}
+}
+
+// dry-run 只回报会新增什么，一个写请求都不发。
+func TestModuleSpecImportDryRunWritesNothing(t *testing.T) {
+	srv, calls := newModuleFacade(t, true)
+	text, isErr := callModule(t, srv, "modules_spec_import", map[string]any{
+		"project_id": testProject,
+		"module_id":  testModule,
+		"html":       `<h2>会话</h2><h3>群列表</h3>`,
+		"dry_run":    true,
+	}, "Bearer mat_task")
+	if isErr {
+		t.Fatalf("unexpected tool error: %s", text)
+	}
+	for _, call := range *calls {
+		if call.method != http.MethodGet {
+			t.Fatalf("dry-run must not write, got %s %s", call.method, call.path)
+		}
+	}
+	if !strings.Contains(text, `"written":false`) || !strings.Contains(text, "FP-01") {
+		t.Fatalf("dry-run report must list what would be added, got %s", text)
+	}
+}
+
+// 没有锚点也没有区块标题就拒绝：批量 publish 空 diff 等于什么都没做，但会让
+// 调用方误以为导入了。空 HTML 同样直接拒，不发任何请求。
+func TestModuleSpecImportRejectsEmptyInput(t *testing.T) {
+	srv, calls := newModuleFacade(t, true)
+	for _, args := range []map[string]any{
+		{"project_id": testProject, "module_id": testModule},
+		{"project_id": testProject, "module_id": testModule, "html": "   "},
+		{"project_id": testProject, "module_id": testModule, "html": "<div>没有锚点也没有标题</div>"},
+	} {
+		if text, isErr := callModule(t, srv, "modules_spec_import", args, "Bearer mat_task"); !isErr {
+			t.Fatalf("args %v must be rejected, got %s", args, text)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("rejected imports must not reach upstream, got %+v", *calls)
 	}
 }

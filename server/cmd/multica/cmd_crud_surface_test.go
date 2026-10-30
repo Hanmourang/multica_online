@@ -216,6 +216,7 @@ func TestModuleSpecSurfaceIsRegistered(t *testing.T) {
 		{"module", "spec", "get"},
 		{"module", "spec", "draft"},
 		{"module", "spec", "publish"},
+		{"module", "spec", "import"},
 		{"module", "plan", "create"},
 		{"module", "plan", "get"},
 		{"module", "plan", "apply"},
@@ -237,6 +238,14 @@ func TestModuleSpecSurfaceIsRegistered(t *testing.T) {
 	}
 	if cmd := findCommandByPath(t, rootCmd, "module", "release", "rollback"); cmd.Flags().Lookup("yes") == nil {
 		t.Fatalf("module release rollback has no --yes flag, so an agent run could not be refused")
+	}
+	// 从原型导入：界面那个按钮的等价物，必须能先看不动（--dry-run）、能指向本地文件
+	// （--html-path）、能守住并发（--expected-version）。
+	importCmd := findCommandByPath(t, rootCmd, "module", "spec", "import")
+	for _, flag := range []string{"dry-run", "html-path", "draft", "expected-version", "no-brief", "no-anchors"} {
+		if importCmd.Flags().Lookup(flag) == nil {
+			t.Fatalf("module spec import has no --%s flag; the import path would be unusable", flag)
+		}
 	}
 }
 

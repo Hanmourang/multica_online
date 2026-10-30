@@ -14,6 +14,7 @@ import {
   Plus,
   Shrink,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import {
@@ -40,6 +41,16 @@ import type {
   ModuleWorkspaceFeature,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../../i18n";
 import { isTopLevelRequirement } from "../../requirements/requirement-helpers";
@@ -49,6 +60,17 @@ import {
   issueShortLabel,
   type PrototypeModule,
 } from "../module-feature-stats";
+import {
+  formatFeatureCode,
+  maxFeatureNumber,
+  nextFeatureCode,
+  reservedFeatureCodes,
+  specFeaturesOf,
+  specWithFeatures,
+  withFeatureAdded,
+  withFeatureRemoved,
+  withFeatureUpdated,
+} from "../module-spec-features";
 import {
   INSPECTOR_COLLAPSED_WIDTH,
   INSPECTOR_WIDTH_DEFAULT,
@@ -280,6 +302,7 @@ export function PrototypeInspector({
               canImport={importer.canImport}
               importableCount={importer.importableCount}
               hasPrototype={Boolean(html?.trim())}
+              briefFields={workspace.brief.fields}
             />
             <VersionsSection
               projectId={projectId}
@@ -362,13 +385,8 @@ function useImportFromPrototype({
     if (!workspace || !moduleId || points.length === 0) return;
     setPending(true);
     try {
-      const features: ModuleSpecFeature[] = workspace.features.map((feature) => ({
-        code: feature.code,
-        title: feature.title,
-        kind: feature.kind === "edge" ? "edge" : "core",
-        priority: feature.priority,
-        group: feature.group,
-      }));
+      // 以 spec 为基准：workspace.features 是上一版投影，刚删掉的功能点可能还留在里面。
+      const features = specFeaturesOf(specQuery.data?.spec ?? null, workspace.features);
       const takenTitles = new Set(features.map((feature) => feature.title.trim()));
       const fields: Record<string, unknown> = {};
       const added: string[] = [];
@@ -381,7 +399,7 @@ function useImportFromPrototype({
         if (isSection) group = title;
         if (!title || takenTitles.has(title)) continue;
         takenTitles.add(title);
-        const code = `FP-${String(++seq).padStart(2, "0")}`;
+        const code = formatFeatureCode(++seq);
         features.push({ code, title, kind: "core", group: isSection ? "" : group });
         const desc = (point.text ?? "").trim();
         if (desc && desc !== title) fields[`fp.${code}.desc`] = desc.slice(0, 400);
@@ -837,7 +855,8 @@ function SourceChip({ entry }: { entry?: { v: number; by: "human" | "agent" } })
 
 // ── ② 功能点清单 + 四段详情 ───────────────────────────────────────────
 
-function FeatureSection({
+/** 右栏第②段：功能点清单。导出是为了让组件测试能直接挂载它，不必渲染整个 Inspector。 */
+export function FeatureSection({
   projectId,
   moduleId,
   features,
@@ -852,6 +871,7 @@ function FeatureSection({
   canImport,
   importableCount,
   hasPrototype,
+  briefFields,
 }: {
   projectId: string;
   moduleId: string;
@@ -869,16 +889,21 @@ function FeatureSection({
   importableCount: number;
   /** 模块是否已有可读的原型：空态文案据此区分「没原型」与「原型里没区块」。 */
   hasPrototype: boolean;
+  /** 说明字段：功能点删掉后四段详情仍留在 brief 里，新增编号要避开这些历史编号。 */
+  briefFields: ModuleBriefFields;
 }) {
   const { t } = useT("archive");
   const wsId = useWorkspaceId();
   const patch = usePatchModuleWorkspace(wsId, projectId, moduleId);
 
-  // 「＋ 功能点」写的是模块规格：spec 是功能点的唯一真源，追加一条后发布，
-  // 后端在同一事务里重建投影，右栏的行与四段详情随之出现。
+  // 功能点的增删改写的都是模块规格：spec 是功能点的唯一真源，改完就发布，
+  // 后端在同一事务里重建投影，右栏的行与四段详情随之增删。
   const specQuery = useQuery({ ...moduleSpecOptions(wsId, projectId, moduleId), retry: false });
   const publish = usePublishModuleSpec(wsId, projectId, moduleId);
   const [addingFeature, setAddingFeature] = useState(false);
+  // 右栏窄，一次只展开一个编辑面：正在改的那条功能点，与被确认删除的那一条。
+  const [editingFeature, setEditingFeature] = useState<string | null>(null);
+  const [removingFeature, setRemovingFeature] = useState<ModuleWorkspaceFeature | null>(null);
 
   // 原型点的 id 是锚点/标题 slug，功能点的 code 是 FP-xx，两者只能按标题对齐。
   const anchored = useMemo(() => {
@@ -902,60 +927,86 @@ function FeatureSection({
 
   const selected = features.find((feature) => feature.code === selectedFp) ?? null;
   const anchoredCount = anchored.size;
+  // 删掉的编号不能再发：brief 里 fp.<code>.* 的四段详情不会跟着删，编号复用会把旧详情复活。
+  const reserved = useMemo(() => reservedFeatureCodes(briefFields), [briefFields]);
 
-  const addFeature = (draft: { code: string; title: string; group: string }) => {
-    const spec = specQuery.data?.spec ?? null;
-    const existing: ModuleSpecFeature[] = spec?.features?.length
-      ? spec.features
-      : features.map((feature) => ({
-          code: feature.code,
-          title: feature.title,
-          kind: feature.kind === "edge" ? ("edge" as const) : ("core" as const),
-          priority: feature.priority,
-          group: feature.group,
-        }));
-    if (existing.some((feature) => feature.code === draft.code)) {
-      toast.error(t(($) => $.features.inspector_fp_add_dup, { code: draft.code }));
+  /**
+   * 增删改共用一条链路：把「下一次完整的功能点列表」发布成新 spec。
+   *
+   * 后端在发布事务里重建 project_module_feature 投影，所以删除 = 发布一份不含
+   * 该项的 spec，修改 = 发布一份替换掉该项的 spec，都不需要新增端点。
+   *
+   * `prepare` 拿到的是当前 spec 的快照；spec 还没到（刚展开右栏、或上一步刚失败）
+   * 就先补拉一次 —— expected_version 是乐观锁，缺了它就等于不加锁地覆盖别人刚发的规格。
+   * 返回 null 表示放弃这次发布（例如编号撞车），由 prepare 自己提示。
+   */
+  const applySpecChange = async (
+    prepare: (current: ModuleSpecFeature[]) => ModuleSpecFeature[] | null,
+    done: { ok: (version: number) => string; fail: string; after?: () => void },
+  ) => {
+    const snapshot = specQuery.data ?? (await specQuery.refetch()).data;
+    if (!snapshot) {
+      toast.error(t(($) => $.features.inspector_fp_spec_unavailable));
       return;
     }
+    const next = prepare(specFeaturesOf(snapshot.spec, features));
+    if (!next) return;
     publish.mutate(
       {
-        spec: {
-          schema: spec?.schema || "module_spec/v1",
-          summary: spec?.summary,
-          features: [
-            ...existing,
-            {
-              code: draft.code,
-              title: draft.title,
-              kind: "core",
-              group: draft.group.trim() || undefined,
-            },
-          ],
-        },
-        expected_version: specQuery.data?.spec_version,
+        spec: specWithFeatures(snapshot.spec, next),
+        expected_version: snapshot.spec_version,
       },
       {
         onSuccess: (result) => {
-          setAddingFeature(false);
-          onSelectFp(draft.code);
-          toast.success(
-            t(($) => $.features.inspector_fp_added, {
-              code: draft.code,
-              version: result.spec_version,
-            }),
-          );
+          done.after?.();
+          toast.success(done.ok(result.spec_version));
         },
         onError: (error: unknown) => {
           const status = (error as { status?: number }).status;
-          toast.error(
-            status === 409
-              ? t(($) => $.features.inspector_brief_stale)
-              : t(($) => $.features.inspector_fp_add_failed),
-          );
+          toast.error(status === 409 ? t(($) => $.features.inspector_brief_stale) : done.fail);
         },
       },
     );
+  };
+
+  const addFeature = (draft: { code: string; title: string; group: string }) => {
+    void applySpecChange(
+      (current) => {
+        if (current.some((feature) => feature.code === draft.code)) {
+          toast.error(t(($) => $.features.inspector_fp_add_dup, { code: draft.code }));
+          return null;
+        }
+        return withFeatureAdded(current, draft);
+      },
+      {
+        ok: (version) => t(($) => $.features.inspector_fp_added, { code: draft.code, version }),
+        fail: t(($) => $.features.inspector_fp_add_failed),
+        after: () => {
+          setAddingFeature(false);
+          onSelectFp(draft.code);
+        },
+      },
+    );
+  };
+
+  const updateFeature = (code: string, draft: FeatureMetaDraft) => {
+    void applySpecChange((current) => withFeatureUpdated(current, code, draft), {
+      ok: (version) => t(($) => $.features.inspector_fp_edit_saved, { code, version }),
+      fail: t(($) => $.features.inspector_fp_edit_failed),
+      after: () => setEditingFeature(null),
+    });
+  };
+
+  const removeFeature = (code: string) => {
+    void applySpecChange((current) => withFeatureRemoved(current, code), {
+      ok: (version) => t(($) => $.features.inspector_fp_removed, { code, version }),
+      fail: t(($) => $.features.inspector_fp_remove_failed),
+      after: () => {
+        setRemovingFeature(null);
+        if (editingFeature === code) setEditingFeature(null);
+        if (selectedFp === code) onClearFp();
+      },
+    });
   };
 
   const saveDetail = (key: string, value: unknown) => {
@@ -1046,7 +1097,7 @@ function FeatureSection({
                 {rows.map((feature) => {
                   const active = feature.code === selectedFp;
                   return (
-                    <li key={feature.code}>
+                    <li key={feature.code} className="group/fp relative">
                       <button
                         type="button"
                         onClick={() => onSelectFp(feature.code)}
@@ -1088,10 +1139,21 @@ function FeatureSection({
                         </span>
                         <ChevronRight
                           className={cn(
-                            "mt-0.5 size-3 shrink-0 text-muted-foreground",
+                            "mt-0.5 size-3 shrink-0 text-muted-foreground transition-opacity group-hover/fp:opacity-0",
                             active && "rotate-90 text-primary",
                           )}
                         />
+                      </button>
+                      {/* 删除按钮绝对定位在行尾：不占行内宽度，hover 时才露出来。 */}
+                      <button
+                        type="button"
+                        aria-label={t(($) => $.features.inspector_fp_remove)}
+                        title={t(($) => $.features.inspector_fp_remove)}
+                        onClick={() => setRemovingFeature(feature)}
+                        className="absolute right-1 top-1.5 rounded p-0.5 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 group-hover/fp:opacity-100"
+                        data-testid={`feature-remove-${feature.code}`}
+                      >
+                        <Trash2 className="size-3" aria-hidden />
                       </button>
                     </li>
                   );
@@ -1104,22 +1166,67 @@ function FeatureSection({
       {addingFeature ? (
         <AddFeatureRow
           pending={publish.isPending}
-          defaultCode={nextFeatureCode(features)}
+          defaultCode={nextFeatureCode(features, reserved)}
           onCancel={() => setAddingFeature(false)}
           onSave={addFeature}
         />
       ) : null}
       {selected ? (
-        <FeatureDetail
-          key={selected.code}
-          feature={selected}
-          currentVersion={currentVersion}
-          changed={changedCodes.has(selected.code)}
-          pending={patch.isPending}
-          onSave={saveDetail}
-          onClose={onClearFp}
-        />
+        editingFeature === selected.code ? (
+          <EditFeatureRow
+            feature={selected}
+            pending={publish.isPending}
+            onCancel={() => setEditingFeature(null)}
+            onSave={(draft) => updateFeature(selected.code, draft)}
+          />
+        ) : (
+          <FeatureDetail
+            key={selected.code}
+            feature={selected}
+            currentVersion={currentVersion}
+            changed={changedCodes.has(selected.code)}
+            pending={patch.isPending}
+            onSave={saveDetail}
+            onClose={onClearFp}
+            onEdit={() => setEditingFeature(selected.code)}
+            onRemove={() => setRemovingFeature(selected)}
+          />
+        )
       ) : null}
+      <AlertDialog
+        open={removingFeature !== null}
+        onOpenChange={(open) => {
+          if (!open && !publish.isPending) setRemovingFeature(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(($) => $.features.inspector_fp_remove_confirm_title)}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.features.inspector_fp_remove_confirm_desc, {
+                code: removingFeature?.code ?? "",
+                title: removingFeature?.title ?? "",
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={publish.isPending}>
+              {t(($) => $.features.inspector_brief_cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={publish.isPending}
+              onClick={() => {
+                if (removingFeature) removeFeature(removingFeature.code);
+              }}
+            >
+              {t(($) => $.features.inspector_fp_remove_action)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
@@ -1187,20 +1294,6 @@ function FeatureTag({
   );
 }
 
-function nextFeatureCode(features: ModuleWorkspaceFeature[]): string {
-  return `FP-${String(maxFeatureNumber(features) + 1).padStart(2, "0")}`;
-}
-
-/** 现有功能点编号的最大尾号：新增与导入都从这里往后接，不重号。 */
-function maxFeatureNumber(features: Array<{ code: string }>): number {
-  let max = 0;
-  for (const feature of features) {
-    const match = /(\d+)\s*$/.exec(feature.code);
-    if (match) max = Math.max(max, Number(match[1]));
-  }
-  return max;
-}
-
 /** 新建功能点：追加到模块规格并发布（spec 是功能点的唯一真源）。 */
 function AddFeatureRow({
   pending,
@@ -1257,6 +1350,93 @@ function AddFeatureRow({
   );
 }
 
+/** 改功能点时能改的三个字段（编号是稳定标识，不在其中）。 */
+type FeatureMetaDraft = { title: string; group: string; kind: "core" | "edge" };
+
+/**
+ * 改功能点：名称 / 分组 / 类型。
+ * 编号不可改 —— 它是四段详情的字段前缀（`fp.<code>.desc`），换编号等于丢详情。
+ */
+function EditFeatureRow({
+  feature,
+  pending,
+  onCancel,
+  onSave,
+}: {
+  feature: ModuleWorkspaceFeature;
+  pending: boolean;
+  onCancel: () => void;
+  onSave: (draft: FeatureMetaDraft) => void;
+}) {
+  const { t } = useT("archive");
+  const [title, setTitle] = useState(feature.title);
+  const [group, setGroup] = useState(feature.group ?? "");
+  const [kind, setKind] = useState<"core" | "edge">(feature.kind === "edge" ? "edge" : "core");
+  const options: Array<{ value: "core" | "edge"; label: string }> = [
+    { value: "core", label: t(($) => $.features.inspector_fp_kind_core) },
+    { value: "edge", label: t(($) => $.features.inspector_fp_kind_edge) },
+  ];
+  return (
+    <div
+      className="mt-2 space-y-1 rounded-lg border border-primary/40 bg-primary/[0.05] p-1.5"
+      data-testid="feature-edit"
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="shrink-0 font-mono text-[9px] text-muted-foreground">{feature.code}</span>
+        <span className="min-w-0 flex-1 truncate text-[9.5px] text-muted-foreground/80">
+          {t(($) => $.features.inspector_fp_edit_code_locked)}
+        </span>
+      </div>
+      <input
+        autoFocus
+        value={title}
+        onChange={(event) => setTitle(event.target.value)}
+        placeholder={t(($) => $.features.inspector_fp_add_title)}
+        className="w-full rounded border border-surface-border bg-surface px-1.5 py-1 text-[11px] outline-none focus:border-primary/50"
+      />
+      <input
+        value={group}
+        onChange={(event) => setGroup(event.target.value)}
+        placeholder={t(($) => $.features.inspector_fp_add_group)}
+        className="w-full rounded border border-surface-border bg-surface px-1.5 py-1 text-[10.5px] outline-none focus:border-primary/50"
+      />
+      <div className="flex items-center gap-1">
+        <span className="shrink-0 text-[9.5px] text-muted-foreground">
+          {t(($) => $.features.inspector_fp_kind)}
+        </span>
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setKind(option.value)}
+            className={cn(
+              "rounded border px-1.5 py-0.5 text-[9.5px] transition-colors",
+              kind === option.value
+                ? "border-primary bg-primary/10 font-semibold text-primary"
+                : "border-surface-border text-muted-foreground hover:border-primary/40",
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+        <div className="ml-auto flex items-center gap-1">
+          <Button
+            type="button"
+            size="xs"
+            disabled={pending || !title.trim()}
+            onClick={() => onSave({ title: title.trim(), group, kind })}
+          >
+            {t(($) => $.features.inspector_brief_save)}
+          </Button>
+          <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
+            {t(($) => $.features.inspector_brief_cancel)}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function completionTone(filled: number, total: number): string {
   if (total === 0 || filled === 0) return "text-muted-foreground/70";
   if (filled >= total) return "text-emerald-600 dark:text-emerald-400";
@@ -1300,6 +1480,8 @@ function FeatureDetail({
   pending,
   onSave,
   onClose,
+  onEdit,
+  onRemove,
 }: {
   feature: ModuleWorkspaceFeature;
   currentVersion: number;
@@ -1307,6 +1489,8 @@ function FeatureDetail({
   pending: boolean;
   onSave: (key: string, value: unknown) => void;
   onClose: () => void;
+  onEdit: () => void;
+  onRemove: () => void;
 }) {
   const { t } = useT("archive");
   const [editing, setEditing] = useState<string | null>(null);
@@ -1423,6 +1607,26 @@ function FeatureDetail({
           total={feature.total}
           className={cn("text-[9.5px] font-semibold", completionTone(feature.filled, feature.total))}
         />
+        <button
+          type="button"
+          aria-label={t(($) => $.features.inspector_fp_edit)}
+          title={t(($) => $.features.inspector_fp_edit)}
+          disabled={pending}
+          onClick={onEdit}
+          className="rounded p-px text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-50"
+        >
+          <Pencil className="size-3" />
+        </button>
+        <button
+          type="button"
+          aria-label={t(($) => $.features.inspector_fp_remove)}
+          title={t(($) => $.features.inspector_fp_remove)}
+          disabled={pending}
+          onClick={onRemove}
+          className="rounded p-px text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+        >
+          <Trash2 className="size-3" />
+        </button>
         <button
           type="button"
           aria-label={t(($) => $.features.inspector_collapse_detail)}

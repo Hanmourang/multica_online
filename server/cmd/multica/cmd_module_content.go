@@ -64,7 +64,12 @@ var moduleRequirementCmd = &cobra.Command{
 the honest way to move one: they only change that column and print what moved.
 
   multica module requirement add <module> MUL-123
+  multica module requirement add <module> MUL-123 --feature FP-03
   multica module requirement remove <module> MUL-123
+
+--feature 把这条 issue 绑到该模块的一个功能点上（issue.feature_code），这正是
+精细化迭代的粒度：一个 issue 对应一个功能点。不带 --feature 则只改 module_id，
+原有功能点归属随模块变更自动清空（编号只在模块内唯一，不能跨模块继承）。
 
 Adding a task/requirement to a module can change which agents may touch it
 (cross-module locks), so state the move before applying it.`,
@@ -109,6 +114,9 @@ func init() {
 	}
 
 	moduleRequirementAddCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
+	// 一次调用把归属链走完：项目（module 自带）→ 模块 → 功能点。
+	// 单独再要一次 PUT 就成了两步非原子写，agent 很容易漏掉后半段。
+	moduleRequirementAddCmd.Flags().String("feature", "", "Bind one feature point of this module (e.g. FP-03); omit = no feature point")
 	moduleRequirementAddCmd.Flags().String("output", "json", "Output format: json or table")
 	moduleRequirementRemoveCmd.Flags().String("project", "", "Project the module belongs to (skips the workspace-wide lookup)")
 	moduleRequirementRemoveCmd.Flags().String("output", "json", "Output format: json or table")
@@ -394,8 +402,16 @@ func setModuleRequirement(cmd *cobra.Command, args []string, attach bool) error 
 	}
 
 	body := map[string]any{"module_id": module.ID}
+	feature, _ := cmd.Flags().GetString("feature")
+	feature = strings.TrimSpace(feature)
+	if attach && feature != "" {
+		// 服务端会校验编号属于该模块（不属于则 404），这里不先查一遍：
+		// 同一张投影表用两次只多一个竞态窗口。
+		body["feature_code"] = feature
+	}
 	if !attach {
 		// null 才是「摘除」；空串会被服务端当成无效 UUID。
+		// feature_code 不用写：模块一变，服务端就把它级联清空。
 		body["module_id"] = nil
 	}
 	var out map[string]any
@@ -404,16 +420,24 @@ func setModuleRequirement(cmd *cobra.Command, args []string, attach bool) error 
 	}
 	if output, _ := cmd.Flags().GetString("output"); output == "table" {
 		if attach {
-			fmt.Printf("%s → module %s\n", issue.Display, module.Name)
+			if feature != "" {
+				fmt.Printf("%s → module %s · feature %s\n", issue.Display, module.Name, feature)
+			} else {
+				fmt.Printf("%s → module %s\n", issue.Display, module.Name)
+			}
 		} else {
 			fmt.Printf("%s is no longer in module %s\n", issue.Display, module.Name)
 		}
 		return nil
 	}
-	return cli.PrintJSON(cmd.OutOrStdout(), map[string]any{
+	result := map[string]any{
 		"issue":     issue.Display,
 		"module":    module.Name,
 		"module_id": module.ID,
 		"attached":  attach,
-	})
+	}
+	if attach {
+		result["feature_code"] = feature
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), result)
 }

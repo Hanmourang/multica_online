@@ -11,6 +11,11 @@ One table for "which command does this module". Read it before guessing an endpo
 or telling someone a feature has no CLI. When a module is not listed as writable,
 it is genuinely not writable from the CLI yet — say so instead of improvising.
 
+The feature-module row also has an MCP twin (`modules_*`): the platform mounts the
+facade as a server named `multica-modules` on every claimed task, so it is usually
+already in the tool list. The CLI below stays authoritative — every MCP tool has a
+CLI equivalent, not the other way round.
+
 ## Modules → commands
 
 | Module (UI) | Read | Write | Delete |
@@ -19,7 +24,7 @@ it is genuinely not writable from the CLI yet — say so instead of improvising.
 | Projects | `project list/get`, `project tab list/get` | `project create/update/status`, `project resource add/remove`, `project roles set` | `project delete` (level C) |
 | Projects · assets | `asset list`, `asset matrix`, `project tab get <p> assets` | `asset bind`, `asset meta`, `asset sync` | `asset unbind` (level B) |
 | Projects · archive & deliverables | `artifact list/get/matrix/unbound`, `project tab get <p> archive`, `project tab get <p> deliverables` | `artifact create/update/bind`, `archive sync`, `archive init` | `artifact unbind`, `artifact delete` (level B; `409 asset_linked` means unbind the asset instead) |
-| Projects · feature modules & prototypes | `module list/get`, `module brief get`, `module brief versions`, `module prototype list/read`, `module prototype diff`, `module coverage`, `module reconcile`, `graph modules` | `module create/update` (`--graph-node` binds/unbinds), `module spec draft/publish` + `module spec feature add/update/remove` (one feature point at a time), `module brief patch` (brief.* / fp.<code>.* fields), `module requirement add/remove`, `module prototype register/update/confirm/parse`, `module plan create/get`, `module release publish/rollback` (all spec flag-gated) | `module delete` (level B; issues fall back to "no module"); `module prototype delete --yes` (level B — canonical and released versions are refused server-side); `module plan apply --yes` moves the canonical prototype; `module release rollback` re-points both pointers |
+| Projects · feature modules & prototypes | `module list/get`, `module brief get`, `module brief versions`, `module prototype list/read`, `module prototype diff`, `module coverage`, `module reconcile`, `graph modules/objects/strategies/neighborhood/changes` | `module create/update` (`--graph-node` binds/unbinds), `module spec draft/publish` + `module spec feature add/update/remove` (one feature point at a time) + `module spec import` (从原型导入：锚点/区块标题→功能点，先 `--dry-run`), `module brief patch` (brief.* / fp.<code>.* fields), `module requirement add/remove`, `module prototype register/update/confirm/parse`, `module plan create/get`, `module release publish/rollback` (all spec flag-gated) | `module delete` (level B; issues fall back to "no module"); `module prototype delete --yes` (level B — canonical and released versions are refused server-side); `module plan apply --yes` moves the canonical prototype; `module release rollback` re-points both pointers |
 | Projects · data model (graph) | `graph latest/detail/modules/objects/changes/strategies/neighborhood/matrix/drilldown/timeline/alerts`, `project tab get <p> data-model` | **nothing — read-only by design** | — |
 | Projects · sprints | `sprint list/get/progress` | `sprint create/update/assign/remove`, `sprint start|complete|reopen` | `sprint delete` (level B) |
 | Projects · acceptance | `requirement acceptance` (read), `project tab get <p> acceptance` | `requirement acceptance` (verdict/criteria) | **not yet** |

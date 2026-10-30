@@ -1814,6 +1814,9 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.AuthToken = tokenStr
 		resp.RemoteMCPDaemonToken = remoteMCPToken
+		// 批量 claim 与单条 claim 是同一条任务入口，MCP 门面必须同样挂上：
+		// 漏了这里，走批量通道的 runtime 会看不到 modules_*。
+		h.injectModuleMCPServer(&resp, tokenStr)
 		resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 		out = append(out, resp)
 	}
@@ -3657,6 +3660,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.AuthToken = tokenStr
 	resp.RemoteMCPDaemonToken = remoteMCPToken
+	// 把「项目 → 功能模块」MCP 门面挂到每个 agent 的 mcp_config 上（2026-10-30）：
+	// token 刚为本任务铸好，注入的条目就用它作 Bearer。这样 agent 无需逐个绑定
+	// 工作区 MCP server 也能拿到 modules_*；MULTICA_PUBLIC_URL 未配置时函数自身跳过。
+	h.injectModuleMCPServer(&resp, tokenStr)
 	task.DeliveredCommentIds = receipt
 	resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 
