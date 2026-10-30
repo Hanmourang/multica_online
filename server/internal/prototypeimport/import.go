@@ -13,6 +13,7 @@ package prototypeimport
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -52,6 +53,152 @@ type Candidate struct {
 	Group string
 	// Section 为真时表示这是一个 h2 区块标题：只做分组，不单独成为功能点。
 	Section bool
+}
+
+// PathSlug 把模块名收成可做目录名的一段：去路径分隔符与空白，其余（含中文）
+// 原样保留，便于人读。规则与界面 prototypePathSlug 逐字一致。
+func PathSlug(value string) string {
+	cleaned := strings.TrimSpace(value)
+	cleaned = slugUnsafeRe.ReplaceAllString(cleaned, "-")
+	cleaned = spaceRunRe.ReplaceAllString(cleaned, "-")
+	cleaned = slugDashRunRe.ReplaceAllString(cleaned, "-")
+	cleaned = strings.Trim(cleaned, "-")
+	if cleaned == "" {
+		return "module"
+	}
+	return cleaned
+}
+
+// RelPath 是模块自有原型的档案相对路径：prototypes/<模块名>/prototype-v<N>.<ext>。
+//
+// 这个字符串同时是 project_artifact.rel_path 与版本行的 html_path：两处必须逐字
+// 相同，MatchArtifact 才能精确命中（否则只能靠文件名/模块名降级匹配）。界面、
+// CLI 与 MCP 三个入口都调用这里，避免各自拼一份。
+func RelPath(moduleName string, version int32, fileName string) string {
+	ext := strings.ToLower(strings.TrimPrefix(path.Ext(strings.TrimSpace(fileName)), "."))
+	if ext == "" {
+		ext = "html"
+	}
+	if version < 1 {
+		version = 1
+	}
+	return fmt.Sprintf("prototypes/%s/prototype-v%d.%s", PathSlug(moduleName), version, ext)
+}
+
+var (
+	slugUnsafeRe  = regexp.MustCompile(`[\\/:*?"<>|]+`)
+	slugDashRunRe = regexp.MustCompile(`-{2,}`)
+)
+
+// ArtifactRef 是 project_artifact 里与「原型正文」有关的字段子集。
+//
+// 界面上「上传本地 HTML」登记的原型，正文进的是 attachment 存储：html_path 只是
+// 按模块名 + 版本号拼出来的虚拟路径，磁盘上永远没有这份文件。要把正文取回来，
+// 只能拿 html_path 去档案里反查这一行，再顺着 attachment_id 拉字节。
+type ArtifactRef struct {
+	ID           string
+	RelPath      string
+	DocType      string
+	DocModule    string
+	Version      int32
+	AttachmentID string
+}
+
+// MatchArtifact 在候选原型档案里挑出 htmlPath 对应的那一行。
+//
+// 必须分层降级：登记路径用的是登记当时的模块名，模块改过名、路径里多打了个空格
+// 之后精确比对就永远落空，而文件其实一直都在。顺序是越精确越优先：
+//
+//  1. 归一化后 rel_path 完全相同；
+//  2. 文件名 + 版本号相同；
+//  3. doc_module + 版本号相同（模块改过名时的主路径）；
+//  4. 同一个版本号只剩一条候选时直接认它。
+//
+// 没有 attachment 的行一律跳过：取不到正文，命中它只会把「读不到」伪装成「读到了」。
+func MatchArtifact(refs []ArtifactRef, htmlPath, moduleName string, version int32) (ArtifactRef, bool) {
+	want := NormalizeArtifactPath(htmlPath)
+	wantBase := path.Base(want)
+	moduleKey := NormalizeArtifactPath(moduleName)
+
+	usable := make([]ArtifactRef, 0, len(refs))
+	for _, ref := range refs {
+		if ref.AttachmentID == "" {
+			continue
+		}
+		usable = append(usable, ref)
+		if want != "" && NormalizeArtifactPath(ref.RelPath) == want {
+			return ref, true
+		}
+	}
+
+	for _, ref := range usable {
+		if version > 0 && ref.Version != version {
+			continue
+		}
+		if wantBase == "" || wantBase == "." {
+			continue
+		}
+		if path.Base(NormalizeArtifactPath(ref.RelPath)) == wantBase {
+			return ref, true
+		}
+	}
+	for _, ref := range usable {
+		if moduleKey == "" || version <= 0 || ref.Version != version {
+			continue
+		}
+		if NormalizeArtifactPath(ref.DocModule) == moduleKey {
+			return ref, true
+		}
+	}
+
+	var sameVersion []ArtifactRef
+	for _, ref := range usable {
+		if version > 0 && ref.Version == version {
+			sameVersion = append(sameVersion, ref)
+		}
+	}
+	if len(sameVersion) == 1 {
+		return sameVersion[0], true
+	}
+	return ArtifactRef{}, false
+}
+
+// DescribeArtifacts 把候选档案收成几行说明（rel_path · vN · doc_module）。
+// 读不到时用它回答「为什么没匹配上」：登记路径和实际档案对不上是最常见的原因，
+// 只报一句 not found 会让人去猜。
+func DescribeArtifacts(refs []ArtifactRef, limit int) []string {
+	out := make([]string, 0, limit)
+	for _, ref := range refs {
+		if len(out) >= limit {
+			break
+		}
+		parts := []string{ref.RelPath}
+		if ref.Version > 0 {
+			parts = append(parts, fmt.Sprintf("v%d", ref.Version))
+		}
+		if ref.DocModule != "" {
+			parts = append(parts, ref.DocModule)
+		}
+		out = append(out, strings.Join(parts, " · "))
+	}
+	return out
+}
+
+// NormalizeArtifactPath 把 rel_path / html_path 收成可比对的形状：统一斜杠、
+// 逐段去空白（手工登记时很容易在中文名后面多打一个空格）、去掉开头的 ./。
+func NormalizeArtifactPath(value string) string {
+	trimmed := strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	if trimmed == "" {
+		return ""
+	}
+	segments := strings.Split(trimmed, "/")
+	kept := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if cleaned := strings.TrimSpace(segment); cleaned != "" {
+			kept = append(kept, cleaned)
+		}
+	}
+	return strings.TrimPrefix(path.Clean(strings.Join(kept, "/")), "./")
 }
 
 // Anchor 是 data-fp 锚点的缓存行，与 handler 侧 service.ProtoAnchor 同一形状

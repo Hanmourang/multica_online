@@ -143,3 +143,48 @@ func TestAnchorsCountsRepeats(t *testing.T) {
 		t.Fatalf("want count 2 + title 群列表, got %+v", got["FP-01"])
 	}
 }
+
+// 上传登记的原型：html_path 与档案 rel_path 逐字相同就是最稳的一击。
+func TestMatchArtifactExactPath(t *testing.T) {
+	refs := []ArtifactRef{
+		{ID: "a1", RelPath: "prototypes/别的/prototype-v1.html", Version: 1, AttachmentID: "att-1"},
+		{ID: "a2", RelPath: "prototypes/1.1-AI助手/prototype-v1.html", Version: 1, AttachmentID: "att-2"},
+	}
+	got, ok := MatchArtifact(refs, "prototypes/1.1-AI助手/prototype-v1.html", "1.1 AI助手", 1)
+	if !ok || got.ID != "a2" {
+		t.Fatalf("want a2, got %+v ok=%v", got, ok)
+	}
+}
+
+// 路径里多打了一个空格也要命中：登记时手工粘的路径经常带这种尾巴。
+func TestMatchArtifactToleratesStraySpaces(t *testing.T) {
+	refs := []ArtifactRef{
+		{ID: "a1", RelPath: "prototypes/1.1-AI助手（首页）/prototype-v1.html", Version: 1, AttachmentID: "att-1"},
+	}
+	got, ok := MatchArtifact(refs, "prototypes/1.1-AI-助手（首页） /prototype-v1.html", "1.0 AI 助手（首页）", 1)
+	if !ok || got.ID != "a1" {
+		t.Fatalf("basename + version should still match, got %+v ok=%v", got, ok)
+	}
+}
+
+// 模块改过名时 doc_module 已对不上，但同版本只剩一条候选——认它。
+func TestMatchArtifactFallsBackToUniqueVersion(t *testing.T) {
+	refs := []ArtifactRef{
+		{ID: "a1", RelPath: "prototypes/旧名/prototype-v1.html", DocModule: "旧名", Version: 1, AttachmentID: "att-1"},
+		{ID: "a2", RelPath: "prototypes/旧名/prototype-v2.html", DocModule: "旧名", Version: 2, AttachmentID: "att-2"},
+	}
+	got, ok := MatchArtifact(refs, "prototypes/改名后/别的文件名.html", "改名后", 2)
+	if !ok || got.ID != "a2" {
+		t.Fatalf("want a2 by unique version, got %+v ok=%v", got, ok)
+	}
+}
+
+// 没有 attachment 的行永远不命中：命中它只会把「读不到」伪装成「读到了」。
+func TestMatchArtifactSkipsRowsWithoutAttachment(t *testing.T) {
+	refs := []ArtifactRef{
+		{ID: "a1", RelPath: "prototypes/x/prototype-v1.html", Version: 1},
+	}
+	if got, ok := MatchArtifact(refs, "prototypes/x/prototype-v1.html", "x", 1); ok {
+		t.Fatalf("row without attachment must not match, got %+v", got)
+	}
+}

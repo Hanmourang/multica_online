@@ -249,6 +249,17 @@ func (h *Handler) UpdateProjectModule(w http.ResponseWriter, r *http.Request) {
 // DeleteProjectModule removes a module. Issues pointing at it fall back to
 // "no module" via the FK's ON DELETE SET NULL, which also releases them from
 // any cross-module locking (spec §5: 无模块任务不参与任何锁).
+//
+// 模块自有原型（issue_id IS NULL）的归属就是 module_id 本身，而
+// issue_prototype_version_owner_check 要求 issue_id 与 module_id 至少一个非空。
+// 历史上 FK 的 SET NULL 会把这种行改成「两个都空」并撞上 CHECK，整个 DELETE
+// 随之失败（前端「删除模块失败」+ 500）。该清理已下沉到数据库：migration 502
+// 的 BEFORE DELETE 触发器先把模块自有版本删掉，同一条路径也覆盖项目 / 工作区
+// 的级联删除；带 issue_id 的需求原型仍由 FK 置空 module_id 保留下来。
+//
+// 版本删掉后，模块自有的原型档案行（产物面投影）就没有归属了，这里一并软删
+// （与 DeleteProjectArtifact 同语义：只打 deleted_at，不动磁盘文件）；需求原型
+// 档案带 issue_id，不受影响。
 func (h *Handler) DeleteProjectModule(w http.ResponseWriter, r *http.Request) {
 	project, ok := h.loadProjectForResource(w, r, chi.URLParam(r, "id"))
 	if !ok {
@@ -267,7 +278,30 @@ func (h *Handler) DeleteProjectModule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project module not found")
 		return
 	}
-	if err := h.Queries.DeleteProjectModule(r.Context(), moduleUUID); err != nil {
+	ctx := r.Context()
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project module")
+		return
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	// 档案行按 doc_module（存的是模块名）+ doc_type='prototype' 限定，只命中
+	// 模块自有原型；档案与模块之间没有 FK，只能靠名字关联。模块本身用原生
+	// SQL 删除：sqlc 的 DeleteProjectModule 绑在连接池上，用不到本事务。
+	if _, err := tx.Exec(ctx, `
+		UPDATE project_artifact
+		SET deleted_at = now(), updated_at = now(), source = 'manual'
+		WHERE project_id = $1 AND doc_module = $2 AND issue_id IS NULL
+		  AND doc_type = 'prototype' AND deleted_at IS NULL`,
+		project.ID, existing.Name); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project module")
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM project_module WHERE id = $1`, moduleUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project module")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project module")
 		return
 	}

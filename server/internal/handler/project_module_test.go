@@ -109,12 +109,54 @@ func TestProjectModuleLifecycle(t *testing.T) {
 	}
 
 	// 删除后列表只剩一个
+	// 先给待删模块挂一个模块自有原型（issue_id 为空）：owner_check 要求
+	// issue_id 与 module_id 至少一个非空，FK 的 SET NULL 会把这种行改成两个都空
+	// 并撞 CHECK —— 之前正是这样让整个删除 500。
+	if _, err := testHandler.DB.Exec(t.Context(), `
+		INSERT INTO issue_prototype_version
+			(workspace_id, module_id, version, html_path, prompt, status, created_by_type, created_by_id)
+		VALUES ($1, $2, 1, 'prototypes/flow/prototype-v1.html', 'manual upload', 'confirmed', 'member', $3)`,
+		testWorkspaceID, second.ID, testUserID); err != nil {
+		t.Fatalf("seed module-owned prototype version: %v", err)
+	}
+	// 模块自有原型的档案行（doc_module 存模块名）也要跟着模块一起软删。
+	if _, err := testHandler.DB.Exec(t.Context(), `
+		INSERT INTO project_artifact
+			(workspace_id, project_id, scope, stage, doc_type, version, rel_path, blob_sha, source, doc_module)
+		VALUES ($1, $2, 'project', 1, 'prototype', 1, 'prototypes/flow/prototype-v1.html', '', 'manual', $3)`,
+		testWorkspaceID, project.ID, second.Name); err != nil {
+		t.Fatalf("seed module prototype artifact: %v", err)
+	}
+
 	w = httptest.NewRecorder()
 	req = newRequest("DELETE", "/api/projects/"+project.ID+"/modules/"+second.ID, nil)
 	req = withURLParams(req, "id", project.ID, "moduleId", second.ID)
 	testHandler.DeleteProjectModule(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("DeleteProjectModule: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 模块自有原型没有可回落的宿主，跟着模块一起消失；不能留下孤儿版本。
+	var orphans int
+	if err := testHandler.DB.QueryRow(t.Context(),
+		`SELECT count(*) FROM issue_prototype_version WHERE module_id = $1`, second.ID,
+	).Scan(&orphans); err != nil {
+		t.Fatalf("count module prototype versions: %v", err)
+	}
+	if orphans != 0 {
+		t.Errorf("module-owned prototype versions left behind: %d", orphans)
+	}
+
+	var artifactGone bool
+	if err := testHandler.DB.QueryRow(t.Context(),
+		`SELECT deleted_at IS NOT NULL FROM project_artifact
+		  WHERE project_id = $1 AND rel_path = 'prototypes/flow/prototype-v1.html'`,
+		project.ID,
+	).Scan(&artifactGone); err != nil {
+		t.Fatalf("read module prototype artifact: %v", err)
+	}
+	if !artifactGone {
+		t.Error("module-owned prototype artifact should be soft-deleted with its module")
 	}
 
 	w = httptest.NewRecorder()
